@@ -1,0 +1,61 @@
+/*
+ * NotebookEntity.kt
+ *
+ * Room entity mirroring the `notebooks` table in
+ * `design-system/migrations/v1_initial.sql`. Notebook is the top of the
+ * notebook → chapter → page hierarchy.
+ *
+ * Schema-source-of-truth gap: same situation as NotepadEntry — column shapes
+ * match v1_initial.sql, but Room generates its own DDL and does not replicate
+ * the CHECK constraints from the .sql file. Tracked as a follow-up alongside
+ * that entity.
+ */
+
+package app.releaf.mobile.data.notebook
+
+import androidx.room.ColumnInfo
+import androidx.room.Entity
+import androidx.room.Index
+import androidx.room.PrimaryKey
+
+@Entity(
+    tableName = "notebooks",
+    indices = [
+        Index("updated_at"),
+        Index("deleted_at"),
+    ],
+)
+data class NotebookEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id")
+    val id: String,
+
+    @ColumnInfo(name = "title")
+    val title: String,
+
+    /** Hex color (e.g. `#E77850`) or null for theme default. */
+    @ColumnInfo(name = "color_hex")
+    val colorHex: String? = null,
+
+    /** Manual ordering hint. 1024-step spacing leaves room for re-ordering. */
+    @ColumnInfo(name = "position", defaultValue = "1024")
+    val position: Long = 1024L,
+
+    @ColumnInfo(name = "drive_file_id")
+    val driveFileId: String? = null,
+
+    /** ISO-8601 UTC with ms. */
+    @ColumnInfo(name = "created_at")
+    val createdAt: String,
+
+    @ColumnInfo(name = "updated_at")
+    val updatedAt: String,
+
+    /** 1 = needs upload to Drive; cleared by sync worker. */
+    @ColumnInfo(name = "dirty", defaultValue = "1")
+    val dirty: Boolean = true,
+
+    /** ISO-8601 UTC when soft-deleted; null = active. */
+    @ColumnInfo(name = "deleted_at")
+    val deletedAt: String? = null,
+)

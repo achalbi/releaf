@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Releaf — Floating nav directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --canvas:      #F5EEE3;
+    --card-solid:  #FFFAF4;
+    --card-90:     rgba(255, 250, 244, 0.9);
+    --border-def:  rgba(80, 62, 45, 0.12);
+    --border-strong: rgba(80, 62, 45, 0.24);
+    --text-primary:   #241D17;
+    --text-secondary: #5F5245;
+    --text-tertiary:  #8A7C6D;
+    --coral:      #E77850;
+    --coral-soft: #FCEAE0;
+    --coral-deep: #C85A30;
+    --dot:        rgba(80, 62, 45, 0.14);
+    --shadow-card: 0 2px 8px rgba(36, 29, 23, 0.06);
+    --shadow-float: 0 12px 28px rgba(36, 29, 23, 0.14), 0 2px 6px rgba(36, 29, 23, 0.08);
+    --shadow-fab:  0 8px 24px rgba(231, 120, 80, 0.38);
+    --r-md: 12px;
+    --r-lg: 16px;
+    --pill: 9999px;
+
+    --font-sans: Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-serif: Newsreader, Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-position: 0 0;
+  }
+
+  .page {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 48px 32px 80px;
+  }
+
+  header.hero {
+    margin-bottom: 48px;
+  }
+
+  .eyebrow {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--coral);
+    margin: 0 0 8px;
+  }
+
+  h1 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    font-size: 32px;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    margin: 0 0 12px;
+    color: var(--text-primary);
+  }
+
+  .lede {
+    font-size: 15px;
+    line-height: 1.55;
+    max-width: 68ch;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 40px;
+  }
+
+  .variant {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .variant .label {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .variant h2 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    font-size: 22px;
+    letter-spacing: -0.005em;
+    margin: 0;
+    color: var(--text-primary);
+  }
+
+  .variant .pill-tag {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: var(--pill);
+    background: var(--coral-soft);
+    color: var(--coral-deep);
+  }
+
+  .variant p.notes {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    margin: 0 0 0 0;
+  }
+
+  /* ---- Phone frame ---- */
+
+  .phone {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 9 / 19;
+    border-radius: 38px;
+    overflow: hidden;
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-position: 0 0;
+    box-shadow:
+      inset 0 0 0 1px rgba(80, 62, 45, 0.18),
+      0 22px 48px rgba(36, 29, 23, 0.12),
+      0 4px 12px rgba(36, 29, 23, 0.06);
+  }
+
+  .phone .status {
+    position: absolute;
+    inset: 0 0 auto 0;
+    padding: 14px 22px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.01em;
+  }
+
+  .phone .content {
+    position: absolute;
+    inset: 44px 20px 120px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .phone .content .title-eyebrow {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--coral);
+  }
+
+  .phone .content .title {
+    font-family: var(--font-serif);
+    font-size: 24px;
+    line-height: 1.2;
+    color: var(--text-primary);
+  }
+
+  .phone .content .card {
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-md);
+    padding: 12px 14px;
+    box-shadow: var(--shadow-card);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .phone .content .card .cap {
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+
+  .phone .content .card .ct {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+
+  .phone .content .card .ct-meta {
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+
+  /* ---- Nav base ---- */
+
+  .nav-wrap {
+    position: absolute;
+    inset: auto 0 24px 0;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 8px 10px;
+    pointer-events: auto;
+  }
+
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 6px 10px;
+    border-radius: var(--r-md);
+    color: var(--text-primary);
+    font-size: 9px;
+    font-weight: 500;
+    min-width: 46px;
+  }
+
+  .tab.active {
+    color: var(--coral);
+    background: var(--coral-soft);
+  }
+
+  .tab svg { width: 18px; height: 18px; }
+
+  /* Leaf brand circle */
+  .leaf {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--coral);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    transform: translateY(-14px);
+    box-shadow: var(--shadow-fab);
+    flex-shrink: 0;
+  }
+  .leaf svg { width: 22px; height: 22px; }
+
+  /* ---- Variant A — Warm paper pill ---- */
+  .nav-wrap.variant-a {
+    padding: 0 16px;
+    justify-content: center;
+  }
+  .variant-a .nav {
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--pill);
+    box-shadow: var(--shadow-float);
+  }
+
+  /* ---- Variant B — Liquid Glass ---- */
+  .nav-wrap.variant-b {
+    padding: 0 16px;
+  }
+  .variant-b .nav {
+    background: rgba(255, 250, 244, 0.55);
+    backdrop-filter: blur(22px) saturate(150%);
+    -webkit-backdrop-filter: blur(22px) saturate(150%);
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    border-radius: var(--pill);
+    box-shadow:
+      var(--shadow-float),
+      inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  }
+  .variant-b .tab.active {
+    background: rgba(231, 120, 80, 0.22);
+    color: var(--coral-deep);
+  }
+
+  /* ---- Variant C — Editorial card bar ---- */
+  .nav-wrap.variant-c {
+    padding: 0 12px;
+  }
+  .variant-c .nav {
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-float);
+    width: 100%;
+    justify-content: space-between;
+    padding: 10px 14px;
+  }
+  .variant-c .tab {
+    flex: 1;
+  }
+
+  /* ---- Variant D — Dark pill ---- */
+  .nav-wrap.variant-d {
+    padding: 0 16px;
+  }
+  .variant-d .nav {
+    background: #241D17;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: var(--pill);
+    box-shadow:
+      0 14px 28px rgba(36, 29, 23, 0.34),
+      0 2px 8px rgba(36, 29, 23, 0.18);
+  }
+  .variant-d .tab { color: #E9E1D3; }
+  .variant-d .tab.active {
+    color: #fff;
+    background: rgba(231, 120, 80, 0.24);
+  }
+
+  /* ---- Token table ---- */
+  .tokens {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px 12px;
+  }
+  .tokens dt { font-weight: 600; color: var(--text-primary); }
+
+  @media (max-width: 720px) {
+    .page { padding: 32px 20px 64px; }
+    h1 { font-size: 26px; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="hero">
+    <p class="eyebrow">Releaf · footer nav exploration</p>
+    <h1>Four directions for a floating bottom bar</h1>
+    <p class="lede">
+      Each variant renders on the real cream canvas and dot-grid you have today, with the same 5-tab IA
+      and lifted coral leaf. Side-by-side so you can compare the feel against the brand before we pick one and ship it.
+    </p>
+  </header>
+
+  <section class="grid">
+    <!-- ============ VARIANT A — Warm paper pill ============ -->
+    <article class="variant">
+      <div class="label">
+        <h2>A · Warm paper pill</h2>
+        <span class="pill-tag">recommended</span>
+      </div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>●●●●</span></div>
+        <div class="content">
+          <div class="title-eyebrow">MONDAY, APR 20</div>
+          <div class="title">Good morning,<br/>Achal.</div>
+          <div class="card"><span class="cap">NOTEBOOK · 12 pages</span><span class="ct">Field notes</span><span class="ct-meta">Updated 2h ago</span></div>
+          <div class="card"><span class="cap">NOTEBOOK · 4 pages</span><span class="ct">Reading log</span><span class="ct-meta">Updated yesterday</span></div>
+          <div class="card"><span class="cap">NOTEBOOK · 23 pages</span><span class="ct">Product ideas</span><span class="ct-meta">Updated 3d ago</span></div>
+        </div>
+        <div class="nav-wrap variant-a">
+          <div class="nav">
+            <div class="tab active">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-8 9 8v10a2 2 0 0 1-2 2h-4v-6H9v6H5a2 2 0 0 1-2-2V11z"/></svg>
+              <span>Home</span>
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h12a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3V4z"/><path d="M4 4v13a3 3 0 0 0 3 3"/></svg>
+              <span>Notebook</span>
+            </div>
+            <div class="leaf">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4c-9 0-15 6-15 14 0 .6.4 1 1 1 .4 0 .8-.3 1-.6C10.7 13 14.5 10 19 9.5c.4 0 .7-.4.7-.8s-.3-.8-.7-.8C14 8.4 10 11 7.5 15c1.8-7 7-9 12.5-9 .6 0 1-.4 1-1s-.4-1-1-1z"/></svg>
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 20h18"/><path d="M16 4l4 4-11 11H5v-4L16 4z"/></svg>
+              <span>Notepad</span>
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M4 12h3M17 12h3M12 4v3M12 17v3M6 6l2 2M16 16l2 2M18 6l-2 2M8 16l-2 2"/></svg>
+              <span>Settings</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="notes">
+        Capsule in <code>cardSolid</code> with a hairline border and a lifted shadow. 16pt side inset, 24pt from bottom.
+        Reads like a paper tab resting on the canvas — leans into Releaf's editorial brand. The lifted coral leaf keeps the
+        center of gravity where it is today.
+      </p>
+      <dl class="tokens">
+        <dt>bg</dt><dd>surface.cardSolid · border.default</dd>
+        <dt>radius</dt><dd>pill (full)</dd>
+        <dt>shadow</dt><dd>0 12 28 / rgba(36,29,23,.14)</dd>
+        <dt>inset</dt><dd>h = 16pt · b = 24pt (safe-area)</dd>
+      </dl>
+    </article>
+
+    <!-- ============ VARIANT B — Liquid Glass ============ -->
+    <article class="variant">
+      <div class="label"><h2>B · Liquid Glass</h2></div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>●●●●</span></div>
+        <div class="content">
+          <div class="title-eyebrow">MONDAY, APR 20</div>
+          <div class="title">Good morning,<br/>Achal.</div>
+          <div class="card"><span class="cap">NOTEBOOK · 12 pages</span><span class="ct">Field notes</span><span class="ct-meta">Updated 2h ago</span></div>
+          <div class="card"><span class="cap">NOTEBOOK · 4 pages</span><span class="ct">Reading log</span><span class="ct-meta">Updated yesterday</span></div>
+          <div class="card"><span class="cap">NOTEBOOK · 23 pages</span><span class="ct">Product ideas</span><span class="ct-meta">Updated 3d ago</span></div>
+        </div>
+        <div class="nav-wrap variant-b">
+          <div class="nav">
+            <div class="tab active">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-8 9 8v10a2 2 0 0 1-2 2h-4v-6H9v6H5a2 2 0 0 1-2-2V11z"/></svg>
+              <span>Home</span>
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h12a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3V4z"/><path d="M4 4v13a3 3 0 0 0 3 3"/></svg>
+              <span>Notebook</span>
+            </div>
+            <div class="leaf">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4c-9 0-15 6-15 14 0 .6.4 1 1 1 .4 0 .8-.3 1-.6C10.7 13 14.5 10 19 9.5c.4 0 .7-.4.7-.8s-.3-.8-.7-.8C14 8.4 10 11 7.5 15c1.8-7 7-9 12.5-9 .6 0 1-.4 1-1s-.4-1-1-1z"/></svg>
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 20h18"/><path d="M16 4l4 4-11 11H5v-4L16 4z"/></svg>
+              <span>Notepad</span>
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M4 12h3M17 12h3M12 4v3M12 17v3M6 6l2 2M16 16l2 2M18 6l-2 2M8 16l-2 2"/></svg>
+              <span>Settings</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="notes">
+        Translucent capsule with backdrop blur — the dot-grid shows faintly through. This is the iOS 26 Liquid Glass
+        pattern Apple Music, Photos, and Notes all adopted. Very modern; less warm. iOS is free; Android needs
+        <code>RenderEffect.createBlurEffect</code> (API 31+) with a translucent fallback below.
+      </p>
+      <dl class="tokens">
+        <dt>bg</dt><dd>cardSolid @ 55% + backdrop-blur 22</dd>
+        <dt>radius</dt><dd>pill</dd>
+        <dt>border</dt><dd>inner-highlight rgba(255,255,255,.55)</dd>
+        <dt>caveat</dt><dd>Android blur needs API 31+; fallback = alpha</dd>
+      </dl>
+    </article>
+
+    <!-- ============ VARIANT C — Editorial card bar ============ -->
+    <article class="variant">
+      <div class="label"><h2>C · Editorial card bar</h2></div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>●●●●</span></div>
+        <div class="content">
+          <div class="title-eyebrow">MONDAY, APR 20</div>
+          <div class="title">Good morning,<br/>Achal.</div>
+          <div class="card"><span class="cap">NOTEBOOK · 12 pages</span><span class="ct">Field notes</span><span class="ct-meta">Updated 2h ago</span></div>
+          <div class="card"><span class="cap">NOTEBOOK · 4 pages</span><span class="ct">Reading log</span><span class="ct-meta">Updated yesterday</span></div>
+          <div class="card"><span class="cap">NOTEBOOK · 23 pages</span><span class="ct">Product ideas</span><span class="ct-meta">Updated 3d ago</span></div>
+        </div>
+        <div class="nav-wrap variant-c">
+          <div class="nav">
+            <div class="tab active">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-8 9 8v10a2 2 0 0 1-2 2h-4v-6H9v6H5a2 2 0 0 1-2-2V11z"/></svg>
+              <span>Home</span>
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h12a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3V4z"/><path d="M4 4v13a3 3 0 0 0 3 3"/></svg>
+              <span>Notebook</span>
+            </div>
+            <div class="leaf">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4c-9 0-15 6-15 14 0 .6.4 1 1 1 .4 0 .8-.3 1-.6C10.7 13 14.5 10 19 9.5c.4 0 .7-.4.7-.8s-.3-.8-.7-.8C14 8.4 10 11 7.5 15c1.8-7 7-9 12.5-9 .6 0 1-.4 1-1s-.4-1-1-1z"/></svg>
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 20h18"/><path d="M16 4l4 4-11 11H5v-4L16 4z"/></svg>
+              <span>Notepad</span>
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M4 12h3M17 12h3M12 4v3M12 17v3M6 6l2 2M16 16l2 2M18 6l-2 2M8 16l-2 2"/></svg>
+              <span>Settings</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="notes">
+        Rounded rectangle (16pt) rather than a full pill, near-full-width with 12pt gutters. Feels closer to a traditional
+        tab bar but clearly detached. Good middle ground — a little more architectural, less playful than the pill.
+      </p>
+      <dl class="tokens">
+        <dt>bg</dt><dd>surface.cardSolid · border.default</dd>
+        <dt>radius</dt><dd>16 (lg)</dd>
+        <dt>shadow</dt><dd>0 12 28 / rgba(36,29,23,.14)</dd>
+        <dt>inset</dt><dd>h = 12pt · b = 24pt</dd>
+      </dl>
+    </article>
+
+    <!-- ============ VARIANT D — Dark pill ============ -->
+    <article class="variant">
+      <div class="label"><h2>D · Dark espresso pill</h2></div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>●●●●</span></div>
+        <div class="content">
+          <div class="title-eyebrow">MONDAY, APR 20</div>
+          <div class="title">Good morning,<br/>Achal.</div>
+          <div class="card"><span class="cap">NOTEBOOK · 12 pages</span><span class="ct">Field notes</span><span class="ct-meta">Updated 2h ago</span></div>
+          <div class="card"><span class="cap">NOTEBOOK · 4 pages</span><span class="ct">Reading log</span><span class="ct-meta">Updated yesterday</span></div>
+          <div class="card"><span class="cap">NOTEBOOK · 23 pages</span><span class="ct">Product ideas</span><span class="ct-meta">Updated 3d ago</span></div>
+        </div>
+        <div class="nav-wrap variant-d">
+          <div class="nav">
+            <div class="tab active">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-8 9 8v10a2 2 0 0 1-2 2h-4v-6H9v6H5a2 2 0 0 1-2-2V11z"/></svg>
+              <span>Home</span>
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h12a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3V4z"/><path d="M4 4v13a3 3 0 0 0 3 3"/></svg>
+              <span>Notebook</span>
+            </div>
+            <div class="leaf">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4c-9 0-15 6-15 14 0 .6.4 1 1 1 .4 0 .8-.3 1-.6C10.7 13 14.5 10 19 9.5c.4 0 .7-.4.7-.8s-.3-.8-.7-.8C14 8.4 10 11 7.5 15c1.8-7 7-9 12.5-9 .6 0 1-.4 1-1s-.4-1-1-1z"/></svg>
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 20h18"/><path d="M16 4l4 4-11 11H5v-4L16 4z"/></svg>
+              <span>Notepad</span>
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M4 12h3M17 12h3M12 4v3M12 17v3M6 6l2 2M16 16l2 2M18 6l-2 2M8 16l-2 2"/></svg>
+              <span>Settings</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="notes">
+        Espresso (#241D17 / neutral.900) fill with off-white icons. High contrast against the cream canvas — the leaf really pops.
+        Showing up a lot in 2026 Dribbble wellness & premium finance apps. Heavier; changes the overall visual weight of the app.
+      </p>
+      <dl class="tokens">
+        <dt>bg</dt><dd>neutral.900 (#241D17)</dd>
+        <dt>radius</dt><dd>pill</dd>
+        <dt>active</dt><dd>rgba(231,120,80,.24) + white text</dd>
+        <dt>shadow</dt><dd>deeper — 0 14 28 / rgba(36,29,23,.34)</dd>
+      </dl>
+    </article>
+  </section>
+</main>
+</body>
+</html>

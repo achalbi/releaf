@@ -1,0 +1,117 @@
+/*
+ * AuthStore.kt
+ * App-wide auth state. Wraps a `GoogleAuthClient` and persists the current
+ * session via EncryptedSharedPreferences so the app can resume on re-launch.
+ */
+
+package app.releaf.mobile.auth
+
+import android.content.Context
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import java.time.Instant
+
+sealed interface AuthState {
+    data object SignedOut : AuthState
+    data object SigningIn : AuthState
+    data class  SignedIn(val session: GoogleAuthSession) : AuthState
+    data class  Failed(val message: String) : AuthState
+}
+
+class AuthStore private constructor(
+    appContext: Context,
+    private val client: GoogleAuthClient,
+) {
+    private val prefs = EncryptedSharedPreferences.create(
+        appContext,
+        "releaf_auth",
+        MasterKey.Builder(appContext).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+    )
+
+    private val _state = MutableStateFlow<AuthState>(restore())
+    val state: StateFlow<AuthState> = _state.asStateFlow()
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    fun signIn() {
+        _state.value = AuthState.SigningIn
+        scope.launch {
+            try {
+                val session = client.signIn()
+                persist(session)
+                _state.value = AuthState.SignedIn(session)
+            } catch (_: GoogleAuthError.Cancelled) {
+                _state.value = AuthState.SignedOut
+            } catch (e: Exception) {
+                _state.value = AuthState.Failed(e.localizedMessage ?: "Sign-in failed")
+            }
+        }
+    }
+
+    fun signOut() {
+        scope.launch {
+            runCatching { client.signOut() }
+            prefs.edit().clear().apply()
+            _state.value = AuthState.SignedOut
+        }
+    }
+
+    // MARK: — persistence
+
+    private fun restore(): AuthState {
+        val userId      = prefs.getString(KEY_USER_ID, null) ?: return AuthState.SignedOut
+        val email       = prefs.getString(KEY_EMAIL, null)   ?: return AuthState.SignedOut
+        val access      = prefs.getString(KEY_ACCESS, null)  ?: return AuthState.SignedOut
+        val refresh     = prefs.getString(KEY_REFRESH, null)
+        val displayName = prefs.getString(KEY_DISPLAY, null)
+        val expiresAt   = prefs.getLong(KEY_EXPIRES, 0L).takeIf { it > 0 }?.let(Instant::ofEpochSecond)
+            ?: return AuthState.SignedOut
+
+        return AuthState.SignedIn(
+            GoogleAuthSession(
+                userId = userId,
+                email = email,
+                displayName = displayName,
+                accessToken = access,
+                refreshToken = refresh,
+                expiresAt = expiresAt,
+            )
+        )
+    }
+
+    private fun persist(session: GoogleAuthSession) {
+        prefs.edit().apply {
+            putString(KEY_USER_ID, session.userId)
+            putString(KEY_EMAIL, session.email)
+            putString(KEY_DISPLAY, session.displayName)
+            putString(KEY_ACCESS, session.accessToken)
+            putString(KEY_REFRESH, session.refreshToken)
+            putLong(KEY_EXPIRES, session.expiresAt.epochSecond)
+        }.apply()
+    }
+
+    companion object {
+        private const val KEY_USER_ID = "user_id"
+        private const val KEY_EMAIL   = "email"
+        private const val KEY_DISPLAY = "display_name"
+        private const val KEY_ACCESS  = "access_token"
+        private const val KEY_REFRESH = "refresh_token"
+        private const val KEY_EXPIRES = "expires_at"
+
+        @Volatile private var instance: AuthStore? = null
+
+        fun get(context: Context, client: GoogleAuthClient = StubGoogleAuthClient()): AuthStore =
+            instance ?: synchronized(this) {
+                instance ?: AuthStore(context.applicationContext, client).also { instance = it }
+            }
+    }
+}

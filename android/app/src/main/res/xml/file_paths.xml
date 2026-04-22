@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider paths for the camera-capture flow in PhotosSection.
+
+  The camera app writes JPEG bytes to a content:// URI we hand it via
+  FileProvider, which resolves back to a file in our own filesDir —
+  specifically `filesDir/releaf/attachments/` (see AttachmentStorage.kt).
+  Exposing only that sub-directory (not the whole files-path) limits the
+  camera app's write surface to the files we're asking it to write.
+-->
+<paths>
+    <files-path
+        name="attachments"
+        path="releaf/attachments/" />
+</paths>

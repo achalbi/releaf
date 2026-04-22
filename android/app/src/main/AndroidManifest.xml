@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Page editor LOCATION section. Coarse is fine — we only need city/address
+         granularity for reverse geocoding; fine is the richer request the user
+         sees. Declaring both lets us downgrade at runtime if the user picks
+         "approximate only" on API 31+. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Editor VOICE section. Required for MediaRecorder to capture audio;
+         user grants the runtime permission on first record tap. No foreground
+         service needed today since recording only happens while the editor
+         surface is visible. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- API 30+ package visibility. SpeechRecognizer needs to resolve a
+         RecognitionService on the device (usually Google's, shipped via
+         Play Services) and the platform won't expose that service to us
+         without an explicit <queries> declaration. Without this block
+         `createSpeechRecognizer` returns a client that silently fails to
+         start on stock Android 11+. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".ReleafApp"
+        android:label="@string/app_name"
+        android:allowBackup="false"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Releaf">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Releaf">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          FileProvider for the camera-capture path in PhotosSection.
+          We prepare an output file in our attachments dir, hand the
+          camera app a content:// URI pointing at it, and read the
+          resulting JPEG back as a file:// URI once capture completes.
+          `exported=false` is required; `grantUriPermissions=true` lets
+          us grant the camera app a temporary write permission on the
+          URI we pass to TakePicture.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

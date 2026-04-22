@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Bare theme; the Compose Material3 theme in ui/theme/AppTheme.kt is the
+         real one. This system theme just sets the background + status bar. -->
+    <style name="Theme.Releaf" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/releaf_canvas</item>
+        <item name="android:statusBarColor">@color/releaf_canvas</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

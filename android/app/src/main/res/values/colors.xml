@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- These mirror AppColors.kt; kept here for status bar + splash theming. -->
+    <color name="releaf_canvas">#F5EEE3</color>
+    <color name="releaf_coral">#E77850</color>
+    <color name="releaf_text_primary">#241D17</color>
+</resources>

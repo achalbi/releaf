@@ -1,0 +1,49 @@
+# ─── macOS ──────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# ─── iOS / Xcode / SwiftPM ──────────────────────────────
+xcuserdata/
+*.xcuserstate
+DerivedData/
+.build/
+Packages/
+Package.resolved
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+.swiftpm/
+
+# Secrets — signing, API keys, Google OAuth client IDs
+GoogleService-Info.plist
+Releaf.entitlements
+*.pem
+*.p12
+*.cer
+
+# ─── Android / Gradle ───────────────────────────────────
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+.cxx/
+
+# Google services JSON — do not commit real creds
+google-services.json
+
+# ─── Tooling ────────────────────────────────────────────
+.vscode/
+.fleet/
+node_modules/
+
+# ─── Misc ───────────────────────────────────────────────
+*.log
+*.tmp
+*.swp

@@ -1,0 +1,138 @@
+[versions]
+agp                   = "9.1.1"
+kotlin                = "2.2.10"
+ksp                   = "2.3.2"
+compose-bom           = "2024.09.03"
+activity-compose      = "1.9.2"
+lifecycle             = "2.8.6"
+coroutines            = "1.8.1"
+kotlinx-serialization = "1.7.3"
+okhttp                = "4.12.0"
+material-icons        = "1.7.3"
+security-crypto       = "1.1.0-alpha06"
+navigation-compose    = "2.8.3"
+room                  = "2.7.2"
+# `androidx.sqlite:sqlite-bundled` ships its own SQLite build with FTS5 compiled
+# in — the system SQLite on some Android images (including API-35 emulators)
+# omits FTS5, which crashes Room at `CREATE VIRTUAL TABLE ... USING fts5`.
+# 2.5.2 pairs with Room 2.7.2.
+sqlite                = "2.5.2"
+work                  = "2.9.1"
+markdown-renderer     = "0.27.0"  # Later versions (0.36+) require Kotlin 2.2+
+# WYSIWYG rich-text editor for the notepad and page editors. Round-trips to
+# Markdown via `state.toMarkdown()` / `state.setMarkdown(...)`, which keeps
+# the schema's canonical CommonMark contract intact.
+rich-editor           = "1.0.0-rc13"
+# Image loading (page editor photo + scan thumbnails).
+coil                  = "2.7.0"
+# Google Play Services location (FusedLocationProviderClient).
+play-services-location = "21.3.0"
+# Google ML Kit Document Scanner (on-device document scanning via Play
+# Services). Runs fully on the device — no network.
+mlkit-document-scanner = "16.0.0-beta1"
+# Google ML Kit Text Recognition v2 (Latin script) via Play Services.
+# Pairs with the document scanner to OCR scanned pages into plain text —
+# also on-device, no network.
+mlkit-text-recognition = "19.0.1"
+# Used to generate client-side UUIDs for attachment/contact/todo ids.
+# `java.util.UUID.randomUUID()` is on the classpath for free — no dep.
+# androidx.activity already ships the new ActivityResult contracts we need
+# for the photo picker + document scanner IntentSender launcher.
+activity              = "1.9.3"
+# sherpa-onnx on-device speech-to-text. File-based (decoded PCM in,
+# plain-text out), so it sidesteps the Android concurrent-mic problem
+# that makes `SpeechRecognizer` unusable alongside `MediaRecorder`.
+# Ships native libs that are 16 KB-page-aligned (required by Google Play
+# for Android 15+). Replaced Vosk 0.3.47, whose last build predates the
+# 16 KB requirement and has no upstream fix in sight.
+sherpa-onnx           = "v1.12.39"
+# Apache Commons Compress — needed only to extract the whisper-tiny.en
+# model, which sherpa-onnx ships as `.tar.bz2`. Android's stdlib has
+# `ZipInputStream` but no tar or bzip2 support.
+commons-compress      = "1.28.0"
+# ML Kit GenAI Speech Recognition. AICore-backed on API 31+ devices
+# (Pixel 8+ / Samsung S24+ and friends); preferred over sherpa-onnx
+# when supported because there's no model bundle — AICore ships the
+# Gemini Nano weights. Alpha as of 2026; no SLA yet.
+mlkit-genai-speech    = "1.0.0-alpha1"
+
+[plugins]
+android-application  = { id = "com.android.application",                     version.ref = "agp" }
+kotlin-android       = { id = "org.jetbrains.kotlin.android",                version.ref = "kotlin" }
+compose-compiler     = { id = "org.jetbrains.kotlin.plugin.compose",         version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization",   version.ref = "kotlin" }
+ksp                  = { id = "com.google.devtools.ksp",                     version.ref = "ksp" }
+
+[libraries]
+# Compose
+compose-bom                = { module = "androidx.compose:compose-bom",                 version.ref = "compose-bom" }
+compose-ui                 = { module = "androidx.compose.ui:ui" }
+compose-ui-tooling         = { module = "androidx.compose.ui:ui-tooling" }
+compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+compose-material3          = { module = "androidx.compose.material3:material3" }
+compose-material-icons     = { module = "androidx.compose.material:material-icons-extended", version.ref = "material-icons" }
+compose-foundation         = { module = "androidx.compose.foundation:foundation" }
+activity-compose           = { module = "androidx.activity:activity-compose",              version.ref = "activity-compose" }
+
+# Lifecycle / coroutines
+lifecycle-runtime-ktx       = { module = "androidx.lifecycle:lifecycle-runtime-ktx",         version.ref = "lifecycle" }
+lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose",   version.ref = "lifecycle" }
+coroutines-android          = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+kotlinx-serialization-json  = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+
+# Networking (for future Drive REST)
+okhttp         = { module = "com.squareup.okhttp3:okhttp",              version.ref = "okhttp" }
+okhttp-logging = { module = "com.squareup.okhttp3:logging-interceptor", version.ref = "okhttp" }
+
+# Secure local storage (for OAuth tokens)
+security-crypto = { module = "androidx.security:security-crypto", version.ref = "security-crypto" }
+
+# Navigation
+navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigation-compose" }
+
+# Local DB (Room)
+room-runtime  = { module = "androidx.room:room-runtime",  version.ref = "room" }
+room-ktx      = { module = "androidx.room:room-ktx",      version.ref = "room" }
+room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+# Bundled SQLite driver — see note on `sqlite` version above. Wiring lives in
+# ReleafDatabase's builder (`.setDriver(BundledSQLiteDriver())`).
+sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
+
+# Background work (Drive sync worker)
+work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
+
+# Markdown rendering (Compose). Core is MPP-first; `-android` brings the JVM
+# artifact for our platform, `-m3` brings Material3-themed defaults.
+markdown-renderer-android = { module = "com.mikepenz:multiplatform-markdown-renderer-android", version.ref = "markdown-renderer" }
+markdown-renderer-m3      = { module = "com.mikepenz:multiplatform-markdown-renderer-m3",      version.ref = "markdown-renderer" }
+
+# Rich-text (WYSIWYG) editor. Replaces the custom MarkdownFormatBar with
+# proper selection-aware bold/italic/list affordances that render inline.
+rich-editor-compose       = { module = "com.mohamedrejeb.richeditor:richeditor-compose", version.ref = "rich-editor" }
+
+# Page-editor feature sections:
+#   - coil-compose: photo + scan thumbnails in PhotosSection / ScansSection
+#   - play-services-location: FusedLocationProviderClient for LocationSection
+#   - play-services-mlkit-document-scanner: on-device scanner for ScansSection
+#   - activity-ktx: Activity Result contracts (photo picker, scanner sender)
+coil-compose              = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
+play-services-location    = { module = "com.google.android.gms:play-services-location", version.ref = "play-services-location" }
+mlkit-document-scanner    = { module = "com.google.android.gms:play-services-mlkit-document-scanner", version.ref = "mlkit-document-scanner" }
+mlkit-text-recognition    = { module = "com.google.android.gms:play-services-mlkit-text-recognition", version.ref = "mlkit-text-recognition" }
+activity-ktx              = { module = "androidx.activity:activity-ktx", version.ref = "activity" }
+
+# sherpa-onnx on-device speech recognition. Feeds float PCM in and gets
+# a plain transcript string out. No mic permission of its own — it
+# transcribes what we've already saved to disk. Pulled via JitPack
+# because upstream publishes Android AARs on GitHub releases only (not
+# Maven Central).
+sherpa-onnx               = { module = "com.github.k2-fsa:sherpa-onnx", version.ref = "sherpa-onnx" }
+# bzip2 + tar reader for the `.tar.bz2` model bundle that sherpa-onnx
+# ships for whisper-tiny.en. See SpeechTranscriber.extractModelTarBz2.
+commons-compress          = { module = "org.apache.commons:commons-compress", version.ref = "commons-compress" }
+
+# ML Kit GenAI Speech Recognition. On-device via AICore / Gemini Nano
+# on API 31+ supported devices. Exposes a Kotlin Flow API for streaming
+# partial + final results. We use `AudioSource.fromPfd` to feed the
+# saved .m4a directly — no decode needed.
+mlkit-genai-speech        = { module = "com.google.mlkit:genai-speech-recognition", version.ref = "mlkit-genai-speech" }
