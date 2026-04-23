@@ -73,6 +73,12 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
 
+    // Cold-launch branded splash. `installSplashScreen()` in MainActivity
+    // holds the native splash while Compose's first frame renders, so the
+    // branded leaf is visible from the first paint instead of the system
+    // white.
+    implementation(libs.core.splashscreen)
+
     // Activity + lifecycle + coroutines
     implementation(libs.activity.compose)
     implementation(libs.lifecycle.runtime.ktx)

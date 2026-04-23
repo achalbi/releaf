@@ -9,6 +9,7 @@ import ReleafData
 
 public struct HomeScreen: View {
     @EnvironmentObject private var authStore: AuthStore
+    @Environment(\.showOnboardingWizard) private var showOnboarding
     @StateObject private var viewModel = HomeViewModel()
 
     public init() {}
@@ -43,6 +44,7 @@ public struct HomeScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: AppSpacing.s6) {
                     header
+                    OnboardingQuickGuideCard(onShowIntro: showOnboarding)
                     ForEach(notebooks) { notebook in
                         NavigationLink(value: NotebookRoute(id: notebook.id)) {
                             NotebookRow(notebook: notebook)

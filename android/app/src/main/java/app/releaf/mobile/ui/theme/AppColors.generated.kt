@@ -55,6 +55,32 @@ object AppColors {
     val Danger600 = Color(0xFFC8432E)
     val Danger700 = Color(0xFF983224)
 
+    // Leaf theme variants (flat — no dark variant yet)
+
+    // coral theme — primary / deep / bgSoft (10%) / borderSoft (30%)
+    val ThemeCoralPrimary = Color(0xFFE07856)
+    val ThemeCoralDeep = Color(0xFFC65A3E)
+    val ThemeCoralBgSoft = Color(0x1AE07856)
+    val ThemeCoralBorderSoft = Color(0x4DE07856)
+
+    // green theme — primary / deep / bgSoft (10%) / borderSoft (30%)
+    val ThemeGreenPrimary = Color(0xFF7AA874)
+    val ThemeGreenDeep = Color(0xFF5B8C52)
+    val ThemeGreenBgSoft = Color(0x1A7AA874)
+    val ThemeGreenBorderSoft = Color(0x4D7AA874)
+
+    // yellow theme — primary / deep / bgSoft (10%) / borderSoft (30%)
+    val ThemeYellowPrimary = Color(0xFFF4C430)
+    val ThemeYellowDeep = Color(0xFFE8B923)
+    val ThemeYellowBgSoft = Color(0x1AF4C430)
+    val ThemeYellowBorderSoft = Color(0x4DF4C430)
+
+    // dry theme — primary / deep / bgSoft (10%) / borderSoft (30%)
+    val ThemeDryPrimary = Color(0xFFB8956A)
+    val ThemeDryDeep = Color(0xFF8B7355)
+    val ThemeDryBgSoft = Color(0x1AB8956A)
+    val ThemeDryBorderSoft = Color(0x4DB8956A)
+
     // Roles (theme-aware — resolve per recomposition via isSystemInDarkTheme())
 
     /** App background — warm cream (light, matches Releaf Branding template) / warm dark (neutral900, dark) */

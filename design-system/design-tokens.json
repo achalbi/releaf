@@ -223,6 +223,33 @@
         "type": "color",
         "description": "App-wide dot-grid tint — warm brown @ 35% in light; neutral50 @ ~5% in dark (texture fades back)"
       }
+    },
+    "theme": {
+      "_notes": "User-selectable leaf themes, sourced from the Releaf Branding template in Figma Make. Each theme carries the same four slots — primary, primaryDeep, bgSoft (10% alpha of primary), borderSoft (30% alpha of primary). Values are flat because Figma Make did not ship dark variants; promote to role tokens (value.light / value.dark) once dark-mode variants are designed. The coral entry here mirrors accent.coral/coralDeep and exists so consumers can iterate over all four themes uniformly.",
+      "coral": {
+        "primary":    { "value": "#E07856",   "type": "color", "description": "Coral theme — warm, energetic, creative. Default." },
+        "primaryDeep":{ "value": "#C65A3E",   "type": "color" },
+        "bgSoft":     { "value": "#E078561A", "type": "color", "description": "10% alpha — chip/wash background" },
+        "borderSoft": { "value": "#E078564D", "type": "color", "description": "30% alpha — soft border" }
+      },
+      "green": {
+        "primary":    { "value": "#7AA874",   "type": "color", "description": "Leaf Green theme — natural, organic, growth-focused" },
+        "primaryDeep":{ "value": "#5B8C52",   "type": "color" },
+        "bgSoft":     { "value": "#7AA8741A", "type": "color" },
+        "borderSoft": { "value": "#7AA8744D", "type": "color" }
+      },
+      "yellow": {
+        "primary":    { "value": "#F4C430",   "type": "color", "description": "Leaf Yellow theme — bright, optimistic, energizing" },
+        "primaryDeep":{ "value": "#E8B923",   "type": "color" },
+        "bgSoft":     { "value": "#F4C4301A", "type": "color" },
+        "borderSoft": { "value": "#F4C4304D", "type": "color" }
+      },
+      "dry": {
+        "primary":    { "value": "#B8956A",   "type": "color", "description": "Dry Leaf theme — earthy, grounded, reflective" },
+        "primaryDeep":{ "value": "#8B7355",   "type": "color" },
+        "bgSoft":     { "value": "#B8956A1A", "type": "color" },
+        "borderSoft": { "value": "#B8956A4D", "type": "color" }
+      }
     }
   },
   "pattern": {

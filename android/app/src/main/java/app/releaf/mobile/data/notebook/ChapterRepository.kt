@@ -22,15 +22,24 @@ class ChapterRepository(
 
     suspend fun findById(id: String): ChapterEntity? = chapterDao.findById(id)
 
-    suspend fun createChapter(notebookId: String, title: String): ChapterEntity {
+    /** chapter-count-per-notebook feed for the Notebooks tab rows. */
+    fun observeChapterCounts(): Flow<List<NotebookCountRow>> =
+        chapterDao.observeChapterCounts()
+
+    suspend fun createChapter(
+        notebookId: String,
+        title: String,
+        description: String? = null,
+    ): ChapterEntity {
         val now = IsoClock.nowIso()
         val entity = ChapterEntity(
-            id         = Uuidv7.generate(),
-            notebookId = notebookId,
-            title      = title.trim(),
-            createdAt  = now,
-            updatedAt  = now,
-            dirty      = true,
+            id          = Uuidv7.generate(),
+            notebookId  = notebookId,
+            title       = title.trim(),
+            description = description?.trim()?.ifEmpty { null },
+            createdAt   = now,
+            updatedAt   = now,
+            dirty       = true,
         )
         chapterDao.upsert(entity)
         return entity
@@ -39,9 +48,10 @@ class ChapterRepository(
     suspend fun saveChapter(entity: ChapterEntity) {
         chapterDao.upsert(
             entity.copy(
-                title     = entity.title.trim(),
-                updatedAt = IsoClock.nowIso(),
-                dirty     = true,
+                title       = entity.title.trim(),
+                description = entity.description?.trim()?.ifEmpty { null },
+                updatedAt   = IsoClock.nowIso(),
+                dirty       = true,
             )
         )
     }

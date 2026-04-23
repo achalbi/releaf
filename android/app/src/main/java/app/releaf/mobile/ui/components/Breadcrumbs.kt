@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 
@@ -63,7 +64,7 @@ fun Breadcrumbs(
                 )
             }
             val isTerminal = segment.onTap == null
-            val color = if (isTerminal) AppColors.TextSecondary else AppColors.Coral
+            val color = if (isTerminal) AppColors.TextSecondary else AppAccent.primary
             val rowBase = if (isTerminal) {
                 Modifier
             } else {

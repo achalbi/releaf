@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 
@@ -162,8 +163,8 @@ private fun RegularTab(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val tint = if (isSelected) AppColors.Coral     else AppColors.TextPrimary
-    val bg   = if (isSelected) AppColors.CoralSoft else Color.Transparent
+    val tint = if (isSelected) AppAccent.primary     else AppColors.TextPrimary
+    val bg   = if (isSelected) AppAccent.soft else Color.Transparent
 
     // Icon-only cell. Whole cell is the tap target (Box with weight(1f)); the
     // visible chip is a 24dp icon with coralSoft rounded-rect background when
@@ -211,7 +212,7 @@ private fun BrandTab(
     // Coral → CoralDeep vertical gradient: lighter at top, deeper at bottom —
     // reads as a subtle 3D lift under ambient light.
     val coralGradient = Brush.verticalGradient(
-        colors = listOf(AppColors.Coral, AppColors.CoralDeep),
+        colors = listOf(AppAccent.primary, AppAccent.deep),
     )
 
     // No ripple — the circular shadow + gradient already read as pressable.
@@ -233,8 +234,8 @@ private fun BrandTab(
                 .shadow(
                     elevation = 12.dp,
                     shape = CircleShape,
-                    ambientColor = AppColors.Coral,
-                    spotColor = AppColors.Coral,
+                    ambientColor = AppAccent.primary,
+                    spotColor = AppAccent.primary,
                 )
                 .background(coralGradient, CircleShape),
             contentAlignment = Alignment.Center,

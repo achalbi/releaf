@@ -12,6 +12,7 @@ package app.releaf.mobile.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
@@ -40,6 +42,11 @@ data class StatItem(
     val value: String,
     val tone: StatTone = StatTone.Neutral,
     val key: String = label,
+    /** Optional tap handler. When non-null the card gets a ripple +
+     *  `clickable` modifier. Null-default so read-only stat grids
+     *  (home dashboard, archive) don't pick up unintended click
+     *  affordances. */
+    val onClick: (() -> Unit)? = null,
 )
 
 // ---------- StatGrid ----------
@@ -71,7 +78,7 @@ private fun StatCard(
 ) {
     val labelColor = when (item.tone) {
         StatTone.Neutral -> AppColors.TextSecondary
-        StatTone.Coral   -> AppColors.CoralDeep
+        StatTone.Coral   -> AppAccent.deep
         StatTone.Green   -> AppColors.Green
         StatTone.Info    -> AppColors.Info
     }
@@ -84,6 +91,10 @@ private fun StatCard(
                 width = 1.dp,
                 color = AppColors.BorderDefault,
                 shape = RoundedCornerShape(AppRadius.lg),
+            )
+            .then(
+                if (item.onClick != null) Modifier.clickable(onClick = item.onClick)
+                else Modifier,
             )
             .padding(AppSpacing.s4),
         verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),

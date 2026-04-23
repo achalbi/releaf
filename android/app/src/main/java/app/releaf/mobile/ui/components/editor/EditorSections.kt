@@ -20,6 +20,7 @@ package app.releaf.mobile.ui.components.editor
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -29,6 +30,8 @@ import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
+import android.provider.ContactsContract
+import android.util.Patterns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -55,6 +58,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -63,29 +67,48 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -93,6 +116,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -120,6 +145,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -127,8 +154,11 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.net.toFile
 import app.releaf.mobile.data.common.AttachmentStorage
+import app.releaf.mobile.data.common.CombineToPdfResult
+import app.releaf.mobile.data.common.PhotosToPdf
 import app.releaf.mobile.data.common.SpeechTranscriber
 import app.releaf.mobile.data.common.TranscribeResult
+import app.releaf.mobile.data.common.WaveformSamples
 import app.releaf.mobile.data.common.Uuidv7
 import app.releaf.mobile.data.notebook.Attachment
 import app.releaf.mobile.data.notebook.Contact
@@ -136,6 +166,7 @@ import app.releaf.mobile.data.notebook.GeoLocation
 import app.releaf.mobile.data.notebook.ScanCategory
 import app.releaf.mobile.data.notebook.TodoItem
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
@@ -171,7 +202,7 @@ private fun SectionShell(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
     ) {
-        Text(title, style = AppTypography.Eyebrow, color = AppColors.Coral)
+        Text(title, style = AppTypography.Eyebrow, color = AppAccent.primary)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -208,7 +239,7 @@ private fun AddAffordance(
         Icon(
             imageVector        = icon,
             contentDescription = null,
-            tint               = AppColors.Coral,
+            tint               = AppAccent.primary,
             modifier           = Modifier.size(20.dp),
         )
         Spacer(Modifier.size(AppSpacing.s3))
@@ -217,7 +248,7 @@ private fun AddAffordance(
         Icon(
             imageVector        = Icons.Filled.Add,
             contentDescription = null,
-            tint               = AppColors.Coral,
+            tint               = AppAccent.primary,
             modifier           = Modifier.size(20.dp),
         )
     }
@@ -238,7 +269,7 @@ private fun LoadingRow(label: String) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CircularProgressIndicator(
-            color       = AppColors.Coral,
+            color       = AppAccent.primary,
             strokeWidth = 2.dp,
             modifier    = Modifier.size(18.dp),
         )
@@ -271,45 +302,115 @@ private fun DeleteButton(onClick: () -> Unit) {
 @Composable
 fun ContactsSection(
     contacts: List<Contact>,
-    onAdd: (name: String) -> Unit,
+    /** Full-shape add signature — mirrors the Figma capture form plus
+     *  the landline field. The trailing fields are optional; only
+     *  `name` is required for the sheet's Save affordance to enable.
+     *  Callers wire this to their VM's `addContact(...)` directly. */
+    onAdd: (
+        name: String,
+        phone: String?,
+        landline: String?,
+        email: String?,
+        title: String?,
+        organization: String?,
+        location: String?,
+        website: String?,
+    ) -> Unit,
+    /** In-place edit: same shape as [onAdd] but keyed by id. Callers
+     *  wire this to their VM's `updateContact(...)`. */
+    onEdit: (
+        id: String,
+        name: String,
+        phone: String?,
+        landline: String?,
+        email: String?,
+        title: String?,
+        organization: String?,
+        location: String?,
+        website: String?,
+    ) -> Unit,
     onRemove: (id: String) -> Unit,
 ) {
     var isAdding by remember { mutableStateOf(false) }
-    // Delete guard — tap × on a chip → open the alert. `onRemove`
-    // fires only on explicit confirm.
+    // Tap a card → open the contact-actions sheet (Call / Edit / Add-to-
+    // Contacts / Email / Delete). Delete from the sheet still routes
+    // through the confirmation alert below so the destructive action
+    // stays gated.
+    var sheetForId by remember { mutableStateOf<String?>(null) }
+    var editingId by remember { mutableStateOf<String?>(null) }
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
 
     SectionShell(title = "CONTACTS") {
         // Add affordance sits at the top of the section, matching the
         // Photos / Scans pattern so the "how do I add?" affordance is
         // always in the same place.
-        if (isAdding) {
-            InlineTextInput(
-                placeholder = "Name",
-                onSubmit    = { text ->
-                    onAdd(text)
-                    isAdding = false
-                },
-                onCancel    = { isAdding = false },
-            )
-        } else {
-            AddAffordance(
-                icon  = Icons.Filled.People,
-                label = "Add contact",
-                onClick = { isAdding = true },
-            )
-        }
+        AddAffordance(
+            icon  = Icons.Filled.People,
+            label = "Add contact",
+            onClick = { isAdding = true },
+        )
 
         if (contacts.isNotEmpty()) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
-                verticalArrangement   = Arrangement.spacedBy(AppSpacing.s2),
+            // Full-width cards stacked vertically — phone + email have
+            // their own rows with leading icons, so the three captured
+            // fields are each legible without truncating.
+            Column(
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
             ) {
                 contacts.forEach { c ->
-                    ContactChip(c, onRemove = { pendingDeleteId = c.id })
+                    ContactCard(
+                        contact = c,
+                        onClick = { sheetForId = c.id },
+                    )
                 }
             }
         }
+    }
+
+    if (isAdding) {
+        ContactEditorSheet(
+            initial   = null,
+            onSubmit  = { name, phone, landline, email, title, organization, location, website ->
+                onAdd(name, phone, landline, email, title, organization, location, website)
+                isAdding = false
+            },
+            onDismiss = { isAdding = false },
+        )
+    }
+
+    val editingContact = editingId?.let { id -> contacts.firstOrNull { it.id == id } }
+    if (editingContact != null) {
+        ContactEditorSheet(
+            initial   = editingContact,
+            onSubmit  = { name, phone, landline, email, title, organization, location, website ->
+                onEdit(editingContact.id, name, phone, landline, email, title, organization, location, website)
+                editingId = null
+            },
+            onDismiss = { editingId = null },
+        )
+    }
+
+    val sheetContact = sheetForId?.let { id -> contacts.firstOrNull { it.id == id } }
+    if (sheetContact != null) {
+        ContactActionsSheet(
+            contact  = sheetContact,
+            onEdit   = {
+                // Close actions sheet, then switch to the edit sheet on
+                // the next frame so dismiss + show don't animate over
+                // each other.
+                editingId = sheetContact.id
+                sheetForId = null
+            },
+            onDelete = {
+                // Close the sheet first, then gate the delete behind
+                // the existing confirmation alert. Two-step is
+                // intentional — the sheet dismiss animation would
+                // otherwise race the alert show.
+                pendingDeleteId = sheetContact.id
+                sheetForId = null
+            },
+            onDismiss = { sheetForId = null },
+        )
     }
 
     pendingDeleteId?.let { id ->
@@ -344,22 +445,718 @@ fun ContactsSection(
     }
 }
 
+/**
+ * Unified add/edit sheet for a contact. Passing `initial = null` opens
+ * it in "Add contact" mode with empty fields; passing a non-null
+ * [Contact] pre-fills every value and swaps the header + commit copy
+ * to "Save" on an existing row.
+ *
+ * Validation (inline, gated on Save):
+ *  - Name: trimmed non-empty (required).
+ *  - Mobile: optional, but if present must contain exactly 10 digits.
+ *  - Landline: same rule as mobile; 10 local digits (e.g. "011 2345
+ *    6789" for a Delhi landline) when present.
+ *  - Email: optional, but if present must match
+ *    `Patterns.EMAIL_ADDRESS`.
+ *
+ * Invalid fields show an inline supporting-text error and the Save
+ * affordance is greyed until every issue clears. On commit, both
+ * number fields get the default `+91` dial-code prepended unless the
+ * user typed their own `+`-prefixed country code — same behavior as
+ * before the landline split.
+ *
+ * Rendered as a `ModalBottomSheet` to match the other editor sheets;
+ * the content scrolls because eight fields + IME padding overflow a
+ * short phone screen.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ContactChip(contact: Contact, onRemove: () -> Unit) {
-    Row(
+private fun ContactEditorSheet(
+    initial: Contact?,
+    onSubmit: (
+        name: String,
+        phone: String?,
+        landline: String?,
+        email: String?,
+        title: String?,
+        organization: String?,
+        location: String?,
+        website: String?,
+    ) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    // Pre-fill from `initial` in edit mode. Strip the `+91 ` dial-code
+    // prefix so the displayed value matches what the field's `prefix`
+    // slot already shows — otherwise users see "+91 +91 98765..." on
+    // re-open. Rows that were stored with a non-`+91` country code
+    // (e.g. `+1 555...`) or as free-form legacy strings are shown
+    // as-captured so we don't silently truncate something the user
+    // typed by hand.
+    var name by remember { mutableStateOf(initial?.name.orEmpty()) }
+    var phone by remember { mutableStateOf(initial?.phone?.stripDefaultDialCode().orEmpty()) }
+    var landline by remember { mutableStateOf(initial?.landline?.stripDefaultDialCode().orEmpty()) }
+    var email by remember { mutableStateOf(initial?.email.orEmpty()) }
+    var title by remember { mutableStateOf(initial?.title.orEmpty()) }
+    var organization by remember { mutableStateOf(initial?.organization.orEmpty()) }
+    var location by remember { mutableStateOf(initial?.location.orEmpty()) }
+    var website by remember { mutableStateOf(initial?.website.orEmpty()) }
+    val nameFocus = remember { FocusRequester() }
+    // Pop the keyboard straight away in add mode. In edit mode the
+    // user probably wants to tap a specific field themselves, so don't
+    // steal focus.
+    LaunchedEffect(Unit) { if (initial == null) nameFocus.requestFocus() }
+
+    val phoneError    = validatePhoneDigits(phone)
+    val landlineError = validatePhoneDigits(landline)
+    val emailError    = validateEmail(email)
+    val canSubmit = name.trim().isNotEmpty() &&
+        phoneError == null &&
+        landlineError == null &&
+        emailError == null
+
+    val commit: () -> Unit = {
+        if (canSubmit) {
+            onSubmit(
+                name.trim(),
+                phone.trim().ifEmpty { null }?.let(::normalizeDialNumber),
+                landline.trim().ifEmpty { null }?.let(::normalizeDialNumber),
+                email.trim().ifEmpty { null },
+                title.trim().ifEmpty { null },
+                organization.trim().ifEmpty { null },
+                location.trim().ifEmpty { null },
+                website.trim().ifEmpty { null },
+            )
+        }
+    }
+
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = AppAccent.primary,
+        cursorColor        = AppAccent.primary,
+        focusedLabelColor  = AppAccent.primary,
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = AppColors.Canvas,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(
+                    start  = AppSpacing.s4,
+                    end    = AppSpacing.s4,
+                    top    = AppSpacing.s2,
+                    bottom = AppSpacing.s4,
+                ),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+        ) {
+            // Title + Save header. Save lives in the top-right like
+            // NotesEditorSheet's "Done", so the commit affordance is
+            // always in the same place across sheets.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (initial == null) "Add contact" else "Edit contact",
+                    style = AppTypography.SectionTitle,
+                    color = AppColors.TextPrimary,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "Save",
+                    style    = AppTypography.Button,
+                    color    = if (canSubmit) AppAccent.primary else AppColors.TextTertiary,
+                    modifier = Modifier.clickable(
+                        enabled = canSubmit,
+                        onClick = commit,
+                    ),
+                )
+            }
+
+            OutlinedTextField(
+                value           = name,
+                onValueChange   = { name = it },
+                label           = { Text("Name") },
+                singleLine      = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Words,
+                    imeAction      = ImeAction.Next,
+                ),
+                colors   = fieldColors,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(nameFocus),
+            )
+            // Mobile sits immediately after Name. The `+91` prefix is
+            // displayed as a read-only affordance (not part of the input
+            // buffer) so users just tap in the local 10-digit number
+            // and the dial-code is added at commit time. Users who need
+            // a different country code can type a leading `+`
+            // themselves — normalizeDialNumber leaves those untouched.
+            OutlinedTextField(
+                value           = phone,
+                onValueChange   = { phone = it },
+                label           = { Text("Mobile") },
+                placeholder     = { Text("10-digit number") },
+                prefix          = { DialCodePrefix() },
+                singleLine      = true,
+                isError         = phoneError != null,
+                supportingText  = phoneError?.let { { Text(it) } },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Phone,
+                    imeAction    = ImeAction.Next,
+                ),
+                colors   = fieldColors,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value           = landline,
+                onValueChange   = { landline = it },
+                label           = { Text("Landline") },
+                placeholder     = { Text("10-digit number with STD code") },
+                prefix          = { DialCodePrefix() },
+                singleLine      = true,
+                isError         = landlineError != null,
+                supportingText  = landlineError?.let { { Text(it) } },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Phone,
+                    imeAction    = ImeAction.Next,
+                ),
+                colors   = fieldColors,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value           = title,
+                onValueChange   = { title = it },
+                label           = { Text("Title / Designation") },
+                placeholder     = { Text("Optional") },
+                singleLine      = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Words,
+                    imeAction      = ImeAction.Next,
+                ),
+                colors   = fieldColors,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value           = organization,
+                onValueChange   = { organization = it },
+                label           = { Text("Organization") },
+                placeholder     = { Text("Optional") },
+                singleLine      = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Words,
+                    imeAction      = ImeAction.Next,
+                ),
+                colors   = fieldColors,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value           = email,
+                onValueChange   = { email = it },
+                label           = { Text("Email") },
+                placeholder     = { Text("name@example.com") },
+                singleLine      = true,
+                isError         = emailError != null,
+                supportingText  = emailError?.let { { Text(it) } },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Email,
+                    imeAction    = ImeAction.Next,
+                ),
+                colors   = fieldColors,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value           = location,
+                onValueChange   = { location = it },
+                label           = { Text("Location") },
+                placeholder     = { Text("Optional, e.g. San Francisco, CA") },
+                singleLine      = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Words,
+                    imeAction      = ImeAction.Next,
+                ),
+                colors   = fieldColors,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value           = website,
+                onValueChange   = { website = it },
+                label           = { Text("Website") },
+                placeholder     = { Text("Optional") },
+                singleLine      = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Uri,
+                    imeAction    = ImeAction.Done,
+                ),
+                // Done on the last field commits — saves a tap vs.
+                // reaching for the Save header.
+                keyboardActions = KeyboardActions(onDone = { commit() }),
+                colors          = fieldColors,
+                modifier        = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DialCodePrefix() {
+    Text(
+        text  = "+91 ",
+        style = AppTypography.Body,
+        color = AppColors.TextSecondary,
+    )
+}
+
+/**
+ * Default-dial-code stripper for pre-filling the edit sheet. Numbers
+ * stored with the `+91 ` prefix we add on commit are shown without it
+ * (the sheet's read-only prefix slot covers that). Anything else —
+ * hand-typed international numbers (`+1 555…`) or free-form legacy
+ * strings — passes through as-captured so we don't silently mangle
+ * data.
+ */
+private fun String.stripDefaultDialCode(): String =
+    if (startsWith("+91 ")) removePrefix("+91 ")
+    else if (startsWith("+91")) removePrefix("+91")
+    else this
+
+/** Apply the `+91` default-dial-code contract on commit: a `+`-prefixed
+ *  value passes through untouched (the user picked their own country
+ *  code); a plain local number gets `+91` prepended. */
+private fun normalizeDialNumber(raw: String): String =
+    if (raw.startsWith("+")) raw else "+91 $raw"
+
+/**
+ * Validation for the mobile and landline fields: the raw entry must
+ * contain exactly 10 digits once non-digit separators (spaces, dashes,
+ * parens) are stripped. `null` means "valid or empty"; a non-null
+ * string is the supporting-text error shown under the field.
+ *
+ * `+`-prefixed entries bypass the 10-digit rule so users can type any
+ * E.164 number — we can't reliably assert a length for every country
+ * code, and we still pass the raw text through on commit.
+ */
+private fun validatePhoneDigits(raw: String): String? {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return null
+    if (trimmed.startsWith("+")) return null
+    val digitCount = trimmed.count { it.isDigit() }
+    return if (digitCount == 10) null else "Enter a 10-digit number"
+}
+
+/** Email validator — uses the platform's `EMAIL_ADDRESS` pattern so the
+ *  rules match what Android's autofill expects. Empty string passes
+ *  (the field is optional). */
+private fun validateEmail(raw: String): String? {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return null
+    return if (Patterns.EMAIL_ADDRESS.matcher(trimmed).matches()) null
+    else "Enter a valid email address"
+}
+
+/**
+ * Full-width contact card. Styled after the published Figma design
+ * (cream panel, circular coral avatar with initials, stacked detail
+ * rows). Matches the design-system card tokens — `cardSolid` fill +
+ * `borderDefault` hairline stroke + `md` (12dp) radius.
+ *
+ *   [SC]  Sarah Chen
+ *         ✉  sarah@releaf.app
+ *         ☎  +1 (555) 123-4567
+ *
+ *  The whole row is tap-target — click opens the `ContactActionsSheet`
+ *  with Call / Add-to-Contacts / Send-Email / Delete. No inline delete
+ *  button any more; destructive actions live in the sheet to keep the
+ *  card glanceable.
+ */
+@Composable
+private fun ContactCard(contact: Contact, onClick: () -> Unit) {
+    // Has any of the icon-prefixed detail fields? Drives whether we
+    // render the lower block at all — a name-only contact is just the
+    // avatar + header row.
+    val hasDetails =
+        contact.email != null ||
+        contact.phone != null ||
+        contact.landline != null ||
+        contact.location != null ||
+        contact.website != null
+    Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(AppSpacing.s3))
-            .background(AppColors.Coral.copy(alpha = 0.15f))
-            .padding(start = AppSpacing.s3, end = AppSpacing.s1, top = 4.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppRadius.md))
+            .background(AppColors.CardSolid)
+            .border(
+                width = 1.dp,
+                color = AppColors.BorderDefault,
+                shape = RoundedCornerShape(AppRadius.md),
+            )
+            .clickable(onClick = onClick)
+            .padding(AppSpacing.s4),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+    ) {
+        // Header: circular avatar + stacked name / title / organization.
+        // Matches the Figma card's first row — avatar flush-left, name
+        // as the primary headline with optional title + org lines
+        // immediately below it (same horizontal column).
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ContactAvatar(name = contact.name)
+            Spacer(Modifier.size(AppSpacing.s3))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text     = contact.name,
+                    style    = AppTypography.SectionTitle,
+                    color    = AppColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                contact.title?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        text     = it,
+                        style    = AppTypography.Body,
+                        color    = AppColors.TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                contact.organization?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        text     = it,
+                        style    = AppTypography.Meta,
+                        color    = AppColors.TextTertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+
+        // Details list. Order matches the Figma reference: email →
+        // phone → location → website. Each row omits itself if the
+        // field is null / blank, so a name-only contact shows just
+        // the header above.
+        if (hasDetails) {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+                contact.email?.let {
+                    ContactDetailRow(icon = Icons.Filled.Email, text = it)
+                }
+                contact.phone?.let {
+                    // Distinct icons on the mobile vs. landline rows so
+                    // users can tell them apart at a glance when both
+                    // are present on the card.
+                    ContactDetailRow(icon = Icons.Filled.PhoneAndroid, text = it)
+                }
+                contact.landline?.let {
+                    ContactDetailRow(icon = Icons.Filled.Phone, text = it)
+                }
+                contact.location?.let {
+                    ContactDetailRow(icon = Icons.Filled.LocationOn, text = it)
+                }
+                contact.website?.let {
+                    ContactDetailRow(icon = Icons.Filled.Language, text = it)
+                }
+            }
+        }
+    }
+}
+
+/** Circular avatar with one-or-two-character initials, filled with
+ *  `coralDeep` and white on-accent text. Matches the "SC" swatch in
+ *  the Figma reference. */
+@Composable
+private fun ContactAvatar(name: String) {
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(AppAccent.deep),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
-            text  = contact.name,
-            style = AppTypography.Body,
-            color = AppColors.TextPrimary,
+            text  = initialsFor(name),
+            style = AppTypography.Button,
+            color = AppColors.OnAccent,
         )
-        Spacer(Modifier.size(AppSpacing.s1))
-        DeleteButton(onClick = onRemove)
+    }
+}
+
+/** Two-letter initials for the avatar. One-word name → first two
+ *  chars; multi-word → first char of first + last. Always upper-case.
+ *  Falls back to "?" for blank strings so the avatar never renders
+ *  empty. */
+private fun initialsFor(name: String): String {
+    val words = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    return when {
+        words.isEmpty()    -> "?"
+        words.size == 1    -> words[0].take(2).uppercase()
+        else               -> "${words.first().first()}${words.last().first()}".uppercase()
+    }
+}
+
+@Composable
+private fun ContactDetailRow(icon: ImageVector, text: String) {
+    Row(
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+    ) {
+        Icon(
+            imageVector        = icon,
+            contentDescription = null,
+            tint               = AppColors.TextSecondary,
+            modifier           = Modifier.size(16.dp),
+        )
+        Text(
+            text     = text,
+            style    = AppTypography.Body,
+            color    = AppColors.TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Bottom-sheet menu for a tapped contact card — Call / Add-to-
+ *  contacts / Send-email / Delete. Rows for Call and Send-email only
+ *  render when the contact actually has that field populated.
+ *
+ *  Each row dispatches the appropriate Android intent and dismisses
+ *  the sheet. Delete is handled by the caller so the existing
+ *  confirmation alert can fire. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ContactActionsSheet(
+    contact: Contact,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    val context = LocalContext.current
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = AppColors.Canvas,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start  = AppSpacing.s4,
+                    end    = AppSpacing.s4,
+                    top    = AppSpacing.s2,
+                    bottom = AppSpacing.s4,
+                ),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s1),
+        ) {
+            // Header — mirrors the sheet pattern used by the capture
+            // form so sheets across the editor feel consistent.
+            Row(
+                modifier            = Modifier.fillMaxWidth().padding(bottom = AppSpacing.s2),
+                verticalAlignment   = Alignment.CenterVertically,
+            ) {
+                ContactAvatar(name = contact.name)
+                Spacer(Modifier.size(AppSpacing.s3))
+                Text(
+                    text     = contact.name,
+                    style    = AppTypography.SectionTitle,
+                    color    = AppColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            contact.phone?.takeIf { it.isNotBlank() }?.let { phone ->
+                ActionRow(
+                    icon    = Icons.Filled.PhoneAndroid,
+                    label   = "Call $phone",
+                    onClick = {
+                        launchPhoneDialer(context, phone)
+                        onDismiss()
+                    },
+                )
+            }
+            contact.landline?.takeIf { it.isNotBlank() }?.let { landline ->
+                ActionRow(
+                    icon    = Icons.Filled.Phone,
+                    label   = "Call $landline",
+                    onClick = {
+                        launchPhoneDialer(context, landline)
+                        onDismiss()
+                    },
+                )
+            }
+            contact.email?.takeIf { it.isNotBlank() }?.let { email ->
+                ActionRow(
+                    icon    = Icons.Filled.Email,
+                    label   = "Send email",
+                    onClick = {
+                        launchEmailClient(context, email)
+                        onDismiss()
+                    },
+                )
+            }
+            contact.website?.takeIf { it.isNotBlank() }?.let { website ->
+                ActionRow(
+                    icon    = Icons.Filled.Language,
+                    label   = "Open website",
+                    onClick = {
+                        launchWebsite(context, website)
+                        onDismiss()
+                    },
+                )
+            }
+            ActionRow(
+                icon    = Icons.Filled.Edit,
+                label   = "Edit",
+                onClick = onEdit,
+            )
+            ActionRow(
+                icon    = Icons.Filled.PersonAdd,
+                label   = "Add to contacts",
+                onClick = {
+                    launchAddToContacts(context, contact)
+                    onDismiss()
+                },
+            )
+            ActionRow(
+                icon    = Icons.Filled.DeleteOutline,
+                label   = "Delete",
+                tint    = AppColors.Danger,
+                onClick = onDelete,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActionRow(
+    icon: ImageVector,
+    label: String,
+    tint: Color = AppColors.TextPrimary,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppRadius.sm))
+            .clickable(onClick = onClick)
+            .padding(vertical = AppSpacing.s3, horizontal = AppSpacing.s2),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+    ) {
+        Icon(
+            imageVector        = icon,
+            contentDescription = null,
+            tint               = tint,
+            modifier           = Modifier.size(20.dp),
+        )
+        Text(
+            text  = label,
+            style = AppTypography.Body,
+            color = tint,
+        )
+    }
+}
+
+// ---------- Contact-action intents ----------
+//
+// Launched from `ContactActionsSheet`. All three are best-effort —
+// we surface a Toast rather than a crash if the user has no handler
+// for the target scheme (e.g. no phone-dial app on a Wi-Fi-only
+// tablet). Android's chooser takes care of ambiguous resolutions
+// (multiple email clients, etc.) so no extra disambiguation UX is
+// needed here.
+
+private fun launchPhoneDialer(context: Context, phone: String) {
+    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(phone)}"))
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "No dialer app available", Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun launchEmailClient(context: Context, email: String) {
+    val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:${Uri.encode(email)}"))
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "No email app available", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** Open the contact's URL in the user's default browser. Auto-prefixes
+ *  `https://` when the user stored a scheme-less value (e.g.
+ *  `sarahchen.design`) so the intent doesn't get rejected. */
+private fun launchWebsite(context: Context, url: String) {
+    val normalised = if (url.startsWith("http://") || url.startsWith("https://")) {
+        url
+    } else {
+        "https://$url"
+    }
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(normalised))
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "No browser available", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** Drops into the OS Contacts app's "new contact" form pre-filled
+ *  with whatever fields we have. The user confirms the save there —
+ *  we don't write to the system contacts DB ourselves.
+ *
+ *  `title` + `organization` map to ContactsContract's JOB_TITLE and
+ *  COMPANY extras. `location` goes in POSTAL — it's free-form, but
+ *  the Contacts app just drops it into the Address field for the user
+ *  to clean up. `website` has no matching Insert extra in the stable
+ *  SDK, so it's omitted from the handoff (user can paste manually). */
+private fun launchAddToContacts(context: Context, contact: Contact) {
+    val intent = Intent(Intent.ACTION_INSERT).apply {
+        type = ContactsContract.Contacts.CONTENT_TYPE
+        putExtra(ContactsContract.Intents.Insert.NAME, contact.name)
+        contact.phone?.takeIf { it.isNotBlank() }?.let {
+            // Primary number → MOBILE type so the Contacts app tags it
+            // correctly after the user confirms the insert.
+            putExtra(ContactsContract.Intents.Insert.PHONE, it)
+            putExtra(
+                ContactsContract.Intents.Insert.PHONE_TYPE,
+                ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE,
+            )
+        }
+        contact.landline?.takeIf { it.isNotBlank() }?.let {
+            // Secondary number slot. Intents.Insert exposes two extra
+            // phone channels; use the first (SECONDARY_PHONE) and tag
+            // it as a WORK line — the Contacts app lets the user
+            // re-label on confirm if the implied type doesn't fit.
+            putExtra(ContactsContract.Intents.Insert.SECONDARY_PHONE, it)
+            putExtra(
+                ContactsContract.Intents.Insert.SECONDARY_PHONE_TYPE,
+                ContactsContract.CommonDataKinds.Phone.TYPE_WORK,
+            )
+        }
+        contact.email?.takeIf { it.isNotBlank() }?.let {
+            putExtra(ContactsContract.Intents.Insert.EMAIL, it)
+        }
+        contact.title?.takeIf { it.isNotBlank() }?.let {
+            putExtra(ContactsContract.Intents.Insert.JOB_TITLE, it)
+        }
+        contact.organization?.takeIf { it.isNotBlank() }?.let {
+            putExtra(ContactsContract.Intents.Insert.COMPANY, it)
+        }
+        contact.location?.takeIf { it.isNotBlank() }?.let {
+            putExtra(ContactsContract.Intents.Insert.POSTAL, it)
+        }
+    }
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "No contacts app available", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -371,37 +1168,100 @@ fun TodosSection(
     onAdd: (text: String) -> Unit,
     onToggle: (id: String) -> Unit,
     onRemove: (id: String) -> Unit,
+    onUpdatePriority: (id: String, priority: Int) -> Unit = { _, _ -> },
+    onReorder: (newList: List<TodoItem>) -> Unit = {},
 ) {
-    var isAdding by remember { mutableStateOf(false) }
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
+    val done = todos.count { it.done }
+    val total = todos.size
+    val percent = if (total == 0) 0 else (done * 100) / total
+
+    // Drag-to-reorder state. `draggingId` pins the floating row to the
+    // user's finger; `dragDy` is the accumulated vertical pointer
+    // delta. Swap threshold is half the approximate row height —
+    // rows aren't perfectly uniform but they're close enough that a
+    // 28dp threshold reads as a crisp "slot change" rather than a
+    // sluggish drag.
+    val density = LocalDensity.current
+    val rowStepPx = with(density) { 56.dp.toPx() }
+    var draggingId by remember { mutableStateOf<String?>(null) }
+    var dragDy by remember { mutableStateOf(0f) }
+    val latestTodos by rememberUpdatedState(todos)
+    val latestReorder by rememberUpdatedState(onReorder)
 
     SectionShell(title = "TODOS") {
-        // Add affordance (or inline input) on top.
-        if (isAdding) {
-            InlineTextInput(
-                placeholder = "New todo",
-                onSubmit    = { text ->
-                    onAdd(text)
-                    isAdding = false
-                },
-                onCancel    = { isAdding = false },
-            )
-        } else {
-            AddAffordance(
-                icon  = Icons.Filled.CheckBoxOutlineBlank,
-                label = "Add todo",
-                onClick = { isAdding = true },
-            )
+        // Progress header + bar. Shown only when there's at least one
+        // todo so a fresh section doesn't sit half-empty.
+        if (total > 0) {
+            TodoProgressBar(done = done, total = total, percent = percent)
         }
 
-        // Todo rows below. × tap routes through `pendingDeleteId` so
-        // the actual remove is gated by the confirmation alert.
+        // Add-new input pinned at the top. Different visual shape from
+        // the other sections' InlineTextInput — this one's the primary
+        // CTA of the whole section, so it gets the filled coral + chip.
+        TodoAddRow(onSubmit = onAdd)
+
         todos.forEach { t ->
-            TodoRow(
-                todo     = t,
-                onToggle = { onToggle(t.id) },
-                onRemove = { pendingDeleteId = t.id },
-            )
+            val isDragging = draggingId == t.id
+            val yOffset = if (isDragging) dragDy else 0f
+            val dragHandle = Modifier.pointerInput(t.id) {
+                detectDragGestures(
+                    onDragStart = {
+                        draggingId = t.id
+                        dragDy = 0f
+                    },
+                    onDragEnd = {
+                        draggingId = null
+                        dragDy = 0f
+                    },
+                    onDragCancel = {
+                        draggingId = null
+                        dragDy = 0f
+                    },
+                ) { change, dragAmount ->
+                    change.consume()
+                    dragDy += dragAmount.y
+                    // Swap with a neighbour once we cross half the row
+                    // height. Re-anchoring dragDy keeps the motion
+                    // continuous across the swap.
+                    val threshold = rowStepPx / 2f
+                    val currentIdx = latestTodos.indexOfFirst { it.id == t.id }
+                    if (currentIdx < 0) return@detectDragGestures
+                    if (dragDy > threshold && currentIdx < latestTodos.size - 1) {
+                        val newList = latestTodos.toMutableList().apply {
+                            add(currentIdx + 1, removeAt(currentIdx))
+                        }
+                        latestReorder(newList)
+                        dragDy -= rowStepPx
+                    } else if (dragDy < -threshold && currentIdx > 0) {
+                        val newList = latestTodos.toMutableList().apply {
+                            add(currentIdx - 1, removeAt(currentIdx))
+                        }
+                        latestReorder(newList)
+                        dragDy += rowStepPx
+                    }
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        translationY = yOffset
+                        // Float the dragging row above its siblings
+                        // so rounded avatars / icons don't clip.
+                        shadowElevation = if (isDragging) 8f else 0f
+                    }
+                    .zIndex(if (isDragging) 1f else 0f),
+            ) {
+                TodoRow(
+                    todo               = t,
+                    onToggle           = { onToggle(t.id) },
+                    onRemove           = { pendingDeleteId = t.id },
+                    onSetPriority      = { level -> onUpdatePriority(t.id, level) },
+                    dragHandleModifier = dragHandle,
+                )
+            }
         }
     }
 
@@ -436,19 +1296,35 @@ fun TodosSection(
 }
 
 @Composable
-private fun TodoRow(todo: TodoItem, onToggle: () -> Unit, onRemove: () -> Unit) {
+private fun TodoRow(
+    todo: TodoItem,
+    onToggle: () -> Unit,
+    onRemove: () -> Unit,
+    onSetPriority: (level: Int) -> Unit,
+    dragHandleModifier: Modifier = Modifier,
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = AppSpacing.s1),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector        = if (todo.done) Icons.Filled.CheckBox else Icons.Filled.CheckBoxOutlineBlank,
-            contentDescription = if (todo.done) "Mark not done" else "Mark done",
-            tint               = AppColors.Coral,
-            modifier           = Modifier
-                .size(22.dp)
-                .clickable(onClick = onToggle),
-        )
+        // 6-dot grip — tap-and-drag vertically to reorder. Wrapped in
+        // a 40dp square so the gesture has room to catch.
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .then(dragHandleModifier),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.DragIndicator,
+                contentDescription = "Reorder",
+                tint               = AppColors.TextTertiary,
+                modifier           = Modifier.size(20.dp),
+            )
+        }
+        TodoCheckbox(done = todo.done, onClick = onToggle)
         Spacer(Modifier.size(AppSpacing.s3))
         Text(
             text     = todo.text,
@@ -458,7 +1334,213 @@ private fun TodoRow(todo: TodoItem, onToggle: () -> Unit, onRemove: () -> Unit) 
             color    = if (todo.done) AppColors.TextTertiary else AppColors.TextPrimary,
             modifier = Modifier.weight(1f),
         )
-        DeleteButton(onClick = onRemove)
+        PriorityDots(level = todo.priority, onSet = onSetPriority)
+        Spacer(Modifier.size(AppSpacing.s2))
+        // 40dp tap target so the delete hit-box is comfortable. Icon
+        // itself stays at 20dp but the clickable Box is larger.
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onRemove),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.DeleteOutline,
+                contentDescription = "Delete todo",
+                tint               = AppColors.TextTertiary,
+                modifier           = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/** Rounded-square checkbox — coral-filled with a white check when
+ *  `done`, hollow with a thin border + faint cream fill when not. */
+@Composable
+private fun TodoCheckbox(done: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(AppSpacing.s1)
+    Box(
+        modifier = Modifier
+            .size(22.dp)
+            .clip(shape)
+            .background(if (done) AppAccent.primary else AppColors.Subtle)
+            .border(
+                width = 1.dp,
+                color = if (done) AppAccent.primary else AppColors.BorderDefault,
+                shape = shape,
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (done) {
+            Icon(
+                imageVector        = Icons.Filled.Check,
+                contentDescription = "Done",
+                tint               = AppColors.OnAccent,
+                modifier           = Modifier.size(16.dp),
+            )
+        }
+    }
+}
+
+/** Three-dot priority picker. Left = high, middle = medium, right = low.
+ *  Tapping a dot sets that level; tapping the currently-active dot clears
+ *  priority back to none. Colors are the project's traffic-light trio:
+ *  high = #C65A3E (coral deep), medium = #E8B923 (yellow), low = #5B8C52 (green). */
+@Composable
+private fun PriorityDots(level: Int, onSet: (Int) -> Unit) {
+    val high   = Color(0xFFC65A3E)
+    val medium = Color(0xFFE8B923)
+    val low    = Color(0xFF5B8C52)
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment     = Alignment.CenterVertically,
+    ) {
+        PriorityDot(active = level == 3, color = high,   onClick = {
+            onSet(if (level == 3) 0 else 3)
+        })
+        PriorityDot(active = level == 2, color = medium, onClick = {
+            onSet(if (level == 2) 0 else 2)
+        })
+        PriorityDot(active = level == 1, color = low,    onClick = {
+            onSet(if (level == 1) 0 else 1)
+        })
+    }
+}
+
+@Composable
+private fun PriorityDot(active: Boolean, color: Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(14.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(if (active) 8.dp else 6.dp)
+                .clip(CircleShape)
+                .background(if (active) color else AppColors.BorderDefault),
+        )
+    }
+}
+
+/** Progress header: "N of M completed" (left) / "NN%" (right) + a
+ *  filled coral bar underneath. Uses a plain `drawBehind` on a Box so
+ *  the bar sits flush with the row's corner rounding. */
+@Composable
+private fun TodoProgressBar(done: Int, total: Int, percent: Int) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text  = "$done of $total completed",
+                style = AppTypography.Meta,
+                color = AppColors.TextSecondary,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                text  = "${percent}%",
+                style = AppTypography.Meta,
+                color = AppColors.TextSecondary,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(AppRadius.pill))
+                .background(AppColors.Subtle),
+        ) {
+            // Fraction as layout weight gives us a simple progress
+            // bar without pulling in `LinearProgressIndicator` (which
+            // carries a fixed height + its own padding).
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction = percent / 100f)
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(AppRadius.pill))
+                    .background(AppAccent.primary),
+            )
+        }
+    }
+}
+
+/** Top-of-section "Add a new task…" input. Large rounded rect with
+ *  the text field on the left and a filled coral + button on the
+ *  right. IME Done and the + button both commit. */
+@Composable
+private fun TodoAddRow(onSubmit: (String) -> Unit) {
+    var value by remember { mutableStateOf("") }
+    val commit: () -> Unit = {
+        val trimmed = value.trim()
+        if (trimmed.isNotEmpty()) {
+            onSubmit(trimmed)
+            value = ""
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = AppSpacing.s1),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+    ) {
+        // No pill container — just a plain underline-less text field
+        // with the placeholder floating at the caret. Matches the
+        // plaintext feel of the rest of the editor.
+        Box(
+            modifier         = Modifier.weight(1f),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            if (value.isEmpty()) {
+                Text(
+                    text  = "Add a new todo…",
+                    style = AppTypography.Body,
+                    color = AppColors.TextTertiary,
+                )
+            }
+            BasicTextField(
+                value         = value,
+                onValueChange = { value = it },
+                singleLine    = true,
+                textStyle     = AppTypography.Body.copy(color = AppColors.TextPrimary),
+                cursorBrush   = SolidColor(AppAccent.primary),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { commit() }),
+                modifier      = Modifier.fillMaxWidth(),
+            )
+        }
+        // Filled coral + button — stays as a solid rounded chip on the
+        // trailing edge; dims to 40% while the field is blank.
+        val enabled = value.isNotBlank()
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(AppRadius.md))
+                .background(
+                    if (enabled) AppAccent.primary
+                    else AppAccent.primary.copy(alpha = 0.4f),
+                )
+                .clickable(enabled = enabled, onClick = commit),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.Add,
+                contentDescription = "Add todo",
+                tint               = AppColors.OnAccent,
+                modifier           = Modifier.size(18.dp),
+            )
+        }
     }
 }
 
@@ -467,30 +1549,51 @@ private fun TodoRow(todo: TodoItem, onToggle: () -> Unit, onRemove: () -> Unit) 
 @Composable
 fun LocationSection(
     locations: List<GeoLocation>,
-    onAdd: (lat: Double, lng: Double, address: String?) -> Unit,
+    /** Adds a row with the given coords + address and returns the
+     *  row's new uuidv7. The id is handed to [onUpdateCoords] later
+     *  when the precise GPS fix arrives. */
+    onAdd: (lat: Double, lng: Double, address: String?) -> String,
+    /** Patches the coordinates on a previously-added row — the
+     *  "refine in background" half of the two-stage capture flow. */
+    onUpdateCoords: (id: String, lat: Double, lng: Double) -> Unit,
     onRemove: (id: String) -> Unit,
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
 
-    // Permission + fetch pipeline. The success/failure paths feed the VM
-    // via `onAdd` on the main thread.
+    // Two-stage capture:
+    //   1. Fast — `client.lastLocation` returns the most recent cached
+    //      fix in ~10ms when any app has used location recently. We
+    //      reverse-geocode that, add the row, and the user sees an
+    //      address immediately.
+    //   2. Refine (background) — `getCurrentLocation` fetches a fresh
+    //      fix (1-10s on GPS cold start). When it arrives we patch
+    //      the row's coordinates via `onUpdateCoords`; the address
+    //      label stays as whatever the fast-fix geocoded to, which
+    //      is almost always the same street / POI.
+    //
+    // If `lastLocation` returns null (no app has used GPS recently),
+    // we fall back to the slow path only — the row still gets added,
+    // just after the user's waited for a live fix.
     val fetchLocation: () -> Unit = fetch@{
         if (activity == null) return@fetch
         val client = LocationServices.getFusedLocationProviderClient(activity)
-        client.getCurrentLocation(
-            Priority.PRIORITY_BALANCED_POWER_ACCURACY,
-            CancellationTokenSource().token,
-        ).addOnSuccessListener { location ->
-            if (location == null) {
-                Toast.makeText(context, "Couldn't read GPS — try again outdoors.", Toast.LENGTH_SHORT).show()
-                return@addOnSuccessListener
-            }
-            resolveAddress(context, location.latitude, location.longitude) { address ->
-                onAdd(location.latitude, location.longitude, address)
+
+        client.lastLocation.addOnSuccessListener { cached ->
+            if (cached != null) {
+                resolveAddress(context, cached.latitude, cached.longitude) { address ->
+                    val newId = onAdd(cached.latitude, cached.longitude, address)
+                    refineLocationCoords(client, newId, onUpdateCoords)
+                }
+            } else {
+                // No cached location — run the slow path only.
+                fetchPreciseAndAdd(context, client, onAdd)
             }
         }.addOnFailureListener {
-            Toast.makeText(context, "Location unavailable.", Toast.LENGTH_SHORT).show()
+            // `lastLocation` rarely fails (it's a local read) but if
+            // it does, fall through to the slow path rather than
+            // leaving the user with no feedback.
+            fetchPreciseAndAdd(context, client, onAdd)
         }
     }
 
@@ -543,8 +1646,11 @@ fun LocationSection(
 
     pendingDeleteId?.let { id ->
         val target = locations.firstOrNull { it.id == id }
-        val primary = target?.address
-            ?: target?.let { "%.5f, %.5f".format(Locale.US, it.lat, it.lng) }
+        // Only surface the address in the confirmation copy — never
+        // raw coordinates. Drops to the generic copy when there's no
+        // resolved address (same rationale as LocationRow's
+        // placeholder above).
+        val primary = target?.address?.takeIf { it.isNotBlank() }
         AlertDialog(
             onDismissRequest = { pendingDeleteId = null },
             title            = { Text("Remove this location?") },
@@ -573,15 +1679,22 @@ fun LocationSection(
 
 @Composable
 private fun LocationRow(location: GeoLocation, onRemove: () -> Unit) {
-    val primary = location.address ?: "%.5f, %.5f".format(Locale.US, location.lat, location.lng)
+    val context = LocalContext.current
+    // Coordinates are persisted on the row (and drive the tap-to-Maps
+    // intent below) but we never put raw lat/lng in the UI — the row
+    // shows the reverse-geocoded address, or a generic placeholder
+    // when the geocoder had no match for that point.
+    val primary = location.address?.takeIf { it.isNotBlank() } ?: "Saved location"
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { openLocationInMaps(context, location) },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector        = Icons.Filled.LocationOn,
             contentDescription = null,
-            tint               = AppColors.Coral,
+            tint               = AppAccent.primary,
             modifier           = Modifier.size(18.dp),
         )
         Spacer(Modifier.size(AppSpacing.s3))
@@ -591,7 +1704,50 @@ private fun LocationRow(location: GeoLocation, onRemove: () -> Unit) {
             color    = AppColors.TextPrimary,
             modifier = Modifier.weight(1f),
         )
+        // Delete button consumes its own click via its internal
+        // `clickable`, so tapping the × won't also fire the row-level
+        // "open in Maps" handler above.
         DeleteButton(onClick = onRemove)
+    }
+}
+
+/**
+ * Launch the saved location in a map app. Tries a `geo:` intent first
+ * — Android's chooser resolves that to whatever map app the user has
+ * set as default (Google Maps on most phones, but also respects
+ * Maps.me / OsmAnd / etc. if they're installed). Falls back to the
+ * Google Maps web URL in a browser if nothing handles `geo:`.
+ *
+ * The `q=lat,lng(label)` query string pins a marker at the exact
+ * coordinates with the reverse-geocoded address as the label, so the
+ * user opens into a recognisable pin rather than a bare lat/lng dot.
+ */
+private fun openLocationInMaps(context: Context, location: GeoLocation) {
+    val label = location.address ?: "Saved location"
+    val geoUri = Uri.parse(
+        "geo:${location.lat},${location.lng}" +
+            "?q=${location.lat},${location.lng}(${Uri.encode(label)})"
+    )
+    val intent = Intent(Intent.ACTION_VIEW, geoUri)
+    try {
+        context.startActivity(intent)
+        return
+    } catch (_: ActivityNotFoundException) {
+        // No map app — fall through to web fallback below.
+    }
+
+    // Browser fallback — every device can load this URL.
+    val webUri = Uri.parse(
+        "https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}"
+    )
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, webUri))
+    } catch (_: Exception) {
+        Toast.makeText(
+            context,
+            "No app available to open this location.",
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 }
 
@@ -599,7 +1755,8 @@ private fun LocationRow(location: GeoLocation, onRemove: () -> Unit) {
  * Reverse-geocode to a human-readable address. Uses the async API on
  * Android 13+ (required; the sync one is deprecated and throttled), the
  * sync API otherwise. Any failure silently resolves to null — the
- * fallback is to show raw coordinates, not crash.
+ * fallback is to show the generic "Saved location" placeholder, never
+ * raw coordinates.
  */
 private fun resolveAddress(
     context: android.content.Context,
@@ -623,6 +1780,63 @@ private fun resolveAddress(
     }
 }
 
+/**
+ * Slow-path location capture: run `getCurrentLocation`, reverse-geocode,
+ * then add a single row with the precise coordinates. Used when the
+ * fast-path `lastLocation` came back null (no recent fix cached on
+ * the device), and also as the refine path — but in the refine case
+ * the row is already on screen, so we go through `refineLocationCoords`
+ * instead of this function.
+ */
+private fun fetchPreciseAndAdd(
+    context: android.content.Context,
+    client: com.google.android.gms.location.FusedLocationProviderClient,
+    onAdd: (Double, Double, String?) -> String,
+) {
+    client.getCurrentLocation(
+        Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+        CancellationTokenSource().token,
+    ).addOnSuccessListener { location ->
+        if (location == null) {
+            Toast.makeText(
+                context,
+                "Couldn't read GPS — try again outdoors.",
+                Toast.LENGTH_SHORT,
+            ).show()
+            return@addOnSuccessListener
+        }
+        resolveAddress(context, location.latitude, location.longitude) { address ->
+            onAdd(location.latitude, location.longitude, address)
+        }
+    }.addOnFailureListener {
+        Toast.makeText(context, "Location unavailable.", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * Background refinement pass: kicks off a precise `getCurrentLocation`
+ * fetch for a row that's already on screen (added from the cached
+ * `lastLocation`), and patches in the accurate coordinates once the
+ * fresh fix arrives. Silent on failure — the fast-path coords that
+ * are already saved are usually within tens of meters anyway.
+ */
+private fun refineLocationCoords(
+    client: com.google.android.gms.location.FusedLocationProviderClient,
+    id: String,
+    onUpdateCoords: (String, Double, Double) -> Unit,
+) {
+    client.getCurrentLocation(
+        Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+        CancellationTokenSource().token,
+    ).addOnSuccessListener { precise ->
+        if (precise != null) {
+            onUpdateCoords(id, precise.latitude, precise.longitude)
+        }
+    }
+    // No failure handler — if the precise fetch errors out, the user
+    // already has a usable row from the fast path.
+}
+
 // ========================== Photos ===========================
 
 @Composable
@@ -630,6 +1844,11 @@ fun PhotosSection(
     photos: List<Attachment>,
     onAdd: (uri: String) -> Unit,
     onRemove: (id: String) -> Unit,
+    /** Called once the "Combine to PDF" flow has written a PDF into
+     *  app storage. Callers route to `viewModel.addAttachment(TYPE_SCAN,
+     *  pdfUri, previewUri)` so the combined document lands in the
+     *  Scans section under the GENERAL category. */
+    onCombineToPdf: (pdfUri: String, previewUri: String?) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
     var showChooser by remember { mutableStateOf(false) }
@@ -707,24 +1926,126 @@ fun PhotosSection(
     // actual removal fires only if the user confirms.
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
 
+    // Which photo's fullscreen viewer is open. Null = closed. The
+    // viewer pager owns navigation between photos once open, so we
+    // only need to track the tapped entry index here.
+    var viewerIndex by remember { mutableStateOf<Int?>(null) }
+
+    // Multi-select state for the "Combine to PDF" flow. `selectMode`
+    // gates the tile appearance (checkmark overlay vs close button);
+    // `selectedIds` tracks which photos are picked. Reset on exit.
+    var selectMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var isCombining by remember { mutableStateOf(false) }
+    val combineScope = rememberCoroutineScope()
+
     SectionShell(title = "PHOTOS") {
-        // Affordance sits at the top of the section so users always
-        // know where to add, even with a full grid below.
-        AddAffordance(
-            icon    = Icons.Filled.PhotoCamera,
-            label   = "Add photo",
-            onClick = { showChooser = true },
-        )
+        // In select mode the add affordance steps aside for the
+        // select-mode header. Same vertical real estate, clearer
+        // which mode the user is in.
+        if (!selectMode) {
+            AddAffordance(
+                icon    = Icons.Filled.PhotoCamera,
+                label   = "Add photo",
+                onClick = { showChooser = true },
+            )
+            if (photos.size >= 2) {
+                // "Combine to PDF" is only useful with 2+ photos —
+                // single-photo PDFs aren't worth the extra surface.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            selectMode = true
+                            selectedIds = emptySet()
+                        }
+                        .padding(vertical = AppSpacing.s1),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector        = Icons.AutoMirrored.Filled.InsertDriveFile,
+                        contentDescription = null,
+                        tint               = AppAccent.primary,
+                        modifier           = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(AppSpacing.s2))
+                    Text(
+                        text  = "Combine to PDF",
+                        style = AppTypography.Button,
+                        color = AppAccent.primary,
+                    )
+                }
+            }
+        } else {
+            SelectModeBar(
+                count       = selectedIds.size,
+                isWorking   = isCombining,
+                onCancel    = {
+                    selectMode = false
+                    selectedIds = emptySet()
+                },
+                onConfirm   = {
+                    // Resolve the ordered URIs from the selected set so
+                    // the PDF page order matches what the user saw in
+                    // the grid, not insertion order of the Set.
+                    val uris = photos
+                        .filter { it.id in selectedIds }
+                        .mapNotNull { runCatching { Uri.parse(it.uri) }.getOrNull() }
+                    if (uris.isEmpty()) return@SelectModeBar
+                    isCombining = true
+                    combineScope.launch {
+                        val result = PhotosToPdf.combine(context, uris)
+                        isCombining = false
+                        when (result) {
+                            is CombineToPdfResult.Success -> {
+                                onCombineToPdf(
+                                    result.pdfUri.toString(),
+                                    result.previewUri?.toString(),
+                                )
+                                selectMode = false
+                                selectedIds = emptySet()
+                                Toast.makeText(
+                                    context,
+                                    "Added to Scan documents",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                            is CombineToPdfResult.Failed -> {
+                                Toast.makeText(
+                                    context,
+                                    "Couldn't combine photos: ${result.cause.message ?: "unknown error"}",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        }
+                    }
+                },
+            )
+        }
 
         if (photos.isNotEmpty()) {
             AttachmentGrid(
                 attachments     = photos,
                 onRemoveRequest = { id -> pendingDeleteId = id },
+                onTap           = { index -> viewerIndex = index },
+                selectMode      = selectMode,
+                selectedIds     = selectedIds,
+                onToggleSelect  = { id ->
+                    selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+                },
                 placeholder     = {
                     Icon(Icons.Filled.PhotoCamera, null, tint = AppColors.TextTertiary)
                 },
             )
         }
+    }
+
+    viewerIndex?.let { index ->
+        PhotoViewerDialog(
+            photos       = photos,
+            initialIndex = index,
+            onDismiss    = { viewerIndex = null },
+        )
     }
 
     if (showChooser) {
@@ -765,6 +2086,63 @@ fun PhotosSection(
                 }
             },
         )
+    }
+}
+
+/**
+ * Multi-select bar shown while the user is picking photos to combine
+ * into a PDF. Exits the mode via Cancel; fires the combine pipeline
+ * via "Create PDF (N)" when there's at least one selection. Disabled
+ * look while the IO is in flight so the user doesn't double-fire.
+ */
+@Composable
+private fun SelectModeBar(
+    count: Int,
+    isWorking: Boolean,
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = AppSpacing.s1),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text  = if (count == 0) "Select photos to combine"
+                    else if (count == 1) "1 selected"
+                    else "$count selected",
+            style = AppTypography.Button,
+            color = AppColors.TextPrimary,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text     = "Cancel",
+            style    = AppTypography.Button,
+            color    = AppColors.TextSecondary,
+            modifier = Modifier
+                .clickable(enabled = !isWorking, onClick = onCancel)
+                .padding(horizontal = AppSpacing.s2, vertical = AppSpacing.s1),
+        )
+        Spacer(Modifier.size(AppSpacing.s2))
+        val enabled = count >= 1 && !isWorking
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(AppRadius.md))
+                .background(
+                    if (enabled) AppAccent.primary
+                    else AppAccent.primary.copy(alpha = 0.4f),
+                )
+                .clickable(enabled = enabled, onClick = onConfirm)
+                .padding(horizontal = AppSpacing.s3, vertical = AppSpacing.s2),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text  = if (isWorking) "Creating…" else "Create PDF",
+                style = AppTypography.Button,
+                color = AppColors.OnAccent,
+            )
+        }
     }
 }
 
@@ -819,7 +2197,7 @@ private fun ChooserRow(
         Icon(
             imageVector        = icon,
             contentDescription = null,
-            tint               = AppColors.Coral,
+            tint               = AppAccent.primary,
             modifier           = Modifier.size(24.dp),
         )
         Spacer(Modifier.size(AppSpacing.s3))
@@ -834,6 +2212,16 @@ fun ScansSection(
     scans: List<Attachment>,
     onAdd: (primaryUri: String, previewUri: String?, pageUrisForOcr: List<Uri>) -> Unit,
     onRemove: (id: String) -> Unit,
+    /** Fires when the user taps "Import this page to notes" in the
+     *  in-house PDF viewer. The URI points at a JPG the viewer
+     *  already wrote into `AttachmentStorage.directory()`; callers
+     *  hand it to `viewModel.addSubPageFromImage(uri)`. */
+    onImportPageToNotes: (pageImageUri: String) -> Unit = {},
+    /** Fires when the user saves the Edit-scan dialog. Title is
+     *  null-to-clear (falls back to OCR-derived); categoryId is
+     *  `ScanCategory.name` or null to fall back to the derived
+     *  classification. */
+    onEditScan: (id: String, title: String?, categoryId: String?) -> Unit = { _, _, _ -> },
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -857,6 +2245,12 @@ fun ScansSection(
     var isLaunching by remember { mutableStateOf(false) }
     // When non-null, opens the extracted-text dialog for that attachment.
     var viewTextFor by remember { mutableStateOf<Attachment?>(null) }
+    // When non-null, opens the in-house PDF viewer for that scan —
+    // the user can flip through pages and import one into the notes
+    // pager as a drawable background.
+    var viewerFor by remember { mutableStateOf<Attachment?>(null) }
+    // When non-null, opens the "Edit scan" dialog for that attachment.
+    var editTargetFor by remember { mutableStateOf<Attachment?>(null) }
     // Active filter chip — null means "All". GENERAL is a real category
     // (catch-all for unmatched first words), so we model "show everything"
     // as a separate null state rather than overloading GENERAL.
@@ -932,7 +2326,13 @@ fun ScansSection(
     // Classify once up-front; each row reuses its category for the chip
     // and the filter visibility test.
     val categorized = remember(scans) {
-        scans.map { it to ScanCategory.fromFirstWord(it.recognizedText) }
+        scans.map { att ->
+            // Prefer the user's override when set (matches `ScanCategory.name`),
+            // otherwise derive from the OCR first-word heuristic.
+            val override = att.categoryId
+                ?.let { runCatching { ScanCategory.valueOf(it) }.getOrNull() }
+            att to (override ?: ScanCategory.fromFirstWord(att.recognizedText))
+        }
     }
     val visible = if (filter == null) categorized
                   else categorized.filter { it.second == filter }
@@ -973,8 +2373,22 @@ fun ScansSection(
                         ScanRow(
                             att         = att,
                             category    = category,
-                            onOpen      = { openScan(context, att) },
+                            // Prefer the in-house PDF viewer for
+                            // file:// PDFs — lets the user pick a
+                            // page to annotate in notes. Falls back
+                            // to the system-intent open for image-only
+                            // scans (no PDF to paginate through).
+                            onOpen      = {
+                                val uriStr = att.uri
+                                if (uriStr.endsWith(".pdf", ignoreCase = true)) {
+                                    viewerFor = att
+                                } else {
+                                    openScan(context, att)
+                                }
+                            },
                             onRemove    = { pendingDeleteId = att.id },
+                            onShare     = { shareScan(context, att) },
+                            onEdit      = { editTargetFor = att },
                             onViewText  = if (!att.recognizedText.isNullOrBlank()) {
                                 { viewTextFor = att }
                             } else null,
@@ -1011,6 +2425,34 @@ fun ScansSection(
         )
     }
 
+    viewerFor?.let { att ->
+        PdfPageViewerDialog(
+            pdfUri    = att.uri,
+            onImport  = { pageImageUri ->
+                onImportPageToNotes(pageImageUri)
+                viewerFor = null
+            },
+            onDismiss = { viewerFor = null },
+        )
+    }
+
+    editTargetFor?.let { att ->
+        // Display the same category the list chip is showing, which
+        // is the override when set and the derived value otherwise.
+        val derived = ScanCategory.fromFirstWord(att.recognizedText)
+        val override = att.categoryId
+            ?.let { runCatching { ScanCategory.valueOf(it) }.getOrNull() }
+        EditScanDialog(
+            attachment      = att,
+            currentCategory = override ?: derived,
+            onSave          = { id, title, categoryId ->
+                onEditScan(id, title, categoryId)
+                editTargetFor = null
+            },
+            onDismiss       = { editTargetFor = null },
+        )
+    }
+
     viewTextFor?.let { att ->
         val recognized = att.recognizedText.orEmpty()
         AlertDialog(
@@ -1041,7 +2483,7 @@ fun ScansSection(
                     }
                     viewTextFor = null
                 }) {
-                    Text("Copy", color = AppColors.Coral)
+                    Text("Copy", color = AppAccent.primary)
                 }
             },
             dismissButton = {
@@ -1111,7 +2553,7 @@ private fun ScanFilterDropdown(
                     Text(
                         "All",
                         style = AppTypography.Body,
-                        color = if (selected == null) AppColors.Coral else AppColors.TextPrimary,
+                        color = if (selected == null) AppAccent.primary else AppColors.TextPrimary,
                     )
                 },
                 onClick = {
@@ -1126,7 +2568,7 @@ private fun ScanFilterDropdown(
                         Text(
                             cat.label,
                             style = AppTypography.Body,
-                            color = if (isActive) AppColors.Coral else AppColors.TextPrimary,
+                            color = if (isActive) AppAccent.primary else AppColors.TextPrimary,
                         )
                     },
                     onClick = {
@@ -1153,6 +2595,8 @@ private fun ScanRow(
     category: ScanCategory,
     onOpen: () -> Unit,
     onRemove: () -> Unit,
+    onShare: () -> Unit,
+    onEdit: () -> Unit,
     onViewText: (() -> Unit)?,
 ) {
     Row(
@@ -1218,25 +2662,114 @@ private fun ScanRow(
             }
         }
 
-        // Optional "Aa" action — only present when OCR produced text.
-        // Standalone button so the row's primary tap stays "open the
-        // document" rather than "open the text dialog".
-        if (onViewText != null) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onViewText),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text  = "Aa",
-                    style = AppTypography.Button,
-                    color = AppColors.Coral,
+        // Single overflow button — keeps the row airy and scales to
+        // more actions (export, rename, copy, …) without crowding the
+        // trailing edge with ever-smaller icons. Row tap remains
+        // "open the document"; the menu carries the secondary verbs.
+        ScanRowOverflowMenu(
+            hasRecognizedText = onViewText != null,
+            onViewText        = onViewText ?: {},
+            onShare           = onShare,
+            onEdit            = onEdit,
+            onRemove          = onRemove,
+        )
+    }
+}
+
+/**
+ * IconButton + DropdownMenu pair for the scan row's overflow actions.
+ * View-text is hidden when OCR didn't produce anything usable so the
+ * menu doesn't carry a dead item. Delete uses the Danger color to
+ * read as destructive.
+ */
+@Composable
+private fun ScanRowOverflowMenu(
+    hasRecognizedText: Boolean,
+    onViewText: () -> Unit,
+    onShare: () -> Unit,
+    onEdit: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .clickable { expanded = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.MoreVert,
+                contentDescription = "More actions",
+                tint               = AppColors.TextSecondary,
+                modifier           = Modifier.size(20.dp),
+            )
+        }
+        DropdownMenu(
+            expanded         = expanded,
+            onDismissRequest = { expanded = false },
+            modifier         = Modifier.background(AppColors.CardSolid),
+        ) {
+            if (hasRecognizedText) {
+                DropdownMenuItem(
+                    text        = { Text("View extracted text") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector        = Icons.Filled.Subtitles,
+                            contentDescription = null,
+                            tint               = AppAccent.primary,
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onViewText()
+                    },
                 )
             }
+            DropdownMenuItem(
+                text        = { Text("Share") },
+                leadingIcon = {
+                    Icon(
+                        imageVector        = Icons.Filled.Share,
+                        contentDescription = null,
+                        tint               = AppAccent.primary,
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onShare()
+                },
+            )
+            DropdownMenuItem(
+                text        = { Text("Edit") },
+                leadingIcon = {
+                    Icon(
+                        imageVector        = Icons.Filled.Edit,
+                        contentDescription = null,
+                        tint               = AppAccent.primary,
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onEdit()
+                },
+            )
+            DropdownMenuItem(
+                text        = { Text("Delete", color = AppColors.Danger) },
+                leadingIcon = {
+                    Icon(
+                        imageVector        = Icons.Filled.DeleteOutline,
+                        contentDescription = null,
+                        tint               = AppColors.Danger,
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onRemove()
+                },
+            )
         }
-        DeleteButton(onClick = onRemove)
     }
 }
 
@@ -1271,6 +2804,10 @@ private fun CategoryChip(category: ScanCategory) {
  * OCR produced nothing usable.
  */
 private fun scanTitle(att: Attachment): String {
+    // User-set title wins over the OCR-derived one — only fall back to
+    // derivation when the override is blank / never-set.
+    val overridden = att.title?.trim()
+    if (!overridden.isNullOrBlank()) return overridden
     val text = att.recognizedText
     if (text.isNullOrBlank()) return "Scan"
     val lines = text.lineSequence()
@@ -1348,6 +2885,65 @@ private fun openScan(context: Context, attachment: Attachment) {
     }
 }
 
+/**
+ * Share the scan via the system share sheet (`Intent.ACTION_SEND`).
+ * Same FileProvider contract as [openScan] — our `file://` URIs need
+ * to be translated into a FileProvider `content://` URI before they
+ * can leave the app, otherwise the receiving app hits
+ * `FileUriExposedException`. MIME is inferred from the extension;
+ * unknown types fall back to `application/octet-stream` so transport
+ * apps (Drive, email, etc.) still show up in the chooser.
+ */
+private fun shareScan(context: Context, attachment: Attachment) {
+    val parsed = runCatching { Uri.parse(attachment.uri) }.getOrNull()
+    if (parsed == null) {
+        Toast.makeText(context, "Scan file missing.", Toast.LENGTH_SHORT).show()
+        return
+    }
+
+    val shareUri: Uri? = when (parsed.scheme) {
+        "file" -> {
+            val file = runCatching { parsed.toFile() }.getOrNull()
+            if (file == null || !file.exists()) null
+            else runCatching {
+                FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file,
+                )
+            }.getOrNull()
+        }
+        else -> parsed
+    }
+    if (shareUri == null) {
+        Toast.makeText(context, "Scan file missing.", Toast.LENGTH_SHORT).show()
+        return
+    }
+
+    val lower = attachment.uri.lowercase()
+    val mime = when {
+        lower.endsWith(".pdf")                             -> "application/pdf"
+        lower.endsWith(".jpg") || lower.endsWith(".jpeg")  -> "image/jpeg"
+        lower.endsWith(".png")                             -> "image/png"
+        else                                               -> "application/octet-stream"
+    }
+
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = mime
+        putExtra(Intent.EXTRA_STREAM, shareUri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    runCatching {
+        context.startActivity(Intent.createChooser(intent, "Share scan"))
+    }.onFailure {
+        Toast.makeText(
+            context,
+            "No app available to share this scan.",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+}
+
 // ========================== Voice ===========================
 
 /**
@@ -1374,13 +2970,19 @@ private fun openScan(context: Context, attachment: Attachment) {
 fun VoiceSection(
     notes: List<Attachment>,
     onAdd: (uri: String, durationMs: Long) -> Unit,
-    /** Fires once the recognizer flushes its final `onResults` after the
-     *  recorder stops — typically 0.5-2s later. Keyed by uri (which
-     *  embeds a uuidv7 and is unique) so the viewmodel can patch the
-     *  already-persisted attachment without the section having to
-     *  track the newly-assigned id across the async hop. Matches the
-     *  iOS twin exactly. */
-    onTranscribed: (uri: String, transcript: String?) -> Unit,
+    /** Fires once recognition finishes (success or retry). Keyed by uri
+     *  so the viewmodel can patch the already-persisted attachment
+     *  without the section tracking the newly-assigned id across the
+     *  async hop. `source` is the engine id —
+     *  [SpeechTranscriber.BACKEND_MLKIT] or
+     *  [SpeechTranscriber.BACKEND_SHERPA] — used internally to pick
+     *  the opposite engine on retry. */
+    onTranscribed: (uri: String, transcript: String?, source: String?) -> Unit,
+    /** "Add to notes" button on a transcribed voice-note card. The
+     *  screen owns the `RichTextState` the editor body is bound to,
+     *  so it handles the actual append. Default no-op keeps callers
+     *  that don't wire a body-editor up working. */
+    onAddTranscriptToNotes: (transcript: String) -> Unit = {},
     onRemove: (id: String) -> Unit,
 ) {
     val context = LocalContext.current
@@ -1551,19 +3153,27 @@ fun VoiceSection(
 
     // User-initiated transcription. Clears any prior failure reason so
     // the row flips back to a "transcribing…" state (instead of
-    // showing stale "unavailable" text alongside the spinner) and
-    // fires the sherpa-onnx pipeline against the saved .m4a. Result routes
-    // through `onTranscribed` on success, back into
-    // `attemptedTranscription` on failure.
-    val transcribe: (String) -> Unit = { uri ->
+    // showing stale "unavailable" text alongside the spinner).
+    //
+    // `preferredBackend` forces a specific engine when the user taps
+    // the "try the other engine" retry pill — passing null keeps the
+    // default priority (Whisper-via-sherpa first, Gemini Nano as
+    // fallback). Both engines are deterministic on the same audio, so
+    // re-running with the same engine always produces the same text
+    // — swapping is the only way to get a genuinely different result
+    // when the first take was inaccurate. On devices without AICore
+    // (most emulators, non-Pixel/Samsung hardware), forcing `mlkit`
+    // will fail; the row surfaces the reason inline so the user
+    // doesn't misread "Try again" as a silent no-op.
+    val transcribe: (uri: String, preferredBackend: String?) -> Unit = { uri, preferredBackend ->
         pendingTranscription = pendingTranscription + uri
         attemptedTranscription = attemptedTranscription - uri
         transcribeScope.launch {
-            val result = SpeechTranscriber.transcribe(context, uri)
+            val result = SpeechTranscriber.transcribe(context, uri, preferredBackend)
             pendingTranscription = pendingTranscription - uri
             when (result) {
                 is TranscribeResult.Success ->
-                    onTranscribed(uri, result.text)
+                    onTranscribed(uri, result.text, result.source)
                 is TranscribeResult.Failure ->
                     attemptedTranscription = attemptedTranscription +
                         (uri to result.reason)
@@ -1593,7 +3203,21 @@ fun VoiceSection(
                 expanded = isExpanded,
                 isTranscribing = att.uri in pendingTranscription,
                 unavailableReason = attemptedTranscription[att.uri],
-                onTranscribe = { transcribe(att.uri) },
+                // Initial transcribe: no preferred backend → default
+                // priority (Whisper first, ML Kit fallback).
+                onTranscribe = { transcribe(att.uri, null) },
+                // Retry: deliberately pick the *opposite* engine from
+                // whatever produced the current transcript. Both are
+                // deterministic so re-running the same one is pointless.
+                onRetranscribe = {
+                    val next = when (att.transcriptSource) {
+                        SpeechTranscriber.BACKEND_MLKIT -> SpeechTranscriber.BACKEND_SHERPA
+                        SpeechTranscriber.BACKEND_SHERPA -> SpeechTranscriber.BACKEND_MLKIT
+                        else -> null
+                    }
+                    transcribe(att.uri, next)
+                },
+                onAddToNotes = onAddTranscriptToNotes,
                 onRemove = { pendingDeleteId = att.id },
             )
         }
@@ -1645,14 +3269,14 @@ private fun VoiceSectionHeader(
         Icon(
             imageVector = Icons.Filled.Mic,
             contentDescription = null,
-            tint = AppColors.Coral,
+            tint = AppAccent.primary,
             modifier = Modifier.size(12.dp),
         )
         Spacer(Modifier.size(AppSpacing.s1))
         Text(
             text = if (count > 0) "VOICE NOTES · $count" else "VOICE NOTES",
             style = AppTypography.Eyebrow,
-            color = AppColors.Coral,
+            color = AppAccent.primary,
         )
         Spacer(Modifier.weight(1f))
         HeaderChevronButton(isExpanded = isExpanded, onClick = onToggleExpand)
@@ -1675,7 +3299,7 @@ private fun HeaderChevronButton(isExpanded: Boolean, onClick: () -> Unit) {
         modifier = Modifier
             .size(32.dp)
             .clip(CircleShape)
-            .background(if (isExpanded) AppColors.CoralSoft else AppColors.CardSolid)
+            .background(if (isExpanded) AppAccent.soft else AppColors.CardSolid)
             .border(1.dp, AppColors.BorderDefault, CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -1683,7 +3307,7 @@ private fun HeaderChevronButton(isExpanded: Boolean, onClick: () -> Unit) {
         Icon(
             imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = if (isExpanded) "Hide voice note details" else "Show voice note details",
-            tint = if (isExpanded) AppColors.Coral else AppColors.TextSecondary,
+            tint = if (isExpanded) AppAccent.primary else AppColors.TextSecondary,
             modifier = Modifier
                 .size(18.dp)
                 .rotate(rotation),
@@ -1699,7 +3323,7 @@ private fun RecordPill(isRecording: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(AppRadius.pill))
-            .background(if (isRecording) AppColors.CoralSoft else AppColors.CardSolid)
+            .background(if (isRecording) AppAccent.soft else AppColors.CardSolid)
             .border(
                 width = 1.dp,
                 color = AppColors.BorderDefault,
@@ -1712,14 +3336,14 @@ private fun RecordPill(isRecording: Boolean, onClick: () -> Unit) {
         Icon(
             imageVector = if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
             contentDescription = null,
-            tint = AppColors.Coral,
+            tint = AppAccent.primary,
             modifier = Modifier.size(14.dp),
         )
         Spacer(Modifier.size(AppSpacing.s1))
         Text(
             text = if (isRecording) "Stop" else "Record",
             style = AppTypography.Button,
-            color = AppColors.Coral,
+            color = AppAccent.primary,
         )
     }
 }
@@ -1774,6 +3398,16 @@ private fun VoiceNoteCard(
      *  the row shows a prominent "Transcribe" button instead. */
     unavailableReason: String?,
     onTranscribe: () -> Unit,
+    /** Retry with the *other* engine — shown once a transcript exists
+     *  (or failed) so the user can swap engines when accuracy is off.
+     *  Re-running with the same engine would be a no-op since both
+     *  are deterministic on the same audio. */
+    onRetranscribe: () -> Unit,
+    /** Drop the current transcript into the editor body. Only shown
+     *  when the card has a transcript. Plumbed up through
+     *  `VoiceSection` → the screen, which appends to the
+     *  `RichTextState` the editor body is bound to. */
+    onAddToNotes: (transcript: String) -> Unit,
     onRemove: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1787,6 +3421,17 @@ private fun VoiceNoteCard(
     // URI changes). Cheap — a single File.length() — but there's no point
     // doing it on every recomposition while the waveform cursor ticks.
     val fileSizeLabel = remember(attachment.uri) { resolveFileSizeLabel(context, attachment.uri) }
+
+    // Real amplitude samples for the waveform. Decoded off the main
+    // thread and cached by `WaveformSamples`; null until the first
+    // decode completes, at which point `Waveform` swaps over from its
+    // hash-seeded fallback. A row of uniformly tiny bars after decode =
+    // the clip is silent, which is the diagnostic we want users to see
+    // when transcription says "No speech detected".
+    var amplitudes by remember(attachment.uri) { mutableStateOf<FloatArray?>(null) }
+    LaunchedEffect(attachment.uri) {
+        amplitudes = WaveformSamples.extract(attachment.uri, barCount = 40)
+    }
 
     DisposableEffect(attachment.id) {
         onDispose {
@@ -1868,7 +3513,7 @@ private fun VoiceNoteCard(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .background(AppColors.Coral)
+                    .background(AppAccent.primary)
                     .clickable(onClick = togglePlay),
                 contentAlignment = Alignment.Center,
             ) {
@@ -1889,8 +3534,9 @@ private fun VoiceNoteCard(
                 Waveform(
                     seed = attachment.id,
                     progress = (positionMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f),
-                    playedColor = AppColors.Coral,
+                    playedColor = AppAccent.primary,
                     unplayedColor = AppColors.TextTertiary,
+                    amplitudes = amplitudes,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(28.dp),
@@ -1930,13 +3576,16 @@ private fun VoiceNoteCard(
         // Four states:
         //   idle / never attempted → "Transcribe" pill button
         //   pending                → spinner + "Transcribing…"
-        //   success                → "TRANSCRIPT" + body text
+        //   success                → text + "Add to notes" + "Try again"
         //   failed                 → reason + "Retry" pill
         TranscriptRow(
             transcript = attachment.transcript,
+            transcriptSource = attachment.transcriptSource,
             isPending = isTranscribing,
             unavailableReason = unavailableReason,
             onTranscribe = onTranscribe,
+            onRetranscribe = onRetranscribe,
+            onAddToNotes = onAddToNotes,
         )
     }
 }
@@ -1949,12 +3598,22 @@ private fun VoiceNoteCard(
 @Composable
 private fun TranscriptRow(
     transcript: String?,
+    transcriptSource: String?,
     isPending: Boolean,
     unavailableReason: String?,
     onTranscribe: () -> Unit,
+    onRetranscribe: () -> Unit,
+    /** Takes the current transcript text and hands it off to the
+     *  screen-level append-to-editor-body callback. Only wired when
+     *  `transcript` is non-empty (the button only renders then). */
+    onAddToNotes: (String) -> Unit,
 ) {
     val hasTranscript = !transcript.isNullOrBlank()
     val hasReason = unavailableReason != null
+    // Local to the row so every voice-note card carries its own
+    // viewer-sheet state — opening one transcript doesn't affect
+    // another's row above or below it.
+    var showFullTranscript by remember { mutableStateOf(false) }
 
     val eyebrow = when {
         hasTranscript -> "TRANSCRIPT"
@@ -1978,15 +3637,53 @@ private fun TranscriptRow(
             color = AppColors.TextTertiary,
         )
         when {
-            hasTranscript -> Text(
-                text = transcript!!,
-                style = AppTypography.Body,
-                color = AppColors.TextPrimary,
-            )
+            hasTranscript -> {
+                // Clamp to two lines with an ellipsis; tapping anywhere
+                // on the preview opens the full-text viewer sheet. The
+                // whole Text is clickable (not just the "…") because
+                // Compose doesn't expose the ellipsis region as a
+                // separate hit target, and surfacing the full text on
+                // any tap is friendlier than a narrow hit zone anyway.
+                Text(
+                    text = transcript!!,
+                    style = AppTypography.Body,
+                    color = AppColors.TextPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showFullTranscript = true },
+                )
+                // Two actions for a transcribed note:
+                //   Add to notes — primary; drops the text into the
+                //                  editor body so the user can keep
+                //                  writing around it.
+                //   Try again    — always swaps engines when we know
+                //                  the source (both recognizers are
+                //                  deterministic, rerunning the same
+                //                  engine is pointless). Legacy
+                //                  transcripts without a source fall
+                //                  back to the default-priority
+                //                  transcribe.
+                val canSwap = transcriptSource == SpeechTranscriber.BACKEND_MLKIT ||
+                    transcriptSource == SpeechTranscriber.BACKEND_SHERPA
+                Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+                    TranscriptActionPill(
+                        label = "Add to notes",
+                        icon = Icons.AutoMirrored.Filled.NoteAdd,
+                        onClick = { onAddToNotes(transcript) },
+                    )
+                    TranscriptActionPill(
+                        label = "Try again",
+                        icon = Icons.Filled.Subtitles,
+                        onClick = if (canSwap) onRetranscribe else onTranscribe,
+                    )
+                }
+            }
             isPending -> Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(14.dp),
-                    color = AppColors.Coral,
+                    color = AppAccent.primary,
                     strokeWidth = 2.dp,
                 )
                 Spacer(Modifier.size(AppSpacing.s2))
@@ -2002,29 +3699,136 @@ private fun TranscriptRow(
                     style = AppTypography.Body,
                     color = AppColors.TextSecondary,
                 )
-                TranscribeButton(label = "Retry", onClick = onTranscribe)
+                TranscriptActionPill(
+                    label = "Retry",
+                    icon = Icons.Filled.Subtitles,
+                    onClick = onTranscribe,
+                )
             }
-            else -> TranscribeButton(label = "Transcribe voice note", onClick = onTranscribe)
+            else -> TranscriptActionPill(
+                label = "Transcribe voice note",
+                icon = Icons.Filled.Subtitles,
+                onClick = onTranscribe,
+            )
+        }
+    }
+
+    if (showFullTranscript && hasTranscript) {
+        TranscriptViewerSheet(
+            transcript       = transcript!!,
+            transcriptSource = transcriptSource,
+            onDismiss        = { showFullTranscript = false },
+        )
+    }
+}
+
+/**
+ * Full-text viewer for a voice-note transcript. Opened when the user
+ * taps the clamped two-line preview on a voice-note card. Read-only
+ * ModalBottomSheet with a scrollable body — long whisper transcripts
+ * (multi-minute clips can run to several paragraphs) still fit, and
+ * the engine attribution under the title tells the user which
+ * recognizer produced the text they're reading.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TranscriptViewerSheet(
+    transcript: String,
+    transcriptSource: String?,
+    onDismiss: () -> Unit,
+) {
+    // Bypass the half-height peek — the viewer is content-first and
+    // should open as tall as it wants to be.
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scrollState = rememberScrollState()
+
+    val attribution = when (transcriptSource) {
+        SpeechTranscriber.BACKEND_MLKIT  -> "Gemini Nano"
+        SpeechTranscriber.BACKEND_SHERPA -> "Whisper"
+        else -> null
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = AppColors.Canvas,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start  = AppSpacing.s4,
+                    end    = AppSpacing.s4,
+                    top    = AppSpacing.s2,
+                    bottom = AppSpacing.s4,
+                ),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text  = "Transcript",
+                        style = AppTypography.SectionTitle,
+                        color = AppColors.TextPrimary,
+                    )
+                    if (attribution != null) {
+                        Text(
+                            text  = "via $attribution",
+                            style = AppTypography.Meta,
+                            color = AppColors.TextSecondary,
+                        )
+                    }
+                }
+                Text(
+                    text     = "Done",
+                    style    = AppTypography.Button,
+                    color    = AppColors.Coral,
+                    modifier = Modifier.clickable(onClick = onDismiss),
+                )
+            }
+            // Scrolls when the transcript exceeds the sheet's natural
+            // height. The sheet itself is still capped at the bottom-
+            // sheet max (approximately screen height minus top inset),
+            // so this is the inner scroll the user needs for long
+            // transcripts.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(scrollState),
+            ) {
+                Text(
+                    text  = transcript,
+                    style = AppTypography.Body,
+                    color = AppColors.TextPrimary,
+                )
+            }
         }
     }
 }
 
-/** Coral pill that kicks off (or retries) transcription. Kept as its
- *  own composable because the transcript row renders the same button
- *  in two different states ("Transcribe…" for untouched notes and
- *  "Retry" after a failure) and we want them visually identical. */
+/** Coral pill button used by the transcript row for every user-facing
+ *  action — "Transcribe voice note", "Retry", "Try again", "Add to
+ *  notes". Takes an `ImageVector` so each action keeps its own icon
+ *  while the shape / colour / typography stay uniform. */
 @Composable
-private fun TranscribeButton(label: String, onClick: () -> Unit) {
+private fun TranscriptActionPill(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(AppRadius.pill))
-            .background(AppColors.Coral)
+            .background(AppAccent.primary)
             .clickable(onClick = onClick)
             .padding(horizontal = AppSpacing.s3, vertical = AppSpacing.s1),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = Icons.Filled.Subtitles,
+            imageVector = icon,
             contentDescription = null,
             tint = AppColors.OnAccent,
             modifier = Modifier.size(14.dp),
@@ -2057,13 +3861,13 @@ private fun VoiceNoteDetails(
                 modifier = Modifier
                     .size(32.dp)
                     .clip(RoundedCornerShape(AppRadius.sm))
-                    .background(AppColors.CoralSoft),
+                    .background(AppAccent.soft),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = Icons.Filled.Mic,
                     contentDescription = null,
-                    tint = AppColors.Coral,
+                    tint = AppAccent.primary,
                     modifier = Modifier.size(16.dp),
                 )
             }
@@ -2138,9 +3942,13 @@ private fun CardIconButton(
  * (hashed from the attachment id) so the shape doesn't jitter on
  * recomposition. Bars left of `progress` (0..1) render in `playedColor`,
  * the rest in `unplayedColor`, giving the user a cheap visual cursor
- * while the MediaPlayer advances. No real amplitude data yet — the
- * MediaRecorder doesn't preserve it and we don't want to re-decode the
- * file just for a sparkline.
+ * while the MediaPlayer advances.
+ *
+ * Bars derive from real amplitude samples when `amplitudes` is non-null
+ * (pulled off the decoded PCM by `WaveformSamples` — see the extraction
+ * pass in `VoiceNoteCard`). While the samples are still being computed
+ * on first render, or if the file isn't decodable, we fall back to a
+ * hash-seeded decorative shape so the card never renders empty.
  */
 @Composable
 private fun Waveform(
@@ -2148,12 +3956,15 @@ private fun Waveform(
     progress: Float,
     playedColor: Color,
     unplayedColor: Color,
+    amplitudes: FloatArray? = null,
     modifier: Modifier = Modifier,
 ) {
     val barCount = 40
-    val heights = remember(seed) {
-        val rng = java.util.Random(seed.hashCode().toLong())
-        FloatArray(barCount) { 0.2f + rng.nextFloat() * 0.8f }
+    val heights = remember(seed, amplitudes) {
+        amplitudes?.takeIf { it.size == barCount } ?: run {
+            val rng = java.util.Random(seed.hashCode().toLong())
+            FloatArray(barCount) { 0.2f + rng.nextFloat() * 0.8f }
+        }
     }
     Canvas(modifier = modifier) {
         val gap = 3f
@@ -2272,20 +4083,34 @@ private fun AttachmentGrid(
     onRemoveRequest: (id: String) -> Unit,
     placeholder: @Composable () -> Unit,
     columns: Int = 3,
+    onTap: (index: Int) -> Unit = {},
+    /** When true, tiles render a checkmark overlay instead of the
+     *  close (×) button; a tile tap toggles selection through
+     *  [onToggleSelect] and [selectedIds] drives the selected look. */
+    selectMode: Boolean = false,
+    selectedIds: Set<String> = emptySet(),
+    onToggleSelect: (id: String) -> Unit = {},
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
     ) {
-        attachments.chunked(columns).forEach { rowItems ->
+        attachments.chunked(columns).forEachIndexed { rowIndex, rowItems ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
             ) {
-                rowItems.forEach { att ->
+                rowItems.forEachIndexed { colIndex, att ->
+                    val flatIndex = rowIndex * columns + colIndex
                     AttachmentTile(
                         att         = att,
                         onRemove    = { onRemoveRequest(att.id) },
+                        onTap       = {
+                            if (selectMode) onToggleSelect(att.id)
+                            else            onTap(flatIndex)
+                        },
+                        selectMode  = selectMode,
+                        selected    = att.id in selectedIds,
                         placeholder = placeholder,
                         modifier    = Modifier.weight(1f).aspectRatio(1f),
                     )
@@ -2303,6 +4128,9 @@ private fun AttachmentTile(
     att: Attachment,
     onRemove: () -> Unit,
     placeholder: @Composable () -> Unit,
+    onTap: () -> Unit = {},
+    selectMode: Boolean = false,
+    selected: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -2310,16 +4138,16 @@ private fun AttachmentTile(
             .clip(RoundedCornerShape(AppSpacing.s2))
             .background(AppColors.CardSolid)
             .border(
-                width = 1.dp,
-                color = AppColors.BorderDefault,
+                width = if (selectMode && selected) 2.dp else 1.dp,
+                color = if (selectMode && selected) AppAccent.primary
+                        else                         AppColors.BorderDefault,
                 shape = RoundedCornerShape(AppSpacing.s2),
-            ),
+            )
+            // Whole tile is the tap target. In select mode the caller
+            // routes taps through `onToggleSelect`; outside select mode
+            // they fall through to the viewer.
+            .clickable(onClick = onTap),
     ) {
-        // We have a renderable thumbnail whenever the attachment is a photo
-        // or the scanner gave us a JPEG preview URI for the PDF. Anything
-        // else falls through to the placeholder icon — don't trust URI
-        // extensions; content:// URIs from ML Kit / MediaStore rarely
-        // carry one.
         val renderable = att.type == Attachment.TYPE_PHOTO || att.previewUri != null
         val thumb = att.previewUri ?: att.uri
         val modelUri = runCatching { Uri.parse(thumb) }.getOrNull()
@@ -2337,23 +4165,56 @@ private fun AttachmentTile(
             ) { placeholder() }
         }
 
-        // Close button overlay — small background so it's legible on any thumb.
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(4.dp)
-                .size(22.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.45f))
-                .clickable(onClick = onRemove),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector        = Icons.Filled.Close,
-                contentDescription = "Remove",
-                tint               = Color.White,
-                modifier           = Modifier.size(14.dp),
-            )
+        if (selectMode) {
+            // Selection checkmark overlay — top-left so it doesn't
+            // collide with existing trailing-edge UI. Unselected tiles
+            // get a hollow circle so the tap affordance is obvious.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (selected) AppAccent.primary
+                        else          Color.Black.copy(alpha = 0.45f),
+                    )
+                    .border(
+                        width = 1.5.dp,
+                        color = Color.White,
+                        shape = CircleShape,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) {
+                    Icon(
+                        imageVector        = Icons.Filled.Check,
+                        contentDescription = "Selected",
+                        tint               = Color.White,
+                        modifier           = Modifier.size(14.dp),
+                    )
+                }
+            }
+        } else {
+            // Close button overlay — hidden in select mode because
+            // remove doesn't apply to a multi-select flow.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .clickable(onClick = onRemove),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.Filled.Close,
+                    contentDescription = "Remove",
+                    tint               = Color.White,
+                    modifier           = Modifier.size(14.dp),
+                )
+            }
         }
     }
 }
@@ -2398,7 +4259,7 @@ private fun InlineTextInput(
                 onValueChange   = { value = it },
                 singleLine      = true,
                 textStyle       = AppTypography.Body.copy(color = AppColors.TextPrimary),
-                cursorBrush     = SolidColor(AppColors.Coral),
+                cursorBrush     = SolidColor(AppAccent.primary),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = {
                     if (value.isBlank()) onCancel() else onSubmit(value)

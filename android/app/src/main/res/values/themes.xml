@@ -1,10 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Bare theme; the Compose Material3 theme in ui/theme/AppTheme.kt is the
-         real one. This system theme just sets the background + status bar. -->
+    <!-- Post-splash application theme. Compose's `ReleafTheme` takes over
+         inside `setContent`; this is only the window chrome (status bar,
+         window background) the platform paints around our Composition. -->
     <style name="Theme.Releaf" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/releaf_canvas</item>
         <item name="android:statusBarColor">@color/releaf_canvas</item>
         <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <!--
+      Cold-launch splash theme (Android 12+ SplashScreen API, back-compat
+      via androidx.core:core-splashscreen down to API 23). The system
+      paints this as the very first frame — before Compose mounts — so the
+      branded leaf is visible from the instant the user taps the icon.
+
+      `postSplashScreenTheme` hands off to `Theme.Releaf` once
+      `installSplashScreen()` releases the keep-condition in MainActivity.
+    -->
+    <style name="Theme.Releaf.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/releaf_theme_green</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_leaf</item>
+        <item name="postSplashScreenTheme">@style/Theme.Releaf</item>
     </style>
 </resources>

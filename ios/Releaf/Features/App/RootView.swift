@@ -19,8 +19,7 @@ public struct RootView: View {
             case .signedOut, .failed:
                 SignInScreen()
             case .signingIn:
-                ProgressView()
-                    .tint(AppColors.coral)
+                SplashScreen()
             case .signedIn:
                 MainShell()
             }

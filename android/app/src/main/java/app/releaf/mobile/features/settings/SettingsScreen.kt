@@ -20,6 +20,7 @@ import androidx.compose.ui.text.style.TextAlign
 import app.releaf.mobile.ui.components.AppButton
 import app.releaf.mobile.ui.components.AppButtonVariant
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 
@@ -35,7 +36,7 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("SETTINGS", style = AppTypography.Eyebrow, color = AppColors.Coral)
+        Text("SETTINGS", style = AppTypography.Eyebrow, color = AppAccent.primary)
         Text(
             "Preferences",
             style = AppTypography.EditorialTitle,

@@ -81,9 +81,20 @@ data class NotepadEntry(
      * JSON array of Stroke (freehand pen/highlighter strokes overlaying the
      * notes body). Coordinates are pinned — strokes don't reflow when text
      * edits push content around. See Stroke in PageAttachments.kt.
+     *
+     * Deprecated path now: when `sub_pages` carries content, it owns the
+     * stroke list per sub-page. This column is kept in sync with the first
+     * sub-page's strokes for back-compat and for rows that pre-date v3.
      */
     @ColumnInfo(name = "sketch_strokes", defaultValue = "'[]'")
     val sketchStrokes: String = "[]",
+
+    /**
+     * JSON array of SubPage — horizontal sub-pages inside this entry.
+     * See PageEntity's twin field for the full contract.
+     */
+    @ColumnInfo(name = "sub_pages", defaultValue = "'[]'")
+    val subPages: String = "[]",
 
     /** Allow empty notes + no contacts + no locations on save. */
     @ColumnInfo(name = "allow_blank_content", defaultValue = "0")

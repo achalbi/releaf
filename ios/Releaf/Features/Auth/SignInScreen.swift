@@ -13,6 +13,7 @@ import ReleafData
 
 public struct SignInScreen: View {
     @EnvironmentObject private var authStore: AuthStore
+    @Environment(\.accentPalette) private var accent
 
     public init() {}
 
@@ -21,10 +22,7 @@ public struct SignInScreen: View {
             Spacer()
 
             VStack(alignment: .center, spacing: AppSpacing.s3) {
-                Text("RELEAF")
-                    .font(AppText.eyebrow)
-                    .tracking(AppLetterSpacing.eyebrow)
-                    .foregroundStyle(AppColors.coral)
+                ReleafLogoRow(size: .md)
 
                 Text("Capture your day")
                     .font(AppText.editorialTitle)

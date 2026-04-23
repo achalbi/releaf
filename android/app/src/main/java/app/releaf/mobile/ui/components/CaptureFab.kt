@@ -41,6 +41,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppSpacing
 
 @Composable
@@ -58,14 +59,14 @@ fun CaptureFab(
             .shadow(
                 elevation = 18.dp,
                 shape = CircleShape,
-                ambientColor = AppColors.Coral,
-                spotColor = AppColors.Coral,
+                ambientColor = AppAccent.primary,
+                spotColor = AppAccent.primary,
             )
             .clip(CircleShape)
-            .background(AppColors.Coral)
+            .background(AppAccent.primary)
             .clickable(
                 interactionSource = interaction,
-                indication = ripple(color = AppColors.CoralDeep),
+                indication = ripple(color = AppAccent.deep),
                 onClick = onClick,
             ),
         contentAlignment = Alignment.Center,

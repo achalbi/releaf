@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.ui.components.AppButton
+import app.releaf.mobile.ui.components.ReleafLogoRow
+import app.releaf.mobile.ui.components.ReleafLogoSize
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
@@ -46,11 +48,7 @@ fun SignInScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
             ) {
-                Text(
-                    "RELEAF",
-                    style = AppTypography.Eyebrow,
-                    color = AppColors.Coral,
-                )
+                ReleafLogoRow(size = ReleafLogoSize.Md)
                 Text(
                     "Capture your day",
                     style = AppTypography.EditorialTitle,

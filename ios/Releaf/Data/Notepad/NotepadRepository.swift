@@ -152,6 +152,74 @@ public final class NotepadRepository: @unchecked Sendable {
         }
     }
 
+    /// Merge `secondaryId`'s content into `primaryId` and soft-delete the
+    /// secondary. The primary keeps its title, entry-date, user, and
+    /// created-at; notes, todos, contacts, locations, and attachments from
+    /// the secondary are appended in order.
+    ///
+    /// Returns `true` when both rows existed and the merge committed.
+    /// Returns `false` for any no-op (missing row, same id, already-deleted
+    /// secondary) so the caller can surface an error. The whole operation
+    /// runs inside a single write transaction so we can't end up with the
+    /// primary updated and the secondary still live (or vice-versa).
+    ///
+    /// Merge is purely local — the sync worker picks both sides up on its
+    /// next pass: the primary as a dirty-edit upload, the secondary as a
+    /// tombstone.
+    @discardableResult
+    public func merge(primaryId: String, secondaryId: String) async throws -> Bool {
+        guard primaryId != secondaryId else { return false }
+        return try await dbQueue.write { db in
+            let primary = try NotepadEntry
+                .filter(sql: "id = ?", arguments: [primaryId])
+                .fetchOne(db)
+            let secondary = try NotepadEntry
+                .filter(sql: "id = ?", arguments: [secondaryId])
+                .fetchOne(db)
+            guard let primary, let secondary,
+                  primary.deletedAt == nil, secondary.deletedAt == nil
+            else { return false }
+
+            // Concatenate typed lists back through the JSON helpers so the
+            // round-trip stays lossless — no schema drift from string-
+            // manipulating the raw JSON here.
+            let mergedContacts    = primary.contacts.parseContacts()    + secondary.contacts.parseContacts()
+            let mergedTodos       = primary.todos.parseTodos()          + secondary.todos.parseTodos()
+            let mergedLocations   = primary.locations.parseLocations()  + secondary.locations.parseLocations()
+            let mergedAttachments = primary.attachments.parseAttachments() + secondary.attachments.parseAttachments()
+
+            // Notes: two blank lines between bodies so the merged entry
+            // reads as two distinct sections. Skip the separator when
+            // either side is empty to avoid leading / trailing blanks.
+            let mergedNotes: String = {
+                switch (primary.notes.isEmpty, secondary.notes.isEmpty) {
+                case (true, true):  return ""
+                case (false, true): return primary.notes
+                case (true, false): return secondary.notes
+                case (false, false): return primary.notes + "\n\n" + secondary.notes
+                }
+            }()
+
+            let now = IsoClock.nowIso()
+            var updated = primary
+            updated.notes       = mergedNotes
+            updated.contacts    = mergedContacts.toJsonString()
+            updated.todos       = mergedTodos.toJsonString()
+            updated.locations   = mergedLocations.toJsonString()
+            updated.attachments = mergedAttachments.toJsonString()
+            updated.updatedAt   = now
+            updated.dirty       = true
+            try updated.update(db)
+
+            try db.execute(sql: """
+                UPDATE notepad_entries
+                SET deleted_at = ?, updated_at = ?, dirty = 1
+                WHERE id = ?
+                """, arguments: [now, now, secondaryId])
+            return true
+        }
+    }
+
     /// Soft delete. Flips deleted_at + dirty so the sync worker can
     /// propagate the tombstone to Drive on its next pass.
     public func softDelete(id: String) async throws {
@@ -176,6 +244,19 @@ public final class NotepadRepository: @unchecked Sendable {
                 SET deleted_at = NULL, updated_at = ?, dirty = 1
                 WHERE id = ?
                 """, arguments: [now, id])
+        }
+    }
+
+    /// One-shot snapshot of every active row for a user, newest first.
+    /// Used by the merge picker — it opens once, grabs the list, lets the
+    /// user pick, and closes; full live observation is overkill for that
+    /// flow so this stays a plain `async throws` read.
+    public func activeRows(userId: String) async throws -> [NotepadEntry] {
+        try await dbQueue.read { db in
+            try NotepadEntry
+                .filter(sql: "user_id = ? AND deleted_at IS NULL", arguments: [userId])
+                .order(Column("updated_at").desc)
+                .fetchAll(db)
         }
     }
 

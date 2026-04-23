@@ -44,10 +44,10 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         PageEntity::class,
         SyncStateEntity::class,
     ],
-    // v2: adds `sketch_strokes` TEXT column to `pages` and
-    // `notepad_entries` for the freehand-drawing overlay. Migration
-    // `Migration1To2` below ships the ALTER TABLE statements.
-    version = 2,
+    // v4: adds `description` to `notebooks` + `chapters` and `archived_at`
+    // to `notebooks` so the detail cards can carry summary copy and the
+    // list screen can split notebooks into Current / Archive tabs.
+    version = 4,
     exportSchema = true,
 )
 abstract class ReleafDatabase : RoomDatabase() {
@@ -181,6 +181,41 @@ abstract class ReleafDatabase : RoomDatabase() {
         }
     }
 
+    /**
+     * v2 → v3: add `sub_pages` JSON column for the horizontal sub-page
+     * pager. Empty default; the VM lazy-migrates legacy rows (flat
+     * `notes` + `sketch_strokes`) into a single sub-page on first load.
+     */
+    private object Migration2To3 : Migration(2, 3) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL(
+                "ALTER TABLE pages ADD COLUMN sub_pages TEXT NOT NULL DEFAULT '[]'",
+            )
+            connection.execSQL(
+                "ALTER TABLE notepad_entries ADD COLUMN sub_pages TEXT NOT NULL DEFAULT '[]'",
+            )
+        }
+    }
+
+    /**
+     * v3 → v4: add `description` on notebooks + chapters (nullable, no
+     * default — the hero / chapter cards treat null as "no description
+     * yet"), and `archived_at` on notebooks so the Archive tab has
+     * something to observe. Indexed so `observeArchived()` and the
+     * active filter stay cheap.
+     */
+    private object Migration3To4 : Migration(3, 4) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL("ALTER TABLE notebooks ADD COLUMN description TEXT")
+            connection.execSQL("ALTER TABLE notebooks ADD COLUMN archived_at TEXT")
+            connection.execSQL("ALTER TABLE chapters ADD COLUMN description TEXT")
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_notebooks_archived_at " +
+                    "ON notebooks(archived_at)"
+            )
+        }
+    }
+
     companion object {
         private const val DB_NAME = "releaf.db"
 
@@ -201,7 +236,7 @@ abstract class ReleafDatabase : RoomDatabase() {
                     // search works on every device.
                     .setDriver(BundledSQLiteDriver())
                     .addCallback(SchemaCallback)
-                    .addMigrations(Migration1To2)
+                    .addMigrations(Migration1To2, Migration2To3, Migration3To4)
                     // Dogfood installs at v2-v6 (pre-flatten) are handled
                     // here as a downgrade: the DB wipes, Room recreates
                     // the v1 schema from the current entity set, and

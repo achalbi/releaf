@@ -56,6 +56,7 @@ import app.releaf.mobile.ui.components.StatGrid
 import app.releaf.mobile.ui.components.StatItem
 import app.releaf.mobile.ui.components.StatTone
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
@@ -73,7 +74,7 @@ fun PageDetailScreen(
         when (val s = state) {
             PageDetailUiState.Loading -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = AppColors.Coral)
+                    CircularProgressIndicator(color = AppAccent.primary)
                 }
             }
             is PageDetailUiState.Failed -> {
@@ -115,10 +116,10 @@ private fun Loaded(page: Page, onBack: () -> Unit) {
             Text(
                 "← Back",
                 style = AppTypography.Button,
-                color = AppColors.Coral,
+                color = AppAccent.primary,
                 modifier = Modifier.clickable { onBack() },
             )
-            Text("PAGE", style = AppTypography.Eyebrow, color = AppColors.Coral)
+            Text("PAGE", style = AppTypography.Eyebrow, color = AppAccent.primary)
             Text(page.title, style = AppTypography.PageTitle, color = AppColors.TextPrimary)
             page.capturedOn?.let {
                 Text(it, style = AppTypography.Meta, color = AppColors.TextTertiary)
@@ -251,7 +252,7 @@ private fun VoiceCard(note: VoiceNote) {
                     color = AppColors.TextPrimary,
                     modifier = Modifier.weight(1f),
                 )
-                Text("▶︎ Play", style = AppTypography.Button, color = AppColors.Coral)
+                Text("▶︎ Play", style = AppTypography.Button, color = AppAccent.primary)
             }
             note.transcription?.let {
                 Text(
@@ -287,7 +288,7 @@ private fun TodoRow(item: TodoItem) {
         Icon(
             imageVector = if (item.done) Icons.Filled.CheckCircle else Icons.Outlined.Circle,
             contentDescription = if (item.done) "Done" else "Not done",
-            tint = if (item.done) AppColors.Coral else AppColors.TextTertiary,
+            tint = if (item.done) AppAccent.primary else AppColors.TextTertiary,
             modifier = Modifier.padding(end = AppSpacing.s2),
         )
         Text(
@@ -323,7 +324,7 @@ private fun ScanRow(scan: ScannedDocument) {
                 Text(
                     "📄",
                     style = AppTypography.StatNumber,
-                    color = AppColors.Coral,
+                    color = AppAccent.primary,
                     modifier = Modifier.padding(end = AppSpacing.s3),
                 )
             }

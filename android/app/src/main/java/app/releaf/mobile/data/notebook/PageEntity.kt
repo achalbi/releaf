@@ -79,9 +79,23 @@ data class PageEntity(
      * JSON array of Stroke (freehand pen/highlighter strokes overlaying the
      * notes body). Coordinates are pinned — strokes don't reflow when text
      * edits push content around. See Stroke in PageAttachments.kt.
+     *
+     * Deprecated path now: when `sub_pages` carries content, it owns the
+     * stroke list per sub-page. This column is kept in sync with the first
+     * sub-page's strokes for back-compat and for rows that pre-date v3.
      */
     @ColumnInfo(name = "sketch_strokes", defaultValue = "'[]'")
     val sketchStrokes: String = "[]",
+
+    /**
+     * JSON array of SubPage — the horizontal sub-pages the user swipes
+     * between inside this page. Source of truth for notes + strokes
+     * once populated. Empty string `'[]'` means "this is a legacy row
+     * with content in the flat `notes` + `sketch_strokes` columns" —
+     * the VM synthesizes a single sub-page from them on load.
+     */
+    @ColumnInfo(name = "sub_pages", defaultValue = "'[]'")
+    val subPages: String = "[]",
 
     @ColumnInfo(name = "position", defaultValue = "1024")
     val position: Long = 1024L,

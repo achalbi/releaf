@@ -53,6 +53,32 @@ public enum AppColors {
     public static let danger600 = Color(hex: 0xC8432E)
     public static let danger700 = Color(hex: 0x983224)
 
+    // MARK: - Leaf theme variants (flat — no dark variant yet)
+
+    // coral theme — primary / deep / bgSoft (10%) / borderSoft (30%)
+    public static let themeCoralPrimary = Color(hex: 0xE07856)
+    public static let themeCoralDeep = Color(hex: 0xC65A3E)
+    public static let themeCoralBgSoft = Color(hex: 0xE07856, alpha: 0.102)
+    public static let themeCoralBorderSoft = Color(hex: 0xE07856, alpha: 0.302)
+
+    // green theme — primary / deep / bgSoft (10%) / borderSoft (30%)
+    public static let themeGreenPrimary = Color(hex: 0x7AA874)
+    public static let themeGreenDeep = Color(hex: 0x5B8C52)
+    public static let themeGreenBgSoft = Color(hex: 0x7AA874, alpha: 0.102)
+    public static let themeGreenBorderSoft = Color(hex: 0x7AA874, alpha: 0.302)
+
+    // yellow theme — primary / deep / bgSoft (10%) / borderSoft (30%)
+    public static let themeYellowPrimary = Color(hex: 0xF4C430)
+    public static let themeYellowDeep = Color(hex: 0xE8B923)
+    public static let themeYellowBgSoft = Color(hex: 0xF4C430, alpha: 0.102)
+    public static let themeYellowBorderSoft = Color(hex: 0xF4C430, alpha: 0.302)
+
+    // dry theme — primary / deep / bgSoft (10%) / borderSoft (30%)
+    public static let themeDryPrimary = Color(hex: 0xB8956A)
+    public static let themeDryDeep = Color(hex: 0x8B7355)
+    public static let themeDryBgSoft = Color(hex: 0xB8956A, alpha: 0.102)
+    public static let themeDryBorderSoft = Color(hex: 0xB8956A, alpha: 0.302)
+
     // MARK: - Roles (theme-aware via dynamicColor(…))
 
     /// App background — warm cream (light, matches Releaf Branding template) / warm dark (neutral900, dark)

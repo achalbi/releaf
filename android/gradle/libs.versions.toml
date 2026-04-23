@@ -55,6 +55,10 @@ commons-compress      = "1.28.0"
 # when supported because there's no model bundle — AICore ships the
 # Gemini Nano weights. Alpha as of 2026; no SLA yet.
 mlkit-genai-speech    = "1.0.0-alpha1"
+# AndroidX SplashScreen compat — backfills the Android 12+ SplashScreen API
+# down to API 23 so our branded launch theme renders on every device in the
+# minSdk 26 support range.
+core-splashscreen     = "1.0.1"
 
 [plugins]
 android-application  = { id = "com.android.application",                     version.ref = "agp" }
@@ -136,3 +140,7 @@ commons-compress          = { module = "org.apache.commons:commons-compress", ve
 # partial + final results. We use `AudioSource.fromPfd` to feed the
 # saved .m4a directly — no decode needed.
 mlkit-genai-speech        = { module = "com.google.mlkit:genai-speech-recognition", version.ref = "mlkit-genai-speech" }
+
+# SplashScreen compat — powers the branded cold-launch splash (leaf +
+# coral/green background) via `installSplashScreen()` in MainActivity.
+core-splashscreen         = { module = "androidx.core:core-splashscreen", version.ref = "core-splashscreen" }

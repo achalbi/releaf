@@ -2,12 +2,13 @@
  * NotebookLocalDetailViewModel.kt
  *
  * Backs the Room-backed notebook detail screen (route: `notebook/local/{id}`).
- * Fans three Flows together — notebook metadata, chapters list, and the flat
- * list of every page across those chapters — and re-groups into a
- * chapter → pages map for the screen to render section-by-section.
+ * Fans four Flows together — notebook metadata, chapters list, the flat
+ * list of every page across those chapters, and the per-chapter page count
+ * feed — and re-groups pages into a chapter → pages map for the screen
+ * and a chapter → count map for the chapter row's meta line.
  *
- * The VM exposes create/delete/undo actions for both chapters and pages so
- * the screen only ever talks to one surface.
+ * The VM exposes create/update/delete/undo actions for the notebook itself,
+ * plus chapters and pages, so the screen only ever talks to one surface.
  */
 
 package app.releaf.mobile.features.notebook
@@ -30,6 +31,7 @@ import app.releaf.mobile.data.notebook.PageRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -43,9 +45,14 @@ data class NotebookLocalDetailUiState(
      * without having to null-check per section.
      */
     val pagesByChapter: Map<String, List<PageEntity>> = emptyMap(),
+    /** Per-chapter live-page count — drives the "N page" meta line on rows. */
+    val pageCountsByChapter: Map<String, Int> = emptyMap(),
 ) {
     /** True when loading has settled and the notebook row is gone. */
     val notFound: Boolean get() = !isLoading && notebook == null
+
+    val totalChapterCount: Int get() = chapters.size
+    val totalPageCount: Int get() = pagesByChapter.values.sumOf { it.size }
 }
 
 class NotebookLocalDetailViewModel(
@@ -56,11 +63,15 @@ class NotebookLocalDetailViewModel(
     private val pageRepository: PageRepository,
 ) : AndroidViewModel(application) {
 
+    private val pageCountsFlow = pageRepository.observePageCountsByChapter()
+        .map { rows -> rows.associateBy({ it.chapterId }, { it.count }) }
+
     val state: StateFlow<NotebookLocalDetailUiState> = combine(
         notebookRepository.observeById(notebookId),
         chapterRepository.observeForNotebook(notebookId),
         pageRepository.observeForNotebook(notebookId),
-    ) { notebook, chapters, pages ->
+        pageCountsFlow,
+    ) { notebook, chapters, pages, pageCounts ->
         // Pre-seed every chapter with an empty list so the UI can render a
         // section for it even when it has no pages yet.
         val grouped = chapters.associate { it.id to emptyList<PageEntity>() }.toMutableMap()
@@ -74,14 +85,15 @@ class NotebookLocalDetailViewModel(
         // Within each chapter, re-sort by the page's own position (the flat
         // notebook query sorts by updated_at; we want stable per-chapter
         // ordering for the sectioned view).
-        grouped.mapValues { (_, list) ->
+        val sorted = grouped.mapValues { (_, list) ->
             list.sortedWith(compareBy({ it.position }, { it.createdAt }))
         }
         NotebookLocalDetailUiState(
-            isLoading      = false,
-            notebook       = notebook,
-            chapters       = chapters,
-            pagesByChapter = grouped,
+            isLoading            = false,
+            notebook             = notebook,
+            chapters             = chapters,
+            pagesByChapter       = sorted,
+            pageCountsByChapter  = pageCounts,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -89,13 +101,28 @@ class NotebookLocalDetailViewModel(
         initialValue = NotebookLocalDetailUiState(),
     )
 
+    /* ---------- notebook actions ---------- */
+
+    /** Apply an edit from the hero's Edit dialog. No-ops if unchanged. */
+    fun saveNotebook(title: String, description: String?) {
+        val current = state.value.notebook ?: return
+        val cleanedTitle = title.trim().ifEmpty { current.title }
+        val cleanedDescription = description?.trim()?.ifEmpty { null }
+        if (cleanedTitle == current.title && cleanedDescription == current.description) return
+        viewModelScope.launch {
+            notebookRepository.saveNotebook(
+                current.copy(title = cleanedTitle, description = cleanedDescription),
+            )
+        }
+    }
+
     /* ---------- chapter actions ---------- */
 
-    fun createChapter(title: String, onCreated: (String) -> Unit = {}) {
+    fun createChapter(title: String, description: String? = null, onCreated: (String) -> Unit = {}) {
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
-            val created = chapterRepository.createChapter(notebookId, trimmed)
+            val created = chapterRepository.createChapter(notebookId, trimmed, description)
             onCreated(created.id)
         }
     }

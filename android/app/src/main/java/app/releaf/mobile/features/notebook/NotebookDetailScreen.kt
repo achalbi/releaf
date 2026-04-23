@@ -33,6 +33,7 @@ import app.releaf.mobile.ui.components.AppButton
 import app.releaf.mobile.ui.components.AppButtonVariant
 import app.releaf.mobile.ui.components.PagePreviewRow
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 
@@ -50,7 +51,7 @@ fun NotebookDetailScreen(
         when (val s = state) {
             NotebookDetailUiState.Loading -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = AppColors.Coral)
+                    CircularProgressIndicator(color = AppAccent.primary)
                 }
             }
             is NotebookDetailUiState.Failed -> {
@@ -109,10 +110,10 @@ private fun Header(title: String, description: String?, onBack: () -> Unit) {
         Text(
             "← Back",
             style = AppTypography.Button,
-            color = AppColors.Coral,
+            color = AppAccent.primary,
             modifier = Modifier.clickable { onBack() },
         )
-        Text("NOTEBOOK", style = AppTypography.Eyebrow, color = AppColors.Coral)
+        Text("NOTEBOOK", style = AppTypography.Eyebrow, color = AppAccent.primary)
         Text(title, style = AppTypography.EditorialTitle, color = AppColors.TextPrimary)
         description?.let {
             Text(it, style = AppTypography.Body, color = AppColors.TextSecondary)

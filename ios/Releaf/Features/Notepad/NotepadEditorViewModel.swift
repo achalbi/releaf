@@ -320,6 +320,53 @@ public final class NotepadEditorViewModel: ObservableObject {
             await MainActor.run { onDeleted() }
         }
     }
+
+    // MARK: - Merge
+
+    /// One-shot snapshot of every other saved notepad entry (the merge
+    /// picker's option list). New/unsaved drafts still surface every
+    /// other entry (nothing to exclude yet), matching the Kotlin twin.
+    public func loadOtherEntries() async -> [NotepadEntry] {
+        let rows = (try? await repository.activeRows(userId: userId)) ?? []
+        let selfId = entry?.id
+        return selfId == nil ? rows : rows.filter { $0.id != selfId }
+    }
+
+    /// Merge this entry with `otherId`. When `keepThisAsPrimary` is true,
+    /// the other entry is folded into this one (this page stays open,
+    /// just refreshed). When false, this entry is folded into the other
+    /// and removed — the caller should navigate away because the editor
+    /// is now showing a soft-deleted row. `onDone` fires on the main
+    /// actor with the surviving row's id so callers can route.
+    ///
+    /// Flushes the current draft first so unsaved edits on this page
+    /// are included in the merge rather than dropped on the floor.
+    public func merge(
+        otherId: String,
+        keepThisAsPrimary: Bool,
+        onDone: @escaping (String) -> Void
+    ) {
+        // Flush the current draft so in-flight edits land before the
+        // merge transaction reads the row. `save()` is idempotent.
+        save()
+        Task { [repository, weak self] in
+            // Tiny delay so the save() Task above wins the write lock
+            // first. Without this the merge can read a stale snapshot.
+            try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+            guard let self else { return }
+            let selfId = await MainActor.run { self.entry?.id }
+            guard let selfId else { return }
+            let primaryId   = keepThisAsPrimary ? selfId  : otherId
+            let secondaryId = keepThisAsPrimary ? otherId : selfId
+            let ok = (try? await repository.merge(
+                primaryId: primaryId,
+                secondaryId: secondaryId,
+            )) ?? false
+            if ok {
+                await MainActor.run { onDone(primaryId) }
+            }
+        }
+    }
 }
 
 // MARK: - Helpers

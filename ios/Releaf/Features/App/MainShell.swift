@@ -30,10 +30,16 @@ public struct MainShell: View {
 
     @State private var hideBottomBar: Bool = false
 
+    // First-run onboarding state. Auto-shown when
+    // `completedAt == 0`; the Home-screen widget re-opens it later.
+    @AppStorage("onboarding.completedAt") private var completedAt: Double = 0
+    @State private var showOnboarding: Bool = false
+
     public init() {}
 
     public var body: some View {
         tabContent
+            .environment(\.showOnboardingWizard, { showOnboarding = true })
             .onPreferenceChange(HideBottomBarKey.self) { hideBottomBar = $0 }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !hideBottomBar {
@@ -60,6 +66,33 @@ public struct MainShell: View {
                     // TODO: route to capture flow once implemented
                     showCapture = false
                 }
+            }
+            .sheet(
+                isPresented: $showOnboarding,
+                onDismiss: {
+                    // Swipe-to-dismiss bypasses our explicit dismiss
+                    // callback; mark complete here so the wizard
+                    // doesn't re-fire on the next launch.
+                    if completedAt == 0 {
+                        completedAt = Date().timeIntervalSince1970
+                    }
+                }
+            ) {
+                OnboardingWizard(
+                    onDismiss: { showOnboarding = false },
+                    onCta: { cta in
+                        switch cta {
+                        case .notebook: selection = "notebook"
+                        case .notepad:  selection = "notepad"
+                        }
+                    }
+                )
+            }
+            .onAppear {
+                // Fire once on first presentation of the shell. The
+                // guard against re-fire handles tab switches that would
+                // otherwise re-trigger this block.
+                if completedAt == 0 && !showOnboarding { showOnboarding = true }
             }
             .tint(AppColors.coral)
     }

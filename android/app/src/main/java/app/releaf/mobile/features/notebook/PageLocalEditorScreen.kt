@@ -18,6 +18,7 @@
 
 package app.releaf.mobile.features.notebook
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -27,12 +28,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
@@ -42,30 +44,31 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.releaf.mobile.data.notebook.Attachment
 import app.releaf.mobile.data.notebook.Stroke
 import app.releaf.mobile.ui.components.BreadcrumbSegment
 import app.releaf.mobile.ui.components.Breadcrumbs
+import app.releaf.mobile.ui.components.CaptureMode
 import app.releaf.mobile.ui.components.DotGridBackground
 import app.releaf.mobile.ui.components.editor.ContactsSection
 import app.releaf.mobile.ui.components.editor.DrawingColorSaver
 import app.releaf.mobile.ui.components.editor.DrawingMode
 import app.releaf.mobile.ui.components.editor.DrawingModeSaver
-import app.releaf.mobile.ui.components.editor.DrawingOverlay
 import app.releaf.mobile.ui.components.editor.DrawingPalette
 import app.releaf.mobile.ui.components.editor.DrawingThicknesses
 import app.releaf.mobile.ui.components.editor.DrawingToolbar
@@ -77,24 +80,32 @@ import app.releaf.mobile.ui.components.editor.PenConfig
 import app.releaf.mobile.ui.components.editor.PhotosSection
 import app.releaf.mobile.ui.components.editor.RichTextFormatBar
 import app.releaf.mobile.ui.components.editor.ScansSection
+import app.releaf.mobile.ui.components.editor.SubPageEditorPager
 import app.releaf.mobile.ui.components.editor.TodosSection
 import app.releaf.mobile.ui.components.editor.VoiceSection
 import app.releaf.mobile.ui.components.editor.WordCountFooter
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 import com.mohamedrejeb.richeditor.model.RichTextState
-import com.mohamedrejeb.richeditor.model.rememberRichTextState
-import com.mohamedrejeb.richeditor.ui.BasicRichTextEditor
 
 @Composable
 fun PageLocalEditorScreen(
     onBack: () -> Unit,
+    onHome: () -> Unit,
+    onNotebooksTab: () -> Unit,
+    onOpenNotebook: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * CaptureTabBar tab to pre-select — wired up for the Quick Capture
+     * flow so tapping "Photos" (or any other feature) in the middle-leaf
+     * sheet lands the new page already scrolled to that section.
+     */
+    initialCaptureMode: CaptureMode? = null,
     viewModel: PageLocalEditorViewModel = viewModel(factory = PageLocalEditorViewModel.Factory),
 ) {
     val state by viewModel.state.collectAsState()
-    val richTextState = rememberRichTextState()
     // Overview (grid) is the default — matches the page-detail design
     // on the Home tab. Users flip to the list icon when they want the
     // single-scroll rich-text editor.
@@ -116,17 +127,65 @@ fun PageLocalEditorScreen(
     var drawWidth by rememberSaveable { mutableStateOf(DrawingThicknesses[1].widthDp) }
     var drawNib by rememberSaveable { mutableStateOf(Stroke.NIB_BALLPOINT) }
 
-    // Hydrate once on bootstrap. Both editor modes share `richTextState`,
-    // so no mode-triggered re-hydration is needed.
-    LaunchedEffect(state.isLoading) {
-        if (!state.isLoading) {
-            richTextState.setMarkdown(state.notes)
+    // One RichTextState per sub-page. Stays at screen level so Edit mode
+    // and the Overview sheet both read/write the same in-flight text (no
+    // round-trip through the VM on mode switch). The map is a plain
+    // `mutableMapOf` remembered once — getOrPut below makes the fill
+    // idempotent, and prune clears entries for removed sub-pages.
+    val richTextStates = remember { mutableMapOf<String, RichTextState>() }
+    state.subPages.forEach { sp ->
+        richTextStates.getOrPut(sp.id) {
+            RichTextState().apply { setMarkdown(sp.notes) }
         }
     }
+    val liveIds = state.subPages.map { it.id }.toSet()
+    richTextStates.keys.removeAll { it !in liveIds }
 
+    // Pager state owned by the screen so the bottom format bar / word
+    // count can read the currently-visible sub-page. Re-keyed on the
+    // loaded-state flip so we don't seed pageCount with 0 and wedge the
+    // initial scroll.
+    val pagerState = rememberPagerState(
+        initialPage = 0,
+        pageCount   = { state.subPages.size },
+    )
+
+    val currentSubPage = state.subPages.getOrNull(pagerState.currentPage)
+    val currentRts = currentSubPage?.let { richTextStates[it.id] }
+
+    val context = LocalContext.current
+    // "Add to notes" on a voice-note card — always append to the *last*
+    // sub-page. Same rationale as NotepadEditorScreen: that's where
+    // the user is usually writing, older sub-pages stay untouched.
+    val addVoiceTranscriptToNotes: (String) -> Unit = addVoice@{ text ->
+        // Skip ruled (ledger) sub-pages when picking the target — they
+        // have no text body, so an append would be dropped on the
+        // floor. Fall back to the latest non-ruled sub-page; Toast if
+        // there isn't one so the user knows why the action no-op'd.
+        val target = state.subPages.lastOrNull { it.background != app.releaf.mobile.data.notebook.SubPage.BG_RULED }
+        if (target == null) {
+            Toast.makeText(context, "Add a notes page first", Toast.LENGTH_SHORT).show()
+            return@addVoice
+        }
+        val rts = richTextStates[target.id] ?: return@addVoice
+        val existing = rts.toMarkdown()
+        val separator = if (existing.isBlank()) "" else "\n\n"
+        rts.setMarkdown(existing + separator + text.trim())
+        viewModel.updateSubPageNotes(target.id, rts.toMarkdown())
+        Toast.makeText(context, "Added to notes", Toast.LENGTH_SHORT).show()
+    }
+
+    // Capture the latest state for dispose-time flush. DisposableEffect
+    // keyed on `viewModel` doesn't re-run per state emit, so we read
+    // through rememberUpdatedState to get the most recent snapshot.
+    val stateRef by rememberUpdatedState(state)
     DisposableEffect(viewModel) {
         onDispose {
-            viewModel.updateNotes(richTextState.toMarkdown())
+            stateRef.subPages.forEach { sp ->
+                richTextStates[sp.id]?.let { rts ->
+                    viewModel.updateSubPageNotes(sp.id, rts.toMarkdown())
+                }
+            }
             viewModel.save()
         }
     }
@@ -150,7 +209,11 @@ fun PageLocalEditorScreen(
                 }
         ) {
         val popBack: () -> Unit = {
-            viewModel.updateNotes(richTextState.toMarkdown())
+            state.subPages.forEach { sp ->
+                richTextStates[sp.id]?.let { rts ->
+                    viewModel.updateSubPageNotes(sp.id, rts.toMarkdown())
+                }
+            }
             viewModel.save()
             onBack()
         }
@@ -159,11 +222,35 @@ fun PageLocalEditorScreen(
             if (state.exists) "Untitled page" else "Page"
         }
 
+        val notebook = state.notebook
+        val crumbs = buildList {
+            add(BreadcrumbSegment(label = "Home", onTap = onHome))
+            add(BreadcrumbSegment(label = "Notebook", onTap = onNotebooksTab))
+            if (notebook != null) {
+                val nbId = notebook.id
+                add(
+                    BreadcrumbSegment(
+                        label = notebook.title.ifBlank { "Notebook" },
+                        onTap = {
+                            // Flush in-flight notes before we route away — the
+                            // editor saves on popBack, but breadcrumb taps
+                            // bypass that path.
+                            state.subPages.forEach { sp ->
+                                richTextStates[sp.id]?.let { rts ->
+                                    viewModel.updateSubPageNotes(sp.id, rts.toMarkdown())
+                                }
+                            }
+                            viewModel.save()
+                            onOpenNotebook(nbId)
+                        },
+                    ),
+                )
+            }
+            add(BreadcrumbSegment(label = pageTitleLabel))
+        }
+
         TopBar(
-            segments = listOf(
-                BreadcrumbSegment(label = "Notebook", onTap = popBack),
-                BreadcrumbSegment(label = pageTitleLabel),
-            ),
+            segments = crumbs,
             showDelete = state.exists,
             editorMode = editorMode,
             onChangeMode = { newMode -> editorMode = newMode },
@@ -195,7 +282,7 @@ fun PageLocalEditorScreen(
                     Modifier.weight(1f).fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator(color = AppColors.Coral)
+                    CircularProgressIndicator(color = AppAccent.primary)
                 }
             }
 
@@ -206,31 +293,87 @@ fun PageLocalEditorScreen(
             }
 
             editorMode == EditorMode.OVERVIEW -> {
+                // Overview's preview + fullscreen sheet always bind to
+                // the *last* sub-page — the user's latest entry, where
+                // "Add to notes" also lands. Multi-sub-page navigation
+                // lives in Edit mode.
+                val lastSp  = state.subPages.lastOrNull()
+                val lastRts = lastSp?.let { richTextStates[it.id] }
                 Box(Modifier.weight(1f)) {
                     OverviewPane(
-                        richTextState = richTextState,
+                        richTextState = lastRts ?: RichTextState(),
                         contacts      = state.contacts,
                         todos         = state.todos,
                         locations     = state.locations,
                         attachments   = state.attachments,
-                        onAddContact    = { name -> viewModel.addContact(name) },
+                        onAddContact    = { name, phone, landline, email, title, organization, location, website ->
+                            viewModel.addContact(
+                                name         = name,
+                                phone        = phone,
+                                landline     = landline,
+                                email        = email,
+                                title        = title,
+                                organization = organization,
+                                location     = location,
+                                website      = website,
+                            )
+                        },
+                        onEditContact   = { id, name, phone, landline, email, title, organization, location, website ->
+                            viewModel.updateContact(
+                                id           = id,
+                                name         = name,
+                                phone        = phone,
+                                landline     = landline,
+                                email        = email,
+                                title        = title,
+                                organization = organization,
+                                location     = location,
+                                website      = website,
+                            )
+                        },
                         onRemoveContact = viewModel::removeContact,
                         onAddTodo       = viewModel::addTodo,
                         onToggleTodo    = viewModel::toggleTodo,
                         onRemoveTodo    = viewModel::removeTodo,
+                        onUpdateTodoPriority = viewModel::updateTodoPriority,
+                        onReorderTodos  = viewModel::reorderTodos,
                         onAddLocation   = { lat, lng, address -> viewModel.addLocation(lat, lng, address) },
+                        onUpdateLocationCoords = viewModel::updateLocationCoords,
                         onRemoveLocation = viewModel::removeLocation,
                         onAddPhoto      = { uri -> viewModel.addAttachment(Attachment.TYPE_PHOTO, uri) },
+                        onCombinePhotosToPdf = { pdfUri, previewUri ->
+                            viewModel.addAttachment(Attachment.TYPE_SCAN, pdfUri, previewUri)
+                        },
                         onAddScan       = { uri, preview, pageUris ->
                             viewModel.addScan(uri, preview, pageUris)
                         },
                         onAddVoiceNote  = { uri, durationMs ->
                             viewModel.addVoiceNote(uri, durationMs)
                         },
-                        onTranscribeVoiceNote = { uri, transcript ->
-                            viewModel.updateVoiceTranscript(uri, transcript)
+                        onTranscribeVoiceNote = { uri, transcript, source ->
+                            viewModel.updateVoiceTranscript(uri, transcript, source)
                         },
+                        onAddVoiceNoteTranscriptToNotes = addVoiceTranscriptToNotes,
                         onRemoveAttachment = viewModel::removeAttachment,
+                        subPages                  = state.subPages,
+                        richTextStates            = richTextStates,
+                        onSubPageStrokesChange    = viewModel::updateSubPageStrokes,
+                        onSubPageTextBoxesChange  = viewModel::updateSubPageTextBoxes,
+                        onSubPageLedgerChange     = viewModel::updateSubPageLedger,
+                        onAddSubPage              = viewModel::addSubPage,
+                        onRemoveSubPage           = viewModel::removeSubPage,
+                        onSubPageBackgroundChange = viewModel::updateSubPageBackground,
+                        onSubPageBgScaleChange    = viewModel::updateSubPageBgScale,
+                        onPhotoExported           = { uri ->
+                            viewModel.addAttachment(Attachment.TYPE_PHOTO, uri)
+                        },
+                        onImportPageToNotes       = { pageImageUri ->
+                            viewModel.addSubPageFromImage(pageImageUri)
+                        },
+                        onEditScan                = { id, title, categoryId ->
+                            viewModel.updateScan(id, title, categoryId)
+                        },
+                        initialCaptureMode        = initialCaptureMode,
                     )
                 }
             }
@@ -244,22 +387,32 @@ fun PageLocalEditorScreen(
                 )
                 Box(Modifier.weight(1f)) {
                     EditorBody(
-                        state         = state,
-                        viewModel     = viewModel,
-                        richTextState = richTextState,
-                        drawingMode   = drawingMode,
-                        penConfig     = penConfig,
+                        state                       = state,
+                        viewModel                   = viewModel,
+                        pagerState                  = pagerState,
+                        richTextStates              = richTextStates,
+                        drawingMode                 = drawingMode,
+                        penConfig                   = penConfig,
+                        onAddVoiceTranscriptToNotes = addVoiceTranscriptToNotes,
                     )
                 }
-                WordCountFooter(text = richTextState.annotatedString.text)
+                if (currentRts != null) {
+                    WordCountFooter(text = currentRts.annotatedString.text)
+                }
                 if (drawingMode == DrawingMode.Off) {
-                    RichTextFormatBar(
-                        state          = richTextState,
-                        onEnterDrawing = {
-                            focusManager.clearFocus()
-                            drawingMode = DrawingMode.Pen
-                        },
-                    )
+                    // Only render the format bar when there's a live
+                    // RichTextState to bind to — on the first frame (or
+                    // while sub-pages are still being rehydrated) that
+                    // can briefly be null.
+                    if (currentRts != null) {
+                        RichTextFormatBar(
+                            state          = currentRts,
+                            onEnterDrawing = {
+                                focusManager.clearFocus()
+                                drawingMode = DrawingMode.Pen
+                            },
+                        )
+                    }
                 } else {
                     DrawingToolbar(
                         mode            = drawingMode,
@@ -272,6 +425,7 @@ fun PageLocalEditorScreen(
                         onWidthChange   = { drawWidth = it },
                         nib             = drawNib,
                         onNibChange     = { drawNib = it },
+                        onClose         = { drawingMode = DrawingMode.Off },
                     )
                 }
             }
@@ -344,47 +498,56 @@ private fun TopBar(
 private fun EditorBody(
     state: PageLocalEditorUiState,
     viewModel: PageLocalEditorViewModel,
-    richTextState: RichTextState,
+    pagerState: PagerState,
+    richTextStates: MutableMap<String, RichTextState>,
     drawingMode: DrawingMode,
     penConfig: PenConfig,
+    onAddVoiceTranscriptToNotes: (String) -> Unit,
 ) {
     val scroll = rememberScrollState()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(scroll)
-            .padding(horizontal = AppSpacing.s4),
+            .verticalScroll(scroll),
         verticalArrangement = Arrangement.spacedBy(AppSpacing.s4),
     ) {
-        // Title is rendered at screen level (above this scroll) so it
-        // stays pinned while the body scrolls. The drawing overlay
-        // stacks directly above the rich-text editor — when mode is
-        // Off it doesn't install a pointerInput modifier so text
-        // editing stays unaffected. `defaultMinSize` gives a usable
-        // drawing area even before the user has typed anything.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .defaultMinSize(minHeight = 360.dp),
-        ) {
-            NotesField(state = richTextState)
-            DrawingOverlay(
-                strokes         = state.strokes,
-                mode            = drawingMode,
-                penConfig       = penConfig,
-                onStrokesChange = viewModel::updateStrokes,
-                modifier        = Modifier.matchParentSize(),
-            )
-        }
+        // Horizontal sub-pages. The pager owns its own horizontal
+        // padding + card styling; the screen's vertical scroll wraps
+        // it + the feature sections below.
+        SubPageEditorPager(
+            subPages           = state.subPages,
+            pagerState         = pagerState,
+            richTextStates     = richTextStates,
+            drawingMode        = drawingMode,
+            penConfig          = penConfig,
+            onStrokesChange    = viewModel::updateSubPageStrokes,
+            onTextBoxesChange  = viewModel::updateSubPageTextBoxes,
+            onLedgerChange     = viewModel::updateSubPageLedger,
+            onAddSubPage       = viewModel::addSubPage,
+            onRemoveSubPage    = viewModel::removeSubPage,
+            onBackgroundChange = viewModel::updateSubPageBackground,
+            onBgScaleChange    = viewModel::updateSubPageBgScale,
+            onPhotoExported    = { uri ->
+                viewModel.addAttachment(Attachment.TYPE_PHOTO, uri)
+            },
+        )
 
-        // Feature sections below the body. Each owns its own capture flow
+        // Feature sections below the pager. Each owns its own capture flow
         // (permissions, intent senders) and calls back into the VM for
-        // the actual state changes.
+        // the actual state changes. Horizontal padding here to match the
+        // old NotesField layout, since the pager handles its own.
+        Column(
+            modifier = Modifier.padding(horizontal = AppSpacing.s4),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s4),
+        ) {
         PhotosSection(
             photos   = state.attachments.filter { it.type == Attachment.TYPE_PHOTO },
             onAdd    = { uri -> viewModel.addAttachment(Attachment.TYPE_PHOTO, uri) },
             onRemove = viewModel::removeAttachment,
+            onCombineToPdf = { pdfUri, previewUri ->
+                viewModel.addAttachment(Attachment.TYPE_SCAN, pdfUri, previewUri)
+            },
         )
         ScansSection(
             scans    = state.attachments.filter { it.type == Attachment.TYPE_SCAN },
@@ -392,29 +555,66 @@ private fun EditorBody(
                 viewModel.addScan(uri, preview, pageUris)
             },
             onRemove = viewModel::removeAttachment,
+            onImportPageToNotes = { pageImageUri ->
+                viewModel.addSubPageFromImage(pageImageUri)
+            },
+            onEditScan = { id, title, categoryId ->
+                viewModel.updateScan(id, title, categoryId)
+            },
         )
         VoiceSection(
-            notes    = state.attachments.filter { it.type == Attachment.TYPE_VOICE },
-            onAdd          = { uri, durationMs -> viewModel.addVoiceNote(uri, durationMs) },
-            onTranscribed  = { uri, transcript -> viewModel.updateVoiceTranscript(uri, transcript) },
-            onRemove = viewModel::removeAttachment,
+            notes                  = state.attachments.filter { it.type == Attachment.TYPE_VOICE },
+            onAdd                  = { uri, durationMs -> viewModel.addVoiceNote(uri, durationMs) },
+            onTranscribed          = { uri, transcript, source ->
+                viewModel.updateVoiceTranscript(uri, transcript, source)
+            },
+            onAddTranscriptToNotes = onAddVoiceTranscriptToNotes,
+            onRemove               = viewModel::removeAttachment,
         )
         ContactsSection(
             contacts = state.contacts,
-            onAdd    = { name -> viewModel.addContact(name) },
+            onAdd    = { name, phone, landline, email, title, organization, location, website ->
+                viewModel.addContact(
+                    name         = name,
+                    phone        = phone,
+                    landline     = landline,
+                    email        = email,
+                    title        = title,
+                    organization = organization,
+                    location     = location,
+                    website      = website,
+                )
+            },
+            onEdit   = { id, name, phone, landline, email, title, organization, location, website ->
+                viewModel.updateContact(
+                    id           = id,
+                    name         = name,
+                    phone        = phone,
+                    landline     = landline,
+                    email        = email,
+                    title        = title,
+                    organization = organization,
+                    location     = location,
+                    website      = website,
+                )
+            },
             onRemove = viewModel::removeContact,
         )
         TodosSection(
-            todos    = state.todos,
-            onAdd    = viewModel::addTodo,
-            onToggle = viewModel::toggleTodo,
-            onRemove = viewModel::removeTodo,
+            todos            = state.todos,
+            onAdd            = viewModel::addTodo,
+            onToggle         = viewModel::toggleTodo,
+            onRemove         = viewModel::removeTodo,
+            onUpdatePriority = viewModel::updateTodoPriority,
+            onReorder        = viewModel::reorderTodos,
         )
         LocationSection(
-            locations = state.locations,
-            onAdd     = { lat, lng, address -> viewModel.addLocation(lat, lng, address) },
-            onRemove  = viewModel::removeLocation,
+            locations      = state.locations,
+            onAdd          = { lat, lng, address -> viewModel.addLocation(lat, lng, address) },
+            onUpdateCoords = viewModel::updateLocationCoords,
+            onRemove       = viewModel::removeLocation,
         )
+        } // end feature-sections Column
 
         Spacer(Modifier.height(AppSpacing.s10))
     }
@@ -445,27 +645,8 @@ private fun TitleField(
             onValueChange = onValueChange,
             singleLine    = true,
             textStyle     = titleStyle,
-            cursorBrush   = SolidColor(AppColors.Coral),
+            cursorBrush   = SolidColor(AppAccent.primary),
             modifier      = Modifier.fillMaxWidth(),
-        )
-    }
-}
-
-@Composable
-private fun NotesField(state: RichTextState) {
-    Box(Modifier.fillMaxWidth()) {
-        if (state.annotatedString.text.isEmpty()) {
-            Text(
-                "Start typing…",
-                style = AppTypography.Body,
-                color = AppColors.TextTertiary,
-            )
-        }
-        BasicRichTextEditor(
-            state       = state,
-            textStyle   = AppTypography.Body.copy(color = AppColors.TextPrimary),
-            cursorBrush = SolidColor(AppColors.Coral),
-            modifier    = Modifier.fillMaxWidth(),
         )
     }
 }
@@ -494,7 +675,7 @@ private fun MissingPageState(onBack: () -> Unit) {
         Text(
             "Back",
             style = AppTypography.Button,
-            color = AppColors.Coral,
+            color = AppAccent.primary,
             modifier = Modifier.clickable { onBack() },
         )
     }

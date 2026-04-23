@@ -36,6 +36,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -48,7 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,9 +58,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import app.releaf.mobile.data.notebook.Attachment
 import app.releaf.mobile.data.notebook.Contact
 import app.releaf.mobile.data.notebook.GeoLocation
+import app.releaf.mobile.data.notebook.Stroke
+import app.releaf.mobile.data.notebook.SubPage
 import app.releaf.mobile.data.notebook.TodoItem
 import app.releaf.mobile.ui.components.CaptureMode
 import app.releaf.mobile.ui.components.CaptureTabBar
@@ -67,6 +72,7 @@ import app.releaf.mobile.ui.components.StatItem
 import app.releaf.mobile.ui.components.StatTone
 import androidx.compose.ui.unit.sp
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
@@ -86,18 +92,79 @@ fun OverviewPane(
     todos: List<TodoItem>,
     locations: List<GeoLocation>,
     attachments: List<Attachment>,
-    onAddContact: (String) -> Unit,
+    onAddContact: (
+        name: String,
+        phone: String?,
+        landline: String?,
+        email: String?,
+        title: String?,
+        organization: String?,
+        location: String?,
+        website: String?,
+    ) -> Unit,
+    onEditContact: (
+        id: String,
+        name: String,
+        phone: String?,
+        landline: String?,
+        email: String?,
+        title: String?,
+        organization: String?,
+        location: String?,
+        website: String?,
+    ) -> Unit,
     onRemoveContact: (String) -> Unit,
     onAddTodo: (String) -> Unit,
     onToggleTodo: (String) -> Unit,
     onRemoveTodo: (String) -> Unit,
-    onAddLocation: (Double, Double, String?) -> Unit,
+    onUpdateTodoPriority: (id: String, priority: Int) -> Unit,
+    onReorderTodos: (newList: List<TodoItem>) -> Unit,
+    /** Adds a location row and returns the new row's id so the section
+     *  can refine its coordinates later via [onUpdateLocationCoords]. */
+    onAddLocation: (lat: Double, lng: Double, address: String?) -> String,
+    /** Background coordinate refinement — called when a precise GPS
+     *  fix arrives after the row was already shown with the fast
+     *  cached fix. No-op in the VM when the id has been removed. */
+    onUpdateLocationCoords: (id: String, lat: Double, lng: Double) -> Unit,
     onRemoveLocation: (String) -> Unit,
     onAddPhoto: (String) -> Unit,
+    onCombinePhotosToPdf: (pdfUri: String, previewUri: String?) -> Unit,
     onAddScan: (String, String?, List<Uri>) -> Unit,
     onAddVoiceNote: (String, Long) -> Unit,
-    onTranscribeVoiceNote: (String, String?) -> Unit,
+    onTranscribeVoiceNote: (uri: String, transcript: String?, source: String?) -> Unit,
+    /** "Add to notes" button on a transcribed voice-note card — the
+     *  screen appends the text to whichever sub-page's RichTextState
+     *  is currently visible. */
+    onAddVoiceNoteTranscriptToNotes: (transcript: String) -> Unit,
     onRemoveAttachment: (String) -> Unit,
+    /**
+     * Full sub-page list + the in-flight RichTextStates keyed by
+     * sub-page id. Hoisted from the screen so the fullscreen
+     * `NotesEditorSheet` shares drafts with Edit mode (no round-trip
+     * through the VM on mode switch).
+     */
+    subPages: List<SubPage>,
+    richTextStates: Map<String, RichTextState>,
+    onSubPageStrokesChange: (id: String, strokes: List<Stroke>) -> Unit,
+    onSubPageTextBoxesChange: (id: String, textBoxes: List<app.releaf.mobile.data.notebook.TextBox>) -> Unit,
+    onSubPageLedgerChange: (id: String, entries: List<app.releaf.mobile.data.notebook.LedgerEntry>) -> Unit = { _, _ -> },
+    onAddSubPage: () -> String,
+    onRemoveSubPage: (id: String) -> Unit,
+    onSubPageBackgroundChange: (id: String, background: String) -> Unit,
+    onSubPageBgScaleChange: (id: String, scale: Float) -> Unit,
+    onPhotoExported: (uri: String) -> Unit,
+    /** "Import PDF page to notes" — receives a `file://` URI for a JPG
+     *  rendered out of the PDF viewer, appends a new sub-page with it
+     *  as the drawable background. */
+    onImportPageToNotes: (pageImageUri: String) -> Unit,
+    onEditScan: (id: String, title: String?, categoryId: String?) -> Unit,
+    /**
+     * Initial tab to land on. Non-null when the user arrived via Quick
+     * Capture and picked a specific capture mode (e.g. Photos, Voice);
+     * null defaults to Overview. Only used for the initial state —
+     * switching tabs afterward is purely local.
+     */
+    initialCaptureMode: CaptureMode? = null,
     modifier: Modifier = Modifier,
 ) {
     // All seven modes render; Voice got its own section once
@@ -105,21 +172,49 @@ fun OverviewPane(
     // directly.
     val modes = remember { CaptureMode.entries.toList() }
 
-    var selected by rememberSaveable(stateSaver = captureModeSaver) {
-        mutableStateOf(CaptureMode.Overview)
+    // Tab state is driven by a HorizontalPager now so horizontal swipes
+    // across the body animate between tabs — no separate `selected`
+    // var, just `pagerState.currentPage` projected back onto
+    // CaptureMode. `initialCaptureMode` resolves to `initialPage`;
+    // subsequent state is saved by PagerState itself.
+    val initialIndex = remember(initialCaptureMode) {
+        (initialCaptureMode ?: CaptureMode.Overview)
+            .let(modes::indexOf)
+            .coerceAtLeast(0)
     }
+    val pagerState = rememberPagerState(
+        initialPage = initialIndex,
+        pageCount   = { modes.size },
+    )
+    val scope = rememberCoroutineScope()
+    val selectedMode = modes[pagerState.currentPage]
+
+    /** Programmatic jump used by both the tab bar and the Overview
+     *  stat-card taps. Animated so the transition matches a swipe
+     *  gesture visually — no abrupt cuts. */
+    val jumpToTab: (CaptureMode) -> Unit = { mode ->
+        val idx = modes.indexOf(mode)
+        if (idx >= 0 && idx != pagerState.currentPage) {
+            scope.launch { pagerState.animateScrollToPage(idx) }
+        }
+    }
+
     var notesSheetOpen by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
         // --- CaptureTabBar ---
         CaptureTabBar(
-            selected = selected,
-            onSelect = { selected = it },
+            selected = selectedMode,
+            onSelect = jumpToTab,
             modes    = modes,
         )
 
-        // --- Tab body ---
-        Box(Modifier.weight(1f)) {
+        // --- Tab body (swipeable) ---
+        HorizontalPager(
+            state    = pagerState,
+            modifier = Modifier.weight(1f),
+        ) { page ->
+            val mode = modes[page]
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -127,46 +222,56 @@ fun OverviewPane(
                     .padding(AppSpacing.s4),
                 verticalArrangement = Arrangement.spacedBy(AppSpacing.s4),
             ) {
-                when (selected) {
+                when (mode) {
                     CaptureMode.Overview -> OverviewTab(
                         richTextState = richTextState,
                         contacts      = contacts,
                         todos         = todos,
                         locations     = locations,
                         attachments   = attachments,
+                        subPageCount  = subPages.size,
                         onEditNotes   = { notesSheetOpen = true },
+                        onJumpToTab   = jumpToTab,
                     )
                     CaptureMode.Photos -> PhotosSection(
-                        photos   = attachments.filter { it.type == Attachment.TYPE_PHOTO },
-                        onAdd    = onAddPhoto,
-                        onRemove = onRemoveAttachment,
+                        photos         = attachments.filter { it.type == Attachment.TYPE_PHOTO },
+                        onAdd          = onAddPhoto,
+                        onRemove       = onRemoveAttachment,
+                        onCombineToPdf = onCombinePhotosToPdf,
                     )
                     CaptureMode.Scans -> ScansSection(
                         scans    = attachments.filter { it.type == Attachment.TYPE_SCAN },
                         onAdd    = onAddScan,
                         onRemove = onRemoveAttachment,
+                        onImportPageToNotes = onImportPageToNotes,
+                        onEditScan = onEditScan,
                     )
                     CaptureMode.Voice -> VoiceSection(
-                        notes         = attachments.filter { it.type == Attachment.TYPE_VOICE },
-                        onAdd         = onAddVoiceNote,
-                        onTranscribed = onTranscribeVoiceNote,
-                        onRemove      = onRemoveAttachment,
+                        notes                  = attachments.filter { it.type == Attachment.TYPE_VOICE },
+                        onAdd                  = onAddVoiceNote,
+                        onTranscribed          = onTranscribeVoiceNote,
+                        onAddTranscriptToNotes = onAddVoiceNoteTranscriptToNotes,
+                        onRemove               = onRemoveAttachment,
                     )
                     CaptureMode.Todo -> TodosSection(
-                        todos    = todos,
-                        onAdd    = onAddTodo,
-                        onToggle = onToggleTodo,
-                        onRemove = onRemoveTodo,
+                        todos            = todos,
+                        onAdd            = onAddTodo,
+                        onToggle         = onToggleTodo,
+                        onRemove         = onRemoveTodo,
+                        onUpdatePriority = onUpdateTodoPriority,
+                        onReorder        = onReorderTodos,
                     )
                     CaptureMode.Contacts -> ContactsSection(
                         contacts = contacts,
                         onAdd    = onAddContact,
+                        onEdit   = onEditContact,
                         onRemove = onRemoveContact,
                     )
                     CaptureMode.Location -> LocationSection(
-                        locations = locations,
-                        onAdd     = onAddLocation,
-                        onRemove  = onRemoveLocation,
+                        locations      = locations,
+                        onAdd          = onAddLocation,
+                        onUpdateCoords = onUpdateLocationCoords,
+                        onRemove       = onRemoveLocation,
                     )
                 }
                 Spacer(Modifier.height(AppSpacing.s10))
@@ -175,13 +280,23 @@ fun OverviewPane(
 
     }
 
-    // Full-screen editing sheet. Binds to the same RichTextState, so
-    // anything typed here flows back into the Overview preview on
-    // dismiss and into Edit mode automatically.
-    if (notesSheetOpen) {
+    // Full-screen editing sheet. Shares the caller's `richTextStates`
+    // map, so typing here flows back into Edit mode on dismiss. The
+    // sheet hosts its own `SubPageEditorPager` for multi-sub-page
+    // navigation.
+    if (notesSheetOpen && subPages.isNotEmpty()) {
         NotesEditorSheet(
-            richTextState = richTextState,
-            onDismiss     = { notesSheetOpen = false },
+            subPages                  = subPages,
+            richTextStates            = richTextStates,
+            onSubPageStrokesChange    = onSubPageStrokesChange,
+            onSubPageTextBoxesChange  = onSubPageTextBoxesChange,
+            onSubPageLedgerChange     = onSubPageLedgerChange,
+            onAddSubPage              = onAddSubPage,
+            onRemoveSubPage           = onRemoveSubPage,
+            onSubPageBackgroundChange = onSubPageBackgroundChange,
+            onSubPageBgScaleChange    = onSubPageBgScaleChange,
+            onPhotoExported           = onPhotoExported,
+            onDismiss                 = { notesSheetOpen = false },
         )
     }
 }
@@ -190,8 +305,9 @@ fun OverviewPane(
  * Overview-tab content: at-a-glance stat grid + tappable notes card.
  * Tapping the card opens the full-screen `NotesEditorSheet` — the
  * inline editor-in-ScrollView pattern proved too cramped alongside
- * the stats. Counts still update live from the current
- * `RichTextState` so the "Words" stat reflects the live buffer.
+ * the stats. All six cells derive from the VM's section lists —
+ * photos/scans/voice from `attachments`, the rest from their own
+ * lists — so they stay in sync with every add/remove tick.
  */
 @Composable
 private fun OverviewTab(
@@ -200,12 +316,22 @@ private fun OverviewTab(
     todos: List<TodoItem>,
     locations: List<GeoLocation>,
     attachments: List<Attachment>,
+    subPageCount: Int,
     onEditNotes: () -> Unit,
+    /** Stat-card tap → jump the containing pager to the matching
+     *  capture tab. Plumbed down from `OverviewPane` so each cell can
+     *  route to the right destination without this composable knowing
+     *  about `PagerState`. */
+    onJumpToTab: (CaptureMode) -> Unit,
 ) {
     val photos = attachments.count { it.type == Attachment.TYPE_PHOTO }
     val scans  = attachments.count { it.type == Attachment.TYPE_SCAN }
-    val bodyText = richTextState.annotatedString.text
-    val words  = if (bodyText.isBlank()) 0 else bodyText.trim().split(Regex("\\s+")).size
+    // Count voice-note attachments — surfaces alongside the other
+    // capture counts so the user can see, at a glance, whether this
+    // page has any audio. Replaces the older "Words" cell because
+    // word-count already lives in the bottom-of-screen `WordCountFooter`
+    // and duplicating it at the top added noise without new info.
+    val voice  = attachments.count { it.type == Attachment.TYPE_VOICE }
 
     Text(
         "AT A GLANCE",
@@ -214,18 +340,49 @@ private fun OverviewTab(
     )
 
     StatGrid(items = listOf(
-        StatItem(label = "Photos",   value = "$photos",         tone = StatTone.Coral),
-        StatItem(label = "Scans",    value = "$scans",          tone = StatTone.Neutral),
-        StatItem(label = "To-do",    value = "${todos.size}",   tone = StatTone.Green),
+        StatItem(
+            label   = "Photos",
+            value   = "$photos",
+            tone    = StatTone.Coral,
+            onClick = { onJumpToTab(CaptureMode.Photos) },
+        ),
+        StatItem(
+            label   = "Scans",
+            value   = "$scans",
+            tone    = StatTone.Neutral,
+            onClick = { onJumpToTab(CaptureMode.Scans) },
+        ),
+        StatItem(
+            label   = "To-do",
+            value   = "${todos.size}",
+            tone    = StatTone.Green,
+            onClick = { onJumpToTab(CaptureMode.Todo) },
+        ),
     ))
     StatGrid(items = listOf(
-        StatItem(label = "Contacts", value = "${contacts.size}",  tone = StatTone.Info),
-        StatItem(label = "Places",   value = "${locations.size}", tone = StatTone.Neutral),
-        StatItem(label = "Words",    value = "$words",            tone = StatTone.Neutral),
+        StatItem(
+            label   = "Contacts",
+            value   = "${contacts.size}",
+            tone    = StatTone.Info,
+            onClick = { onJumpToTab(CaptureMode.Contacts) },
+        ),
+        StatItem(
+            label   = "Places",
+            value   = "${locations.size}",
+            tone    = StatTone.Neutral,
+            onClick = { onJumpToTab(CaptureMode.Location) },
+        ),
+        StatItem(
+            label   = "Voice",
+            value   = "$voice",
+            tone    = StatTone.Neutral,
+            onClick = { onJumpToTab(CaptureMode.Voice) },
+        ),
     ))
 
     NotesPreviewCard(
         richTextState = richTextState,
+        subPageCount  = subPageCount,
         onTap         = onEditNotes,
     )
 }
@@ -239,6 +396,7 @@ private fun OverviewTab(
 @Composable
 private fun NotesPreviewCard(
     richTextState: RichTextState,
+    subPageCount: Int,
     onTap: () -> Unit,
 ) {
     // Subscribe explicitly to `annotatedString` so the preview
@@ -270,11 +428,29 @@ private fun NotesPreviewCard(
                 style = AppTypography.Eyebrow,
                 color = AppColors.TextSecondary,
             )
+            if (subPageCount > 1) {
+                Spacer(Modifier.size(AppSpacing.s2))
+                // Small pill showing how many sub-pages live behind this
+                // preview, so users know there's more than what's
+                // rendered (we only render the first sub-page here).
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(AppRadius.sm))
+                        .background(AppAccent.primary.copy(alpha = 0.15f))
+                        .padding(horizontal = AppSpacing.s2, vertical = 2.dp),
+                ) {
+                    Text(
+                        text  = "$subPageCount pages",
+                        style = AppTypography.Meta,
+                        color = AppAccent.primary,
+                    )
+                }
+            }
             Spacer(Modifier.weight(1f))
             Icon(
                 imageVector        = Icons.Filled.Edit,
                 contentDescription = "Edit notes",
-                tint               = AppColors.Coral,
+                tint               = AppAccent.primary,
                 modifier           = Modifier.size(18.dp),
             )
         }
@@ -294,8 +470,7 @@ private fun NotesPreviewCard(
 // `OverviewTitleField` was removed — the title now lives in a row at
 // screen level, shared between Edit and Overview modes. Keeping it
 // here would duplicate the title surface when the user switches modes.
-
-private val captureModeSaver: Saver<CaptureMode, String> = Saver(
-    save    = { it.name },
-    restore = { name -> runCatching { CaptureMode.valueOf(name) }.getOrDefault(CaptureMode.Overview) },
-)
+//
+// The previous `captureModeSaver` was also removed: the selected tab
+// is now held inside `PagerState`, which provides its own Saver, so
+// the hand-rolled CaptureMode saver has no remaining callers.

@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppSpacing
 import com.mohamedrejeb.richeditor.model.RichTextState
 
@@ -131,14 +132,14 @@ private fun ToggleButton(
         modifier = Modifier
             .size(40.dp)
             .clip(RoundedCornerShape(AppSpacing.s2))
-            .background(if (active) AppColors.Coral.copy(alpha = 0.15f) else androidx.compose.ui.graphics.Color.Transparent)
+            .background(if (active) AppAccent.primary.copy(alpha = 0.15f) else androidx.compose.ui.graphics.Color.Transparent)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector        = icon,
             contentDescription = description,
-            tint               = AppColors.Coral,
+            tint               = AppAccent.primary,
             modifier           = Modifier.size(20.dp),
         )
     }

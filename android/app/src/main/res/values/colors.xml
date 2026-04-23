@@ -4,4 +4,17 @@
     <color name="releaf_canvas">#F5EEE3</color>
     <color name="releaf_coral">#E77850</color>
     <color name="releaf_text_primary">#241D17</color>
+
+    <!-- Leaf-theme primaries (design-tokens.json → color.theme.*). Used for
+         the Android 12+ SplashScreen background and the adaptive launcher
+         background. Green is the canonical "App Launch" color in the
+         Releaf Branding spec. -->
+    <color name="releaf_theme_coral">#E07856</color>
+    <color name="releaf_theme_green">#7AA874</color>
+    <color name="releaf_theme_yellow">#F4C430</color>
+    <color name="releaf_theme_dry">#B8956A</color>
+
+    <!-- Ink color for the leaf on the splash — cream-onAccent, matches
+         AppColors.OnAccent. -->
+    <color name="releaf_on_accent">#F5EEDF</color>
 </resources>

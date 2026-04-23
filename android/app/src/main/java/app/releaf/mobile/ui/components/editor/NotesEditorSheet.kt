@@ -1,46 +1,62 @@
 /*
  * NotesEditorSheet.kt
  *
- * Full-height modal bottom sheet that owns the rich-text editor +
- * format bar. Invoked from the Overview tab on the notepad and
+ * Full-height modal bottom sheet that owns the multi-sub-page rich-text
+ * editor + format bar. Invoked from the Overview tab on the notepad and
  * notebook-page editors: tap the notes preview to open the sheet;
  * dismiss via the handle, a back-swipe, or the "Done" button.
  *
- * The sheet binds to the caller's shared `RichTextState`, so any
- * formatting or typing that happened in the inline Edit-mode editor
- * appears here unchanged, and edits here appear in Edit mode on
- * dismiss.
+ * The sheet binds to the caller's shared `richTextStates` map — one
+ * RichTextState per sub-page — so any typing or formatting done here
+ * shows up unchanged when the user flips to Edit mode, and vice versa.
  */
 
 package app.releaf.mobile.ui.components.editor
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import app.releaf.mobile.data.notebook.Stroke
+import app.releaf.mobile.data.notebook.SubPage
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
-import androidx.compose.foundation.clickable
 import com.mohamedrejeb.richeditor.model.RichTextState
-import com.mohamedrejeb.richeditor.ui.BasicRichTextEditor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotesEditorSheet(
-    richTextState: RichTextState,
+    subPages: List<SubPage>,
+    richTextStates: Map<String, RichTextState>,
+    onSubPageStrokesChange: (id: String, strokes: List<Stroke>) -> Unit,
+    onSubPageTextBoxesChange: (id: String, textBoxes: List<app.releaf.mobile.data.notebook.TextBox>) -> Unit,
+    onSubPageLedgerChange: (id: String, entries: List<app.releaf.mobile.data.notebook.LedgerEntry>) -> Unit = { _, _ -> },
+    onAddSubPage: () -> String,
+    onRemoveSubPage: (id: String) -> Unit,
+    onSubPageBackgroundChange: (id: String, background: String) -> Unit,
+    onSubPageBgScaleChange: (id: String, scale: Float) -> Unit,
+    onPhotoExported: (uri: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(
@@ -50,6 +66,32 @@ fun NotesEditorSheet(
         // otherwise try on keyboard show/hide.
         skipPartiallyExpanded = true,
         confirmValueChange    = { it != SheetValue.PartiallyExpanded },
+    )
+    val focusManager = LocalFocusManager.current
+
+    // Drawing toolbar state. Screen-local so a single sheet session has
+    // a stable pen configuration across add / delete / swipe.
+    var drawingMode by rememberSaveable(stateSaver = DrawingModeSaver) {
+        mutableStateOf(DrawingMode.Off)
+    }
+    var drawColor by rememberSaveable(stateSaver = DrawingColorSaver) {
+        mutableStateOf(DrawingPalette[0])
+    }
+    var drawOpacity by rememberSaveable { mutableStateOf(1f) }
+    var drawWidth by rememberSaveable { mutableStateOf(DrawingThicknesses[1].widthDp) }
+    var drawNib by rememberSaveable { mutableStateOf(Stroke.NIB_BALLPOINT) }
+
+    val pagerState = rememberPagerState(
+        initialPage = 0,
+        pageCount   = { subPages.size },
+    )
+    val currentSubPage = subPages.getOrNull(pagerState.currentPage)
+    val currentRts = currentSubPage?.let { richTextStates[it.id] }
+    val penConfig = PenConfig(
+        color    = drawColor,
+        opacity  = drawOpacity,
+        widthDp  = drawWidth,
+        nib      = drawNib,
     )
 
     ModalBottomSheet(
@@ -64,35 +106,64 @@ fun NotesEditorSheet(
         ) {
             SheetHeader(onDone = onDismiss)
 
-            // Editor body owns the full middle band. No outer
-            // `verticalScroll` here — the sheet's only scrollable
-            // surface needs to be the editor itself, otherwise the
-            // surrounding scroll container will contest text gestures
-            // (including double-tap-to-select-a-word) with
-            // `BasicRichTextEditor`. Letting the editor fill the box
-            // and scroll internally keeps gesture ownership clean.
+            // Pager owns the editor body — one rich-text editor +
+            // drawing overlay per sub-page, page indicator + add /
+            // delete controls at the top.
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = AppSpacing.s4, vertical = AppSpacing.s2),
+                    .fillMaxWidth(),
             ) {
-                if (richTextState.annotatedString.text.isEmpty()) {
-                    Text(
-                        "Start typing…",
-                        style = AppTypography.Body,
-                        color = AppColors.TextTertiary,
-                    )
-                }
-                BasicRichTextEditor(
-                    state       = richTextState,
-                    textStyle   = AppTypography.Body.copy(color = AppColors.TextPrimary),
-                    cursorBrush = SolidColor(AppColors.Coral),
-                    modifier    = Modifier.fillMaxSize(),
+                // pageHeight = null makes the pager grow to fill the
+                // Box — the sheet is already fullscreen, so the editor
+                // surface feels like a whole page of paper.
+                SubPageEditorPager(
+                    subPages           = subPages,
+                    pagerState         = pagerState,
+                    richTextStates     = richTextStates,
+                    drawingMode        = drawingMode,
+                    penConfig          = penConfig,
+                    onStrokesChange    = onSubPageStrokesChange,
+                    onTextBoxesChange  = onSubPageTextBoxesChange,
+                    onLedgerChange     = onSubPageLedgerChange,
+                    onAddSubPage       = onAddSubPage,
+                    onRemoveSubPage    = onRemoveSubPage,
+                    onBackgroundChange = onSubPageBackgroundChange,
+                    onBgScaleChange    = onSubPageBgScaleChange,
+                    onPhotoExported    = onPhotoExported,
+                    pageHeight         = null,
                 )
             }
 
-            RichTextFormatBar(state = richTextState)
+            if (drawingMode == DrawingMode.Off) {
+                // Only render the format bar when the current sub-page
+                // resolves to a live RichTextState. During a re-hydrate
+                // or right after a delete the pager can briefly sit on
+                // a half-torn state.
+                if (currentRts != null) {
+                    RichTextFormatBar(
+                        state          = currentRts,
+                        onEnterDrawing = {
+                            focusManager.clearFocus()
+                            drawingMode = DrawingMode.Pen
+                        },
+                    )
+                }
+            } else {
+                DrawingToolbar(
+                    mode            = drawingMode,
+                    onModeChange    = { drawingMode = it },
+                    color           = drawColor,
+                    onColorChange   = { drawColor = it },
+                    opacity         = drawOpacity,
+                    onOpacityChange = { drawOpacity = it },
+                    widthDp         = drawWidth,
+                    onWidthChange   = { drawWidth = it },
+                    nib             = drawNib,
+                    onNibChange     = { drawNib = it },
+                    onClose         = { drawingMode = DrawingMode.Off },
+                )
+            }
         }
     }
 }
@@ -115,11 +186,11 @@ private fun SheetHeader(onDone: () -> Unit) {
             style = AppTypography.SectionTitle,
             color = AppColors.TextPrimary,
         )
-        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+        Spacer(Modifier.weight(1f))
         Text(
             "Done",
             style    = AppTypography.Button,
-            color    = AppColors.Coral,
+            color    = AppAccent.primary,
             modifier = Modifier.clickable(onClick = onDone),
         )
     }

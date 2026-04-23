@@ -22,6 +22,7 @@ class NotebookRepository(
     /* ---------- reads ---------- */
 
     fun observeActive(): Flow<List<NotebookEntity>> = notebookDao.observeActive()
+    fun observeArchived(): Flow<List<NotebookEntity>> = notebookDao.observeArchived()
     fun observeById(id: String): Flow<NotebookEntity?> = notebookDao.observeById(id)
     suspend fun findById(id: String): NotebookEntity? = notebookDao.findById(id)
 
@@ -32,28 +33,78 @@ class NotebookRepository(
      * optional `colorHex`; everything else (id, timestamps, dirty) is filled
      * in here so the UI layer isn't duplicating boilerplate.
      */
-    suspend fun createNotebook(title: String, colorHex: String? = null): NotebookEntity {
+    suspend fun createNotebook(
+        title: String,
+        colorHex: String? = null,
+        description: String? = null,
+    ): NotebookEntity {
         val now = IsoClock.nowIso()
         val entity = NotebookEntity(
-            id        = Uuidv7.generate(),
-            title     = title.trim(),
-            colorHex  = colorHex,
-            createdAt = now,
-            updatedAt = now,
-            dirty     = true,
+            id          = Uuidv7.generate(),
+            title       = title.trim(),
+            description = description?.trim()?.ifEmpty { null },
+            colorHex    = colorHex,
+            createdAt   = now,
+            updatedAt   = now,
+            dirty       = true,
         )
         notebookDao.upsert(entity)
         return entity
     }
 
+    /**
+     * Resolve a chapter id suitable for a brand-new page created from Quick
+     * Capture (middle leaf button). Picks the first active notebook and its
+     * first chapter, matching the ordering the Notebooks tab / detail screen
+     * already use. Auto-creates a "Quick Notes" notebook and "Notes" chapter
+     * on fresh installs so the capture flow never has to dead-end.
+     */
+    suspend fun resolveQuickCaptureChapter(): String {
+        val notebook = notebookDao.firstActive() ?: run {
+            val now = IsoClock.nowIso()
+            val entity = NotebookEntity(
+                id        = Uuidv7.generate(),
+                title     = "Quick Notes",
+                createdAt = now,
+                updatedAt = now,
+                dirty     = true,
+            )
+            notebookDao.upsert(entity)
+            entity
+        }
+        chapterDao.firstIdForNotebook(notebook.id)?.let { return it }
+        val now = IsoClock.nowIso()
+        val chapter = ChapterEntity(
+            id         = Uuidv7.generate(),
+            notebookId = notebook.id,
+            title      = "Notes",
+            createdAt  = now,
+            updatedAt  = now,
+            dirty      = true,
+        )
+        chapterDao.upsert(chapter)
+        return chapter.id
+    }
+
     suspend fun saveNotebook(entity: NotebookEntity) {
         notebookDao.upsert(
             entity.copy(
-                title     = entity.title.trim(),
-                updatedAt = IsoClock.nowIso(),
-                dirty     = true,
+                title       = entity.title.trim(),
+                description = entity.description?.trim()?.ifEmpty { null },
+                updatedAt   = IsoClock.nowIso(),
+                dirty       = true,
             )
         )
+    }
+
+    /* ---------- archive ---------- */
+
+    suspend fun archiveNotebook(id: String) {
+        notebookDao.archive(id = id, nowIso = IsoClock.nowIso())
+    }
+
+    suspend fun unarchiveNotebook(id: String) {
+        notebookDao.unarchive(id = id, nowIso = IsoClock.nowIso())
     }
 
     /* ---------- soft delete + cascade ---------- */

@@ -37,21 +37,36 @@ import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import app.releaf.mobile.data.notebook.Attachment
+import app.releaf.mobile.data.notebook.ChapterEntity
+import app.releaf.mobile.data.notebook.ChapterRepository
 import app.releaf.mobile.data.notebook.Contact
 import app.releaf.mobile.data.notebook.GeoLocation
+import app.releaf.mobile.data.notebook.NotebookEntity
+import app.releaf.mobile.data.notebook.NotebookRepository
+import app.releaf.mobile.data.notebook.PageRepository
 import app.releaf.mobile.data.notebook.Stroke
+import app.releaf.mobile.data.notebook.SubPage
 import app.releaf.mobile.data.notebook.TodoItem
 import app.releaf.mobile.data.notebook.parseAttachments
 import app.releaf.mobile.data.notebook.parseContacts
 import app.releaf.mobile.data.notebook.parseLocations
 import app.releaf.mobile.data.notebook.parseStrokes
+import app.releaf.mobile.data.notebook.parseSubPages
 import app.releaf.mobile.data.notebook.parseTodos
 import app.releaf.mobile.data.notebook.toJsonString
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.notepad.NotepadRepository
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class NotepadEditorUiState(
@@ -59,30 +74,35 @@ data class NotepadEditorUiState(
     /** Null until the VM has loaded (or created) the backing row. */
     val entry: NotepadEntry? = null,
     val title: String = "",
-    val notes: String = "",
     /**
      * Local-calendar date (YYYY-MM-DD) the entry is filed under. Defaults
      * to today for fresh drafts; mirrors `entry.entry_date` once loaded.
      * Editable via the date chip in the editor UI.
      */
     val entryDate: String = "",
+    /**
+     * Horizontal sub-pages for this entry. Always non-empty once
+     * `isLoading` flips false — bootstrap seeds a single empty sub-page
+     * for new drafts and synthesizes one from legacy columns on load.
+     */
+    val subPages: List<SubPage> = emptyList(),
     val contacts: List<Contact> = emptyList(),
     val todos: List<TodoItem> = emptyList(),
     val locations: List<GeoLocation> = emptyList(),
     val attachments: List<Attachment> = emptyList(),
-    val strokes: List<Stroke> = emptyList(),
 ) {
     /**
-     * Is there anything worth persisting on back-nav? Title/notes are the
-     * common case; any of the feature-section lists being non-empty is
-     * also reason enough to create the row — otherwise someone who adds
-     * a photo to a new draft and taps back would lose it.
+     * Is there anything worth persisting on back-nav? Title + any
+     * non-empty sub-page content is the common case; any of the
+     * feature-section lists being non-empty is also reason enough to
+     * create the row — otherwise someone who adds a photo to a new
+     * draft and taps back would lose it.
      */
     val canSave: Boolean
-        get() = notes.isNotBlank() || title.isNotBlank() ||
+        get() = title.isNotBlank() ||
+            subPages.any { it.notes.isNotBlank() || it.strokes.isNotEmpty() } ||
             contacts.isNotEmpty() || todos.isNotEmpty() ||
-            locations.isNotEmpty() || attachments.isNotEmpty() ||
-            strokes.isNotEmpty()
+            locations.isNotEmpty() || attachments.isNotEmpty()
 }
 
 class NotepadEditorViewModel(
@@ -90,10 +110,38 @@ class NotepadEditorViewModel(
     private val entryId: String,
     private val userId: String,
     private val repository: NotepadRepository,
+    private val notebookRepository: NotebookRepository,
+    private val chapterRepository: ChapterRepository,
+    private val pageRepository: PageRepository,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(NotepadEditorUiState())
     val state: StateFlow<NotepadEditorUiState> = _state.asStateFlow()
+
+    /** Live list of the user's active notebooks. Feeds the destination
+     *  picker in the "Move to notebook" card — never closes, so the
+     *  modal opens to a fresh list every time. */
+    val notebooks: StateFlow<List<NotebookEntity>> =
+        notebookRepository.observeActive()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Chapters of the notebook the user just tapped inside the
+     *  picker. Empty until a notebook is selected, then flips to that
+     *  notebook's active chapter list. */
+    private val _chapterPickerNotebookId = MutableStateFlow<String?>(null)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val chaptersForPicker: StateFlow<List<ChapterEntity>> =
+        _chapterPickerNotebookId
+            .flatMapLatest { id ->
+                if (id == null) flowOf(emptyList())
+                else chapterRepository.observeForNotebook(id)
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun openChaptersFor(notebookId: String?) {
+        _chapterPickerNotebookId.value = notebookId
+    }
 
     /**
      * Guard for the create branch. Back-tap → `save()` and `onDispose` →
@@ -111,24 +159,40 @@ class NotepadEditorViewModel(
         viewModelScope.launch {
             if (entryId == NEW_ENTRY_ID) {
                 // Don't create the row until the user types something — the
-                // list shouldn't show a blank entry if they back out.
+                // list shouldn't show a blank entry if they back out. Seed
+                // with one empty sub-page so the editor body always has
+                // something to render.
                 _state.value = NotepadEditorUiState(
                     isLoading = false,
                     entryDate = IsoClock.todayLocalDate(),
+                    subPages  = listOf(SubPage(id = Uuidv7.generate())),
                 )
             } else {
                 val loaded = repository.findById(entryId)
+                val parsed = loaded?.subPages?.parseSubPages().orEmpty()
+                val effectiveSubPages = if (parsed.isNotEmpty()) {
+                    parsed
+                } else {
+                    // Legacy row (pre-v3): synthesize one sub-page from the
+                    // flat `notes` + `sketch_strokes` columns.
+                    listOf(
+                        SubPage(
+                            id      = Uuidv7.generate(),
+                            notes   = loaded?.notes.orEmpty(),
+                            strokes = loaded?.sketchStrokes?.parseStrokes().orEmpty(),
+                        )
+                    )
+                }
                 _state.value = NotepadEditorUiState(
                     isLoading   = false,
                     entry       = loaded,
                     title       = loaded?.title.orEmpty(),
-                    notes       = loaded?.notes.orEmpty(),
                     entryDate   = loaded?.entryDate ?: IsoClock.todayLocalDate(),
+                    subPages    = effectiveSubPages,
                     contacts    = loaded?.contacts?.parseContacts().orEmpty(),
                     todos       = loaded?.todos?.parseTodos().orEmpty(),
                     locations   = loaded?.locations?.parseLocations().orEmpty(),
                     attachments = loaded?.attachments?.parseAttachments().orEmpty(),
-                    strokes     = loaded?.sketchStrokes?.parseStrokes().orEmpty(),
                 )
             }
         }
@@ -138,31 +202,162 @@ class NotepadEditorViewModel(
         _state.value = _state.value.copy(title = value)
     }
 
-    fun updateNotes(value: String) {
-        _state.value = _state.value.copy(notes = value)
-    }
-
-    /** Freehand-drawing strokes overlaying the notes body. */
-    fun updateStrokes(value: List<Stroke>) {
-        _state.value = _state.value.copy(strokes = value)
-    }
-
     /** Local YYYY-MM-DD; callers get the string back via the date picker. */
     fun updateEntryDate(value: String) {
         _state.value = _state.value.copy(entryDate = value)
     }
 
+    // ------------------------- Sub-pages -------------------------
+
+    /** Patch the notes body on a specific sub-page. */
+    fun updateSubPageNotes(id: String, notes: String) {
+        _state.value = _state.value.copy(
+            subPages = _state.value.subPages.map {
+                if (it.id == id) it.copy(notes = notes) else it
+            },
+        )
+    }
+
+    /** Patch the freehand strokes on a specific sub-page. */
+    fun updateSubPageStrokes(id: String, strokes: List<Stroke>) {
+        _state.value = _state.value.copy(
+            subPages = _state.value.subPages.map {
+                if (it.id == id) it.copy(strokes = strokes) else it
+            },
+        )
+    }
+
+    /** Replace the free-form text-box list on a specific sub-page. */
+    fun updateSubPageTextBoxes(id: String, textBoxes: List<app.releaf.mobile.data.notebook.TextBox>) {
+        _state.value = _state.value.copy(
+            subPages = _state.value.subPages.map {
+                if (it.id == id) it.copy(textBoxes = textBoxes) else it
+            },
+        )
+    }
+
+    /** Swap the background pattern on a specific sub-page. */
+    fun updateSubPageBackground(id: String, background: String) {
+        _state.value = _state.value.copy(
+            subPages = _state.value.subPages.map {
+                if (it.id == id) it.copy(background = background) else it
+            },
+        )
+    }
+
+    /** Adjust the background pattern's scale (0.5..2.0). */
+    fun updateSubPageBgScale(id: String, scale: Float) {
+        _state.value = _state.value.copy(
+            subPages = _state.value.subPages.map {
+                if (it.id == id) it.copy(bgScale = scale) else it
+            },
+        )
+    }
+
+    /** Replace the ledger-entry list on a specific sub-page. Used when
+     *  the sub-page is in `BG_RULED` mode and its body renders the
+     *  ledger form instead of the rich-text editor. */
+    fun updateSubPageLedger(
+        id: String,
+        entries: List<app.releaf.mobile.data.notebook.LedgerEntry>,
+    ) {
+        _state.value = _state.value.copy(
+            subPages = _state.value.subPages.map {
+                if (it.id == id) it.copy(ledgerEntries = entries) else it
+            },
+        )
+    }
+
+    /** Append a fresh empty sub-page. Returns the new id so the UI can flip to it. */
+    fun addSubPage(): String {
+        val new = SubPage(id = Uuidv7.generate())
+        _state.value = _state.value.copy(subPages = _state.value.subPages + new)
+        return new.id
+    }
+
+    /** Append a new sub-page with [imageUri] as its background. See the
+     *  twin on PageLocalEditorViewModel for the full rationale. */
+    fun addSubPageFromImage(imageUri: String): String {
+        val new = SubPage(
+            id                 = Uuidv7.generate(),
+            backgroundImageUri = imageUri,
+        )
+        _state.value = _state.value.copy(subPages = _state.value.subPages + new)
+        return new.id
+    }
+
+    /** Remove a sub-page. Keeps at least one so the editor body always has content. */
+    fun removeSubPage(id: String) {
+        val snapshot = _state.value
+        if (snapshot.subPages.size <= 1) return
+        _state.value = snapshot.copy(
+            subPages = snapshot.subPages.filterNot { it.id == id },
+        )
+    }
+
     // ------------------------- Contacts -------------------------
 
-    fun addContact(name: String, role: String? = null) {
+    fun addContact(
+        name: String,
+        role: String? = null,
+        phone: String? = null,
+        landline: String? = null,
+        email: String? = null,
+        title: String? = null,
+        organization: String? = null,
+        location: String? = null,
+        website: String? = null,
+    ) {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
         val contact = Contact(
-            id   = Uuidv7.generate(),
-            name = trimmed,
-            role = role?.trim()?.ifEmpty { null },
+            id           = Uuidv7.generate(),
+            name         = trimmed,
+            role         = role?.trim()?.ifEmpty { null },
+            phone        = phone?.trim()?.ifEmpty { null },
+            landline     = landline?.trim()?.ifEmpty { null },
+            email        = email?.trim()?.ifEmpty { null },
+            title        = title?.trim()?.ifEmpty { null },
+            organization = organization?.trim()?.ifEmpty { null },
+            location     = location?.trim()?.ifEmpty { null },
+            website      = website?.trim()?.ifEmpty { null },
         )
         _state.value = _state.value.copy(contacts = _state.value.contacts + contact)
+    }
+
+    /**
+     * In-place edit of an existing contact. Keeps `id` + `role` (role is a
+     * legacy artifact we don't expose in the editor) and overwrites the
+     * user-facing fields with the sheet's new values. No-op if `id`
+     * doesn't match any current contact.
+     */
+    fun updateContact(
+        id: String,
+        name: String,
+        phone: String? = null,
+        landline: String? = null,
+        email: String? = null,
+        title: String? = null,
+        organization: String? = null,
+        location: String? = null,
+        website: String? = null,
+    ) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        _state.value = _state.value.copy(
+            contacts = _state.value.contacts.map { existing ->
+                if (existing.id != id) existing else existing.copy(
+                    name         = trimmed,
+                    phone        = phone?.trim()?.ifEmpty { null },
+                    landline     = landline?.trim()?.ifEmpty { null },
+                    email        = email?.trim()?.ifEmpty { null },
+                    title        = title?.trim()?.ifEmpty { null },
+                    organization = organization?.trim()?.ifEmpty { null },
+                    location     = location?.trim()?.ifEmpty { null },
+                    website      = website?.trim()?.ifEmpty { null },
+                )
+            },
+        )
     }
 
     fun removeContact(id: String) {
@@ -194,9 +389,30 @@ class NotepadEditorViewModel(
         )
     }
 
+    /** Set a todo's priority level (0 = none, 1 = low, 2 = medium, 3 = high). */
+    fun updateTodoPriority(id: String, priority: Int) {
+        _state.value = _state.value.copy(
+            todos = _state.value.todos.map {
+                if (it.id == id) it.copy(priority = priority) else it
+            },
+        )
+    }
+
+    /** Replace the todo list wholesale — used by drag-to-reorder. */
+    fun reorderTodos(newList: List<TodoItem>) {
+        _state.value = _state.value.copy(todos = newList)
+    }
+
     // ------------------------- Locations ------------------------
 
-    fun addLocation(lat: Double, lng: Double, address: String? = null) {
+    /**
+     * Append a saved location. Returns the newly-assigned uuidv7 so
+     * the caller can hand it back to [updateLocationCoords] once a
+     * more precise GPS fix arrives — the LocationSection uses
+     * `lastLocation` for the fast path (near-instant cached fix) and
+     * refines the coordinates in the background via `getCurrentLocation`.
+     */
+    fun addLocation(lat: Double, lng: Double, address: String? = null): String {
         val loc = GeoLocation(
             id         = Uuidv7.generate(),
             lat        = lat,
@@ -205,6 +421,22 @@ class NotepadEditorViewModel(
             capturedAt = IsoClock.nowIso(),
         )
         _state.value = _state.value.copy(locations = _state.value.locations + loc)
+        return loc.id
+    }
+
+    /**
+     * Replace the coordinates on a previously-saved location. Used by
+     * the "capture now, refine later" flow: LocationSection adds a
+     * row from the cached `lastLocation` immediately, then patches
+     * the precise coordinates in once `getCurrentLocation` resolves.
+     * No-op when the id doesn't match (row deleted mid-fetch).
+     */
+    fun updateLocationCoords(id: String, lat: Double, lng: Double) {
+        _state.value = _state.value.copy(
+            locations = _state.value.locations.map {
+                if (it.id == id) it.copy(lat = lat, lng = lng) else it
+            },
+        )
     }
 
     fun removeLocation(id: String) {
@@ -236,6 +468,19 @@ class NotepadEditorViewModel(
      * inference completes. Blank joins are dropped — empty pages stay
      * empty rather than landing a stray separator string on the row.
      */
+    /** Overwrite the title + category overrides on a scan. See the
+     *  twin on PageLocalEditorViewModel for the full contract. */
+    fun updateScan(id: String, title: String?, categoryId: String?) {
+        val cleanedTitle = title?.trim()?.takeIf { it.isNotBlank() }
+        _state.value = _state.value.copy(
+            attachments = _state.value.attachments.map { att ->
+                if (att.id == id && att.type == Attachment.TYPE_SCAN) {
+                    att.copy(title = cleanedTitle, categoryId = categoryId)
+                } else att
+            },
+        )
+    }
+
     fun addScan(primaryUri: String, previewUri: String?, pageUrisForOcr: List<Uri>) {
         val id = Uuidv7.generate()
         val att = Attachment(
@@ -292,11 +537,14 @@ class NotepadEditorViewModel(
      * uuidv7 and is unique) so the section doesn't need to track the
      * newly-assigned id across the async hop. Mirrors the iOS twin.
      */
-    fun updateVoiceTranscript(uri: String, transcript: String?) {
+    fun updateVoiceTranscript(uri: String, transcript: String?, source: String?) {
         val cleaned = transcript?.takeIf { it.isNotBlank() }
+        val cleanedSource = if (cleaned != null) source else null
         _state.value = _state.value.copy(
             attachments = _state.value.attachments.map { existing ->
-                if (existing.uri == uri) existing.copy(transcript = cleaned) else existing
+                if (existing.uri == uri) {
+                    existing.copy(transcript = cleaned, transcriptSource = cleanedSource)
+                } else existing
             },
         )
     }
@@ -324,12 +572,18 @@ class NotepadEditorViewModel(
         val app = getApplication<Application>()
         when (att.type) {
             Attachment.TYPE_PHOTO -> {
+                // Photos can be MediaStore content:// (picker) or
+                // file:// (our "Save to Photos" export). Release
+                // permission if possible, then delete the local
+                // file if we own it — see the twin comment in
+                // PageLocalEditorViewModel for the full rationale.
                 runCatching {
                     app.contentResolver.releasePersistableUriPermission(
                         Uri.parse(att.uri),
                         Intent.FLAG_GRANT_READ_URI_PERMISSION,
                     )
                 }
+                AttachmentStorage.deleteIfLocal(att.uri)
             }
             Attachment.TYPE_SCAN -> {
                 AttachmentStorage.deleteIfLocal(att.uri)
@@ -364,7 +618,14 @@ class NotepadEditorViewModel(
         val todosJson       = snapshot.todos.toJsonString()
         val locationsJson   = snapshot.locations.toJsonString()
         val attachmentsJson = snapshot.attachments.toJsonString()
-        val strokesJson     = snapshot.strokes.toJsonString()
+        val subPagesJson    = snapshot.subPages.toJsonString()
+
+        // Flatten sub-pages into the legacy flat columns so FTS indexing
+        // and any pre-v3 readers keep working. See the twin comment in
+        // PageLocalEditorViewModel.
+        val joinedNotes      = snapshot.subPages.joinToString("\n\n") { it.notes }
+        val firstStrokesJson = snapshot.subPages.firstOrNull()
+            ?.strokes.orEmpty().toJsonString()
 
         if (existing == null) {
             if (!snapshot.canSave) return
@@ -374,13 +635,14 @@ class NotepadEditorViewModel(
                 val created = repository.create(
                     userId        = userId,
                     title         = snapshot.title,
-                    notes         = snapshot.notes,
+                    notes         = joinedNotes,
                     entryDate     = snapshot.entryDate.ifBlank { IsoClock.todayLocalDate() },
                     contacts      = contactsJson,
                     locations     = locationsJson,
                     todos         = todosJson,
                     attachments   = attachmentsJson,
-                    sketchStrokes = strokesJson,
+                    sketchStrokes = firstStrokesJson,
+                    subPages      = subPagesJson,
                 )
                 // Once the row exists, route any subsequent edits through the
                 // update branch below. State fields are preserved as-is.
@@ -390,29 +652,31 @@ class NotepadEditorViewModel(
         }
 
         val titleChanged       = (existing.title.orEmpty()) != snapshot.title
-        val notesChanged       = existing.notes != snapshot.notes
+        val notesChanged       = existing.notes != joinedNotes
         val entryDateChanged   = snapshot.entryDate.isNotBlank() &&
             existing.entryDate != snapshot.entryDate
         val contactsChanged    = existing.contacts != contactsJson
         val todosChanged       = existing.todos != todosJson
         val locationsChanged   = existing.locations != locationsJson
         val attachmentsChanged = existing.attachments != attachmentsJson
-        val strokesChanged     = existing.sketchStrokes != strokesJson
+        val strokesChanged     = existing.sketchStrokes != firstStrokesJson
+        val subPagesChanged    = existing.subPages != subPagesJson
         if (!titleChanged && !notesChanged && !entryDateChanged &&
             !contactsChanged && !todosChanged &&
             !locationsChanged && !attachmentsChanged &&
-            !strokesChanged
+            !strokesChanged && !subPagesChanged
         ) return
 
         val updated = existing.copy(
             title         = snapshot.title.ifBlank { null },
-            notes         = snapshot.notes,
+            notes         = joinedNotes,
             entryDate     = snapshot.entryDate.ifBlank { existing.entryDate },
             contacts      = contactsJson,
             todos         = todosJson,
             locations     = locationsJson,
             attachments   = attachmentsJson,
-            sketchStrokes = strokesJson,
+            sketchStrokes = firstStrokesJson,
+            subPages      = subPagesJson,
         )
         // Advance the baseline synchronously so a second save() in this tick
         // (back-tap → onDispose) diffs against the target and no-ops.
@@ -428,6 +692,88 @@ class NotepadEditorViewModel(
         viewModelScope.launch {
             repository.softDelete(existing.id)
             onDeleted()
+        }
+    }
+
+    /**
+     * Convert this notepad entry into a notebook page inside [chapterId].
+     * Fires [onMoved] with the new page's id once the DB rows have been
+     * committed — callers use it to navigate the editor over to the
+     * freshly-created notebook page. No-op when the entry is still a
+     * fresh unsaved draft with nothing worth keeping.
+     *
+     * Flow:
+     *   1. Flush the draft via [save] so the latest edits are in the DB
+     *      (`save()` is idempotent — a no-op when there's nothing new).
+     *   2. Re-read the persisted row so the copy picks up whatever the
+     *      save just wrote (including the id assigned during create).
+     *   3. Copy every field the two surfaces share (sub-pages, todos,
+     *      contacts, locations, attachments, strokes) into a new
+     *      `PageEntity` under the chosen chapter.
+     *   4. Soft-delete the source notepad entry so the list screen
+     *      doesn't show both the notebook page and the original row.
+     */
+    fun moveToNotebook(chapterId: String, onMoved: (newPageId: String) -> Unit) {
+        val snapshot = _state.value
+        if (snapshot.entry == null && !snapshot.canSave) {
+            // Fresh empty draft — nothing to move.
+            return
+        }
+        save()
+        viewModelScope.launch {
+            val sourceId = _state.value.entry?.id ?: return@launch
+            val fresh = repository.findById(sourceId) ?: return@launch
+            val newPage = pageRepository.createFromNotepadEntry(
+                chapterId = chapterId,
+                source    = fresh,
+            )
+            repository.softDelete(sourceId)
+            onMoved(newPage.id)
+        }
+    }
+
+    /**
+     * Live list of saved notepad entries that could serve as the
+     * "other page" in a merge — every active row except the one this
+     * editor is currently showing. Kept as a hot StateFlow so the
+     * MergeSection and its picker render synchronously on first open.
+     * New/unsaved drafts still surface every other entry (nothing to
+     * exclude yet).
+     */
+    val otherEntries: StateFlow<List<NotepadEntry>> =
+        combine(
+            repository.observeActive(userId),
+            _state.map { it.entry?.id },
+        ) { entries, selfId ->
+            if (selfId == null) entries else entries.filterNot { it.id == selfId }
+        }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * Merge this entry with [otherId]. When [keepThisAsPrimary] is true,
+     * the other entry is folded into this one (this page stays open,
+     * just refreshed). When false, this entry is folded into the other
+     * and removed — the caller should navigate away because the editor
+     * is now showing a soft-deleted row. [onDone] fires on the main
+     * thread with the surviving row's id so callers can route.
+     *
+     * Flushes the current draft first so unsaved edits on this page
+     * are included in the merge rather than being dropped on the floor.
+     */
+    fun merge(otherId: String, keepThisAsPrimary: Boolean, onDone: (String) -> Unit) {
+        val snapshot = _state.value
+        // The merge targets persisted rows; if this side is a fresh
+        // draft, flush it first. `save()` is idempotent so calling it
+        // here is safe even for already-saved entries (usually a no-op).
+        save()
+        viewModelScope.launch {
+            // `save()` is fire-and-forget; re-read state after it
+            // advances `_state.entry` so we have the real primary id.
+            val selfId = _state.value.entry?.id ?: return@launch
+            val primaryId   = if (keepThisAsPrimary) selfId  else otherId
+            val secondaryId = if (keepThisAsPrimary) otherId else selfId
+            val ok = repository.merge(primaryId, secondaryId)
+            if (ok) onDone(primaryId)
         }
     }
 
@@ -447,7 +793,15 @@ class NotepadEditorViewModel(
                 val userId = (app.authStore.state.value as? AuthState.SignedIn)
                     ?.session?.userId
                     ?: error("NotepadEditorViewModel created while not signed in")
-                NotepadEditorViewModel(app, entryId, userId, app.notepadRepository)
+                NotepadEditorViewModel(
+                    application        = app,
+                    entryId            = entryId,
+                    userId             = userId,
+                    repository         = app.notepadRepository,
+                    notebookRepository = app.notebookRepository,
+                    chapterRepository  = app.chapterRepository,
+                    pageRepository     = app.pageRepository,
+                )
             }
         }
     }

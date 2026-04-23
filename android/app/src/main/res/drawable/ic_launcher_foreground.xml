@@ -1,0 +1,50 @@
+<!--
+  Adaptive launcher foreground. 108-unit canvas with the leaf placed
+  inside the 66-unit safe zone (bounded from 21..87 on each axis, so
+  the leaf survives every vendor mask — circle, squircle, teardrop).
+
+  Leaf path is the canonical 24-viewport SVG, scaled and offset to sit
+  at x [24..84], y [18..90] in the 108 canvas.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="18"
+        android:translateY="18"
+        android:scaleX="3"
+        android:scaleY="3">
+        <!-- Leaf body — vertical green gradient + hairline -->
+        <path
+            android:pathData="M12,3 C12,3 6,6 6,12 C6,15.5 8,18.5 11,20 C11.5,20.2 12,20.5 12,21 C12,20.5 12.5,20.2 13,20 C16,18.5 18,15.5 18,12 C18,6 12,3 12,3 Z"
+            android:strokeColor="#5B8C52"
+            android:strokeWidth="0.5"
+            android:strokeLineJoin="round">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="12"
+                    android:startY="3"
+                    android:endX="12"
+                    android:endY="21"
+                    android:startColor="#7AA874"
+                    android:endColor="#5B8C52" />
+            </aapt:attr>
+        </path>
+        <!-- Cream brand outline -->
+        <path
+            android:pathData="M12,3 C12,3 6,6 6,12 C6,15.5 8,18.5 11,20 C11.5,20.2 12,20.5 12,21 C12,20.5 12.5,20.2 13,20 C16,18.5 18,15.5 18,12 C18,6 12,3 12,3 Z"
+            android:strokeColor="#F5EEDF"
+            android:strokeWidth="1.2"
+            android:strokeLineJoin="round" />
+        <!-- Vein S-curve at 40% alpha -->
+        <path
+            android:pathData="M12,6 C12,6 14,8.5 14,11.5 C14,13.5 13,15 12,16"
+            android:strokeColor="#66F5EEDF"
+            android:strokeWidth="0.8"
+            android:strokeLineCap="round" />
+    </group>
+</vector>

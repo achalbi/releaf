@@ -39,6 +39,21 @@ interface ChapterDao {
     suspend fun findById(id: String): ChapterEntity?
 
     /**
+     * First active chapter under a notebook, in the same ordering the
+     * notebook detail renders. Used by Quick Capture to land on a real
+     * chapter without the user having to choose.
+     */
+    @Query(
+        """
+        SELECT id FROM chapters
+        WHERE notebook_id = :notebookId AND deleted_at IS NULL
+        ORDER BY position ASC, created_at ASC
+        LIMIT 1
+        """
+    )
+    suspend fun firstIdForNotebook(notebookId: String): String?
+
+    /**
      * Count active chapters under a notebook. Used by the repo's "can delete
      * this notebook?" guard and the list screen's meta line.
      */
@@ -49,6 +64,21 @@ interface ChapterDao {
         """
     )
     suspend fun countForNotebook(notebookId: String): Int
+
+    /**
+     * Live-count-per-notebook feed for the Notebooks tab. Emits one row per
+     * notebook that has at least one active chapter; callers treat "missing"
+     * as zero. Cheaper than observing chapters for every notebook separately.
+     */
+    @Query(
+        """
+        SELECT notebook_id AS notebookId, COUNT(*) AS count
+        FROM chapters
+        WHERE deleted_at IS NULL
+        GROUP BY notebook_id
+        """
+    )
+    fun observeChapterCounts(): Flow<List<NotebookCountRow>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entry: ChapterEntity)

@@ -39,6 +39,10 @@ data class ChapterEntity(
     @ColumnInfo(name = "title")
     val title: String,
 
+    /** Free-form summary shown on the chapter row + chapter-detail card. */
+    @ColumnInfo(name = "description")
+    val description: String? = null,
+
     @ColumnInfo(name = "position", defaultValue = "1024")
     val position: Long = 1024L,
 

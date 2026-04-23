@@ -2,14 +2,14 @@
  * NotebookTabViewModel.kt
  *
  * Backs the top-level Notebooks tab. Observes the Room-backed
- * NotebookRepository for the list, and (when the user types in the header
- * search field) also runs an FTS5 page search across every notebook so
- * content hits are surfaced alongside matching notebook titles.
+ * NotebookRepository for the list, fans out to an FTS5 page search across
+ * every notebook when the user types, and joins in per-notebook chapter /
+ * page counts so each row in the list can show "2 chapters · 3 pages"
+ * without a second round-trip.
  *
- * Scope decision: search filters notebooks by substring on `title` (cheap,
- * deterministic) AND fans out to the page FTS index. Both surfaces are
- * rendered side-by-side by the screen. An empty query yields the full
- * notebook list and an empty page list.
+ * The screen toggles between the Current and Archive tabs — we swap the
+ * source flow via `flatMapLatest` on the tab selection so only one
+ * observation is active at a time.
  */
 
 package app.releaf.mobile.features.notebook
@@ -21,6 +21,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.releaf.mobile.ReleafApp
+import app.releaf.mobile.data.notebook.ChapterRepository
+import app.releaf.mobile.data.notebook.NotebookCountRow
 import app.releaf.mobile.data.notebook.NotebookEntity
 import app.releaf.mobile.data.notebook.NotebookRepository
 import app.releaf.mobile.data.notebook.PageEntity
@@ -36,17 +38,23 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/**
- * Observable state for the Notebooks tab. No explicit "loading" flag — Room's
- * Flow emits an empty list immediately when the table is empty, and the
- * empty-list UI doubles as the loading UI.
- */
+enum class NotebookListTab { Current, Archive }
+
+/** Notebook row with chapter / page counts pre-computed. */
+data class NotebookSummary(
+    val entity: NotebookEntity,
+    val chapterCount: Int,
+    val pageCount: Int,
+)
+
 data class NotebookTabUiState(
     val query: String = "",
-    val notebooks: List<NotebookEntity> = emptyList(),
+    val tab: NotebookListTab = NotebookListTab.Current,
+    val notebooks: List<NotebookSummary> = emptyList(),
     /** Only non-empty when searching; FTS hits across every live notebook. */
     val matchingPages: List<PageEntity> = emptyList(),
 ) {
@@ -54,49 +62,81 @@ data class NotebookTabUiState(
     val isEmpty: Boolean get() = notebooks.isEmpty() && matchingPages.isEmpty()
 }
 
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class NotebookTabViewModel(
     application: Application,
     private val notebookRepository: NotebookRepository,
+    private val chapterRepository: ChapterRepository,
     private val pageRepository: PageRepository,
 ) : AndroidViewModel(application) {
 
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
-    // Unfiltered list of live notebooks — filtering happens in the combine
-    // below so the DAO doesn't have to re-run on every keystroke.
-    private val notebooksFlow: Flow<List<NotebookEntity>> =
-        notebookRepository.observeActive()
+    private val _tab = MutableStateFlow(NotebookListTab.Current)
 
-    // Page FTS. Blank query → empty flow (no network to SQLite). Only
+    private val notebooksFlow: Flow<List<NotebookEntity>> = _tab.flatMapLatest { tab ->
+        when (tab) {
+            NotebookListTab.Current -> notebookRepository.observeActive()
+            NotebookListTab.Archive -> notebookRepository.observeArchived()
+        }
+    }
+
+    private val chapterCountsFlow: Flow<Map<String, Int>> =
+        chapterRepository.observeChapterCounts().mapToCountMap()
+
+    private val pageCountsFlow: Flow<Map<String, Int>> =
+        pageRepository.observePageCountsByNotebook().mapToCountMap()
+
+    // Page FTS. Blank query → empty flow (no round-trip to SQLite). Only
     // debounce non-blank input so the first paint isn't delayed.
-    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     private val pageResultsFlow: Flow<List<PageEntity>> = _query
         .debounce { q -> if (q.isBlank()) 0L else 150L }
         .flatMapLatest { q ->
             if (q.isBlank()) flowOf(emptyList()) else pageRepository.searchAll(q)
         }
 
-    val state: StateFlow<NotebookTabUiState> =
-        combine(_query, notebooksFlow, pageResultsFlow) { q, notebooks, pages ->
-            // Title-substring filter is fine here — notebook titles are short
-            // and the list is small. If we grow past a few dozen notebooks we
-            // can move this to a DAO-level LIKE/FTS query.
-            val filteredNotebooks = if (q.isBlank()) {
-                notebooks
-            } else {
-                notebooks.filter { it.title.contains(q, ignoreCase = true) }
+    // Pre-combine to fit inside the 5-arg `combine` overload without
+    // giving up compile-time types. The pair destructuring below keeps
+    // the final combine readable.
+    private val tabAndNotebooksFlow: Flow<Pair<NotebookListTab, List<NotebookEntity>>> =
+        combine(_tab, notebooksFlow) { tab, notebooks -> tab to notebooks }
+
+    private val countsFlow: Flow<Pair<Map<String, Int>, Map<String, Int>>> =
+        combine(chapterCountsFlow, pageCountsFlow) { ch, pg -> ch to pg }
+
+    val state: StateFlow<NotebookTabUiState> = combine(
+        _query,
+        tabAndNotebooksFlow,
+        countsFlow,
+        pageResultsFlow,
+    ) { q, (tab, notebooks), (chapterCounts, pageCounts), matchingPages ->
+        val filteredNotebooks = if (q.isBlank()) {
+            notebooks
+        } else {
+            notebooks.filter { nb ->
+                nb.title.contains(q, ignoreCase = true) ||
+                    (nb.description?.contains(q, ignoreCase = true) == true)
             }
-            NotebookTabUiState(
-                query         = q,
-                notebooks     = filteredNotebooks,
-                matchingPages = pages,
+        }
+        val summaries = filteredNotebooks.map { nb ->
+            NotebookSummary(
+                entity       = nb,
+                chapterCount = chapterCounts[nb.id] ?: 0,
+                pageCount    = pageCounts[nb.id] ?: 0,
             )
-        }.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = NotebookTabUiState(),
+        }
+        NotebookTabUiState(
+            query         = q,
+            tab           = tab,
+            notebooks     = summaries,
+            matchingPages = matchingPages,
         )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = NotebookTabUiState(),
+    )
 
     fun updateQuery(value: String) {
         _query.value = value
@@ -106,15 +146,28 @@ class NotebookTabViewModel(
         _query.value = ""
     }
 
+    fun setTab(tab: NotebookListTab) {
+        _tab.value = tab
+    }
+
     /**
      * Create a notebook from the FAB dialog. Blank titles are rejected at the
      * screen layer; we still trim defensively here.
      */
-    fun createNotebook(title: String, colorHex: String? = null, onCreated: (String) -> Unit = {}) {
+    fun createNotebook(
+        title: String,
+        description: String? = null,
+        colorHex: String? = null,
+        onCreated: (String) -> Unit = {},
+    ) {
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
-            val created = notebookRepository.createNotebook(trimmed, colorHex)
+            val created = notebookRepository.createNotebook(
+                title = trimmed,
+                colorHex = colorHex,
+                description = description,
+            )
             onCreated(created.id)
         }
     }
@@ -132,6 +185,14 @@ class NotebookTabViewModel(
         viewModelScope.launch { notebookRepository.undoSoftDeleteNotebook(id) }
     }
 
+    fun archive(id: String) {
+        viewModelScope.launch { notebookRepository.archiveNotebook(id) }
+    }
+
+    fun unarchive(id: String) {
+        viewModelScope.launch { notebookRepository.unarchiveNotebook(id) }
+    }
+
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
@@ -139,9 +200,14 @@ class NotebookTabViewModel(
                 NotebookTabViewModel(
                     application        = app,
                     notebookRepository = app.notebookRepository,
+                    chapterRepository  = app.chapterRepository,
                     pageRepository     = app.pageRepository,
                 )
             }
         }
     }
 }
+
+/** Collapse a repo-count feed into the `notebookId → count` lookup each row needs. */
+private fun Flow<List<NotebookCountRow>>.mapToCountMap(): Flow<Map<String, Int>> =
+    map { rows -> rows.associateBy({ it.notebookId }, { it.count }) }

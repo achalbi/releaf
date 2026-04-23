@@ -23,6 +23,7 @@ import androidx.room.PrimaryKey
     indices = [
         Index("updated_at"),
         Index("deleted_at"),
+        Index("archived_at"),
     ],
 )
 data class NotebookEntity(
@@ -32,6 +33,10 @@ data class NotebookEntity(
 
     @ColumnInfo(name = "title")
     val title: String,
+
+    /** Free-form summary shown on list + detail cards. Nullable / empty. */
+    @ColumnInfo(name = "description")
+    val description: String? = null,
 
     /** Hex color (e.g. `#E77850`) or null for theme default. */
     @ColumnInfo(name = "color_hex")
@@ -54,6 +59,14 @@ data class NotebookEntity(
     /** 1 = needs upload to Drive; cleared by sync worker. */
     @ColumnInfo(name = "dirty", defaultValue = "1")
     val dirty: Boolean = true,
+
+    /**
+     * ISO-8601 UTC when archived; null = active. Archived notebooks move to
+     * the Archive tab and stop showing in Current notebooks. Orthogonal to
+     * `deleted_at` — soft-deleted rows are hidden from both tabs.
+     */
+    @ColumnInfo(name = "archived_at")
+    val archivedAt: String? = null,
 
     /** ISO-8601 UTC when soft-deleted; null = active. */
     @ColumnInfo(name = "deleted_at")

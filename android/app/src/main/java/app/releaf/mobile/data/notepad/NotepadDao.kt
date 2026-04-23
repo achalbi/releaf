@@ -53,6 +53,17 @@ interface NotepadDao {
      * verifier doesn't know about them (they're not @Entity-declared), so
      * @SkipQueryVerification is required here. Room still maps the cursor
      * to NotepadEntry because the row selector is `notepad_entries.*`.
+     *
+     * Returned as a one-shot `suspend` (not `Flow`) because Room 2.7's
+     * invalidation tracker validates every observed table up-front, and
+     * `fts_notepad_notes` isn't registered with Room (it's a virtual
+     * table installed out-of-band by SchemaCallback), which would throw
+     * `IllegalArgumentException: There is no table with name
+     * fts_notepad_notes` at query time. The repository composes a Flow
+     * on top of `observeActive`, which IS tracked — and since the FTS
+     * triggers mirror every notepad_entries change, re-running the
+     * search on each notepad_entries emission yields identical
+     * reactivity without the tracker problem.
      */
     @SkipQueryVerification
     @Query(
@@ -65,7 +76,7 @@ interface NotepadDao {
         ORDER BY rank
         """
     )
-    fun searchActive(userId: String, query: String): Flow<List<NotepadEntry>>
+    suspend fun searchActive(userId: String, query: String): List<NotepadEntry>
 
     /** Insert-or-replace. Callers are responsible for bumping updated_at. */
     @Insert(onConflict = OnConflictStrategy.REPLACE)

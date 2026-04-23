@@ -1,29 +1,18 @@
 /*
  * NotebookLocalDetailScreen.kt
  *
- * Room-backed notebook detail — shows a notebook's chapters with the pages
- * grouped beneath each. Distinct from the older NotebookDetailScreen (which
- * reads from the Drive fake repo and will be retired when phase 3 lands).
+ * Room-backed notebook detail — drills into a notebook from the Notebooks
+ * tab. The layout leads with a serif hero card (icon + title + description
+ * + status + stats row), then a "Chapters" section that lists each chapter
+ * as a tappable row. Tapping a chapter routes to ChapterLocalDetailScreen
+ * for the pages beneath it.
  *
- * Layout:
- *   - TopAppBar with a back button and the notebook's title (editable
- *     treatment deferred; same decision as the notepad editor which shows
- *     the editable surface inside the body).
- *   - Single LazyColumn with sticky chapter headers. Each chapter section
- *     includes an inline "Add page" row at the tail so page creation is
- *     local to the chapter and doesn't need a modal picker.
- *   - Chapter header rows AND page rows are both swipe-to-delete
- *     (EndToStart). Committed swipes tombstone immediately and surface an
- *     Undo snackbar. Note: undoing a chapter restores only the chapter row;
- *     its cascaded page tombstones stay deleted (see the VM doc).
- *   - FAB: "+ New chapter" — opens a titled dialog. When the notebook has no
- *     chapters yet, an empty state also shows a "Create chapter" CTA so the
- *     FAB isn't the only discovery path.
+ * Navigation chrome is breadcrumbs under the screen header, not a
+ * TopAppBar — keeps parity with the rest of the notebook surfaces.
  */
 
 package app.releaf.mobile.features.notebook
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -38,20 +27,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -61,7 +51,6 @@ import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -81,19 +70,29 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.releaf.mobile.data.notebook.ChapterEntity
-import app.releaf.mobile.data.notebook.PageEntity
+import app.releaf.mobile.data.notebook.NotebookEntity
+import app.releaf.mobile.ui.components.BreadcrumbSegment
+import app.releaf.mobile.ui.components.Breadcrumbs
+import app.releaf.mobile.ui.components.CollapsibleCard
+import app.releaf.mobile.ui.components.DeleteConfirmationDialog
+import app.releaf.mobile.ui.components.HairlineDivider
+import app.releaf.mobile.ui.components.MetaPill
+import app.releaf.mobile.ui.components.RoundIconButton
+import app.releaf.mobile.ui.components.ScreenHeader
+import app.releaf.mobile.ui.components.absoluteDate
+import app.releaf.mobile.ui.components.relativeTimeAgo
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
-import app.releaf.mobile.ui.theme.Card
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotebookLocalDetailScreen(
     onBack: () -> Unit,
-    onOpenPage: (String) -> Unit,
+    onHome: () -> Unit,
+    onOpenChapter: (String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: NotebookLocalDetailViewModel = viewModel(factory = NotebookLocalDetailViewModel.Factory),
 ) {
@@ -101,48 +100,16 @@ fun NotebookLocalDetailScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var showCreateChapterDialog by rememberSaveable { mutableStateOf(false) }
+    var showEditNotebookDialog by rememberSaveable { mutableStateOf(false) }
+    var heroExpanded by rememberSaveable { mutableStateOf(true) }
+    var chaptersExpanded by rememberSaveable { mutableStateOf(true) }
+    // Pending delete — holds the chapter the user swiped until they confirm
+    // via the guard dialog.
+    var pendingChapterDelete by remember { mutableStateOf<ChapterEntity?>(null) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = state.notebook?.title?.ifBlank { "Untitled" } ?: " ",
-                        style = AppTypography.SectionTitle,
-                        color = AppColors.TextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = AppColors.TextPrimary,
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = Color.Transparent,
-                ),
-            )
-        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        floatingActionButton = {
-            // Only expose the FAB once the notebook has loaded — creating a
-            // chapter under a stale/missing id would be a bug.
-            if (state.notebook != null) {
-                FloatingActionButton(
-                    onClick        = { showCreateChapterDialog = true },
-                    containerColor = AppColors.Coral,
-                    contentColor   = AppColors.OnAccent,
-                ) {
-                    Icon(Icons.Filled.Add, contentDescription = "New chapter")
-                }
-            }
-        },
         containerColor = Color.Transparent,
     ) { innerPadding ->
         Column(
@@ -150,82 +117,369 @@ fun NotebookLocalDetailScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
+            ScreenHeader(
+                eyebrow = "Notebook",
+                title = "Project notebooks",
+                avatarInitial = "A",
+            )
+            Breadcrumbs(
+                segments = listOf(
+                    BreadcrumbSegment("Home", onTap = onHome),
+                    BreadcrumbSegment("Notebook", onTap = onBack),
+                    BreadcrumbSegment(state.notebook?.title?.ifBlank { "Notebook" } ?: "Notebook"),
+                ),
+                modifier = Modifier.padding(horizontal = AppSpacing.s4),
+            )
+
             when {
-                state.isLoading -> {
-                    // Blank — the empty-state will render a beat later if
-                    // there's really nothing here. No spinner for such a
-                    // cheap local query.
+                state.isLoading -> Spacer(Modifier.weight(1f))
+                state.notFound -> NotFoundState(onBack = onBack, modifier = Modifier.weight(1f))
+                else -> {
+                    NotebookDetailBody(
+                        state = state,
+                        heroExpanded = heroExpanded,
+                        onToggleHero = { heroExpanded = !heroExpanded },
+                        chaptersExpanded = chaptersExpanded,
+                        onToggleChapters = { chaptersExpanded = !chaptersExpanded },
+                        onEditNotebook = { showEditNotebookDialog = true },
+                        onAddChapter = { showCreateChapterDialog = true },
+                        onOpenChapter = onOpenChapter,
+                        onDeleteChapter = { chapter -> pendingChapterDelete = chapter },
+                        modifier = Modifier.weight(1f, fill = true),
+                    )
                 }
-                state.notFound -> NotFoundState(onBack)
-                state.chapters.isEmpty() -> EmptyChapterState(
-                    onCreateChapter = { showCreateChapterDialog = true },
-                )
-                else -> ChapterList(
-                    chapters = state.chapters,
-                    pagesByChapter = state.pagesByChapter,
-                    onOpenPage = onOpenPage,
-                    onAddPage = { chapterId ->
-                        viewModel.createPage(chapterId) { newId ->
-                            onOpenPage(newId)
-                        }
-                    },
-                    onDeleteChapter = { chapter ->
-                        val id = chapter.id
-                        viewModel.softDeleteChapter(id)
-                        scope.launch {
-                            val result = snackbarHostState.showSnackbar(
-                                message     = "Chapter deleted",
-                                actionLabel = "Undo",
-                                duration    = SnackbarDuration.Short,
-                            )
-                            if (result == SnackbarResult.ActionPerformed) {
-                                viewModel.undoDeleteChapter(id)
-                            }
-                        }
-                    },
-                    onDeletePage = { page ->
-                        val id = page.id
-                        viewModel.softDeletePage(id)
-                        scope.launch {
-                            val result = snackbarHostState.showSnackbar(
-                                message     = "Page deleted",
-                                actionLabel = "Undo",
-                                duration    = SnackbarDuration.Short,
-                            )
-                            if (result == SnackbarResult.ActionPerformed) {
-                                viewModel.undoDeletePage(id)
-                            }
-                        }
-                    },
-                )
             }
         }
     }
 
+    pendingChapterDelete?.let { chapter ->
+        val title = chapter.title.ifBlank { "Untitled chapter" }
+        DeleteConfirmationDialog(
+            title = "Delete chapter?",
+            message = "\u201C$title\u201D and its pages will be deleted. " +
+                "You can undo this immediately after.",
+            onDismiss = { pendingChapterDelete = null },
+            onConfirm = {
+                val id = chapter.id
+                pendingChapterDelete = null
+                viewModel.softDeleteChapter(id)
+                scope.launch {
+                    val result = snackbarHostState.showSnackbar(
+                        message     = "Chapter deleted",
+                        actionLabel = "Undo",
+                        duration    = SnackbarDuration.Short,
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        viewModel.undoDeleteChapter(id)
+                    }
+                }
+            },
+        )
+    }
+
     if (showCreateChapterDialog) {
-        CreateTitledDialog(
+        TitledDialog(
             heading = "New chapter",
             subhead = "Chapters group related pages. You can rename it later.",
-            placeholder = "Chapter title",
+            titlePlaceholder = "Chapter title",
+            descriptionPlaceholder = "Describe this chapter (optional)",
             onDismiss = { showCreateChapterDialog = false },
-            onConfirm = { title ->
-                viewModel.createChapter(title)
+            onConfirm = { title, description ->
+                viewModel.createChapter(title, description)
                 showCreateChapterDialog = false
             },
         )
     }
+
+    if (showEditNotebookDialog) {
+        val current = state.notebook
+        if (current != null) {
+            TitledDialog(
+                heading = "Edit notebook",
+                subhead = "Tweak the title or the summary that shows on the list.",
+                titlePlaceholder = "Notebook title",
+                descriptionPlaceholder = "Describe this notebook (optional)",
+                initialTitle = current.title,
+                initialDescription = current.description.orEmpty(),
+                onDismiss = { showEditNotebookDialog = false },
+                onConfirm = { title, description ->
+                    viewModel.saveNotebook(title, description)
+                    showEditNotebookDialog = false
+                },
+            )
+        }
+    }
 }
 
-/* ---------- empty states ---------- */
+/* ---------- body ---------- */
 
 @Composable
-private fun EmptyChapterState(onCreateChapter: () -> Unit) {
+private fun NotebookDetailBody(
+    state: NotebookLocalDetailUiState,
+    heroExpanded: Boolean,
+    onToggleHero: () -> Unit,
+    chaptersExpanded: Boolean,
+    onToggleChapters: () -> Unit,
+    onEditNotebook: () -> Unit,
+    onAddChapter: () -> Unit,
+    onOpenChapter: (String) -> Unit,
+    onDeleteChapter: (ChapterEntity) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val notebook = state.notebook ?: return
+    LazyColumn(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(
+            start  = AppSpacing.s4,
+            end    = AppSpacing.s4,
+            top    = AppSpacing.s3,
+            bottom = AppSpacing.s10,
+        ),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+    ) {
+        item(key = "hero") {
+            NotebookHeroCard(
+                notebook = notebook,
+                chapterCount = state.totalChapterCount,
+                pageCount = state.totalPageCount,
+                expanded = heroExpanded,
+                onToggle = onToggleHero,
+                onEdit = onEditNotebook,
+            )
+        }
+        item(key = "chapters_card") {
+            ChaptersCard(
+                state = state,
+                expanded = chaptersExpanded,
+                onToggle = onToggleChapters,
+                onAdd = onAddChapter,
+                onOpen = onOpenChapter,
+                onDelete = onDeleteChapter,
+            )
+        }
+        item { Spacer(Modifier.height(AppSpacing.s6)) }
+    }
+}
+
+/* ---------- hero ---------- */
+
+@Composable
+private fun NotebookHeroCard(
+    notebook: NotebookEntity,
+    chapterCount: Int,
+    pageCount: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onEdit: () -> Unit,
+) {
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .padding(AppSpacing.s6),
-        verticalArrangement = Arrangement.Center,
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppRadius.lg))
+            .background(AppColors.CardSolid)
+            .border(1.dp, AppColors.BorderDefault, RoundedCornerShape(AppRadius.lg)),
+    ) {
+        Column(
+            modifier = Modifier.padding(AppSpacing.s4),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+                verticalAlignment = Alignment.Top,
+            ) {
+                HeroIconChip()
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+                ) {
+                    Text(
+                        text = notebook.title.ifBlank { "Untitled" },
+                        style = AppTypography.EditorialTitle,
+                        color = AppColors.TextPrimary,
+                    )
+                    if (!notebook.description.isNullOrBlank()) {
+                        Text(
+                            text = notebook.description,
+                            style = AppTypography.Body,
+                            color = AppColors.TextSecondary,
+                        )
+                    }
+                }
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+                ) {
+                    if (notebook.archivedAt == null) MetaPill("Active", accent = true)
+                    else MetaPill("Archived")
+                    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+                        RoundIconButton(
+                            icon = Icons.Filled.Edit,
+                            contentDescription = "Edit notebook",
+                            onClick = onEdit,
+                        )
+                        RoundIconButton(
+                            icon = if (expanded) Icons.Filled.KeyboardArrowUp
+                                   else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = if (expanded) "Collapse" else "Expand",
+                            onClick = onToggle,
+                        )
+                    }
+                }
+            }
+        }
+        if (expanded) {
+            HairlineDivider()
+            StatsRow(
+                chapterCount = chapterCount,
+                pageCount = pageCount,
+                createdAt = notebook.createdAt,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HeroIconChip() {
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(RoundedCornerShape(AppRadius.md))
+            .background(AppAccent.soft),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Book,
+            contentDescription = null,
+            tint = AppAccent.deep,
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+@Composable
+private fun StatsRow(
+    chapterCount: Int,
+    pageCount: Int,
+    createdAt: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(AppSpacing.s4),
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+        verticalAlignment = Alignment.Top,
+    ) {
+        StatCell(
+            value = chapterCount.toString(),
+            label = if (chapterCount == 1) "Chapter" else "Chapters",
+            modifier = Modifier.weight(1f),
+        )
+        VerticalRule()
+        StatCell(
+            value = pageCount.toString(),
+            label = if (pageCount == 1) "Page" else "Pages",
+            modifier = Modifier.weight(1f),
+        )
+        VerticalRule()
+        StatCell(
+            value = absoluteDate(createdAt),
+            label = "Created",
+            modifier = Modifier.weight(1f),
+            valueStyle = AppTypography.SectionTitle,
+        )
+    }
+}
+
+@Composable
+private fun StatCell(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier,
+    valueStyle: androidx.compose.ui.text.TextStyle = AppTypography.StatNumber,
+) {
+    Column(
+        modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = value,
+            style = valueStyle,
+            color = AppColors.TextPrimary,
+            maxLines = 2,
+            textAlign = TextAlign.Center,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = label,
+            style = AppTypography.Meta,
+            color = AppColors.TextSecondary,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun VerticalRule() {
+    Box(
+        modifier = Modifier
+            .width(1.dp)
+            .height(56.dp)
+            .background(AppColors.BorderDefault),
+    )
+}
+
+/* ---------- chapters ---------- */
+
+@Composable
+private fun ChaptersCard(
+    state: NotebookLocalDetailUiState,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onAdd: () -> Unit,
+    onOpen: (String) -> Unit,
+    onDelete: (ChapterEntity) -> Unit,
+) {
+    CollapsibleCard(
+        title = "Chapters",
+        subtitle = "Main sections of this notebook.",
+        expanded = expanded,
+        onToggle = onToggle,
+        trailing = {
+            RoundIconButton(
+                icon = Icons.Filled.Add,
+                contentDescription = "New chapter",
+                onClick = onAdd,
+            )
+        },
+    ) {
+        if (state.chapters.isEmpty()) {
+            EmptyChapterBody(onAdd = onAdd)
+        } else {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                state.chapters.forEachIndexed { index, chapter ->
+                    if (index > 0) HairlineDivider()
+                    SwipeableChapterRow(
+                        chapter = chapter,
+                        pageCount = state.pageCountsByChapter[chapter.id] ?: 0,
+                        position = index + 1,
+                        onOpen = { onOpen(chapter.id) },
+                        onDelete = { onDelete(chapter) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyChapterBody(onAdd: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(AppSpacing.s6),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
     ) {
         Text(
             "No chapters yet",
@@ -238,19 +492,174 @@ private fun EmptyChapterState(onCreateChapter: () -> Unit) {
             style = AppTypography.Body,
             color = AppColors.TextTertiary,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = AppSpacing.s2),
         )
-        Spacer(Modifier.height(AppSpacing.s4))
-        TextButton(onClick = onCreateChapter) {
-            Text("Create a chapter", color = AppColors.Coral, style = AppTypography.Body)
+        Spacer(Modifier.height(AppSpacing.s1))
+        TextButton(onClick = onAdd) {
+            Text("Create a chapter", color = AppAccent.primary, style = AppTypography.Body)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeableChapterRow(
+    chapter: ChapterEntity,
+    pageCount: Int,
+    position: Int,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            // Don't auto-dismiss — hand off to the screen's guard dialog.
+            // Returning false snaps the row back while the dialog is open.
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onDelete()
+                false
+            } else {
+                false
+            }
+        },
+    )
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = true,
+        backgroundContent = { SwipeDeleteBackground() },
+    ) {
+        ChapterRow(
+            chapter = chapter,
+            pageCount = pageCount,
+            position = position,
+            onClick = onOpen,
+        )
+    }
+}
+
+@Composable
+private fun ChapterRow(
+    chapter: ChapterEntity,
+    pageCount: Int,
+    position: Int,
+    onClick: () -> Unit,
+) {
+    // Opaque fill is required: SwipeToDismissBox lays the delete background
+    // *behind* the foreground row, so a transparent row would leak the red
+    // strip through at rest.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(AppColors.CardSolid)
+            .clickable(onClick = onClick)
+            .padding(AppSpacing.s4),
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+        verticalAlignment = Alignment.Top,
+    ) {
+        RowIconChip(icon = Icons.AutoMirrored.Filled.MenuBook)
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s1),
+        ) {
+            Text(
+                text = chapter.title.ifBlank { "Untitled chapter" },
+                style = AppTypography.SectionTitle,
+                color = AppColors.TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            MetaPill(text = "Ch. $position")
+            if (!chapter.description.isNullOrBlank()) {
+                Text(
+                    text = chapter.description,
+                    style = AppTypography.Body,
+                    color = AppColors.TextSecondary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (pageCount == 1) "1 page" else "$pageCount pages",
+                    style = AppTypography.Meta,
+                    color = AppColors.TextSecondary,
+                )
+                Text(
+                    text = "\u00B7",
+                    style = AppTypography.Meta,
+                    color = AppColors.TextTertiary,
+                )
+                Text(
+                    text = relativeTimeAgo(chapter.updatedAt),
+                    style = AppTypography.Meta,
+                    color = AppColors.TextTertiary,
+                )
+            }
+        }
+        Column(
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                Icons.Filled.KeyboardArrowUp,
+                contentDescription = null,
+                tint = AppColors.TextTertiary,
+                modifier = Modifier.size(18.dp),
+            )
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                contentDescription = null,
+                tint = AppColors.TextTertiary,
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }
 
 @Composable
-private fun NotFoundState(onBack: () -> Unit) {
-    Column(
+private fun RowIconChip(icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Box(
         modifier = Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(AppRadius.md))
+            .background(AppAccent.soft),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = AppAccent.deep,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+@Composable
+private fun SwipeDeleteBackground() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AppColors.Danger)
+            .padding(horizontal = AppSpacing.s4),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        Icon(
+            Icons.Filled.Delete,
+            contentDescription = null,
+            tint = AppColors.OnAccent,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/* ---------- not-found state ---------- */
+
+@Composable
+private fun NotFoundState(onBack: () -> Unit, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
             .fillMaxSize()
             .padding(AppSpacing.s6),
         verticalArrangement = Arrangement.Center,
@@ -271,220 +680,26 @@ private fun NotFoundState(onBack: () -> Unit) {
         )
         Spacer(Modifier.height(AppSpacing.s4))
         TextButton(onClick = onBack) {
-            Text("Back", color = AppColors.Coral, style = AppTypography.Body)
+            Text("Back", color = AppAccent.primary, style = AppTypography.Body)
         }
     }
 }
 
-/* ---------- list ---------- */
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun ChapterList(
-    chapters: List<ChapterEntity>,
-    pagesByChapter: Map<String, List<PageEntity>>,
-    onOpenPage: (String) -> Unit,
-    onAddPage: (String) -> Unit,
-    onDeleteChapter: (ChapterEntity) -> Unit,
-    onDeletePage: (PageEntity) -> Unit,
-) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start  = AppSpacing.s4,
-            end    = AppSpacing.s4,
-            top    = AppSpacing.s1,
-            bottom = AppSpacing.s10,
-        ),
-        verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
-    ) {
-        chapters.forEach { chapter ->
-            stickyHeader(key = "ch_${chapter.id}") {
-                SwipeableChapterHeader(
-                    chapter = chapter,
-                    onDelete = { onDeleteChapter(chapter) },
-                )
-            }
-            val pages = pagesByChapter[chapter.id].orEmpty()
-            items(items = pages, key = { "pg_${it.id}" }) { page ->
-                SwipeablePageRow(
-                    page = page,
-                    onOpen = { onOpenPage(page.id) },
-                    onDelete = { onDeletePage(page) },
-                )
-            }
-            item(key = "addpage_${chapter.id}") {
-                AddPageRow(onClick = { onAddPage(chapter.id) })
-            }
-        }
-        item(key = "tail_spacer") { Spacer(Modifier.height(AppSpacing.s6)) }
-    }
-}
-
-/* ---------- chapter header row ---------- */
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SwipeableChapterHeader(
-    chapter: ChapterEntity,
-    onDelete: () -> Unit,
-) {
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.EndToStart) {
-                onDelete()
-                true
-            } else {
-                false
-            }
-        },
-    )
-
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromStartToEnd = false,
-        enableDismissFromEndToStart = true,
-        backgroundContent = { SwipeDeleteBackground() },
-    ) {
-        ChapterHeader(chapter)
-    }
-}
+/* ---------- shared titled-create / edit dialog ---------- */
 
 @Composable
-private fun ChapterHeader(chapter: ChapterEntity) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(AppColors.Canvas)
-            .padding(
-                top    = AppSpacing.s3,
-                bottom = AppSpacing.s1,
-            ),
-    ) {
-        Text(
-            chapter.title.ifBlank { "Untitled chapter" },
-            style = AppTypography.Eyebrow,
-            color = AppColors.Coral,
-        )
-    }
-}
-
-/* ---------- page row ---------- */
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SwipeablePageRow(
-    page: PageEntity,
-    onOpen: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.EndToStart) {
-                onDelete()
-                true
-            } else {
-                false
-            }
-        },
-    )
-
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromStartToEnd = false,
-        enableDismissFromEndToStart = true,
-        backgroundContent = { SwipeDeleteBackground() },
-    ) {
-        PageRow(page, onClick = onOpen)
-    }
-}
-
-@Composable
-private fun PageRow(page: PageEntity, onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth().clickable { onClick() }) {
-        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s1)) {
-            Text(
-                displayPageTitle(page),
-                style = AppTypography.SectionTitle,
-                color = AppColors.TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            pagePreviewBody(page)?.let { preview ->
-                Text(
-                    preview,
-                    style = AppTypography.Body,
-                    color = AppColors.TextSecondary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SwipeDeleteBackground() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .clip(RoundedCornerShape(AppRadius.md))
-            .background(AppColors.Danger)
-            .padding(horizontal = AppSpacing.s4),
-        contentAlignment = Alignment.CenterEnd,
-    ) {
-        Icon(
-            Icons.Filled.Delete,
-            contentDescription = null,
-            tint = AppColors.OnAccent,
-            modifier = Modifier.size(20.dp),
-        )
-    }
-}
-
-/* ---------- add page row ---------- */
-
-@Composable
-private fun AddPageRow(onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(AppRadius.md))
-            .border(
-                width = 1.dp,
-                color = AppColors.BorderDefault,
-                shape = RoundedCornerShape(AppRadius.md),
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = AppSpacing.s4, vertical = AppSpacing.s3),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Filled.Add,
-            contentDescription = null,
-            tint = AppColors.Coral,
-            modifier = Modifier.size(18.dp),
-        )
-        Spacer(Modifier.size(AppSpacing.s2))
-        Text(
-            "Add page",
-            style = AppTypography.Body,
-            color = AppColors.Coral,
-        )
-    }
-}
-
-/* ---------- shared titled-create dialog ---------- */
-
-@Composable
-private fun CreateTitledDialog(
+private fun TitledDialog(
     heading: String,
     subhead: String,
-    placeholder: String,
+    titlePlaceholder: String,
+    descriptionPlaceholder: String,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
+    onConfirm: (String, String) -> Unit,
+    initialTitle: String = "",
+    initialDescription: String = "",
 ) {
-    var title by rememberSaveable { mutableStateOf("") }
+    var title by rememberSaveable { mutableStateOf(initialTitle) }
+    var description by rememberSaveable { mutableStateOf(initialDescription) }
     val canConfirm = title.isNotBlank()
 
     AlertDialog(
@@ -503,45 +718,26 @@ private fun CreateTitledDialog(
                     style = AppTypography.Body,
                     color = AppColors.TextSecondary,
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(AppRadius.md))
-                        .background(AppColors.Canvas)
-                        .border(
-                            width = 1.dp,
-                            color = AppColors.BorderDefault,
-                            shape = RoundedCornerShape(AppRadius.md),
-                        )
-                        .padding(horizontal = AppSpacing.s3, vertical = AppSpacing.s3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(Modifier.weight(1f, fill = true)) {
-                        if (title.isEmpty()) {
-                            Text(
-                                placeholder,
-                                style = AppTypography.Body,
-                                color = AppColors.TextTertiary,
-                            )
-                        }
-                        BasicTextField(
-                            value = title,
-                            onValueChange = { title = it },
-                            singleLine = true,
-                            textStyle = AppTypography.Body.copy(color = AppColors.TextPrimary),
-                            cursorBrush = SolidColor(AppColors.Coral),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
+                DialogTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    placeholder = titlePlaceholder,
+                    singleLine = true,
+                )
+                DialogTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    placeholder = descriptionPlaceholder,
+                    singleLine = false,
+                )
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { if (canConfirm) onConfirm(title) },
+                onClick = { if (canConfirm) onConfirm(title, description) },
                 enabled = canConfirm,
             ) {
-                Text("Create", color = AppColors.Coral)
+                Text("Save", color = AppAccent.primary)
             }
         },
         dismissButton = {
@@ -553,28 +749,42 @@ private fun CreateTitledDialog(
     )
 }
 
-/* ---------- small helpers mirroring the notepad list ---------- */
-
-private fun displayPageTitle(page: PageEntity): String {
-    page.title?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
-    val firstLine = page.notes
-        .lineSequence()
-        .map { it.trim() }
-        .firstOrNull { it.isNotEmpty() }
-    return firstLine?.takeIf { it.isNotEmpty() } ?: "Untitled page"
-}
-
-private fun pagePreviewBody(page: PageEntity): String? {
-    val notes = page.notes.trim()
-    if (notes.isEmpty()) return null
-    val titleIsFromNotes = page.title.isNullOrBlank()
-    return if (titleIsFromNotes) {
-        notes.lineSequence()
-            .drop(1)
-            .joinToString("\n")
-            .trim()
-            .takeIf { it.isNotEmpty() }
-    } else {
-        notes
+@Composable
+private fun DialogTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    singleLine: Boolean,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppRadius.md))
+            .background(AppColors.Canvas)
+            .border(
+                width = 1.dp,
+                color = AppColors.BorderDefault,
+                shape = RoundedCornerShape(AppRadius.md),
+            )
+            .padding(horizontal = AppSpacing.s3, vertical = AppSpacing.s3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f, fill = true)) {
+            if (value.isEmpty()) {
+                Text(
+                    placeholder,
+                    style = AppTypography.Body,
+                    color = AppColors.TextTertiary,
+                )
+            }
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = singleLine,
+                textStyle = AppTypography.Body.copy(color = AppColors.TextPrimary),
+                cursorBrush = SolidColor(AppAccent.primary),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }

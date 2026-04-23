@@ -41,7 +41,18 @@ import app.releaf.mobile.data.common.Uuidv7
 import app.releaf.mobile.data.notebook.Stroke
 import kotlin.math.hypot
 
-enum class DrawingMode { Off, Pen, Eraser }
+/**
+ * Input mode for the sub-page editor's annotation layers.
+ *
+ * - [Off]    — normal rich-text editing. Drawing overlay + text-box
+ *              overlay are both display-only.
+ * - [Pen]    — pen strokes land via the [DrawingOverlay] pointer input.
+ * - [Eraser] — eraser path removes strokes it intersects.
+ * - [Text]   — tapping an empty area creates a free-form text box at
+ *              the tap position; tapping an existing box re-focuses
+ *              it for editing. See `TextBoxLayer`.
+ */
+enum class DrawingMode { Off, Pen, Eraser, Text }
 
 /**
  * Live pen config — `color` is the swatch pick, `opacity` is the 0..1
@@ -79,7 +90,10 @@ fun DrawingOverlay(
     // Re-key pointerInput on mode only — changing color/width mid-stroke
     // shouldn't abort the current gesture, and we read `latestConfig`
     // through rememberUpdatedState anyway.
-    val gestureModifier = if (mode == DrawingMode.Off) {
+    // Pointer input is only hot for Pen + Eraser. In Off / Text mode
+    // the overlay is display-only so taps pass through to the rich-
+    // text editor below (Off) or to the text-box layer above (Text).
+    val gestureModifier = if (mode != DrawingMode.Pen && mode != DrawingMode.Eraser) {
         Modifier
     } else {
         Modifier.pointerInput(mode) {

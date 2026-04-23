@@ -28,9 +28,11 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.releaf.mobile.auth.GoogleAuthSession
 import app.releaf.mobile.data.domain.Notebook
+import app.releaf.mobile.features.onboarding.OnboardingQuickGuideCard
 import app.releaf.mobile.ui.components.AppButton
 import app.releaf.mobile.ui.components.AppButtonVariant
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 import app.releaf.mobile.ui.theme.Card
@@ -40,6 +42,7 @@ fun HomeScreen(
     session: GoogleAuthSession,
     onOpenNotebook: (String) -> Unit,
     onSignOut: () -> Unit,
+    onShowOnboarding: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
 ) {
@@ -50,7 +53,7 @@ fun HomeScreen(
         when (val s = state) {
             HomeUiState.Idle, HomeUiState.Loading -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = AppColors.Coral)
+                    CircularProgressIndicator(color = AppAccent.primary)
                 }
             }
             is HomeUiState.Failed -> {
@@ -78,6 +81,11 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(AppSpacing.s6),
                 ) {
                     Header(session = session, onSignOut = onSignOut)
+                    OnboardingQuickGuideCard(onShowIntro = onShowOnboarding)
+                    // Theme picker lives at the top of Home so
+                    // appearance tweaks are one tap away without
+                    // digging into Settings.
+                    app.releaf.mobile.ui.components.ThemePickerSection()
                     s.notebooks.forEach { nb ->
                         NotebookRow(nb, onClick = { onOpenNotebook(nb.id) })
                     }
@@ -91,7 +99,7 @@ fun HomeScreen(
 @Composable
 private fun Header(session: GoogleAuthSession, onSignOut: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
-        Text("NOTEBOOKS", style = AppTypography.Eyebrow, color = AppColors.Coral)
+        Text("NOTEBOOKS", style = AppTypography.Eyebrow, color = AppAccent.primary)
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -105,7 +113,7 @@ private fun Header(session: GoogleAuthSession, onSignOut: () -> Unit) {
             Text(
                 "Sign out",
                 style = AppTypography.Button,
-                color = AppColors.Coral,
+                color = AppAccent.primary,
                 modifier = Modifier.clickable { onSignOut() },
             )
         }

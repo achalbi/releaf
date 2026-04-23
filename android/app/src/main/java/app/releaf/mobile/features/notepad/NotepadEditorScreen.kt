@@ -26,6 +26,7 @@
 package app.releaf.mobile.features.notepad
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -34,18 +35,29 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
@@ -57,11 +69,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -69,40 +81,45 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.releaf.mobile.data.notebook.Attachment
 import app.releaf.mobile.data.notebook.Stroke
+import app.releaf.mobile.ui.components.AppToastHost
 import app.releaf.mobile.ui.components.BreadcrumbSegment
 import app.releaf.mobile.ui.components.Breadcrumbs
 import app.releaf.mobile.ui.components.DotGridBackground
+import app.releaf.mobile.ui.components.rememberToastState
 import app.releaf.mobile.ui.components.editor.ContactsSection
 import app.releaf.mobile.ui.components.editor.DrawingColorSaver
 import app.releaf.mobile.ui.components.editor.DrawingMode
 import app.releaf.mobile.ui.components.editor.DrawingModeSaver
-import app.releaf.mobile.ui.components.editor.DrawingOverlay
 import app.releaf.mobile.ui.components.editor.DrawingPalette
 import app.releaf.mobile.ui.components.editor.DrawingThicknesses
 import app.releaf.mobile.ui.components.editor.DrawingToolbar
 import app.releaf.mobile.ui.components.editor.EditorMode
 import app.releaf.mobile.ui.components.editor.EditorModeIconToggle
 import app.releaf.mobile.ui.components.editor.LocationSection
+import app.releaf.mobile.ui.components.editor.MergeSection
+import app.releaf.mobile.ui.components.editor.MoveToNotebookSection
 import app.releaf.mobile.ui.components.editor.OverviewPane
 import app.releaf.mobile.ui.components.editor.PenConfig
 import app.releaf.mobile.ui.components.editor.PhotosSection
 import app.releaf.mobile.ui.components.editor.RichTextFormatBar
 import app.releaf.mobile.ui.components.editor.ScansSection
+import app.releaf.mobile.ui.components.editor.SubPageEditorPager
 import app.releaf.mobile.ui.components.editor.TodosSection
 import app.releaf.mobile.ui.components.editor.VoiceSection
 import app.releaf.mobile.ui.components.editor.WordCountFooter
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
+import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 import com.mohamedrejeb.richeditor.model.RichTextState
-import com.mohamedrejeb.richeditor.model.rememberRichTextState
-import com.mohamedrejeb.richeditor.ui.BasicRichTextEditor
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -110,6 +127,7 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotepadEditorScreen(
     onBack: () -> Unit,
@@ -117,12 +135,13 @@ fun NotepadEditorScreen(
     viewModel: NotepadEditorViewModel = viewModel(factory = NotepadEditorViewModel.Factory),
 ) {
     val state by viewModel.state.collectAsState()
-    val richTextState = rememberRichTextState()
     // Overview (grid) is the default — the at-a-glance tab bar is the
     // expected entry point. Users tap the list icon to drop into the
     // single-scroll rich-text editor when they actually want to write.
     var editorMode by rememberSaveable { mutableStateOf(EditorMode.OVERVIEW) }
     var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
+    var showMergeSheet by rememberSaveable { mutableStateOf(false) }
+    var showMoveSheet  by rememberSaveable { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
 
     // Drawing overlay controls. Persisted strokes come from the VM;
@@ -139,19 +158,62 @@ fun NotepadEditorScreen(
     var drawWidth by rememberSaveable { mutableStateOf(DrawingThicknesses[1].widthDp) }
     var drawNib by rememberSaveable { mutableStateOf(Stroke.NIB_BALLPOINT) }
 
-    // Hydrate once on bootstrap. Both editor modes share `richTextState`,
-    // so no mode-triggered re-hydration is needed — `setMarkdown` would
-    // clobber in-flight edits.
-    LaunchedEffect(state.isLoading) {
-        if (!state.isLoading) {
-            richTextState.setMarkdown(state.notes)
+    // One RichTextState per sub-page. See PageLocalEditorScreen twin
+    // for the ownership rationale.
+    val richTextStates = remember { mutableMapOf<String, RichTextState>() }
+    state.subPages.forEach { sp ->
+        richTextStates.getOrPut(sp.id) {
+            RichTextState().apply { setMarkdown(sp.notes) }
         }
     }
+    val liveIds = state.subPages.map { it.id }.toSet()
+    richTextStates.keys.removeAll { it !in liveIds }
 
-    // Save on backgrounding / process death / nav-away without a Back tap.
+    val pagerState = rememberPagerState(
+        initialPage = 0,
+        pageCount   = { state.subPages.size },
+    )
+    val currentSubPage = state.subPages.getOrNull(pagerState.currentPage)
+    val currentRts = currentSubPage?.let { richTextStates[it.id] }
+
+    val context = LocalContext.current
+    val toastScope = androidx.compose.runtime.rememberCoroutineScope()
+    val toastState = rememberToastState(toastScope)
+    // "Add to notes" on a voice-note card — always append to the *last*
+    // sub-page in the list. That's usually where the user is actively
+    // writing (new sub-pages are appended on the right), and it keeps
+    // older sub-pages' content immutable from voice actions. Mutates
+    // the `RichTextState` directly so Edit mode reflects the append
+    // immediately, then pushes through the VM so save() picks it up,
+    // and surfaces a toast confirming the action happened.
+    val addVoiceTranscriptToNotes: (String) -> Unit = addVoice@{ text ->
+        // Walk backwards from the newest sub-page and pick the first one
+        // that actually has a notes body. Ruled (ledger) sub-pages have
+        // no text editor — appending to one would silently drop the
+        // transcript — so we skip them and keep scanning. If the user
+        // only has ruled pages in the entry, surface a toast so they
+        // know why nothing happened.
+        val target = state.subPages.lastOrNull { it.background != app.releaf.mobile.data.notebook.SubPage.BG_RULED }
+        if (target == null) {
+            toastState.show("Add a notes page first")
+            return@addVoice
+        }
+        val rts = richTextStates[target.id] ?: return@addVoice
+        val existing = rts.toMarkdown()
+        val separator = if (existing.isBlank()) "" else "\n\n"
+        rts.setMarkdown(existing + separator + text.trim())
+        viewModel.updateSubPageNotes(target.id, rts.toMarkdown())
+        toastState.show("Added to notes")
+    }
+
+    val stateRef by rememberUpdatedState(state)
     DisposableEffect(viewModel) {
         onDispose {
-            viewModel.updateNotes(richTextState.toMarkdown())
+            stateRef.subPages.forEach { sp ->
+                richTextStates[sp.id]?.let { rts ->
+                    viewModel.updateSubPageNotes(sp.id, rts.toMarkdown())
+                }
+            }
             viewModel.save()
         }
     }
@@ -181,9 +243,14 @@ fun NotepadEditorScreen(
                 }
         ) {
         val popBack: () -> Unit = {
-            // Both modes share the rich-text state, so flush is
-            // unconditional.
-            viewModel.updateNotes(richTextState.toMarkdown())
+            // Flush every live sub-page's rich-text draft back into the VM
+            // before triggering the save. The VM diff-checks and no-ops
+            // when nothing changed.
+            state.subPages.forEach { sp ->
+                richTextStates[sp.id]?.let { rts ->
+                    viewModel.updateSubPageNotes(sp.id, rts.toMarkdown())
+                }
+            }
             viewModel.save()
             onBack()
         }
@@ -193,10 +260,17 @@ fun NotepadEditorScreen(
                 BreadcrumbSegment(label = "Notepad", onTap = popBack),
                 BreadcrumbSegment(label = formatEntryDateLabel(parseLocalDate(state.entryDate))),
             ),
-            showDelete = state.entry != null,
-            editorMode = editorMode,
+            showDelete  = state.entry != null,
+            // Merge and Move-to-notebook only make sense once there's
+            // something to act on. Same guard as MergeSection's enabled
+            // flag — surfaces consistent behavior wherever the action
+            // can be triggered.
+            showActions = state.canSave || state.entry != null,
+            editorMode  = editorMode,
             onChangeMode = { newMode -> editorMode = newMode },
-            onDelete = { showDeleteDialog = true },
+            onDelete    = { showDeleteDialog = true },
+            onOpenMerge = { showMergeSheet = true },
+            onOpenMove  = { showMoveSheet  = true },
         )
 
         // Title + date share one row at screen level: title takes the
@@ -231,36 +305,91 @@ fun NotepadEditorScreen(
                     Modifier.weight(1f).fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator(color = AppColors.Coral)
+                    CircularProgressIndicator(color = AppAccent.primary)
                 }
             }
 
             editorMode == EditorMode.OVERVIEW -> {
+                // Overview's preview + fullscreen sheet always bind to
+                // the *last* sub-page — the user's latest entry, where
+                // "Add to notes" also lands. Multi-sub-page navigation
+                // lives in Edit mode.
+                val lastSp  = state.subPages.lastOrNull()
+                val lastRts = lastSp?.let { richTextStates[it.id] }
                 Box(Modifier.weight(1f)) {
                     OverviewPane(
-                        richTextState = richTextState,
+                        richTextState = lastRts ?: RichTextState(),
                         contacts      = state.contacts,
                         todos         = state.todos,
                         locations     = state.locations,
                         attachments   = state.attachments,
-                        onAddContact    = { name -> viewModel.addContact(name) },
+                        onAddContact    = { name, phone, landline, email, title, organization, location, website ->
+                            viewModel.addContact(
+                                name         = name,
+                                phone        = phone,
+                                landline     = landline,
+                                email        = email,
+                                title        = title,
+                                organization = organization,
+                                location     = location,
+                                website      = website,
+                            )
+                        },
+                        onEditContact   = { id, name, phone, landline, email, title, organization, location, website ->
+                            viewModel.updateContact(
+                                id           = id,
+                                name         = name,
+                                phone        = phone,
+                                landline     = landline,
+                                email        = email,
+                                title        = title,
+                                organization = organization,
+                                location     = location,
+                                website      = website,
+                            )
+                        },
                         onRemoveContact = viewModel::removeContact,
                         onAddTodo       = viewModel::addTodo,
                         onToggleTodo    = viewModel::toggleTodo,
                         onRemoveTodo    = viewModel::removeTodo,
+                        onUpdateTodoPriority = viewModel::updateTodoPriority,
+                        onReorderTodos  = viewModel::reorderTodos,
                         onAddLocation   = { lat, lng, address -> viewModel.addLocation(lat, lng, address) },
+                        onUpdateLocationCoords = viewModel::updateLocationCoords,
                         onRemoveLocation = viewModel::removeLocation,
                         onAddPhoto      = { uri -> viewModel.addAttachment(Attachment.TYPE_PHOTO, uri) },
+                        onCombinePhotosToPdf = { pdfUri, previewUri ->
+                            viewModel.addAttachment(Attachment.TYPE_SCAN, pdfUri, previewUri)
+                        },
                         onAddScan       = { uri, preview, pageUris ->
                             viewModel.addScan(uri, preview, pageUris)
                         },
                         onAddVoiceNote  = { uri, durationMs ->
                             viewModel.addVoiceNote(uri, durationMs)
                         },
-                        onTranscribeVoiceNote = { uri, transcript ->
-                            viewModel.updateVoiceTranscript(uri, transcript)
+                        onTranscribeVoiceNote = { uri, transcript, source ->
+                            viewModel.updateVoiceTranscript(uri, transcript, source)
                         },
+                        onAddVoiceNoteTranscriptToNotes = addVoiceTranscriptToNotes,
                         onRemoveAttachment = viewModel::removeAttachment,
+                        subPages                  = state.subPages,
+                        richTextStates            = richTextStates,
+                        onSubPageStrokesChange    = viewModel::updateSubPageStrokes,
+                        onSubPageTextBoxesChange  = viewModel::updateSubPageTextBoxes,
+                        onSubPageLedgerChange     = viewModel::updateSubPageLedger,
+                        onAddSubPage              = viewModel::addSubPage,
+                        onRemoveSubPage           = viewModel::removeSubPage,
+                        onSubPageBackgroundChange = viewModel::updateSubPageBackground,
+                        onSubPageBgScaleChange    = viewModel::updateSubPageBgScale,
+                        onPhotoExported           = { uri ->
+                            viewModel.addAttachment(Attachment.TYPE_PHOTO, uri)
+                        },
+                        onImportPageToNotes       = { pageImageUri ->
+                            viewModel.addSubPageFromImage(pageImageUri)
+                        },
+                        onEditScan                = { id, title, categoryId ->
+                            viewModel.updateScan(id, title, categoryId)
+                        },
                     )
                 }
             }
@@ -274,22 +403,29 @@ fun NotepadEditorScreen(
                 )
                 Box(Modifier.weight(1f)) {
                     EditorBody(
-                        state         = state,
-                        viewModel     = viewModel,
-                        richTextState = richTextState,
-                        drawingMode   = drawingMode,
-                        penConfig     = penConfig,
+                        state                       = state,
+                        viewModel                   = viewModel,
+                        pagerState                  = pagerState,
+                        richTextStates              = richTextStates,
+                        drawingMode                 = drawingMode,
+                        penConfig                   = penConfig,
+                        onAddVoiceTranscriptToNotes = addVoiceTranscriptToNotes,
+                        onBack                      = onBack,
                     )
                 }
-                WordCountFooter(text = richTextState.annotatedString.text)
+                if (currentRts != null) {
+                    WordCountFooter(text = currentRts.annotatedString.text)
+                }
                 if (drawingMode == DrawingMode.Off) {
-                    RichTextFormatBar(
-                        state          = richTextState,
-                        onEnterDrawing = {
-                            focusManager.clearFocus()
-                            drawingMode = DrawingMode.Pen
-                        },
-                    )
+                    if (currentRts != null) {
+                        RichTextFormatBar(
+                            state          = currentRts,
+                            onEnterDrawing = {
+                                focusManager.clearFocus()
+                                drawingMode = DrawingMode.Pen
+                            },
+                        )
+                    }
                 } else {
                     DrawingToolbar(
                         mode            = drawingMode,
@@ -302,11 +438,25 @@ fun NotepadEditorScreen(
                         onWidthChange   = { drawWidth = it },
                         nib             = drawNib,
                         onNibChange     = { drawNib = it },
+                        onClose         = { drawingMode = DrawingMode.Off },
                     )
                 }
             }
         }
         } // end inner Column (content layer)
+        // Floating toast — layered above all screen content via the
+        // same outer Box so it sits over sub-page strokes, the format
+        // bar, etc. Padding leaves room for the format bar + bottom
+        // sheets pinned to the bottom edge.
+        AppToastHost(
+            state   = toastState,
+            padding = androidx.compose.foundation.layout.PaddingValues(
+                start   = AppSpacing.s4,
+                end     = AppSpacing.s4,
+                bottom  = AppSpacing.s10,
+                top     = AppSpacing.s4,
+            ),
+        )
     } // end outer Box (dot-grid canvas)
 
     // Destructive-action guard. Tapping Delete in the top bar only
@@ -337,16 +487,87 @@ fun NotepadEditorScreen(
             },
         )
     }
+
+    // Top-bar entry point for Merge pages. Same MergeSection shown
+    // inline at the end of the scroll, hoisted into a bottom sheet so
+    // it's reachable without scrolling. Dismisses on a successful
+    // merge by popping back (the entry is either refreshed or the
+    // secondary was soft-deleted — either way the list is the right
+    // place to land).
+    if (showMergeSheet) {
+        val otherEntries by viewModel.otherEntries.collectAsState()
+        ModalBottomSheet(
+            onDismissRequest = { showMergeSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = AppColors.Canvas,
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = AppSpacing.s4, vertical = AppSpacing.s3),
+            ) {
+                MergeSection(
+                    otherEntries = otherEntries,
+                    enabled      = state.canSave || state.entry != null,
+                    onMerge      = { otherId, keepThisAsPrimary ->
+                        viewModel.merge(otherId, keepThisAsPrimary) { _ ->
+                            showMergeSheet = false
+                            onBack()
+                        }
+                    },
+                )
+                Spacer(Modifier.height(AppSpacing.s4))
+            }
+        }
+    }
+
+    // Top-bar entry point for Move-to-notebook. Same shape as the
+    // merge sheet — wraps the existing inline section, provides
+    // consistent dismiss semantics.
+    if (showMoveSheet) {
+        val notebooks by viewModel.notebooks.collectAsState()
+        val chaptersForPicker by viewModel.chaptersForPicker.collectAsState()
+        ModalBottomSheet(
+            onDismissRequest = { showMoveSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = AppColors.Canvas,
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = AppSpacing.s4, vertical = AppSpacing.s3),
+            ) {
+                MoveToNotebookSection(
+                    notebooks          = notebooks,
+                    chaptersForPicker  = chaptersForPicker,
+                    onOpenChaptersFor  = viewModel::openChaptersFor,
+                    enabled            = state.canSave || state.entry != null,
+                    onMove             = { chapterId ->
+                        viewModel.moveToNotebook(chapterId) {
+                            showMoveSheet = false
+                            onBack()
+                        }
+                    },
+                )
+                Spacer(Modifier.height(AppSpacing.s4))
+            }
+        }
+    }
 }
 
 @Composable
 private fun TopBar(
     segments: List<BreadcrumbSegment>,
     showDelete: Boolean,
+    showActions: Boolean,
     editorMode: EditorMode,
     onChangeMode: (EditorMode) -> Unit,
     onDelete: () -> Unit,
+    onOpenMerge: () -> Unit,
+    onOpenMove: () -> Unit,
 ) {
+    // Delete now lives inside the overflow menu — surface the icon
+    // button only when neither Merge nor Move are available (i.e. the
+    // entry isn't yet persisted) so the top bar isn't completely
+    // empty on the trailing edge during a fresh draft.
+    var menuOpen by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -360,65 +581,197 @@ private fun TopBar(
     ) {
         Breadcrumbs(segments = segments, modifier = Modifier.weight(1f))
         EditorModeIconToggle(mode = editorMode, onChange = onChangeMode)
-        if (showDelete) {
-            Spacer(Modifier.size(AppSpacing.s3))
-            Text(
-                "Delete",
-                style = AppTypography.Button,
-                color = AppColors.Danger,
-                modifier = Modifier.clickable { onDelete() },
-            )
+
+        if (showActions) {
+            Spacer(Modifier.size(AppSpacing.s2))
+            Box {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .clickable { menuOpen = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector        = Icons.Filled.MoreVert,
+                        contentDescription = "More actions",
+                        tint               = AppColors.TextSecondary,
+                        modifier           = Modifier.size(22.dp),
+                    )
+                }
+                // Popup (not DropdownMenu) — Material 3's DropdownMenu
+                // wraps its content in its own Surface whose shape,
+                // elevation, and color aren't reachable from the
+                // `modifier` slot. That Surface paints a white rounded
+                // rectangle behind our cream card, producing the
+                // double-layer look. Popup draws only what we give it.
+                if (menuOpen) {
+                    Popup(
+                        alignment = Alignment.TopEnd,
+                        // Offset below the anchor icon's 40dp bounds so
+                        // the card doesn't cover the "More" button.
+                        offset = IntOffset(0, with(androidx.compose.ui.platform.LocalDensity.current) {
+                            (40.dp + AppSpacing.s1).roundToPx()
+                        }),
+                        onDismissRequest = { menuOpen = false },
+                        properties = PopupProperties(focusable = true),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .widthIn(min = 240.dp)
+                                .shadow(8.dp, RoundedCornerShape(AppRadius.md))
+                                .clip(RoundedCornerShape(AppRadius.md))
+                                .background(AppColors.CardSolid)
+                                .border(
+                                    width = 1.dp,
+                                    color = AppColors.BorderDefault,
+                                    shape = RoundedCornerShape(AppRadius.md),
+                                )
+                                .padding(vertical = AppSpacing.s2),
+                        ) {
+                            TokenMenuItem(
+                                label = "Merge with another page",
+                                onClick = {
+                                    menuOpen = false
+                                    onOpenMerge()
+                                },
+                            )
+                            TokenMenuItem(
+                                label = "Move to notebook",
+                                onClick = {
+                                    menuOpen = false
+                                    onOpenMove()
+                                },
+                            )
+                            if (showDelete) {
+                                TokenMenuDivider()
+                                TokenMenuItem(
+                                    label = "Delete entry",
+                                    color = AppColors.Danger,
+                                    onClick = {
+                                        menuOpen = false
+                                        onDelete()
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (showDelete) {
+            // Pre-persistence only — Merge / Move need a row, but Delete
+            // makes sense as soon as one exists. This branch is a safety
+            // net; in practice `showActions` opens as soon as there's
+            // anything to save, which subsumes the Delete visibility.
+            Spacer(Modifier.size(AppSpacing.s2))
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .clickable { onDelete() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.Filled.DeleteOutline,
+                    contentDescription = "Delete entry",
+                    tint               = AppColors.Danger,
+                    modifier           = Modifier.size(22.dp),
+                )
+            }
         }
     }
+}
+
+/**
+ * Menu item styled with design tokens — body typography, primary
+ * text color (or a passed override for destructive actions), and
+ * padding matching other app rows.
+ */
+@Composable
+private fun TokenMenuItem(
+    label: String,
+    onClick: () -> Unit,
+    color: androidx.compose.ui.graphics.Color = AppColors.TextPrimary,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = AppSpacing.s4, vertical = AppSpacing.s3),
+    ) {
+        Text(
+            text  = label,
+            style = AppTypography.Body,
+            color = color,
+        )
+    }
+}
+
+@Composable
+private fun TokenMenuDivider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = AppSpacing.s3)
+            .height(1.dp)
+            .background(AppColors.BorderDefault),
+    )
 }
 
 @Composable
 private fun EditorBody(
     state: NotepadEditorUiState,
     viewModel: NotepadEditorViewModel,
-    richTextState: RichTextState,
+    pagerState: PagerState,
+    richTextStates: MutableMap<String, RichTextState>,
     drawingMode: DrawingMode,
     penConfig: PenConfig,
+    onAddVoiceTranscriptToNotes: (String) -> Unit,
+    onBack: () -> Unit,
 ) {
     val scroll = rememberScrollState()
+    val otherEntries by viewModel.otherEntries.collectAsState()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(scroll)
-            .padding(horizontal = AppSpacing.s4),
+            .verticalScroll(scroll),
         verticalArrangement = Arrangement.spacedBy(AppSpacing.s4),
     ) {
-        // Title + date are rendered at screen level, sticky above the
-        // scrolling body. Keeping them out of this scroll container
-        // means they stay visible even when the user scrolls deep
-        // into the notes or sections. The drawing overlay stacks
-        // directly above the rich-text editor — when mode is Off it
-        // doesn't install a pointerInput modifier so text editing is
-        // unaffected. `defaultMinSize` gives a usable drawing area
-        // even before the user has typed anything.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .defaultMinSize(minHeight = 360.dp),
-        ) {
-            NotesField(state = richTextState)
-            DrawingOverlay(
-                strokes         = state.strokes,
-                mode            = drawingMode,
-                penConfig       = penConfig,
-                onStrokesChange = viewModel::updateStrokes,
-                modifier        = Modifier.matchParentSize(),
-            )
-        }
+        // Horizontal sub-pages. Pager manages its own side padding;
+        // feature sections below are wrapped in a padded Column.
+        SubPageEditorPager(
+            subPages           = state.subPages,
+            pagerState         = pagerState,
+            richTextStates     = richTextStates,
+            drawingMode        = drawingMode,
+            penConfig          = penConfig,
+            onStrokesChange    = viewModel::updateSubPageStrokes,
+            onTextBoxesChange  = viewModel::updateSubPageTextBoxes,
+            onLedgerChange     = viewModel::updateSubPageLedger,
+            onAddSubPage       = viewModel::addSubPage,
+            onRemoveSubPage    = viewModel::removeSubPage,
+            onBackgroundChange = viewModel::updateSubPageBackground,
+            onBgScaleChange    = viewModel::updateSubPageBgScale,
+            onPhotoExported    = { uri ->
+                viewModel.addAttachment(Attachment.TYPE_PHOTO, uri)
+            },
+        )
 
         // Feature sections — identical shape to the page editor. Each owns
         // its own capture flow (permissions, intent senders, etc.) and
         // calls back into the VM for the actual state changes.
+        Column(
+            modifier = Modifier.padding(horizontal = AppSpacing.s4),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s4),
+        ) {
         PhotosSection(
             photos   = state.attachments.filter { it.type == Attachment.TYPE_PHOTO },
             onAdd    = { uri -> viewModel.addAttachment(Attachment.TYPE_PHOTO, uri) },
             onRemove = viewModel::removeAttachment,
+            onCombineToPdf = { pdfUri, previewUri ->
+                viewModel.addAttachment(Attachment.TYPE_SCAN, pdfUri, previewUri)
+            },
         )
         ScansSection(
             scans    = state.attachments.filter { it.type == Attachment.TYPE_SCAN },
@@ -426,29 +779,102 @@ private fun EditorBody(
                 viewModel.addScan(uri, preview, pageUris)
             },
             onRemove = viewModel::removeAttachment,
+            onImportPageToNotes = { pageImageUri ->
+                viewModel.addSubPageFromImage(pageImageUri)
+            },
+            onEditScan = { id, title, categoryId ->
+                viewModel.updateScan(id, title, categoryId)
+            },
         )
         VoiceSection(
-            notes    = state.attachments.filter { it.type == Attachment.TYPE_VOICE },
-            onAdd          = { uri, durationMs -> viewModel.addVoiceNote(uri, durationMs) },
-            onTranscribed  = { uri, transcript -> viewModel.updateVoiceTranscript(uri, transcript) },
-            onRemove = viewModel::removeAttachment,
+            notes                  = state.attachments.filter { it.type == Attachment.TYPE_VOICE },
+            onAdd                  = { uri, durationMs -> viewModel.addVoiceNote(uri, durationMs) },
+            onTranscribed          = { uri, transcript, source ->
+                viewModel.updateVoiceTranscript(uri, transcript, source)
+            },
+            onAddTranscriptToNotes = onAddVoiceTranscriptToNotes,
+            onRemove               = viewModel::removeAttachment,
         )
         ContactsSection(
             contacts = state.contacts,
-            onAdd    = { name -> viewModel.addContact(name) },
+            onAdd    = { name, phone, landline, email, title, organization, location, website ->
+                viewModel.addContact(
+                    name         = name,
+                    phone        = phone,
+                    landline     = landline,
+                    email        = email,
+                    title        = title,
+                    organization = organization,
+                    location     = location,
+                    website      = website,
+                )
+            },
+            onEdit   = { id, name, phone, landline, email, title, organization, location, website ->
+                viewModel.updateContact(
+                    id           = id,
+                    name         = name,
+                    phone        = phone,
+                    landline     = landline,
+                    email        = email,
+                    title        = title,
+                    organization = organization,
+                    location     = location,
+                    website      = website,
+                )
+            },
             onRemove = viewModel::removeContact,
         )
         TodosSection(
-            todos    = state.todos,
-            onAdd    = viewModel::addTodo,
-            onToggle = viewModel::toggleTodo,
-            onRemove = viewModel::removeTodo,
+            todos            = state.todos,
+            onAdd            = viewModel::addTodo,
+            onToggle         = viewModel::toggleTodo,
+            onRemove         = viewModel::removeTodo,
+            onUpdatePriority = viewModel::updateTodoPriority,
+            onReorder        = viewModel::reorderTodos,
         )
         LocationSection(
-            locations = state.locations,
-            onAdd     = { lat, lng, address -> viewModel.addLocation(lat, lng, address) },
-            onRemove  = viewModel::removeLocation,
+            locations      = state.locations,
+            onAdd          = { lat, lng, address -> viewModel.addLocation(lat, lng, address) },
+            onUpdateCoords = viewModel::updateLocationCoords,
+            onRemove       = viewModel::removeLocation,
         )
+        MergeSection(
+            otherEntries = otherEntries,
+            // Merging requires a persisted row on this side; a brand-new
+            // draft with nothing typed has no id to hand to the merge
+            // transaction. The VM's `merge()` flushes drafts first, but we
+            // still disable the CTA until there's meaningful content.
+            enabled      = state.canSave || state.entry != null,
+            onMerge      = { otherId, keepThisAsPrimary ->
+                viewModel.merge(otherId, keepThisAsPrimary) { _ ->
+                    // When this page was the secondary it's now soft-deleted;
+                    // pop back to the list. When it was the primary the same
+                    // nav is also correct — the list will refresh via Flow
+                    // and the user can re-open the merged entry from there.
+                    onBack()
+                }
+            },
+        )
+
+        val notebooks by viewModel.notebooks.collectAsState()
+        val chaptersForPicker by viewModel.chaptersForPicker.collectAsState()
+        MoveToNotebookSection(
+            notebooks         = notebooks,
+            chaptersForPicker = chaptersForPicker,
+            onOpenChaptersFor = viewModel::openChaptersFor,
+            // Same gate as merge — need something worth moving.
+            enabled           = state.canSave || state.entry != null,
+            onMove            = { chapterId ->
+                viewModel.moveToNotebook(chapterId) { _ ->
+                    // Source entry was soft-deleted; pop back to the
+                    // notepad list. The destination notebook / chapter
+                    // will surface the freshly-created page via its own
+                    // Flow on the next load.
+                    onBack()
+                }
+            },
+        )
+        } // end feature-sections Column
 
         // Extra clearance so the format bar doesn't crowd the last section
         // on short content.
@@ -484,7 +910,7 @@ private fun EntryDateRow(
         Icon(
             imageVector        = Icons.Filled.CalendarMonth,
             contentDescription = null,
-            tint               = AppColors.Coral,
+            tint               = AppAccent.primary,
             modifier           = Modifier.size(16.dp),
         )
         Spacer(Modifier.size(AppSpacing.s2))
@@ -518,7 +944,7 @@ private fun EntryDateRow(
                         onEntryDateChange(date.format(DateTimeFormatter.ISO_LOCAL_DATE))
                     }
                     showPicker = false
-                }) { Text("Set", color = AppColors.Coral) }
+                }) { Text("Set", color = AppAccent.primary) }
             },
             dismissButton = {
                 TextButton(onClick = { showPicker = false }) {
@@ -576,27 +1002,9 @@ private fun TitleField(
             onValueChange = onValueChange,
             singleLine    = true,
             textStyle     = titleStyle,
-            cursorBrush   = SolidColor(AppColors.Coral),
+            cursorBrush   = SolidColor(AppAccent.primary),
             modifier      = Modifier.fillMaxWidth(),
         )
     }
 }
 
-@Composable
-private fun NotesField(state: RichTextState) {
-    Box(Modifier.fillMaxWidth()) {
-        if (state.annotatedString.text.isEmpty()) {
-            Text(
-                "Start typing…",
-                style = AppTypography.Body,
-                color = AppColors.TextTertiary,
-            )
-        }
-        BasicRichTextEditor(
-            state       = state,
-            textStyle   = AppTypography.Body.copy(color = AppColors.TextPrimary),
-            cursorBrush = SolidColor(AppColors.Coral),
-            modifier    = Modifier.fillMaxWidth(),
-        )
-    }
-}

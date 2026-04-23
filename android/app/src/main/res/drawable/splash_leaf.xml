@@ -1,0 +1,30 @@
+<!--
+  Cold-launch splash icon for the Android 12+ SplashScreen API. The
+  outer canvas is 288 × 288 (system spec); the visible safe area is the
+  centered 192 × 192 square — the leaf sits inside that.
+
+  Same canonical 24-viewport path as the launcher, cream-only so the
+  leaf reads crisply against the solid theme-green splash background.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+    <group
+        android:translateX="48"
+        android:translateY="48"
+        android:scaleX="8"
+        android:scaleY="8">
+        <path
+            android:pathData="M12,3 C12,3 6,6 6,12 C6,15.5 8,18.5 11,20 C11.5,20.2 12,20.5 12,21 C12,20.5 12.5,20.2 13,20 C16,18.5 18,15.5 18,12 C18,6 12,3 12,3 Z"
+            android:strokeColor="#F5EEDF"
+            android:strokeWidth="1.2"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M12,6 C12,6 14,8.5 14,11.5 C14,13.5 13,15 12,16"
+            android:strokeColor="#66F5EEDF"
+            android:strokeWidth="0.8"
+            android:strokeLineCap="round" />
+    </group>
+</vector>

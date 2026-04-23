@@ -11,6 +11,7 @@ package app.releaf.mobile.data.notebook
 import app.releaf.mobile.data.common.FtsQuery
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
+import app.releaf.mobile.data.notepad.NotepadEntry
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 
@@ -24,6 +25,14 @@ class PageRepository(
         pageDao.observeForNotebook(notebookId)
 
     fun observeById(id: String): Flow<PageEntity?> = pageDao.observeById(id)
+
+    /** page-count-per-notebook feed for the Notebooks tab rows. */
+    fun observePageCountsByNotebook(): Flow<List<NotebookCountRow>> =
+        pageDao.observePageCountsByNotebook()
+
+    /** page-count-per-chapter feed for the notebook detail Chapter rows. */
+    fun observePageCountsByChapter(): Flow<List<ChapterCountRow>> =
+        pageDao.observePageCountsByChapter()
 
     suspend fun findById(id: String): PageEntity? = pageDao.findById(id)
 
@@ -60,6 +69,39 @@ class PageRepository(
         )
         pageDao.upsert(entity)
         return entity
+    }
+
+    /**
+     * Create a new page inside [chapterId] whose body is copied straight
+     * from a notepad entry. All the JSON side channels (sub-pages,
+     * attachments, todos, contacts, locations, strokes) are carried over
+     * verbatim — both surfaces share the same JSON shapes, so no
+     * conversion is needed. The caller is expected to soft-delete the
+     * source notepad entry after this returns.
+     */
+    suspend fun createFromNotepadEntry(
+        chapterId: String,
+        source: NotepadEntry,
+    ): PageEntity {
+        val now = IsoClock.nowIso()
+        val page = PageEntity(
+            id            = Uuidv7.generate(),
+            chapterId     = chapterId,
+            projectId     = source.projectId,
+            title         = source.title?.trim()?.ifEmpty { null },
+            notes         = source.notes,
+            contacts      = source.contacts,
+            locations     = source.locations,
+            todos         = source.todos,
+            attachments   = source.attachments,
+            sketchStrokes = source.sketchStrokes,
+            subPages      = source.subPages,
+            createdAt     = now,
+            updatedAt     = now,
+            dirty         = true,
+        )
+        pageDao.upsert(page)
+        return page
     }
 
     suspend fun savePage(entity: PageEntity) {

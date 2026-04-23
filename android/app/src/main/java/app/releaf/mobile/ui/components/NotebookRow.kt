@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
@@ -118,13 +119,13 @@ private fun IconChip(icon: ImageVector) {
         modifier = Modifier
             .size(40.dp)
             .clip(RoundedCornerShape(AppRadius.sm))
-            .background(AppColors.CoralSoft),
+            .background(AppAccent.soft),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = AppColors.CoralDeep,
+            tint = AppAccent.deep,
             modifier = Modifier.size(18.dp),
         )
     }
@@ -135,10 +136,10 @@ private fun ChapterTag(text: String) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(AppRadius.pill))
-            .background(AppColors.CoralSoft)
+            .background(AppAccent.soft)
             .padding(horizontal = AppSpacing.s2, vertical = 2.dp),
     ) {
-        Text(text = text, style = AppTypography.Tag, color = AppColors.CoralDeep)
+        Text(text = text, style = AppTypography.Tag, color = AppAccent.deep)
     }
 }
 

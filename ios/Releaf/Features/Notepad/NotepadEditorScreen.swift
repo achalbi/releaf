@@ -87,6 +87,8 @@ private struct EditorContent: View {
     // icon when they want the single-scroll rich-text editor.
     @State private var editorMode: EditorMode = .overview
     @State private var showDeleteDialog: Bool = false
+    @State private var showMergeSheet: Bool = false
+    @State private var showMoveSheet: Bool = false
 
     init(entryId: String, repository: NotepadRepository, userId: String) {
         _vm = StateObject(wrappedValue: NotepadEditorViewModel(
@@ -157,6 +159,70 @@ private struct EditorContent: View {
         } message: {
             Text("It'll move to the trash and stop showing in the list. You can still undo this from the list screen.")
         }
+        // Top-bar entry point for Merge pages. Hosts the same
+        // MergeSection shown inline at the end of the editor so the
+        // action is reachable without scrolling. Dismisses by popping
+        // back on success (the entry is either refreshed or the
+        // secondary was soft-deleted — either way the list is the
+        // right place to land).
+        .sheet(isPresented: $showMergeSheet) {
+            NavigationStack {
+                ScrollView {
+                    MergeSection(
+                        loadOtherEntries: { await vm.loadOtherEntries() },
+                        enabled: vm.canSave || vm.entry != nil,
+                        onMerge: { otherId, keepThisAsPrimary in
+                            vm.merge(
+                                otherId: otherId,
+                                keepThisAsPrimary: keepThisAsPrimary
+                            ) { _ in
+                                showMergeSheet = false
+                                dismiss()
+                            }
+                        }
+                    )
+                    .padding(AppSpacing.s4)
+                }
+                .background(AppColors.canvas)
+                .navigationTitle("Merge pages")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { showMergeSheet = false }
+                    }
+                }
+            }
+        }
+        // Top-bar entry point for Move-to-notebook. Mirrors the merge
+        // sheet — wraps whatever "Move" UI the notepad editor already
+        // exposes. For now we delegate to the inline MoveToNotebook
+        // surface inside OverviewPane; if a dedicated Section ships
+        // later we can host it directly here, same as Merge.
+        .sheet(isPresented: $showMoveSheet) {
+            NavigationStack {
+                VStack(spacing: AppSpacing.s4) {
+                    Text("Move to notebook")
+                        .font(AppText.sectionTitle)
+                        .foregroundStyle(AppColors.textPrimary)
+                    Text("This action is still in progress on iOS. Use the Android build for now, or tap Close to return.")
+                        .font(AppText.body)
+                        .foregroundStyle(AppColors.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, AppSpacing.s6)
+                    Spacer()
+                }
+                .padding(.top, AppSpacing.s8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(AppColors.canvas)
+                .navigationTitle("Move to notebook")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { showMoveSheet = false }
+                    }
+                }
+            }
+        }
     }
 
     // MARK: Overview
@@ -219,6 +285,28 @@ private struct EditorContent: View {
                     Text("Delete")
                         .font(AppText.button)
                         .foregroundStyle(AppColors.danger)
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Overflow menu for Merge + Move-to-notebook — surfaces
+            // both destination-changing actions without requiring the
+            // user to scroll to the bottom of the editor. Gated on the
+            // same "there's something to act on" check MergeSection
+            // uses.
+            if vm.canSave || vm.entry != nil {
+                Menu {
+                    Button("Merge with another page") {
+                        showMergeSheet = true
+                    }
+                    Button("Move to notebook") {
+                        showMoveSheet = true
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
             }
@@ -314,6 +402,26 @@ private struct EditorBody: View {
                     locations: vm.locations,
                     onAdd:     { lat, lng, address in vm.addLocation(lat: lat, lng: lng, address: address) },
                     onRemove:  { id in vm.removeLocation(id: id) }
+                )
+                MergeSection(
+                    loadOtherEntries: { await vm.loadOtherEntries() },
+                    // Merging requires something to merge from. A fresh,
+                    // untouched draft has nothing to hand over — disable
+                    // the CTA until the user's typed (or attached)
+                    // anything. The VM's merge() also flushes first.
+                    enabled: vm.canSave || vm.entry != nil,
+                    onMerge: { otherId, keepThisAsPrimary in
+                        vm.merge(
+                            otherId: otherId,
+                            keepThisAsPrimary: keepThisAsPrimary
+                        ) { _ in
+                            // Either this page was the secondary (now
+                            // soft-deleted) or the primary (safe to
+                            // re-open from the list); pop back either
+                            // way to let the list refresh.
+                            dismiss()
+                        }
+                    }
                 )
 
                 // Bottom clearance so the keyboard doesn't hide the last

@@ -18,19 +18,29 @@ import kotlinx.coroutines.flow.Flow
 interface NotebookDao {
 
     /**
-     * Live notebooks, ordered by manual `position` first and recent edits
-     * second. Two-key ORDER BY keeps drag-to-reorder deterministic while still
-     * letting recent activity surface ahead of long-idle notebooks with the
-     * same position.
+     * Live, non-archived notebooks — the "Current notebooks" tab feed.
+     * Two-key ORDER BY keeps drag-to-reorder deterministic while still
+     * letting recent activity surface ahead of long-idle notebooks with
+     * the same position.
      */
     @Query(
         """
         SELECT * FROM notebooks
-        WHERE deleted_at IS NULL
+        WHERE deleted_at IS NULL AND archived_at IS NULL
         ORDER BY position ASC, updated_at DESC
         """
     )
     fun observeActive(): Flow<List<NotebookEntity>>
+
+    /** Archived (but not deleted) notebooks — the "Archive" tab feed. */
+    @Query(
+        """
+        SELECT * FROM notebooks
+        WHERE deleted_at IS NULL AND archived_at IS NOT NULL
+        ORDER BY archived_at DESC
+        """
+    )
+    fun observeArchived(): Flow<List<NotebookEntity>>
 
     /** Observe a single notebook (null when not found or soft-deleted). */
     @Query(
@@ -45,6 +55,21 @@ interface NotebookDao {
     /** One-shot lookup used by parent screens on first load. */
     @Query("SELECT * FROM notebooks WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): NotebookEntity?
+
+    /**
+     * First active notebook by the "Current" tab's ordering. Used by Quick
+     * Capture to pick a default landing notebook when the user taps the
+     * middle leaf button — null means the user hasn't created any yet.
+     */
+    @Query(
+        """
+        SELECT * FROM notebooks
+        WHERE deleted_at IS NULL AND archived_at IS NULL
+        ORDER BY position ASC, updated_at DESC
+        LIMIT 1
+        """
+    )
+    suspend fun firstActive(): NotebookEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entry: NotebookEntity)
@@ -67,6 +92,26 @@ interface NotebookDao {
         """
     )
     suspend fun restore(id: String, nowIso: String)
+
+    /** Move a notebook into the Archive tab. */
+    @Query(
+        """
+        UPDATE notebooks
+        SET archived_at = :nowIso, updated_at = :nowIso, dirty = 1
+        WHERE id = :id
+        """
+    )
+    suspend fun archive(id: String, nowIso: String)
+
+    /** Inverse of [archive]. */
+    @Query(
+        """
+        UPDATE notebooks
+        SET archived_at = NULL, updated_at = :nowIso, dirty = 1
+        WHERE id = :id
+        """
+    )
+    suspend fun unarchive(id: String, nowIso: String)
 
     /* ---------- sync worker ---------- */
 

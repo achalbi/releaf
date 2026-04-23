@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppSpacing
 
 enum class EditorMode { EDIT, OVERVIEW }
@@ -80,14 +81,14 @@ private fun ModeIcon(
         modifier = Modifier
             .size(32.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(if (isActive) AppColors.Coral else Color.Transparent)
+            .background(if (isActive) AppAccent.primary else Color.Transparent)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector        = icon,
             contentDescription = description,
-            tint               = if (isActive) AppColors.OnAccent else AppColors.Coral,
+            tint               = if (isActive) AppColors.OnAccent else AppAccent.primary,
             modifier           = Modifier.size(18.dp),
         )
     }

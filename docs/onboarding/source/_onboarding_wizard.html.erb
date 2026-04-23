@@ -1,0 +1,300 @@
+<%# Rendered in workspace layout. Pass autoshow: true to open on connect. %>
+<% autoshow = local_assigns.fetch(:autoshow, false) %>
+<div
+  class="onboarding-backdrop"
+  data-controller="onboarding-wizard"
+  data-onboarding-wizard-dismiss-url-value="<%= onboarding_dismiss_path %>"
+  data-onboarding-wizard-csrf-value="<%= form_authenticity_token %>"
+  data-onboarding-wizard-total-steps-value="10"
+  data-onboarding-wizard-autoshow-value="<%= autoshow %>"
+  data-onboarding-wizard-target="modal"
+  role="dialog"
+  aria-modal="true"
+  aria-label="Welcome to Inkcreate"
+  style="display:none"
+>
+  <div class="onboarding-modal">
+
+    <%# Skip link %>
+    <button
+      class="onboarding-skip"
+      data-action="click->onboarding-wizard#skip"
+      aria-label="Skip"
+    >Skip ✕</button>
+
+    <%# Progress dots %>
+    <div class="onboarding-dots" aria-hidden="true">
+      <% 10.times do |i| %>
+        <button
+          class="onboarding__dot"
+          data-onboarding-wizard-target="dot"
+          data-step="<%= i + 1 %>"
+          data-action="click->onboarding-wizard#goTo"
+          aria-label="Go to step <%= i + 1 %>"
+        ></button>
+      <% end %>
+    </div>
+
+    <%# ── Step 1: Welcome ───────────────────────────────────────────── %>
+    <div class="onboarding-step" data-onboarding-wizard-target="step" aria-hidden="false">
+      <div class="onboarding-illustration onboarding-illustration--welcome">
+        <div class="onboarding-logo-mark">
+          <%= image_tag "/icons/app-icon.svg", alt: "Inkcreate", class: "onboarding-app-icon" %>
+        </div>
+        <div class="onboarding-sparkles">
+          <span>✦</span><span>✦</span><span>✦</span>
+        </div>
+      </div>
+      <h2 class="onboarding-headline">Welcome to Inkcreate</h2>
+      <p class="onboarding-body">
+        Your workspace for projects, daily notes, voice recordings, scanned documents, and action items — all in one place.
+      </p>
+      <div class="onboarding-actions">
+        <button class="onboarding-btn onboarding-btn--primary" data-action="click->onboarding-wizard#next">
+          Get started →
+        </button>
+      </div>
+    </div>
+
+    <%# ── Step 2: Notebooks ─────────────────────────────────────────── %>
+    <div class="onboarding-step" data-onboarding-wizard-target="step" hidden aria-hidden="true">
+      <div class="onboarding-illustration onboarding-illustration--notebooks">
+        <div class="onboarding-icon-stack">
+          <div class="onboarding-card-mock onboarding-card-mock--back">📑</div>
+          <div class="onboarding-card-mock onboarding-card-mock--mid">📄</div>
+          <div class="onboarding-card-mock onboarding-card-mock--front">📓</div>
+        </div>
+      </div>
+      <div class="onboarding-step-badge">Step 1 of 9</div>
+      <h2 class="onboarding-headline">Notebooks for projects</h2>
+      <p class="onboarding-body">
+        Create a notebook for each project. Organise it into <strong>chapters</strong>, then add <strong>pages</strong> with rich notes, photos, and voice recordings — everything in context.
+      </p>
+      <div class="onboarding-actions">
+        <button class="onboarding-btn onboarding-btn--ghost" data-action="click->onboarding-wizard#prev">← Back</button>
+        <button class="onboarding-btn onboarding-btn--primary" data-action="click->onboarding-wizard#next">Next →</button>
+      </div>
+    </div>
+
+    <%# ── Step 3: Notepad ───────────────────────────────────────────── %>
+    <div class="onboarding-step" data-onboarding-wizard-target="step" hidden aria-hidden="true">
+      <div class="onboarding-illustration onboarding-illustration--notepad">
+        <div class="onboarding-calendar-mock">
+          <div class="onboarding-calendar-header">April</div>
+          <div class="onboarding-calendar-date"><%= Date.today.day %></div>
+          <div class="onboarding-calendar-line"></div>
+          <div class="onboarding-calendar-line onboarding-calendar-line--short"></div>
+        </div>
+      </div>
+      <div class="onboarding-step-badge">Step 2 of 9</div>
+      <h2 class="onboarding-headline">Notepad for daily capture</h2>
+      <p class="onboarding-body">
+        The Notepad gives each day its own <strong>page</strong>. Jot quick thoughts, record voice notes, scan documents, or build a to-do list — without creating a notebook and chapter first.
+      </p>
+      <div class="onboarding-actions">
+        <button class="onboarding-btn onboarding-btn--ghost" data-action="click->onboarding-wizard#prev">← Back</button>
+        <button class="onboarding-btn onboarding-btn--primary" data-action="click->onboarding-wizard#next">Next →</button>
+      </div>
+    </div>
+
+    <%# ── Step 4: Photos ────────────────────────────────────────────── %>
+    <div class="onboarding-step" data-onboarding-wizard-target="step" hidden aria-hidden="true">
+      <div class="onboarding-illustration onboarding-illustration--photos">
+        <div class="onboarding-photo-mock">
+          <div class="onboarding-photo-frame">
+            <div class="onboarding-photo-lens">📷</div>
+          </div>
+          <div class="onboarding-photo-badge">Settings → Quality</div>
+        </div>
+      </div>
+      <div class="onboarding-step-badge">Step 3 of 9</div>
+      <h2 class="onboarding-headline">Photos, your way</h2>
+      <p class="onboarding-body">
+        Add photos directly to any page. Choose your preferred <strong>capture quality</strong> in Settings — balance between image clarity and storage size to suit your workflow.
+      </p>
+      <div class="onboarding-actions">
+        <button class="onboarding-btn onboarding-btn--ghost" data-action="click->onboarding-wizard#prev">← Back</button>
+        <button class="onboarding-btn onboarding-btn--primary" data-action="click->onboarding-wizard#next">Next →</button>
+      </div>
+    </div>
+
+    <%# ── Step 5: Voice Notes ───────────────────────────────────────── %>
+    <div class="onboarding-step" data-onboarding-wizard-target="step" hidden aria-hidden="true">
+      <div class="onboarding-illustration onboarding-illustration--voice">
+        <div class="onboarding-voice-mock">
+          <div class="onboarding-voice-icon">🎙️</div>
+          <div class="onboarding-waveform">
+            <span></span><span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+      </div>
+      <div class="onboarding-step-badge">Step 4 of 9</div>
+      <h2 class="onboarding-headline">Voice notes</h2>
+      <p class="onboarding-body">
+        Record a voice note on any page with one tap. Play it back inline, or generate a <strong>transcription on demand</strong> to turn speech into searchable text.
+      </p>
+      <div class="onboarding-actions">
+        <button class="onboarding-btn onboarding-btn--ghost" data-action="click->onboarding-wizard#prev">← Back</button>
+        <button class="onboarding-btn onboarding-btn--primary" data-action="click->onboarding-wizard#next">Next →</button>
+      </div>
+    </div>
+
+    <%# ── Step 6: To-do lists ───────────────────────────────────────── %>
+    <div class="onboarding-step" data-onboarding-wizard-target="step" hidden aria-hidden="true">
+      <div class="onboarding-illustration onboarding-illustration--todo">
+        <div class="onboarding-todo-mock">
+          <div class="onboarding-todo-item onboarding-todo-item--done">
+            <span class="onboarding-todo-check">✓</span><span>Buy groceries</span>
+          </div>
+          <div class="onboarding-todo-item onboarding-todo-item--remind">
+            <span class="onboarding-todo-check"></span><span>Call dentist</span>
+            <span class="onboarding-todo-tag">⏰</span>
+          </div>
+          <div class="onboarding-todo-item onboarding-todo-item--task">
+            <span class="onboarding-todo-check"></span><span>Finish report</span>
+            <span class="onboarding-todo-tag onboarding-todo-tag--task">Task</span>
+          </div>
+        </div>
+      </div>
+      <div class="onboarding-step-badge">Step 5 of 9</div>
+      <h2 class="onboarding-headline">To-do lists</h2>
+      <p class="onboarding-body">
+        Add a checklist to any page. Set a <strong>reminder</strong> on an item to get notified at the right time, or <strong>promote it to a Task</strong> when it needs tracking across your workspace.
+      </p>
+      <div class="onboarding-actions">
+        <button class="onboarding-btn onboarding-btn--ghost" data-action="click->onboarding-wizard#prev">← Back</button>
+        <button class="onboarding-btn onboarding-btn--primary" data-action="click->onboarding-wizard#next">Next →</button>
+      </div>
+    </div>
+
+    <%# ── Step 7: Scan Documents ────────────────────────────────────── %>
+    <div class="onboarding-step" data-onboarding-wizard-target="step" hidden aria-hidden="true">
+      <div class="onboarding-illustration onboarding-illustration--scan">
+        <div class="onboarding-scan-mock">
+          <div class="onboarding-scan-doc">
+            <div class="onboarding-scan-corner onboarding-scan-corner--tl"></div>
+            <div class="onboarding-scan-corner onboarding-scan-corner--tr"></div>
+            <div class="onboarding-scan-corner onboarding-scan-corner--bl"></div>
+            <div class="onboarding-scan-corner onboarding-scan-corner--br"></div>
+            <div class="onboarding-scan-lines">
+              <div></div><div></div><div></div><div></div>
+            </div>
+          </div>
+          <div class="onboarding-scan-badge">PDF ✓</div>
+        </div>
+        <div class="onboarding-scan-pills">
+          <span class="onboarding-scan-pill onboarding-scan-pill--done">Capture</span>
+          <span class="onboarding-scan-pill onboarding-scan-pill--done">Detect</span>
+          <span class="onboarding-scan-pill onboarding-scan-pill--done">Enhance</span>
+          <span class="onboarding-scan-pill onboarding-scan-pill--active">Save</span>
+        </div>
+      </div>
+      <div class="onboarding-step-badge">Step 6 of 9</div>
+      <h2 class="onboarding-headline">Scan → PDF in seconds</h2>
+      <p class="onboarding-body">
+        Point your camera at any document. Inkcreate detects the edges, lets you crop and enhance it, then saves it as a PDF attached to your page.
+      </p>
+      <div class="onboarding-actions">
+        <button class="onboarding-btn onboarding-btn--ghost" data-action="click->onboarding-wizard#prev">← Back</button>
+        <button class="onboarding-btn onboarding-btn--primary" data-action="click->onboarding-wizard#next">Next →</button>
+      </div>
+    </div>
+
+    <%# ── Step 8: Migrate to Notebook ───────────────────────────────── %>
+    <div class="onboarding-step" data-onboarding-wizard-target="step" hidden aria-hidden="true">
+      <div class="onboarding-illustration onboarding-illustration--migrate">
+        <div class="onboarding-migrate-mock">
+          <div class="onboarding-migrate-from">
+            <div class="onboarding-calendar-mock onboarding-calendar-mock--sm">
+              <div class="onboarding-calendar-header">Apr</div>
+              <div class="onboarding-calendar-date onboarding-calendar-date--sm"><%= Date.today.day %></div>
+            </div>
+          </div>
+          <div class="onboarding-migrate-arrow">→</div>
+          <div class="onboarding-migrate-to">
+            <div class="onboarding-card-mock onboarding-card-mock--front">📓</div>
+          </div>
+        </div>
+      </div>
+      <div class="onboarding-step-badge">Step 7 of 9</div>
+      <h2 class="onboarding-headline">Move pages into a Notebook</h2>
+      <p class="onboarding-body">
+        When a Notepad page grows into something worth keeping, move it. Tap <strong>Migrate to Notebook</strong> on any Notepad page to place it into the right chapter — structure added, nothing lost.
+      </p>
+      <div class="onboarding-actions">
+        <button class="onboarding-btn onboarding-btn--ghost" data-action="click->onboarding-wizard#prev">← Back</button>
+        <button class="onboarding-btn onboarding-btn--primary" data-action="click->onboarding-wizard#next">Next →</button>
+      </div>
+    </div>
+
+    <%# ── Step 9: Google Drive Backup ───────────────────────────────── %>
+    <div class="onboarding-step" data-onboarding-wizard-target="step" hidden aria-hidden="true">
+      <div class="onboarding-illustration onboarding-illustration--backup">
+        <div class="onboarding-backup-mock">
+          <div class="onboarding-backup-from">
+            <%= image_tag "/icons/app-icon.svg", alt: "Inkcreate", class: "onboarding-backup-app-icon" %>
+          </div>
+          <div class="onboarding-migrate-arrow">→</div>
+          <div class="onboarding-backup-to">
+            <div class="onboarding-gdrive-icon">
+              <svg viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg" width="48" height="44">
+                <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
+                <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/>
+                <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/>
+                <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
+                <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
+                <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 27h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="onboarding-step-badge">Step 8 of 9</div>
+      <h2 class="onboarding-headline">Backed up to Google Drive</h2>
+      <p class="onboarding-body">
+        Connect your Google Drive in Settings and Inkcreate will <strong>back up your data automatically</strong> — notes, voice recordings, photos, and scanned documents all kept safe in your own Drive.
+      </p>
+      <div class="onboarding-actions">
+        <button class="onboarding-btn onboarding-btn--ghost" data-action="click->onboarding-wizard#prev">← Back</button>
+        <button class="onboarding-btn onboarding-btn--primary" data-action="click->onboarding-wizard#next">Next →</button>
+      </div>
+    </div>
+
+    <%# ── Step 10: Done ─────────────────────────────────────────────── %>
+    <div class="onboarding-step" data-onboarding-wizard-target="step" hidden aria-hidden="true">
+      <div class="onboarding-illustration onboarding-illustration--done">
+        <div class="onboarding-checkmark">
+          <svg viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="28" cy="28" r="26" stroke="#ff5f4e" stroke-width="3" fill="#fff5f4"/>
+            <path d="M16 28l9 9 15-16" stroke="#ff5f4e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+      </div>
+      <div class="onboarding-step-badge">Step 9 of 9</div>
+      <h2 class="onboarding-headline">You're all set!</h2>
+      <p class="onboarding-body">
+        Start where it makes sense for you. Everything else will become clear as you go.
+      </p>
+      <div class="onboarding-cta-cards">
+        <%= link_to new_notebook_path, class: "onboarding-cta-card", data: { action: "click->onboarding-wizard#finish" } do %>
+          <span class="onboarding-cta-icon">📓</span>
+          <span class="onboarding-cta-label">Create a<br><strong>Notebook</strong></span>
+          <span class="onboarding-cta-arrow">→</span>
+        <% end %>
+        <%= link_to new_notepad_entry_path, class: "onboarding-cta-card", data: { action: "click->onboarding-wizard#finish" } do %>
+          <span class="onboarding-cta-icon">📅</span>
+          <span class="onboarding-cta-label">Open today's<br><strong>Notepad</strong></span>
+          <span class="onboarding-cta-arrow">→</span>
+        <% end %>
+      </div>
+      <div class="onboarding-actions onboarding-actions--centered">
+        <button class="onboarding-btn onboarding-btn--ghost" data-action="click->onboarding-wizard#prev">← Back</button>
+        <button class="onboarding-btn onboarding-btn--primary" data-action="click->onboarding-wizard#finish">
+          Let's go ✓
+        </button>
+      </div>
+    </div>
+
+  </div><%# end .onboarding-modal %>
+</div><%# end .onboarding-backdrop %>

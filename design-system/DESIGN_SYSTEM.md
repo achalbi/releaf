@@ -37,6 +37,23 @@ Variables, iOS `AppColors`/`AppTypography`, and Android theme files.
 | `green`      | `#1E5943` | Sync-success CTA |
 | `greenSoft`  | `#D9EDE2` | Sync-success tint |
 
+### Leaf theme variants
+
+User-selectable accent palettes, one per season. Each variant exposes four
+slots — `primary`, `primaryDeep`, `bgSoft` (10% alpha wash), `borderSoft`
+(30% alpha). Tokens live under `color.theme.*` in `design-tokens.json` and
+emit as `themeCoral*` / `themeGreen*` / `themeYellow*` / `themeDry*` on both
+platforms.
+
+| Theme   | Primary   | Deep      | Character                              |
+| ------- | --------- | --------- | -------------------------------------- |
+| coral   | `#E07856` | `#C65A3E` | Warm, energetic, creative (default)    |
+| green   | `#7AA874` | `#5B8C52` | Natural, organic, growth-focused       |
+| yellow  | `#F4C430` | `#E8B923` | Bright, optimistic, energizing         |
+| dry     | `#B8956A` | `#8B7355` | Earthy, grounded, reflective           |
+
+No dark-mode pair yet — these are flat until a dark variant is designed.
+
 ### Semantic
 
 Pairs of text/background for status and tags:

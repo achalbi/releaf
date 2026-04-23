@@ -68,6 +68,33 @@ const RAMPS = [
 ];
 
 /**
+ * User-selectable leaf theme variants (coral/green/yellow/dry).
+ *
+ * Each theme carries the same four slots, read from `color.theme.<name>.<slot>`:
+ *   primary     — the filled accent color
+ *   primaryDeep — pressed/hover or gradient end-stop
+ *   bgSoft      — 10% alpha wash (chip/pill/tint backgrounds)
+ *   borderSoft  — 30% alpha (subtle border on the wash)
+ *
+ * Emitted as flat, appearance-agnostic constants — same shape as ramps. The
+ * Figma Make source did not ship dark-mode variants; when dark values arrive,
+ * migrate these to `ROLE_TOKENS` with `{ light, dark }` pairs.
+ */
+const THEMES = [
+    { jsonKey: 'coral',  swiftPrefix: 'themeCoral',  kotlinPrefix: 'ThemeCoral'  },
+    { jsonKey: 'green',  swiftPrefix: 'themeGreen',  kotlinPrefix: 'ThemeGreen'  },
+    { jsonKey: 'yellow', swiftPrefix: 'themeYellow', kotlinPrefix: 'ThemeYellow' },
+    { jsonKey: 'dry',    swiftPrefix: 'themeDry',    kotlinPrefix: 'ThemeDry'    },
+];
+
+const THEME_SLOTS = [
+    { key: 'primary',     suffix: 'Primary'    },
+    { key: 'primaryDeep', suffix: 'Deep'       },
+    { key: 'bgSoft',      suffix: 'BgSoft'     },
+    { key: 'borderSoft',  suffix: 'BorderSoft' },
+];
+
+/**
  * Role tokens that become theme-aware. Explicit manifest — each entry is one
  * line of config, easy to diff-review when role assignments change.
  *
@@ -168,6 +195,12 @@ function rampStop(tokens, rampKey, stop) {
     return parseHex(node.value);
 }
 
+function themeSlot(tokens, themeKey, slotKey) {
+    const node = tokens.color.theme?.[themeKey]?.[slotKey];
+    if (!node) throw new Error(`Missing theme slot color.theme.${themeKey}.${slotKey}`);
+    return parseHex(node.value);
+}
+
 function roleValues(tokens, path) {
     let node = tokens.color;
     for (const seg of path) {
@@ -209,6 +242,23 @@ function emitSwift(tokens) {
         for (const stop of ramp.stops) {
             const { rgb, alpha } = rampStop(tokens, ramp.jsonKey, stop);
             const name = `${ramp.swiftPrefix}${stop}`;
+            if (alpha === 1.0) {
+                p(`    public static let ${name} = Color(hex: 0x${hex6(rgb)})`);
+            } else {
+                p(`    public static let ${name} = Color(hex: 0x${hex6(rgb)}, alpha: ${swiftAlpha(alpha)})`);
+            }
+        }
+    }
+
+    p('');
+    p('    // MARK: - Leaf theme variants (flat — no dark variant yet)');
+
+    for (const theme of THEMES) {
+        p('');
+        p(`    // ${theme.jsonKey} theme — primary / deep / bgSoft (10%) / borderSoft (30%)`);
+        for (const slot of THEME_SLOTS) {
+            const { rgb, alpha } = themeSlot(tokens, theme.jsonKey, slot.key);
+            const name = `${theme.swiftPrefix}${slot.suffix}`;
             if (alpha === 1.0) {
                 p(`    public static let ${name} = Color(hex: 0x${hex6(rgb)})`);
             } else {
@@ -329,6 +379,19 @@ function emitKotlin(tokens) {
         for (const stop of ramp.stops) {
             const { rgb, alpha } = rampStop(tokens, ramp.jsonKey, stop);
             const name = `${ramp.kotlinPrefix}${stop}`;
+            p(`    val ${name} = Color(${kotlinArgb(rgb, alpha)})`);
+        }
+    }
+
+    // Leaf theme variants (flat — single-mode until dark values arrive).
+    p('');
+    p('    // Leaf theme variants (flat — no dark variant yet)');
+    for (const theme of THEMES) {
+        p('');
+        p(`    // ${theme.jsonKey} theme — primary / deep / bgSoft (10%) / borderSoft (30%)`);
+        for (const slot of THEME_SLOTS) {
+            const { rgb, alpha } = themeSlot(tokens, theme.jsonKey, slot.key);
+            const name = `${theme.kotlinPrefix}${slot.suffix}`;
             p(`    val ${name} = Color(${kotlinArgb(rgb, alpha)})`);
         }
     }

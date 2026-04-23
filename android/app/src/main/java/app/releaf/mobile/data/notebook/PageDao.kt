@@ -139,6 +139,37 @@ interface PageDao {
     @Query("SELECT COUNT(*) FROM pages WHERE deleted_at IS NULL")
     suspend fun countActive(): Int
 
+    /**
+     * Live-page-count-per-notebook for the Notebooks tab rows. Same shape as
+     * ChapterDao.observeChapterCounts — joins through chapters so we count
+     * pages whose *chapter* is also live (cascaded tombstones are excluded).
+     */
+    @Query(
+        """
+        SELECT c.notebook_id AS notebookId, COUNT(p.id) AS count
+        FROM pages p
+        JOIN chapters c ON c.id = p.chapter_id
+        WHERE p.deleted_at IS NULL AND c.deleted_at IS NULL
+        GROUP BY c.notebook_id
+        """
+    )
+    fun observePageCountsByNotebook(): Flow<List<NotebookCountRow>>
+
+    /**
+     * Live-page-count-per-chapter for the notebook detail screen's Chapter
+     * rows. Excludes deleted pages; chapters with zero pages won't appear in
+     * the emission.
+     */
+    @Query(
+        """
+        SELECT chapter_id AS chapterId, COUNT(*) AS count
+        FROM pages
+        WHERE deleted_at IS NULL
+        GROUP BY chapter_id
+        """
+    )
+    fun observePageCountsByChapter(): Flow<List<ChapterCountRow>>
+
     /** Race-safe — see NotepadDao.markSynced for the design note. */
     @Query(
         """

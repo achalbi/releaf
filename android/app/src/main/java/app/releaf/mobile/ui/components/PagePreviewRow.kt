@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ui.theme.AppColors
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
@@ -101,13 +102,13 @@ private fun IconChip(icon: ImageVector) {
         modifier = Modifier
             .size(36.dp)
             .clip(RoundedCornerShape(AppRadius.sm))
-            .background(AppColors.CoralSoft),
+            .background(AppAccent.soft),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = AppColors.CoralDeep,
+            tint = AppAccent.deep,
             modifier = Modifier.size(16.dp),
         )
     }

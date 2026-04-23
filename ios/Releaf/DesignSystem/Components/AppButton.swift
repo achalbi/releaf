@@ -41,16 +41,16 @@ public struct AppButton: View {
                 Text(title)
                     .font(AppText.button)
             }
-            .padding(.horizontal, AppSpacing.s4)
+            .padding(.horizontal, AppSpacing.s6)
             .padding(.vertical, AppSpacing.s3)
             .frame(maxWidth: variant == .text ? nil : .infinity)
             .foregroundStyle(foreground)
             .background(background)
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.pill)
+                RoundedRectangle(cornerRadius: AppRadius.lg)
                     .stroke(borderColor, lineWidth: borderWidth)
             )
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
         }
         .buttonStyle(.plain)
     }
