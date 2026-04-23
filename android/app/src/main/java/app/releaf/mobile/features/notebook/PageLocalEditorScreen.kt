@@ -628,11 +628,11 @@ private fun TitleField(
 ) {
     // Bump past `PageTitle` (24sp) so the page title reads as the
     // primary heading. Keeps the serif treatment + weight.
-    val titleStyle = AppTypography.PageTitle.copy(
+    val titleStyle = AppTypography.PageTitleLight.copy(
         color    = AppColors.TextPrimary,
         fontSize = 34.sp,
     )
-    val placeholderStyle = AppTypography.PageTitle.copy(
+    val placeholderStyle = AppTypography.PageTitleLight.copy(
         color    = AppColors.TextTertiary,
         fontSize = 34.sp,
     )
@@ -662,7 +662,7 @@ private fun MissingPageState(onBack: () -> Unit) {
     ) {
         Text(
             "Page not found",
-            style = AppTypography.SectionTitle,
+            style = AppTypography.SectionTitleLight,
             color = AppColors.TextSecondary,
         )
         Text(

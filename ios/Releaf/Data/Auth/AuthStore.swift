@@ -1,10 +1,12 @@
 /*
  * AuthStore.swift
  * App-wide auth state. Wraps a `GoogleAuthClient` and persists the current
- * session so the app can resume without re-prompting.
+ * session.
  *
- * For now persistence is UserDefaults-based (so previews work). Before ship:
- * move the access/refresh tokens into Keychain.
+ * Persistence: sessions are stored in the iOS Keychain via
+ * `KeychainTokenStore`. The Keychain item is configured with
+ * `kSecAttrAccessibleAfterFirstUnlock`, which lets the background sync
+ * refresh task read it after a cold launch.
  */
 
 import Foundation
@@ -24,15 +26,9 @@ public final class AuthStore: ObservableObject {
     @Published public private(set) var state: State = .signedOut
 
     private let client: GoogleAuthClient
-    private let defaults: UserDefaults
-    private let storageKey = "releaf.auth.session"
 
-    public init(
-        client: GoogleAuthClient = StubGoogleAuthClient(),
-        defaults: UserDefaults = .standard
-    ) {
+    public init(client: GoogleAuthClient = StubGoogleAuthClient()) {
         self.client = client
-        self.defaults = defaults
         restore()
     }
 
@@ -61,54 +57,42 @@ public final class AuthStore: ObservableObject {
 
     public func signOut() async {
         await client.signOut()
-        defaults.removeObject(forKey: storageKey)
+        KeychainTokenStore.clear()
         state = .signedOut
     }
 
-    // MARK: - Persistence (UserDefaults placeholder — move to Keychain)
+    // MARK: - External sign-in bridge
 
-    private func restore() {
-        guard
-            let data = defaults.data(forKey: storageKey),
-            let stored = try? JSONDecoder().decode(StoredSession.self, from: data)
-        else { return }
-        let session = stored.toDomain()
+    /// Adopt a session obtained from an external flow (e.g. a
+    /// `RealGoogleAuthClient` driven by a SwiftUI screen that owns the
+    /// presenting view controller). Mirrors Android's equivalent on
+    /// `AuthStore.kt`.
+    public func adoptSession(_ session: GoogleAuthSession) {
+        persist(session)
         state = .signedIn(session)
     }
 
-    private func persist(_ session: GoogleAuthSession) {
-        let stored = StoredSession(session)
-        if let data = try? JSONEncoder().encode(stored) {
-            defaults.set(data, forKey: storageKey)
+    public func failSignIn(_ message: String) {
+        state = .failed(message)
+    }
+
+    public func cancelSignIn() {
+        state = .signedOut
+    }
+
+    public func beginExternalSignIn() {
+        state = .signingIn
+    }
+
+    // MARK: - Persistence
+
+    private func restore() {
+        if let session = KeychainTokenStore.load() {
+            state = .signedIn(session)
         }
     }
 
-    private struct StoredSession: Codable {
-        let userId: String
-        let email: String
-        let displayName: String?
-        let accessToken: String
-        let refreshToken: String?
-        let expiresAt: Date
-
-        init(_ s: GoogleAuthSession) {
-            userId = s.userId
-            email = s.email
-            displayName = s.displayName
-            accessToken = s.accessToken
-            refreshToken = s.refreshToken
-            expiresAt = s.expiresAt
-        }
-
-        func toDomain() -> GoogleAuthSession {
-            GoogleAuthSession(
-                userId: userId,
-                email: email,
-                displayName: displayName,
-                accessToken: accessToken,
-                refreshToken: refreshToken,
-                expiresAt: expiresAt
-            )
-        }
+    private func persist(_ session: GoogleAuthSession) {
+        try? KeychainTokenStore.save(session)
     }
 }

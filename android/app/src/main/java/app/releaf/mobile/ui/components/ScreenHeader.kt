@@ -25,7 +25,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppColors
@@ -39,6 +41,15 @@ fun ScreenHeader(
     modifier: Modifier = Modifier,
     avatarInitial: String? = null,
     onAvatarTap: (() -> Unit)? = null,
+    /** Override the default top padding. Top-level tabs (Notepad,
+     *  Notebook) use [AppSpacing.s3] so their headers share the same
+     *  vertical rhythm; drill-in surfaces stay on the [AppSpacing.s4]
+     *  default for breathing room above breadcrumbs. */
+    topPadding: Dp = AppSpacing.s4,
+    /** Style override for the title. Defaults to the heavy serif
+     *  EditorialTitle; pass a lighter variant for screens that want
+     *  the title to read as a label rather than a display heading. */
+    titleStyle: TextStyle = AppTypography.EditorialTitle,
 ) {
     Row(
         modifier = modifier
@@ -46,7 +57,7 @@ fun ScreenHeader(
             .padding(
                 start = AppSpacing.s4,
                 end = AppSpacing.s4,
-                top = AppSpacing.s4,
+                top = topPadding,
                 bottom = AppSpacing.s3,
             ),
         horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
@@ -63,7 +74,7 @@ fun ScreenHeader(
             )
             Text(
                 text = title,
-                style = AppTypography.EditorialTitle,
+                style = titleStyle,
                 color = AppColors.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

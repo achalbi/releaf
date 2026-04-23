@@ -278,6 +278,37 @@ public final class ReleafDatabase: @unchecked Sendable {
                 """)
         }
 
+        // v2 — adds the `tasks` table powering the workspace-level
+        // Tasks screen launched from the home card. Mirrors the
+        // Android v4→v5 migration; column shapes match
+        // design-system/migrations/v1_initial.sql §5 (subset).
+        migrator.registerMigration("v2_tasks") { db in
+            try db.execute(sql: """
+                CREATE TABLE tasks (
+                    id             TEXT PRIMARY KEY NOT NULL,
+                    user_id        TEXT NOT NULL,
+                    title          TEXT NOT NULL,
+                    description    TEXT,
+                    due_date       TEXT CHECK (due_date IS NULL OR (
+                                       length(due_date) = 10 AND
+                                       due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+                                   )),
+                    completed      INTEGER NOT NULL DEFAULT 0 CHECK (completed IN (0, 1)),
+                    completed_at   TEXT,
+                    priority       INTEGER NOT NULL DEFAULT 0,
+                    created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty          INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at     TEXT
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_tasks_user_id    ON tasks(user_id)")
+            try db.execute(sql: "CREATE INDEX idx_tasks_due_date   ON tasks(due_date)")
+            try db.execute(sql: "CREATE INDEX idx_tasks_completed  ON tasks(completed)")
+            try db.execute(sql: "CREATE INDEX idx_tasks_updated_at ON tasks(updated_at)")
+            try db.execute(sql: "CREATE INDEX idx_tasks_deleted_at ON tasks(deleted_at)")
+        }
+
         return migrator
     }
 }

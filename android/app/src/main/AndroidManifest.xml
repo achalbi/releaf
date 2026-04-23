@@ -16,6 +16,16 @@
          surface is visible. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Reminders feature. Need POST_NOTIFICATIONS runtime-granted on API 33+
+         to post the alarm notification, SCHEDULE_EXACT_ALARM on API 31+ so the
+         ReminderScheduler can wake the device at the user's chosen time, and
+         RECEIVE_BOOT_COMPLETED so ReminderBootReceiver can re-register pending
+         alarms after a reboot (AlarmManager clears the queue on shutdown). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <!-- API 30+ package visibility. SpeechRecognizer needs to resolve a
          RecognitionService on the device (usually Google's, shipped via
          Play Services) and the platform won't expose that service to us
@@ -65,5 +75,30 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!--
+          Reminders — alarm fire receiver. Not exported; only the OS
+          AlarmManager calls it via PendingIntent, so no external
+          broadcast needs to reach it.
+        -->
+        <receiver
+            android:name="app.releaf.mobile.data.reminder.ReminderAlarmReceiver"
+            android:exported="false" />
+
+        <!--
+          Reminders — boot receiver. Exported so it receives
+          BOOT_COMPLETED + MY_PACKAGE_REPLACED from the OS (implicit
+          broadcasts from a privileged sender — we still scope it to
+          those actions in the intent-filter).
+        -->
+        <receiver
+            android:name="app.releaf.mobile.data.reminder.ReminderBootReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

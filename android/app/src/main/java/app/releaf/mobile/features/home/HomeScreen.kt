@@ -29,6 +29,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import app.releaf.mobile.auth.GoogleAuthSession
 import app.releaf.mobile.data.domain.Notebook
 import app.releaf.mobile.features.onboarding.OnboardingQuickGuideCard
+import app.releaf.mobile.features.reminder.HomeRemindersCard
+import app.releaf.mobile.features.tasks.HomeTasksCard
 import app.releaf.mobile.ui.components.AppButton
 import app.releaf.mobile.ui.components.AppButtonVariant
 import app.releaf.mobile.ui.theme.AppColors
@@ -41,6 +43,8 @@ import app.releaf.mobile.ui.theme.Card
 fun HomeScreen(
     session: GoogleAuthSession,
     onOpenNotebook: (String) -> Unit,
+    onOpenTasks: () -> Unit,
+    onOpenReminders: () -> Unit,
     onSignOut: () -> Unit,
     onShowOnboarding: () -> Unit,
     modifier: Modifier = Modifier,
@@ -82,6 +86,8 @@ fun HomeScreen(
                 ) {
                     Header(session = session, onSignOut = onSignOut)
                     OnboardingQuickGuideCard(onShowIntro = onShowOnboarding)
+                    HomeTasksCard(onOpenTasks = onOpenTasks)
+                    HomeRemindersCard(onOpenReminders = onOpenReminders)
                     // Theme picker lives at the top of Home so
                     // appearance tweaks are one tap away without
                     // digging into Settings.

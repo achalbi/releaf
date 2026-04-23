@@ -14,6 +14,7 @@ package app.releaf.mobile.ui.components
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
@@ -44,6 +45,10 @@ data class BreadcrumbSegment(
 /**
  * Render the trail as `{parent} › {child} › …`. Tappable parents get
  * coral text (accent), the terminal crumb gets muted secondary text.
+ *
+ * Tappable segments wrap their label in a clickable Box that includes
+ * generous internal padding so the touch target hits the recommended
+ * 44dp on at least one axis even for short labels like "Home".
  */
 @Composable
 fun Breadcrumbs(
@@ -65,19 +70,37 @@ fun Breadcrumbs(
             }
             val isTerminal = segment.onTap == null
             val color = if (isTerminal) AppColors.TextSecondary else AppAccent.primary
-            val rowBase = if (isTerminal) {
-                Modifier
+            if (isTerminal) {
+                Text(
+                    text     = segment.label,
+                    style    = AppTypography.Button,
+                    color    = color,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(vertical = AppSpacing.s2),
+                )
             } else {
-                Modifier.clickable { segment.onTap?.invoke() }
+                // Padding inside clickable so the tap target includes
+                // the gutter around the label. Without this, taps that
+                // land on the small whitespace between the chevron and
+                // the next label can miss the hit area entirely.
+                Box(
+                    modifier = Modifier
+                        .clickable { segment.onTap?.invoke() }
+                        .padding(
+                            horizontal = AppSpacing.s2,
+                            vertical   = AppSpacing.s2,
+                        ),
+                ) {
+                    Text(
+                        text     = segment.label,
+                        style    = AppTypography.Button,
+                        color    = color,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-            Text(
-                text       = segment.label,
-                style      = AppTypography.Button,
-                color      = color,
-                maxLines   = 1,
-                overflow   = TextOverflow.Ellipsis,
-                modifier   = rowBase.padding(vertical = AppSpacing.s1),
-            )
         }
     }
 }

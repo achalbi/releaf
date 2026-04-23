@@ -65,6 +65,37 @@ class AuthStore private constructor(
         }
     }
 
+    /**
+     * Adopt a session obtained elsewhere (e.g. a `RealGoogleAuthClient`
+     * flow that runs inside the SignInScreen, where the Activity context
+     * + ActivityResultLauncher for the Drive consent sheet are
+     * available). Persists the session and flips to `SignedIn`.
+     */
+    fun adoptSession(session: GoogleAuthSession) {
+        persist(session)
+        _state.value = AuthState.SignedIn(session)
+    }
+
+    /**
+     * Surface a sign-in failure from an external flow — e.g. a caught
+     * [GoogleAuthError] from the Credential Manager or
+     * AuthorizationClient path. Mirrors the internal failure path used
+     * by [signIn].
+     */
+    fun failSignIn(message: String) {
+        _state.value = AuthState.Failed(message)
+    }
+
+    /** Surface a user-cancelled external flow. */
+    fun cancelSignIn() {
+        _state.value = AuthState.SignedOut
+    }
+
+    /** Transition to SigningIn while an external flow runs. */
+    fun beginExternalSignIn() {
+        _state.value = AuthState.SigningIn
+    }
+
     // MARK: — persistence
 
     private fun restore(): AuthState {

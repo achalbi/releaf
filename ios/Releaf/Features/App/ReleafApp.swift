@@ -21,7 +21,10 @@ public struct ReleafApp: App {
     @StateObject private var authStore = AuthStore.shared
     @StateObject private var uiPrefs   = UiPreferences.shared
 
-    public init() {}
+    public init() {
+        // Wire the sync stack once per process. Idempotent.
+        SyncEnvironment.shared.install(authStore: .shared)
+    }
 
     public var body: some Scene {
         WindowGroup {

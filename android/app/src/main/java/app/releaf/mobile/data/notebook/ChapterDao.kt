@@ -133,6 +133,14 @@ interface ChapterDao {
     @Query("SELECT * FROM chapters WHERE dirty = 1")
     suspend fun dirtyRows(): List<ChapterEntity>
 
+    /** All non-deleted chapters, one-shot. Feeds the v2 sync manifest. */
+    @Query("SELECT * FROM chapters WHERE deleted_at IS NULL")
+    suspend fun activeRows(): List<ChapterEntity>
+
+    /** Lookup-by-ids for the pull path. */
+    @Query("SELECT * FROM chapters WHERE id IN (:ids)")
+    suspend fun findByIds(ids: List<String>): List<ChapterEntity>
+
     /**
      * Global count of live chapters — feeds the sync manifest's
      * `entity_counts`. Different from [countForNotebook], which is parent-

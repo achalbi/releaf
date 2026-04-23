@@ -140,4 +140,23 @@ dependencies {
     implementation(libs.mlkit.genai.speech)
     implementation(libs.sherpa.onnx)
     implementation(libs.commons.compress)
+
+    // Natty — natural-language date/time parser. Handles phrases
+    // like "call mom at 7pm tomorrow" / "in 2 hours" / "next
+    // monday at 9" far better than our regex fallback can. Used by
+    // ReminderParser; the regex path stays as a fallback for the
+    // few phrasings Natty misses.
+    implementation("com.joestelmach:natty:0.13")
+
+    // Google Sign-In — see libs.versions.toml for per-dep notes.
+    // CredentialManager handles the ID-token exchange; AuthorizationClient
+    // grants the drive.file scope on top.
+    implementation(libs.credentials)
+    implementation(libs.credentials.play.services.auth)
+    implementation(libs.googleid)
+    implementation(libs.play.services.auth)
+
+    // Unit tests — JVM, no Android runtime. Scoped so they don't ship.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.kotlinx.serialization.json)
 }

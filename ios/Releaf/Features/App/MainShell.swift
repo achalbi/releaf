@@ -110,6 +110,9 @@ public struct MainShell: View {
                     .navigationDestination(for: PageRoute.self) { route in
                         PageDetailView(pageId: route.id)
                     }
+                    .navigationDestination(for: TasksRoute.self) { _ in
+                        TasksScreen()
+                    }
             }
 
         case "notebook":

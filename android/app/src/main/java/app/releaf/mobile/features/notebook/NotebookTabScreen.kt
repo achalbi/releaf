@@ -2,7 +2,7 @@
  * NotebookTabScreen.kt
  *
  * Top-level Notebooks tab. Shows the user's active notebooks under a
- * serif "Project notebooks" header and splits the list into Current /
+ * serif "Your notebooks" header and splits the list into Current /
  * Archive tabs. Each row carries an icon chip, an Active badge, the
  * notebook's description, chapter + page counts, and a relative update
  * time — the richer shape the design calls for.
@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -126,6 +127,11 @@ fun NotebookTabScreen(
             }
         },
         containerColor = Color.Transparent,
+        // Outer SignedInShell Scaffold already consumes the system-bar
+        // insets; swallow them here so the header docks flush to the
+        // top instead of doubling the status-bar padding. Same trick
+        // the Notepad screen uses.
+        contentWindowInsets = WindowInsets(0),
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -134,8 +140,18 @@ fun NotebookTabScreen(
         ) {
             ScreenHeader(
                 eyebrow = "Notebook",
-                title = "Project notebooks",
+                title = "Your notebooks",
                 avatarInitial = "A",
+                // Match the Notepad screen's top rhythm — its custom
+                // header uses s3 above the eyebrow, so we drop the
+                // default s4 here to keep the two top-level tabs
+                // aligned vertically.
+                topPadding = AppSpacing.s3,
+                // Lighter serif weight than the default heavy
+                // EditorialTitle — reads as a tab label rather than a
+                // display heading, which fits the more list-heavy
+                // notebook surface.
+                titleStyle = AppTypography.EditorialTitleLight,
             )
 
             Column(
@@ -223,14 +239,29 @@ private fun TabSwitcher(
     tab: NotebookListTab,
     onSelect: (NotebookListTab) -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
-        TabChip(
+    // Segmented control — two icons in one connected pill. Outer
+    // hairline border + inner divider replace the previous gap-and-
+    // separate-chips layout; selected segment fills with accent.soft
+    // so the active tab reads at a glance.
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(AppRadius.md))
+            .background(AppColors.CardSolid)
+            .border(1.dp, AppColors.BorderDefault, RoundedCornerShape(AppRadius.md)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TabSegment(
             icon = Icons.AutoMirrored.Filled.MenuBook,
             contentDescription = "Current notebooks",
             selected = tab == NotebookListTab.Current,
             onClick = { onSelect(NotebookListTab.Current) },
         )
-        TabChip(
+        Box(
+            modifier = Modifier
+                .size(width = 1.dp, height = 24.dp)
+                .background(AppColors.BorderDefault),
+        )
+        TabSegment(
             icon = Icons.Filled.Archive,
             contentDescription = "Archive",
             selected = tab == NotebookListTab.Archive,
@@ -240,21 +271,18 @@ private fun TabSwitcher(
 }
 
 @Composable
-private fun TabChip(
+private fun TabSegment(
     icon: ImageVector,
     contentDescription: String,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val bg = if (selected) AppAccent.soft else AppColors.CardSolid
-    val border = if (selected) AppAccent.border else AppColors.BorderDefault
+    val bg = if (selected) AppAccent.soft else Color.Transparent
     val tint = if (selected) AppAccent.deep else AppColors.TextSecondary
     Box(
         modifier = Modifier
-            .size(44.dp)
-            .clip(RoundedCornerShape(AppRadius.md))
+            .size(width = 56.dp, height = 40.dp)
             .background(bg)
-            .border(1.dp, border, RoundedCornerShape(AppRadius.md))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -387,14 +415,16 @@ private fun NotebookCard(
         archive && count == 0  -> "Empty"
         archive                -> "$count archived"
         count == 0             -> "No notebooks"
-        count == 1             -> "1 active notebook"
-        else                   -> "$count active notebooks"
+        else                   -> "$count active"
     }
 
     CollapsibleCard(
         title = title,
         expanded = expanded,
         onToggle = onToggle,
+        // Lighter weight than the default heavy SectionTitle —
+        // matches the tab-label feel of the screen header above.
+        titleStyle = AppTypography.SectionTitleLight,
         trailing = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -521,7 +551,10 @@ private fun NotebookListItem(
             ) {
                 Text(
                     text = notebook.title.ifBlank { "Untitled" },
-                    style = AppTypography.SectionTitle,
+                    // Lighter than the default bold SectionTitle —
+                    // reads as a list row rather than a section head,
+                    // which is what this row actually is.
+                    style = AppTypography.SectionTitleLight,
                     color = AppColors.TextPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -648,7 +681,7 @@ private fun PageHitRow(page: PageEntity, onClick: () -> Unit) {
         ) {
             Text(
                 displayPageTitle(page),
-                style = AppTypography.SectionTitle,
+                style = AppTypography.SectionTitleLight,
                 color = AppColors.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -737,7 +770,7 @@ private fun CreateNotebookDialog(
         title = {
             Text(
                 "New notebook",
-                style = AppTypography.SectionTitle,
+                style = AppTypography.SectionTitleLight,
                 color = AppColors.TextPrimary,
             )
         },

@@ -120,6 +120,23 @@ interface NotepadDao {
     suspend fun dirtyRows(): List<NotepadEntry>
 
     /**
+     * One-shot list of every active row, scoped by user. Used by the
+     * v2 sync pass to rebuild `manifest.entity_checksums` from scratch
+     * each pass — simpler than tracking per-row upload history, at the
+     * cost of an O(N) re-hash per pass.
+     */
+    @Query("SELECT * FROM notepad_entries WHERE user_id = :userId AND deleted_at IS NULL")
+    suspend fun activeRows(userId: String): List<NotepadEntry>
+
+    /**
+     * All locally-known rows matching [ids], regardless of soft-delete
+     * state. Pull path uses this to decide insert-vs-update during
+     * reconciliation.
+     */
+    @Query("SELECT * FROM notepad_entries WHERE id IN (:ids)")
+    suspend fun findByIds(ids: List<String>): List<NotepadEntry>
+
+    /**
      * Count of live entries for a user — fed into the sync manifest's
      * `entity_counts` map so a future pull can sanity-check Drive vs local.
      */

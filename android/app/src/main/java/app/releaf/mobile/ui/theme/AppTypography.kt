@@ -66,4 +66,33 @@ object AppTypography {
         fontWeight = FontWeight.SemiBold,
         fontSize = 11.sp,
     )
+
+    // ---------------------------------------------------------------
+    // "Light" variants — same family + size as the heavy roles, but
+    // dropped a step in weight. Used by the notebook tab and its
+    // drill-in surfaces (chapters / pages / page editor) to give that
+    // half of the app a calmer, more list-driven typographic colour.
+    // Other surfaces (notepad, settings, etc.) keep the heavy roles.
+    // ---------------------------------------------------------------
+
+    /** Bold → Medium. Use for list-row headlines and grouping cards. */
+    val SectionTitleLight = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Medium,
+        fontSize = 20.sp,
+    )
+
+    /** Medium → Normal. Use for tab-level page headings. */
+    val EditorialTitleLight = TextStyle(
+        fontFamily = FontFamily.Serif,
+        fontWeight = FontWeight.Normal,
+        fontSize = 26.sp,
+    )
+
+    /** SemiBold → Medium. Use for in-page editor titles. */
+    val PageTitleLight = TextStyle(
+        fontFamily = FontFamily.Serif,
+        fontWeight = FontWeight.Medium,
+        fontSize = 24.sp,
+    )
 }

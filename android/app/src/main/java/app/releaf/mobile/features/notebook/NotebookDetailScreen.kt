@@ -114,7 +114,7 @@ private fun Header(title: String, description: String?, onBack: () -> Unit) {
             modifier = Modifier.clickable { onBack() },
         )
         Text("NOTEBOOK", style = AppTypography.Eyebrow, color = AppAccent.primary)
-        Text(title, style = AppTypography.EditorialTitle, color = AppColors.TextPrimary)
+        Text(title, style = AppTypography.EditorialTitleLight, color = AppColors.TextPrimary)
         description?.let {
             Text(it, style = AppTypography.Body, color = AppColors.TextSecondary)
         }

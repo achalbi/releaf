@@ -1,4 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Releaf</string>
+    <string name="reminders_channel_name">Reminders</string>
+    <string name="reminders_channel_description">Notifications for scheduled reminders you set from the Releaf home screen.</string>
+
+    <!--
+      Google OAuth 2.0 Web client ID for Credential Manager sign-in.
+      Create one in Google Cloud Console → APIs & Services → Credentials
+      for OAuth client type "Web application" (NOT "Android" — the Web
+      client ID is what Credential Manager audiences its ID tokens
+      against).
+
+      Until a real ID is filled in, the real auth client will fail with
+      "Unknown client ID" at sign-in time; SignInScreen should fall
+      back to the stub client when this string is the placeholder.
+    -->
+    <string name="google_web_client_id" translatable="false">534102618638-dkugcqci44heoart4le3qhel78pmu299.apps.googleusercontent.com</string>
 </resources>

@@ -39,6 +39,13 @@ public struct PageRoute: Hashable {
     public init(id: String) { self.id = id }
 }
 
+/// Singleton-style tag for the workspace Tasks destination. No
+/// payload — the screen pulls from [TaskRepository] scoped to the
+/// signed-in user.
+public struct TasksRoute: Hashable {
+    public init() {}
+}
+
 #Preview("Signed out") {
     RootView()
         .environmentObject(AuthStore(client: StubGoogleAuthClient()))

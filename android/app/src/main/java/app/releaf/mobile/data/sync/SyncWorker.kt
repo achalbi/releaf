@@ -56,15 +56,23 @@ class SyncWorker(
         }
 
         return try {
-            val result = app.syncRepository.pushDirty(
+            val result = app.syncRepository.sync(
                 userId      = session.userId,
                 deviceId    = DeviceIdentity.get(applicationContext),
                 accessToken = session.accessToken,
             )
-            // Per-row failures are caught inside SyncRepository and
-            // counted on `failed`; dirty rows survive so a retry can pick
-            // them up with backoff.
-            if (result.failed > 0) Result.retry() else Result.success()
+            when {
+                // Remote manifest is on a newer major schema than this
+                // build. Retrying won't help — the user has to update.
+                // Return failure so WorkManager stops scheduling retries;
+                // the Settings surface will show the block banner.
+                result.versionBlocked -> Result.failure()
+                // Per-row failures are caught inside SyncRepository and
+                // counted on `failed`; dirty rows survive so a retry
+                // can pick them up with backoff.
+                result.failed > 0     -> Result.retry()
+                else                  -> Result.success()
+            }
         } catch (_: DriveError.Unauthenticated) {
             // Token was rejected server-side (revoked, scope removed).
             // Don't retry — the user needs to sign in again; the UI will

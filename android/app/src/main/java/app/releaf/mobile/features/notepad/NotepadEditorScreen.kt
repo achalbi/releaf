@@ -40,7 +40,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
@@ -617,8 +617,14 @@ private fun TopBar(
                         properties = PopupProperties(focusable = true),
                     ) {
                         Column(
+                            // Fixed width so the menu doesn't reflow
+                            // when the destructive "Delete entry" row
+                            // is conditionally hidden — and so the
+                            // visual stays identical across the two
+                            // editor surfaces (notepad / page) that
+                            // host the same overflow.
                             modifier = Modifier
-                                .widthIn(min = 240.dp)
+                                .width(260.dp)
                                 .shadow(8.dp, RoundedCornerShape(AppRadius.md))
                                 .clip(RoundedCornerShape(AppRadius.md))
                                 .background(AppColors.CardSolid)

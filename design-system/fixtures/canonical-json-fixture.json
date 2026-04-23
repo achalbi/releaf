@@ -1,0 +1,20 @@
+{
+  "zulu": "last-alphabetical",
+  "alpha": "first-alphabetical",
+  "nested": {
+    "z_key": 3,
+    "a_key": 1,
+    "m_key": 2
+  },
+  "array_with_objects": [
+    { "key": "b", "order": 1 },
+    { "key": "a", "order": 2 }
+  ],
+  "escapes": "quote:\" backslash:\\ newline:\n tab:\t",
+  "unicode": "héron + naïve + 日本語",
+  "integers": [0, 1, -1, 1024, 9007199254740991],
+  "booleans": [true, false],
+  "nulls": [null, null, null],
+  "empty_object": {},
+  "empty_array": []
+}

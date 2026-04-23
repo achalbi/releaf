@@ -135,6 +135,14 @@ interface PageDao {
     @Query("SELECT * FROM pages WHERE dirty = 1")
     suspend fun dirtyRows(): List<PageEntity>
 
+    /** All non-deleted pages, one-shot. Feeds the v2 sync manifest. */
+    @Query("SELECT * FROM pages WHERE deleted_at IS NULL")
+    suspend fun activeRows(): List<PageEntity>
+
+    /** Lookup-by-ids for the pull path. */
+    @Query("SELECT * FROM pages WHERE id IN (:ids)")
+    suspend fun findByIds(ids: List<String>): List<PageEntity>
+
     /** Count of live pages — feeds the sync manifest's `entity_counts`. */
     @Query("SELECT COUNT(*) FROM pages WHERE deleted_at IS NULL")
     suspend fun countActive(): Int

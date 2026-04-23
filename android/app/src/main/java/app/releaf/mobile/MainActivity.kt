@@ -49,6 +49,7 @@ import androidx.navigation.navArgument
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
 import app.releaf.mobile.auth.GoogleAuthSession
+import app.releaf.mobile.auth.rememberGoogleSignInAction
 import app.releaf.mobile.features.auth.SignInScreen
 import app.releaf.mobile.features.home.HomeScreen
 import app.releaf.mobile.features.splash.SplashScreen
@@ -69,7 +70,11 @@ import app.releaf.mobile.features.onboarding.OnboardingPreferences
 import app.releaf.mobile.features.onboarding.OnboardingWizard
 import app.releaf.mobile.features.page.PageDetailScreen
 import app.releaf.mobile.features.page.PageDetailViewModel
+import app.releaf.mobile.features.reminder.ReminderEditorScreen
+import app.releaf.mobile.features.reminder.ReminderEditorViewModel
+import app.releaf.mobile.features.reminder.RemindersScreen
 import app.releaf.mobile.features.settings.SettingsScreen
+import app.releaf.mobile.features.tasks.TasksScreen
 import app.releaf.mobile.ui.components.BottomNav
 import app.releaf.mobile.ui.components.BottomNavItem
 import app.releaf.mobile.ui.components.CaptureMode
@@ -123,6 +128,9 @@ private object Routes {
     const val PAGE_LOCAL            = "page/local/{pageId}?mode={mode}"
     const val ARG_CAPTURE_MODE      = "mode"
     const val NOTEPAD_EDIT          = "notepad/edit/{entryId}"
+    const val TASKS                 = "tasks"
+    const val REMINDERS             = "reminders"
+    const val REMINDER_EDIT         = "reminders/edit/{reminderId}"
 
     fun notebookDetail(id: String)      = "notebook/$id"
     fun page(id: String)                = "page/$id"
@@ -135,6 +143,8 @@ private object Routes {
     }
     /** Pass `NotepadEditorViewModel.NEW_ENTRY_ID` to compose a fresh entry. */
     fun notepadEdit(id: String)         = "notepad/edit/$id"
+    /** Pass `ReminderEditorViewModel.NEW_REMINDER_ID` to compose a fresh reminder. */
+    fun reminderEdit(id: String)        = "reminders/edit/$id"
 
     /** Top-level destinations that should show the BottomNav. */
     val topLevel = setOf(HOME, NOTEBOOKS, NOTEPAD, SETTINGS)
@@ -161,11 +171,15 @@ private object Routes {
 @Composable
 private fun RootScreen(authStore: AuthStore) {
     val state by authStore.state.collectAsState()
+    // Composable wiring for the real Google Sign-In flow. Falls back
+    // to the stub client when `google_web_client_id` is still the
+    // default placeholder string (see strings.xml + GoogleSignInBinding).
+    val onSignIn = rememberGoogleSignInAction(authStore)
 
     ReleafCanvas {
         when (val s = state) {
             is AuthState.SignedOut, is AuthState.Failed ->
-                SignInScreen(state = s, onSignIn = authStore::signIn)
+                SignInScreen(state = s, onSignIn = onSignIn)
 
             AuthState.SigningIn -> SplashScreen()
 
@@ -293,6 +307,8 @@ private fun SignedInNavHost(
             HomeScreen(
                 session = session,
                 onOpenNotebook = { id -> nav.navigate(Routes.notebookDetail(id)) },
+                onOpenTasks = { nav.navigate(Routes.TASKS) },
+                onOpenReminders = { nav.navigate(Routes.REMINDERS) },
                 onSignOut = onSignOut,
                 onShowOnboarding = onShowOnboarding,
             )
@@ -304,22 +320,35 @@ private fun SignedInNavHost(
             )
         }
 
-        // Jump to the Notebooks tab from a breadcrumb without re-adding it to
-        // the back stack. popUpTo(NOTEBOOKS) handles the case where the user
-        // entered the drill from the tab directly; the singleTop flag covers
-        // deep-link cases (Home → drill) where the tab isn't yet on the stack.
+        // Jump to the Notebooks tab from a breadcrumb. The common case is
+        // "I drilled in from the tab and want to pop back" — which is
+        // exactly what popBackStack does when the tab is on the stack.
+        // For deep links (Home → drill, with no tab in the stack) we
+        // fall through to a fresh navigate.
+        //
+        // The previous implementation used `nav.navigate(NOTEBOOKS) {
+        // popUpTo(NOTEBOOKS, inclusive=false) }` — that combo pops the
+        // intermediate destinations but the navigate itself becomes a
+        // launchSingleTop no-op (NOTEBOOKS is already on the stack
+        // after the popUpTo). The result was a silent no-op breadcrumb
+        // tap on some back-stack shapes. popBackStack is the
+        // unambiguous expression of "rewind to this destination".
         val navigateToNotebooksTab: () -> Unit = {
-            nav.navigate(Routes.NOTEBOOKS) {
-                popUpTo(Routes.NOTEBOOKS) { inclusive = false; saveState = true }
-                launchSingleTop = true
-                restoreState = true
+            if (!nav.popBackStack(Routes.NOTEBOOKS, inclusive = false)) {
+                nav.navigate(Routes.NOTEBOOKS) {
+                    popUpTo(Routes.HOME) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
+                }
             }
         }
         val navigateHome: () -> Unit = {
-            nav.navigate(Routes.HOME) {
-                popUpTo(Routes.HOME) { inclusive = false; saveState = true }
-                launchSingleTop = true
-                restoreState = true
+            if (!nav.popBackStack(Routes.HOME, inclusive = false)) {
+                nav.navigate(Routes.HOME) {
+                    popUpTo(Routes.HOME) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
+                }
             }
         }
         composable(Routes.NOTEPAD) {
@@ -338,6 +367,32 @@ private fun SignedInNavHost(
         }
         composable(Routes.SETTINGS) {
             SettingsScreen(onSignOut = onSignOut)
+        }
+
+        // Tasks is a drill-in surface (not a top-level tab), so it's
+        // absent from BottomNav. Entry lives on the Home screen's
+        // Tasks card; the back arrow / breadcrumb returns there.
+        composable(Routes.TASKS) {
+            TasksScreen(onBack = { nav.popBackStack() })
+        }
+
+        // Reminders — same shape as Tasks. List view + per-reminder
+        // editor route. Editor carries `reminderId` which the VM
+        // factory reads from the SavedStateHandle.
+        composable(Routes.REMINDERS) {
+            RemindersScreen(
+                onBack         = { nav.popBackStack() },
+                onComposeNew   = { nav.navigate(Routes.reminderEdit(ReminderEditorViewModel.NEW_REMINDER_ID)) },
+                onOpenReminder = { id -> nav.navigate(Routes.reminderEdit(id)) },
+            )
+        }
+        composable(
+            route     = Routes.REMINDER_EDIT,
+            arguments = listOf(navArgument(ReminderEditorViewModel.ARG_REMINDER_ID) {
+                type = NavType.StringType
+            }),
+        ) {
+            ReminderEditorScreen(onBack = { nav.popBackStack() })
         }
 
         // ---------- Drill-in routes (bottom nav hidden) ----------

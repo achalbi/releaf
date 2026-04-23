@@ -1,0 +1,93 @@
+/*
+ * DrivePath.kt
+ *
+ * Deterministic Drive paths per `docs/DRIVE_SCHEMA.md` §"Root layout".
+ * Every entity has one and only one canonical path derived from its kind
+ * + id (+ bucket key for date-sharded kinds). Sync callers never invent
+ * paths — this file is the single source of truth.
+ *
+ * Scope deviation from the spec (intentional):
+ *
+ *   The spec has notebooks/chapters/pages in a nested tree
+ *   (`notebooks/{nb}/{ch}/{page}.json`). This implementation keeps them
+ *   flat (`notebooks/{id}.json`, `chapters/{id}.json`,
+ *   `pages/{id}.json`) because the manifest is the source of truth for
+ *   "what exists and where it lives" — paths are just storage detail.
+ *   Flat paths are a pure function of the row's own id, so upload doesn't
+ *   need a parent-lookup step. Notepad entries and daily logs stay
+ *   date-bucketed as the spec requires (`yyyy/mm/` / `yyyy/yyyy-mm-dd`)
+ *   because those kinds benefit from directory-listing fan-out.
+ *
+ *   A future migration can renest by updating this file and re-uploading
+ *   every entity (then updating `manifest.json` last). The
+ *   `schema_version.major` bump is what gates clients across the change.
+ */
+
+package app.releaf.mobile.data.sync
+
+object DrivePath {
+
+    /** User-visible top-level folder in the user's Drive. */
+    const val ROOT_FOLDER = "Releaf"
+
+    /** Manifest filename, under the root folder. */
+    const val MANIFEST = "manifest.json"
+
+    // ---- entity "kind" strings, stable on the wire ----
+    const val KIND_NOTEBOOK       = "notebook"
+    const val KIND_CHAPTER        = "chapter"
+    const val KIND_PAGE           = "page"
+    const val KIND_NOTEPAD_ENTRY  = "notepad_entry"
+    const val KIND_DAILY_LOG      = "daily_log"
+    const val KIND_CAPTURE        = "capture"
+    const val KIND_TASK           = "task"
+    const val KIND_TAG            = "tag"
+    const val KIND_PROJECT        = "project"
+    const val KIND_REFERENCE_LINK = "reference_link"
+    const val KIND_PAGE_TEMPLATE  = "page_template"
+
+    // ---- folder names (no trailing slash; join with `/`) ----
+    const val FOLDER_NOTEBOOKS       = "notebooks"
+    const val FOLDER_CHAPTERS        = "chapters"
+    const val FOLDER_PAGES           = "pages"
+    const val FOLDER_NOTEPAD_ENTRIES = "notepad_entries"
+    const val FOLDER_DAILY_LOGS      = "daily_logs"
+    const val FOLDER_CAPTURES        = "captures"
+    const val FOLDER_TASKS           = "tasks"
+    const val FOLDER_TOMBSTONES      = "tombstones"
+
+    // ---- path builders ----
+
+    fun notebook(id: String): String = "$FOLDER_NOTEBOOKS/$id.json"
+
+    fun chapter(id: String): String = "$FOLDER_CHAPTERS/$id.json"
+
+    fun page(id: String): String = "$FOLDER_PAGES/$id.json"
+
+    /** `entry_date` is `YYYY-MM-DD`; bucket by year + month. */
+    fun notepadEntry(entryDate: String, entryId: String): String {
+        require(isYyyyMmDd(entryDate)) { "entryDate must be YYYY-MM-DD, got $entryDate" }
+        val yyyy = entryDate.substring(0, 4)
+        val mm   = entryDate.substring(5, 7)
+        return "$FOLDER_NOTEPAD_ENTRIES/$yyyy/$mm/$entryId.json"
+    }
+
+    /** `log_date` is `YYYY-MM-DD`; bucket by year, filename == date. */
+    fun dailyLog(logDate: String): String {
+        require(isYyyyMmDd(logDate)) { "logDate must be YYYY-MM-DD, got $logDate" }
+        val yyyy = logDate.substring(0, 4)
+        return "$FOLDER_DAILY_LOGS/$yyyy/$logDate.json"
+    }
+
+    fun task(id: String): String = "$FOLDER_TASKS/$id.json"
+
+    fun tombstone(id: String): String = "$FOLDER_TOMBSTONES/$id.json"
+
+    // ---- helpers ----
+
+    private fun isYyyyMmDd(s: String): Boolean =
+        s.length == 10 && s[4] == '-' && s[7] == '-' &&
+        s.substring(0, 4).all(Char::isDigit) &&
+        s.substring(5, 7).all(Char::isDigit) &&
+        s.substring(8, 10).all(Char::isDigit)
+}

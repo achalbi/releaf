@@ -65,6 +65,10 @@ fun CollapsibleCard(
     subtitle: String? = null,
     trailing: (@Composable () -> Unit)? = null,
     divider: Boolean = true,
+    /** Style override for the card title. Defaults to the heavy
+     *  [AppTypography.SectionTitle]; pass a lighter variant when the
+     *  card is grouping list items rather than headlining a section. */
+    titleStyle: androidx.compose.ui.text.TextStyle = AppTypography.SectionTitle,
     body: @Composable () -> Unit,
 ) {
     Column(
@@ -96,7 +100,7 @@ fun CollapsibleCard(
             ) {
                 Text(
                     text = title,
-                    style = AppTypography.SectionTitle,
+                    style = titleStyle,
                     color = AppColors.TextPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

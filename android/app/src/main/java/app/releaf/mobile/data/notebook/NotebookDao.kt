@@ -118,6 +118,14 @@ interface NotebookDao {
     @Query("SELECT * FROM notebooks WHERE dirty = 1")
     suspend fun dirtyRows(): List<NotebookEntity>
 
+    /** All non-deleted notebooks, one-shot. Feeds the v2 sync manifest. */
+    @Query("SELECT * FROM notebooks WHERE deleted_at IS NULL")
+    suspend fun activeRows(): List<NotebookEntity>
+
+    /** Lookup-by-ids for the pull path. */
+    @Query("SELECT * FROM notebooks WHERE id IN (:ids)")
+    suspend fun findByIds(ids: List<String>): List<NotebookEntity>
+
     /** Count of live notebooks — feeds the sync manifest's `entity_counts`. */
     @Query("SELECT COUNT(*) FROM notebooks WHERE deleted_at IS NULL")
     suspend fun countActive(): Int

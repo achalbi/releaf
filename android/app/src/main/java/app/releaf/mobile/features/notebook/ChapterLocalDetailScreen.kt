@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -116,6 +117,10 @@ fun ChapterLocalDetailScreen(
         modifier = modifier.fillMaxSize(),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = Color.Transparent,
+        // Outer SignedInShell Scaffold already consumes the system-bar
+        // insets; swallow them here so the header docks flush to the
+        // top instead of doubling the status-bar padding.
+        contentWindowInsets = WindowInsets(0),
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -124,8 +129,10 @@ fun ChapterLocalDetailScreen(
         ) {
             ScreenHeader(
                 eyebrow = "Notebook",
-                title = "Project notebooks",
+                title = "Your notebooks",
                 avatarInitial = "A",
+                // Match the Notebook tab + Notepad screen rhythm.
+                topPadding = AppSpacing.s3,
             )
             Breadcrumbs(
                 segments = listOf(
@@ -287,7 +294,7 @@ private fun ChapterOverviewCard(
         ) {
             Text(
                 text = title,
-                style = AppTypography.EditorialTitle,
+                style = AppTypography.EditorialTitleLight,
                 color = AppColors.TextPrimary,
             )
             if (!description.isNullOrBlank()) {
@@ -376,7 +383,7 @@ private fun EmptyPagesBody(onAdd: () -> Unit) {
     ) {
         Text(
             "No pages yet",
-            style = AppTypography.SectionTitle,
+            style = AppTypography.SectionTitleLight,
             color = AppColors.TextSecondary,
             textAlign = TextAlign.Center,
         )
@@ -453,7 +460,7 @@ private fun PageRow(page: PageEntity, order: Int, onClick: () -> Unit) {
         ) {
             Text(
                 text = titleText,
-                style = AppTypography.SectionTitle,
+                style = AppTypography.SectionTitleLight,
                 color = AppColors.TextPrimary,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -586,7 +593,7 @@ private fun NotFoundState(onBack: () -> Unit, modifier: Modifier = Modifier) {
     ) {
         Text(
             "Chapter not found",
-            style = AppTypography.SectionTitle,
+            style = AppTypography.SectionTitleLight,
             color = AppColors.TextSecondary,
             textAlign = TextAlign.Center,
         )
@@ -622,7 +629,7 @@ private fun EditChapterDialog(
         title = {
             Text(
                 "Edit chapter",
-                style = AppTypography.SectionTitle,
+                style = AppTypography.SectionTitleLight,
                 color = AppColors.TextPrimary,
             )
         },

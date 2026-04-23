@@ -45,6 +45,7 @@ public struct HomeScreen: View {
                 VStack(alignment: .leading, spacing: AppSpacing.s6) {
                     header
                     OnboardingQuickGuideCard(onShowIntro: showOnboarding)
+                    HomeTasksCard()
                     ForEach(notebooks) { notebook in
                         NavigationLink(value: NotebookRoute(id: notebook.id)) {
                             NotebookRow(notebook: notebook)

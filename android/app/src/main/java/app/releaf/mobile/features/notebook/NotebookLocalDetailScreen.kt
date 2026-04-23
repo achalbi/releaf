@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -111,6 +112,11 @@ fun NotebookLocalDetailScreen(
         modifier = modifier.fillMaxSize(),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = Color.Transparent,
+        // Outer SignedInShell Scaffold already consumes the system-bar
+        // insets; swallow them here so the header docks flush to the
+        // top instead of doubling the status-bar padding. Same fix
+        // the Notepad and Notebook tab screens use.
+        contentWindowInsets = WindowInsets(0),
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -119,8 +125,12 @@ fun NotebookLocalDetailScreen(
         ) {
             ScreenHeader(
                 eyebrow = "Notebook",
-                title = "Project notebooks",
+                title = "Your notebooks",
                 avatarInitial = "A",
+                // Match the Notebook tab + Notepad screen rhythm —
+                // top-level / drill-in headers all dock at s3 above
+                // the eyebrow.
+                topPadding = AppSpacing.s3,
             )
             Breadcrumbs(
                 segments = listOf(
@@ -294,7 +304,7 @@ private fun NotebookHeroCard(
                 ) {
                     Text(
                         text = notebook.title.ifBlank { "Untitled" },
-                        style = AppTypography.EditorialTitle,
+                        style = AppTypography.EditorialTitleLight,
                         color = AppColors.TextPrimary,
                     )
                     if (!notebook.description.isNullOrBlank()) {
@@ -385,7 +395,7 @@ private fun StatsRow(
             value = absoluteDate(createdAt),
             label = "Created",
             modifier = Modifier.weight(1f),
-            valueStyle = AppTypography.SectionTitle,
+            valueStyle = AppTypography.SectionTitleLight,
         )
     }
 }
@@ -483,7 +493,7 @@ private fun EmptyChapterBody(onAdd: () -> Unit) {
     ) {
         Text(
             "No chapters yet",
-            style = AppTypography.SectionTitle,
+            style = AppTypography.SectionTitleLight,
             color = AppColors.TextSecondary,
             textAlign = TextAlign.Center,
         )
@@ -562,7 +572,7 @@ private fun ChapterRow(
         ) {
             Text(
                 text = chapter.title.ifBlank { "Untitled chapter" },
-                style = AppTypography.SectionTitle,
+                style = AppTypography.SectionTitleLight,
                 color = AppColors.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -667,7 +677,7 @@ private fun NotFoundState(onBack: () -> Unit, modifier: Modifier = Modifier) {
     ) {
         Text(
             "Notebook not found",
-            style = AppTypography.SectionTitle,
+            style = AppTypography.SectionTitleLight,
             color = AppColors.TextSecondary,
             textAlign = TextAlign.Center,
         )
@@ -707,7 +717,7 @@ private fun TitledDialog(
         title = {
             Text(
                 heading,
-                style = AppTypography.SectionTitle,
+                style = AppTypography.SectionTitleLight,
                 color = AppColors.TextPrimary,
             )
         },

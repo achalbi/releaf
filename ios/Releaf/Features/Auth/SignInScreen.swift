@@ -40,7 +40,10 @@ public struct SignInScreen: View {
 
             VStack(spacing: AppSpacing.s3) {
                 AppButton("Sign in with Google") {
-                    Task { await authStore.signIn() }
+                    // Real flow when `GIDClientID` is set in Info.plist,
+                    // otherwise falls back to the stub client path.
+                    let signIn = GoogleSignInBinding.signInAction(authStore: authStore)
+                    Task { await signIn() }
                 }
 
                 if case .failed(let message) = authStore.state {

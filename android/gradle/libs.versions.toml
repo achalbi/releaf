@@ -59,6 +59,12 @@ mlkit-genai-speech    = "1.0.0-alpha1"
 # down to API 23 so our branded launch theme renders on every device in the
 # minSdk 26 support range.
 core-splashscreen     = "1.0.1"
+# Google Sign-In via Credential Manager + Google Identity Services.
+# Credential Manager supplies the ID token; `AuthorizationClient`
+# (from play-services-auth) is what grants the Drive scope on top.
+credentials           = "1.3.0"
+googleid              = "1.1.1"
+play-services-auth    = "21.3.0"
 
 [plugins]
 android-application  = { id = "com.android.application",                     version.ref = "agp" }
@@ -144,3 +150,15 @@ mlkit-genai-speech        = { module = "com.google.mlkit:genai-speech-recognitio
 # SplashScreen compat — powers the branded cold-launch splash (leaf +
 # coral/green background) via `installSplashScreen()` in MainActivity.
 core-splashscreen         = { module = "androidx.core:core-splashscreen", version.ref = "core-splashscreen" }
+
+# Google Sign-In stack.
+#   - androidx.credentials + credentials-play-services-auth: modern
+#     sign-in entry point via CredentialManager on API 34+; falls back
+#     through play-services on older devices.
+#   - googleid: `GetGoogleIdOption` builder for the sign-in request.
+#   - play-services-auth: `AuthorizationClient.authorize()` for Drive
+#     scope grant on top of the ID token from Credential Manager.
+credentials               = { module = "androidx.credentials:credentials", version.ref = "credentials" }
+credentials-play-services-auth = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
+googleid                  = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
+play-services-auth        = { module = "com.google.android.gms:play-services-auth", version.ref = "play-services-auth" }

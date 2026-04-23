@@ -14,30 +14,30 @@ public struct SettingsView: View {
     public init() {}
 
     public var body: some View {
-        VStack(spacing: AppSpacing.s3) {
-            Text("SETTINGS")
-                .font(AppText.eyebrow)
-                .tracking(AppLetterSpacing.eyebrow)
-                .foregroundStyle(AppColors.coral)
+        ScrollView {
+            VStack(spacing: AppSpacing.s6) {
+                VStack(spacing: AppSpacing.s1) {
+                    Text("SETTINGS")
+                        .font(AppText.eyebrow)
+                        .tracking(AppLetterSpacing.eyebrow)
+                        .foregroundStyle(AppColors.coral)
 
-            Text("Preferences")
-                .font(AppText.editorialTitle)
-                .foregroundStyle(AppColors.textPrimary)
-                .multilineTextAlignment(.center)
+                    Text("Preferences")
+                        .font(AppText.editorialTitle)
+                        .foregroundStyle(AppColors.textPrimary)
+                        .multilineTextAlignment(.center)
+                }
 
-            Text("Sync, appearance, and account settings are coming soon.")
-                .font(AppText.body)
-                .foregroundStyle(AppColors.textSecondary)
-                .multilineTextAlignment(.center)
+                // Drive sync card.
+                DriveSettingsSection()
 
-            Spacer().frame(height: AppSpacing.s6)
-
-            AppButton("Sign out", variant: .secondary) {
-                Task { await authStore.signOut() }
+                AppButton("Sign out", variant: .secondary) {
+                    Task { await authStore.signOut() }
+                }
+                .fixedSize(horizontal: true, vertical: false)
             }
-            .fixedSize(horizontal: true, vertical: false)
+            .padding(AppSpacing.s6)
         }
-        .padding(AppSpacing.s6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
