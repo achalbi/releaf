@@ -32,6 +32,37 @@ interface NotebookDao {
     )
     fun observeActive(): Flow<List<NotebookEntity>>
 
+    /** Live, non-archived notebooks for a single shelf. */
+    @Query(
+        """
+        SELECT * FROM notebooks
+        WHERE shelf_id = :shelfId
+          AND deleted_at IS NULL
+          AND archived_at IS NULL
+        ORDER BY position ASC, updated_at DESC
+        """
+    )
+    fun observeForShelf(shelfId: String): Flow<List<NotebookEntity>>
+
+    /** Active volumes of a series, ordered by volume number. */
+    @Query(
+        """
+        SELECT * FROM notebooks
+        WHERE series_id = :seriesId AND deleted_at IS NULL
+        ORDER BY volume_number ASC
+        """
+    )
+    fun observeForSeries(seriesId: String): Flow<List<NotebookEntity>>
+
+    /** Returns the highest `volume_number` in a series (null when empty). */
+    @Query(
+        """
+        SELECT MAX(volume_number) FROM notebooks
+        WHERE series_id = :seriesId AND deleted_at IS NULL
+        """
+    )
+    suspend fun maxVolumeFor(seriesId: String): Int?
+
     /** Archived (but not deleted) notebooks — the "Archive" tab feed. */
     @Query(
         """

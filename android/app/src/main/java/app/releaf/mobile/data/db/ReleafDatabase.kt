@@ -25,12 +25,16 @@ import androidx.room.migration.Migration
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
+import app.releaf.mobile.data.notebook.BookSeriesDao
+import app.releaf.mobile.data.notebook.BookSeriesEntity
 import app.releaf.mobile.data.notebook.ChapterDao
 import app.releaf.mobile.data.notebook.ChapterEntity
 import app.releaf.mobile.data.notebook.NotebookDao
 import app.releaf.mobile.data.notebook.NotebookEntity
 import app.releaf.mobile.data.notebook.PageDao
 import app.releaf.mobile.data.notebook.PageEntity
+import app.releaf.mobile.data.shelf.ShelfDao
+import app.releaf.mobile.data.shelf.ShelfEntity
 import app.releaf.mobile.data.notepad.NotepadDao
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.perspective.PerspectiveDao
@@ -48,15 +52,19 @@ import app.releaf.mobile.data.task.TaskEntity
         NotebookEntity::class,
         ChapterEntity::class,
         PageEntity::class,
+        ShelfEntity::class,
+        BookSeriesEntity::class,
         SyncStateEntity::class,
         TaskEntity::class,
         ReminderEntity::class,
         PerspectiveEntity::class,
     ],
-    // v11: adds `perspective_id` FK column on `reminders` so a
-    // reminder can be explicitly tagged with a perspective tile
-    // (instead of relying on parsing `@tag` out of the title).
-    version = 11,
+    // v12: Shelf → Book(Notebook) → Chapter → Page hierarchy. Adds
+    // `shelves` + `book_series` tables and four new columns on
+    // `notebooks` (`shelf_id`, `series_id`, `volume_number`,
+    // `volume_name`). Backfills existing notebooks into the default
+    // "General" shelf and seeds that shelf on upgrade.
+    version = 12,
     exportSchema = true,
 )
 abstract class ReleafDatabase : RoomDatabase() {
@@ -65,6 +73,8 @@ abstract class ReleafDatabase : RoomDatabase() {
     abstract fun notebookDao(): NotebookDao
     abstract fun chapterDao(): ChapterDao
     abstract fun pageDao(): PageDao
+    abstract fun shelfDao(): ShelfDao
+    abstract fun bookSeriesDao(): BookSeriesDao
     abstract fun syncStateDao(): SyncStateDao
     abstract fun taskDao(): TaskDao
     abstract fun reminderDao(): ReminderDao
@@ -399,6 +409,106 @@ abstract class ReleafDatabase : RoomDatabase() {
         }
     }
 
+    /**
+     * v11 → v12: introduces Shelf → Book → Chapter → Page hierarchy.
+     *
+     * Additions:
+     *  - `shelves` table (top-level grouping; editable name, color,
+     *    order).
+     *  - `book_series` table (groups notebooks that are volumes of
+     *    the same book). A notebook belongs to a series only when
+     *    there's more than one volume; single-volume books keep
+     *    `series_id = NULL`.
+     *  - Four columns on `notebooks`: `shelf_id` (FK, NOT NULL —
+     *    defaults to `shelf-general` via DEFAULT so existing rows
+     *    pick it up in one sweep), `series_id` (FK, nullable),
+     *    `volume_number` (INTEGER DEFAULT 1), `volume_name`
+     *    (TEXT, nullable — UI derives "<book> vol <n>" when a
+     *    series has >1 volumes).
+     *
+     * Seed: inserts the default "General" shelf so upgrading users
+     * land with their existing notebooks already assigned to it.
+     */
+    private object Migration11To12 : Migration(11, 12) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS shelves (
+                    id              TEXT NOT NULL PRIMARY KEY,
+                    name            TEXT NOT NULL,
+                    color_hex       TEXT,
+                    position        INTEGER NOT NULL DEFAULT 1024,
+                    created_at      TEXT NOT NULL,
+                    updated_at      TEXT NOT NULL,
+                    dirty           INTEGER NOT NULL DEFAULT 1,
+                    deleted_at      TEXT
+                )
+                """.trimIndent()
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_shelves_position ON shelves(position)"
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_shelves_deleted_at ON shelves(deleted_at)"
+            )
+
+            connection.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS book_series (
+                    id              TEXT NOT NULL PRIMARY KEY,
+                    shelf_id        TEXT NOT NULL,
+                    name            TEXT NOT NULL,
+                    created_at      TEXT NOT NULL,
+                    updated_at      TEXT NOT NULL,
+                    dirty           INTEGER NOT NULL DEFAULT 1,
+                    deleted_at      TEXT
+                )
+                """.trimIndent()
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_book_series_shelf_id ON book_series(shelf_id)"
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_book_series_deleted_at ON book_series(deleted_at)"
+            )
+
+            // Seed the default shelf BEFORE adding shelf_id to
+            // notebooks so the ALTER with DEFAULT 'shelf-general'
+            // has a valid target row for the logical FK.
+            connection.execSQL(
+                """
+                INSERT OR IGNORE INTO shelves (
+                    id, name, color_hex, position, created_at, updated_at, dirty
+                ) VALUES (
+                    'shelf-general', 'General', '#7AA874', 1024,
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                    1
+                )
+                """.trimIndent()
+            )
+
+            connection.execSQL(
+                "ALTER TABLE notebooks ADD COLUMN shelf_id TEXT NOT NULL DEFAULT 'shelf-general'"
+            )
+            connection.execSQL(
+                "ALTER TABLE notebooks ADD COLUMN series_id TEXT"
+            )
+            connection.execSQL(
+                "ALTER TABLE notebooks ADD COLUMN volume_number INTEGER NOT NULL DEFAULT 1"
+            )
+            connection.execSQL(
+                "ALTER TABLE notebooks ADD COLUMN volume_name TEXT"
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_notebooks_shelf_id ON notebooks(shelf_id)"
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_notebooks_series_id ON notebooks(series_id)"
+            )
+        }
+    }
+
     companion object {
         private const val DB_NAME = "releaf.db"
 
@@ -430,6 +540,7 @@ abstract class ReleafDatabase : RoomDatabase() {
                         Migration8To9,
                         Migration9To10,
                         Migration10To11,
+                        Migration11To12,
                     )
                     // Dogfood installs at v2-v6 (pre-flatten) are handled
                     // here as a downgrade: the DB wipes, Room recreates

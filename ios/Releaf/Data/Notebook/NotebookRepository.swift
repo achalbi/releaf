@@ -17,6 +17,21 @@
 import Foundation
 import GRDB
 
+/// One active notebook joined with its live chapter + page counts.
+/// Feeds the variant-1 "Your shelves" view so the UI layer gets a
+/// single stream instead of having to fan out three separate reads.
+public struct ShelfRecord: Equatable, Sendable {
+    public let notebook: NotebookEntity
+    public let chapterCount: Int
+    public let pageCount: Int
+
+    public init(notebook: NotebookEntity, chapterCount: Int, pageCount: Int) {
+        self.notebook = notebook
+        self.chapterCount = chapterCount
+        self.pageCount = pageCount
+    }
+}
+
 public final class NotebookRepository: @unchecked Sendable {
 
     private let dbQueue: DatabaseQueue
@@ -38,6 +53,80 @@ public final class NotebookRepository: @unchecked Sendable {
         return bridge(observation.values(in: dbQueue))
     }
 
+    /// Stream of live notebooks scoped to one shelf, ordered for list display.
+    public func observeForShelf(shelfId: String) -> AsyncThrowingStream<[NotebookEntity], Error> {
+        let observation = ValueObservation.tracking { db in
+            try NotebookEntity
+                .filter(sql: "shelf_id = ? AND deleted_at IS NULL", arguments: [shelfId])
+                .order(Column("position").asc, Column("updated_at").desc)
+                .fetchAll(db)
+        }
+        return bridge(observation.values(in: dbQueue))
+    }
+
+    /// Stream of volumes within a series, sorted by `volume_number`.
+    public func observeForSeries(seriesId: String) -> AsyncThrowingStream<[NotebookEntity], Error> {
+        let observation = ValueObservation.tracking { db in
+            try NotebookEntity
+                .filter(sql: "series_id = ? AND deleted_at IS NULL", arguments: [seriesId])
+                .order(Column("volume_number").asc)
+                .fetchAll(db)
+        }
+        return bridge(observation.values(in: dbQueue))
+    }
+
+    /// Stream of live notebooks with per-notebook chapter + page
+    /// counts joined in. Re-fires on any change to the three tables.
+    public func observeShelves() -> AsyncThrowingStream<[ShelfRecord], Error> {
+        let observation = ValueObservation.tracking { db -> [ShelfRecord] in
+            let notebooks = try NotebookEntity
+                .filter(sql: "deleted_at IS NULL")
+                .order(Column("updated_at").desc)
+                .fetchAll(db)
+
+            let chapterCounts: [String: Int] = try Self.fetchCountMap(
+                db: db,
+                sql: """
+                    SELECT notebook_id AS id, COUNT(*) AS c
+                    FROM chapters
+                    WHERE deleted_at IS NULL
+                    GROUP BY notebook_id
+                    """
+            )
+
+            let pageCounts: [String: Int] = try Self.fetchCountMap(
+                db: db,
+                sql: """
+                    SELECT c.notebook_id AS id, COUNT(*) AS c
+                    FROM pages p
+                    JOIN chapters c ON c.id = p.chapter_id
+                    WHERE p.deleted_at IS NULL AND c.deleted_at IS NULL
+                    GROUP BY c.notebook_id
+                    """
+            )
+
+            return notebooks.map { nb in
+                ShelfRecord(
+                    notebook: nb,
+                    chapterCount: chapterCounts[nb.id] ?? 0,
+                    pageCount: pageCounts[nb.id] ?? 0
+                )
+            }
+        }
+        return bridge(observation.values(in: dbQueue))
+    }
+
+    private static func fetchCountMap(db: Database, sql: String) throws -> [String: Int] {
+        let rows = try Row.fetchAll(db, sql: sql)
+        var out: [String: Int] = [:]
+        for row in rows {
+            guard let id: String = row["id"] else { continue }
+            let c: Int = row["c"] ?? 0
+            out[id] = c
+        }
+        return out
+    }
+
     public func observeById(_ id: String) -> AsyncThrowingStream<NotebookEntity?, Error> {
         let observation = ValueObservation.tracking { db in
             try NotebookEntity
@@ -57,21 +146,142 @@ public final class NotebookRepository: @unchecked Sendable {
 
     // MARK: - Create / Update
 
-    /// Create a notebook. Caller supplies `title` and an optional
-    /// `colorHex`; everything else (id, timestamps, dirty) is filled in
-    /// here so view-models don't duplicate the boilerplate.
+    /// Create a standalone book (no series). Defaults to the
+    /// General shelf so existing call-sites that aren't yet shelf-
+    /// aware continue to work.
     @discardableResult
-    public func createNotebook(title: String, colorHex: String? = nil) async throws -> NotebookEntity {
+    public func createNotebook(
+        title: String,
+        colorHex: String? = nil,
+        shelfId: String = "shelf-general"
+    ) async throws -> NotebookEntity {
         let now = IsoClock.nowIso()
         let entity = NotebookEntity(
-            id:          Uuidv7.generate(),
-            title:       title.trimmingCharacters(in: .whitespacesAndNewlines),
-            colorHex:    colorHex,
-            createdAt:   now,
-            updatedAt:   now,
-            dirty:       true
+            id:           Uuidv7.generate(),
+            title:        title.trimmingCharacters(in: .whitespacesAndNewlines),
+            colorHex:     colorHex,
+            shelfId:      shelfId,
+            seriesId:     nil,
+            volumeNumber: 1,
+            volumeName:   nil,
+            createdAt:    now,
+            updatedAt:    now,
+            dirty:        true
         )
         try await dbQueue.write { db in try entity.insert(db) }
+        return entity
+    }
+
+    /// Promote an existing standalone notebook to belong to a
+    /// series so additional volumes can be added. Returns the new
+    /// (or existing) series id.
+    @discardableResult
+    public func ensureSeriesFor(notebookId: String, seriesName: String? = nil) async throws -> String {
+        guard let nb = try await dbQueue.read({ db in
+            try NotebookEntity.filter(sql: "id = ?", arguments: [notebookId]).fetchOne(db)
+        }) else {
+            throw DriveError.notFound
+        }
+        if let existing = nb.seriesId { return existing }
+
+        let now = IsoClock.nowIso()
+        let series = BookSeriesEntity(
+            id:        Uuidv7.generate(),
+            shelfId:   nb.shelfId,
+            name:      seriesName?.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty(nb.title) ?? nb.title,
+            createdAt: now,
+            updatedAt: now,
+            dirty:     true
+        )
+        try await dbQueue.write { db in
+            try series.insert(db)
+            try db.execute(sql: """
+                UPDATE notebooks
+                SET series_id = ?, volume_number = 1, updated_at = ?, dirty = 1
+                WHERE id = ?
+                """, arguments: [series.id, now, notebookId])
+        }
+        return series.id
+    }
+
+    /// Add a new volume under an existing series.
+    @discardableResult
+    public func addVolumeToSeries(
+        seriesId: String,
+        volumeName: String? = nil,
+        colorHex: String? = nil
+    ) async throws -> NotebookEntity {
+        let (series, next): (BookSeriesEntity, Int) = try await dbQueue.read { db in
+            guard let series = try BookSeriesEntity
+                .filter(sql: "id = ?", arguments: [seriesId])
+                .fetchOne(db) else {
+                throw DriveError.notFound
+            }
+            let max = try Int.fetchOne(db, sql: """
+                SELECT MAX(volume_number) FROM notebooks
+                WHERE series_id = ? AND deleted_at IS NULL
+                """, arguments: [seriesId]) ?? 0
+            return (series, max + 1)
+        }
+
+        let cleanedVolumeName = volumeName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
+        let displayTitle = cleanedVolumeName ?? "\(series.name) vol \(next)"
+
+        let now = IsoClock.nowIso()
+        let entity = NotebookEntity(
+            id:           Uuidv7.generate(),
+            title:        displayTitle,
+            colorHex:     colorHex,
+            shelfId:      series.shelfId,
+            seriesId:     series.id,
+            volumeNumber: next,
+            volumeName:   cleanedVolumeName,
+            createdAt:    now,
+            updatedAt:    now,
+            dirty:        true
+        )
+        try await dbQueue.write { db in try entity.insert(db) }
+        return entity
+    }
+
+    /// Create a book and its enclosing series in one call — use
+    /// when the user knows up front the book will have multiple
+    /// volumes.
+    @discardableResult
+    public func createBookInNewSeries(
+        shelfId: String,
+        seriesName: String,
+        volumeName: String? = nil,
+        colorHex: String? = nil
+    ) async throws -> NotebookEntity {
+        let now = IsoClock.nowIso()
+        let series = BookSeriesEntity(
+            id:        Uuidv7.generate(),
+            shelfId:   shelfId,
+            name:      seriesName.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("Untitled book"),
+            createdAt: now,
+            updatedAt: now,
+            dirty:     true
+        )
+        let cleanedVolumeName = volumeName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
+        let entity = NotebookEntity(
+            id:           Uuidv7.generate(),
+            title:        cleanedVolumeName ?? series.name,
+            colorHex:     colorHex,
+            shelfId:      shelfId,
+            seriesId:     series.id,
+            volumeNumber: 1,
+            volumeName:   cleanedVolumeName,
+            createdAt:    now,
+            updatedAt:    now,
+            dirty:        true
+        )
+        try await dbQueue.write { db in
+            try series.insert(db)
+            try entity.insert(db)
+        }
         return entity
     }
 
@@ -156,5 +366,16 @@ where S.Element: Sendable {
             }
         }
         continuation.onTermination = { _ in task.cancel() }
+    }
+}
+
+// MARK: - String helpers (shared with ShelfRepository)
+
+private extension String {
+    func ifEmpty(_ fallback: String) -> String {
+        trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback : self
+    }
+    var nilIfEmpty: String? {
+        trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self
     }
 }

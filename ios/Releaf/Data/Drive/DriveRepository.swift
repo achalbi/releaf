@@ -66,35 +66,68 @@ public final class FakeDriveRepository: DriveRepository, @unchecked Sendable {
     // MARK: - Seed
 
     public static let seededNotebooks: [Notebook] = [
-        Notebook(id: "nb-1", title: "Sabbatical 2026",
+        Notebook(
+            id: "nb-1", title: "Plant log 2026",
             description: "A month off to walk, write, and cook again.",
-            colorToken: "coral", chapterCount: 2, pageCount: 4),
-        Notebook(id: "nb-2", title: "Morning pages",
+            colorToken: "green", position: 0,
+            updatedAt: Date().addingTimeInterval(-2 * 3600),
+            chapterCount: 12, pageCount: 47,
+            shelfName: "GARDEN", volumeNumber: 2,
+            status: .active, iconKey: "plant"
+        ),
+        Notebook(
+            id: "nb-2", title: "Sprint notes",
             description: "Three pages every day, in any form.",
-            colorToken: "green", chapterCount: 1, pageCount: 2),
-        Notebook(id: "nb-3", title: "Recipes",
+            colorToken: "info", position: 1,
+            updatedAt: Date().addingTimeInterval(-30 * 60),
+            chapterCount: 6, pageCount: 28,
+            shelfName: "WORK", volumeNumber: 7,
+            status: .active, iconKey: "chart"
+        ),
+        Notebook(
+            id: "nb-3", title: "Morning pages",
             description: "Things that worked at least twice.",
-            colorToken: "info",  chapterCount: 1, pageCount: 1),
+            colorToken: "dry",  position: 2,
+            updatedAt: Date().addingTimeInterval(-24 * 3600),
+            chapterCount: 5, pageCount: 33,
+            shelfName: "DAILY", volumeNumber: 12,
+            status: .paused, iconKey: "sun"
+        ),
     ]
 
     public static let seededChapters: [String: [Chapter]] = [
         "nb-1": [
-            Chapter(id: "ch-1", notebookId: "nb-1", title: "Week 1", pages: [
-                PageSummary(id: "pg-1", title: "Heron walk",
-                    capturedOn: "Apr 12, 2026",
-                    counts: PageCounts(photos: 2, voiceNotes: 1, todoItems: 3, locations: 1)),
-                PageSummary(id: "pg-2", title: "Coffee shop, 9am",
-                    capturedOn: "Apr 13, 2026",
-                    counts: PageCounts(voiceNotes: 1, scannedDocuments: 1, contacts: 1)),
-            ]),
-            Chapter(id: "ch-2", notebookId: "nb-1", title: "Week 2", pages: [
-                PageSummary(id: "pg-3", title: "Farmers market",
-                    capturedOn: "Apr 19, 2026",
-                    counts: PageCounts(photos: 3, todoItems: 2, contacts: 2)),
-                PageSummary(id: "pg-4", title: "Evening draft",
-                    capturedOn: "Apr 20, 2026",
-                    counts: PageCounts(todoItems: 5)),
-            ]),
+            Chapter(id: "ch-1", notebookId: "nb-1", title: "Seedling diary — week 3",
+                position: 7,
+                updatedAt: Date().addingTimeInterval(-2 * 3600),
+                pages: [
+                    PageSummary(id: "pg-1", title: "Seedlings found the light",
+                        capturedOn: "Fri · Apr 24 · 2026",
+                        updatedAt: Date().addingTimeInterval(-2 * 3600),
+                        counts: PageCounts(photos: 2, voiceNotes: 1, todoItems: 3, locations: 1),
+                        tags: ["tomato", "basil", "windowsill"]),
+                    PageSummary(id: "pg-2", title: "Coffee shop, 9am",
+                        capturedOn: "Apr 13, 2026",
+                        counts: PageCounts(voiceNotes: 1, scannedDocuments: 1, contacts: 1)),
+                ]),
+            Chapter(id: "ch-2", notebookId: "nb-1", title: "Soil mix experiments",
+                position: 6,
+                pages: [
+                    PageSummary(id: "pg-3", title: "Farmers market",
+                        capturedOn: "Apr 19, 2026",
+                        counts: PageCounts(photos: 3, todoItems: 2, contacts: 2)),
+                    PageSummary(id: "pg-4", title: "Evening draft",
+                        capturedOn: "Apr 20, 2026",
+                        counts: PageCounts(todoItems: 5)),
+                ]),
+            Chapter(id: "ch-5", notebookId: "nb-1", title: "Herbs windowsill setup",
+                position: 5, pages: []),
+            Chapter(id: "ch-6", notebookId: "nb-1", title: "Composter first turn",
+                position: 4, pages: []),
+            Chapter(id: "ch-7", notebookId: "nb-1", title: "Seed order & sourcing",
+                position: 3, pages: []),
+            Chapter(id: "ch-8", notebookId: "nb-1", title: "Garden plan — layout",
+                position: 2, pages: []),
         ],
         "nb-2": [
             Chapter(id: "ch-3", notebookId: "nb-2", title: "April", pages: [
@@ -118,20 +151,24 @@ public final class FakeDriveRepository: DriveRepository, @unchecked Sendable {
         let list: [Page] = [
             Page(
                 id: "pg-1", notebookId: "nb-1", chapterId: "ch-1",
-                title: "Heron walk", capturedOn: "Apr 12, 2026",
+                title: "Seedlings found the light",
+                capturedOn: "Fri · Apr 24 · 2026",
                 notes: [
                     Note(id: "n1", body:
-                        "Low tide, grey light. Three herons by the second bridge — one of " +
-                        "them stayed still for ten minutes. I sat on the bench and tried to " +
-                        "name what I was feeling. Mostly: that I've been holding my breath " +
-                        "since January."),
+                        "Moved the tray two feet closer to the window this morning. The " +
+                        "tomato sprouts that were leaning are already righting themselves " +
+                        "— by lunch, two had opened their first true leaves."),
                     Note(id: "n2", body:
-                        "Coffee on the way back was terrible. The place next to the fish " +
-                        "stand is fine though, try that one next time."),
+                        "The basil is still sulking. Three weeks in and only the heartiest " +
+                        "seedling has broken through. I'll give the rest until Sunday " +
+                        "before starting fresh."),
+                    Note(id: "n-quote", body:
+                        "NOTE TO SELF\nRotate the tray each morning — they're always " +
+                        "reaching one way."),
                 ],
                 photos: [
-                    Photo(id: "ph1", caption: "Heron, second bridge", width: 1620, height: 2160),
-                    Photo(id: "ph2", caption: "Bench view, low tide",  width: 2160, height: 1620),
+                    Photo(id: "ph1", caption: "TRAY A", width: 1620, height: 2160),
+                    Photo(id: "ph2", caption: "DETAIL · 11AM", width: 2160, height: 1620),
                 ],
                 voiceNotes: [
                     VoiceNote(id: "v1", durationMs: 47_000,
@@ -148,7 +185,8 @@ public final class FakeDriveRepository: DriveRepository, @unchecked Sendable {
                     LocationPin(id: "l1", name: "Second bridge, Arcata Marsh",
                                 latitude: 40.8541, longitude: -124.0876,
                                 notes: "Bring the longer lens next time."),
-                ]
+                ],
+                tags: ["tomato", "basil", "windowsill"]
             ),
             Page(
                 id: "pg-2", notebookId: "nb-1", chapterId: "ch-1",

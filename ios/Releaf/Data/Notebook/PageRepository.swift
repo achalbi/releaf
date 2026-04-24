@@ -10,6 +10,40 @@
 import Foundation
 import GRDB
 
+public struct PageSearchHit: Codable, FetchableRecord, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let title: String?
+    public let notes: String
+    public let updatedAt: String
+    public let notebookTitle: String
+    public let chapterTitle: String
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case notes
+        case updatedAt     = "updated_at"
+        case notebookTitle = "notebook_title"
+        case chapterTitle  = "chapter_title"
+    }
+
+    public init(
+        id: String,
+        title: String?,
+        notes: String,
+        updatedAt: String,
+        notebookTitle: String,
+        chapterTitle: String
+    ) {
+        self.id = id
+        self.title = title
+        self.notes = notes
+        self.updatedAt = updatedAt
+        self.notebookTitle = notebookTitle
+        self.chapterTitle = chapterTitle
+    }
+}
+
 public final class PageRepository: @unchecked Sendable {
 
     private let dbQueue: DatabaseQueue
@@ -80,6 +114,38 @@ public final class PageRepository: @unchecked Sendable {
                 SELECT p.* FROM pages p
                 JOIN fts_page_notes fts ON fts.page_id = p.id
                 WHERE p.deleted_at IS NULL
+                  AND fts_page_notes MATCH ?
+                ORDER BY rank
+                """, arguments: [match])
+        }
+        return bridge(observation.values(in: dbQueue))
+    }
+
+    /// Full-text search across every live page, plus the notebook/chapter
+    /// labels needed to make tab-level results understandable at a glance.
+    public func searchAllWithContext(rawQuery: String) -> AsyncThrowingStream<[PageSearchHit], Error> {
+        guard let match = FtsQuery.build(rawQuery) else {
+            return AsyncThrowingStream { c in
+                c.yield([])
+                c.finish()
+            }
+        }
+        let observation = ValueObservation.tracking { db in
+            try PageSearchHit.fetchAll(db, sql: """
+                SELECT
+                    p.id,
+                    p.title,
+                    p.notes,
+                    p.updated_at,
+                    c.title AS chapter_title,
+                    n.title AS notebook_title
+                FROM pages p
+                JOIN chapters c ON c.id = p.chapter_id
+                JOIN notebooks n ON n.id = c.notebook_id
+                JOIN fts_page_notes fts ON fts.page_id = p.id
+                WHERE p.deleted_at IS NULL
+                  AND c.deleted_at IS NULL
+                  AND n.deleted_at IS NULL
                   AND fts_page_notes MATCH ?
                 ORDER BY rank
                 """, arguments: [match])

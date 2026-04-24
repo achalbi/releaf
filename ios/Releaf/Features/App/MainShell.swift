@@ -20,6 +20,8 @@ import ReleafDesignSystem
 import ReleafData
 
 public struct MainShell: View {
+    @EnvironmentObject private var uiPrefs: UiPreferences
+    @EnvironmentObject private var authStore: AuthStore
     @State private var selection: String = "home"
     @State private var showCapture: Bool = false
 
@@ -102,22 +104,45 @@ public struct MainShell: View {
     @ViewBuilder private var tabContent: some View {
         switch selection {
         case "home":
+            // Home tab root is always the dashboard HomeScreen (no variant).
+            // Its drill-in (notebook → chapters → page) still follows the
+            // variant preference so the notebook/chapter/page look swaps
+            // whether the user entered from Home or the Notebook tab.
             NavigationStack(path: $homePath) {
-                HomeScreen()
-                    .navigationDestination(for: NotebookRoute.self) { route in
-                        NotebookDetailView(notebookId: route.id)
-                    }
-                    .navigationDestination(for: PageRoute.self) { route in
-                        PageDetailView(pageId: route.id)
-                    }
-                    .navigationDestination(for: TasksRoute.self) { _ in
-                        TasksScreen()
-                    }
+                HomeScreen(
+                    userId: authStore.session?.userId ?? "",
+                    onOpenNotebook: { id in homePath.append(NotebookRoute(id: id)) },
+                    onOpenNotebooksTab: { selection = "notebook" },
+                    onOpenNotepadTab:   { selection = "notepad" },
+                    onOpenNotepadEntry: { id in homePath.append(NotepadEditorRoute(entryId: id)) },
+                    onOpenContacts:     { homePath.append(ContactsRoute()) }
+                )
+                .navigationDestination(for: NotebookRoute.self) { route in
+                    notebookDetail(id: route.id)
+                }
+                .navigationDestination(for: PageRoute.self) { route in
+                    pageDetail(id: route.id)
+                }
+                .navigationDestination(for: NotepadEditorRoute.self) { route in
+                    NotepadEditorScreen(entryId: route.entryId)
+                }
+                .navigationDestination(for: TasksRoute.self) { _ in
+                    TasksScreen()
+                }
+                .navigationDestination(for: ContactsRoute.self) { _ in
+                    ContactsView(userId: authStore.session?.userId ?? "")
+                }
             }
 
         case "notebook":
             NavigationStack(path: $notebookPath) {
-                NotebookTabView()
+                notebookTabRoot
+                    .navigationDestination(for: NotebookRoute.self) { route in
+                        notebookDetail(id: route.id)
+                    }
+                    .navigationDestination(for: PageRoute.self) { route in
+                        pageDetail(id: route.id)
+                    }
             }
 
         case "notepad":
@@ -138,6 +163,31 @@ public struct MainShell: View {
         }
     }
 
+    // MARK: - Variant-aware screen pickers (Notebook tab only)
+
+    /// Notebook tab root — classic shows the Room-backed list; variant-1
+    /// shows the editorial "Your shelves" screen. Home tab stays classic.
+    @ViewBuilder private var notebookTabRoot: some View {
+        switch uiPrefs.state.notebookVariant {
+        case .classic:  NotebookTabView()
+        case .variant1: HomeScreenVariant1()
+        }
+    }
+
+    @ViewBuilder private func notebookDetail(id: String) -> some View {
+        switch uiPrefs.state.notebookVariant {
+        case .classic:  NotebookDetailView(notebookId: id)
+        case .variant1: NotebookDetailViewVariant1(notebookId: id)
+        }
+    }
+
+    @ViewBuilder private func pageDetail(id: String) -> some View {
+        switch uiPrefs.state.notebookVariant {
+        case .classic:  PageDetailView(pageId: id)
+        case .variant1: PageDetailViewVariant1(pageId: id)
+        }
+    }
+
     // MARK: - Helpers
 
     private func popToRoot(for tabId: String) {
@@ -154,4 +204,5 @@ public struct MainShell: View {
 #Preview {
     MainShell()
         .environmentObject(AuthStore(client: StubGoogleAuthClient()))
+        .environmentObject(UiPreferences.shared)
 }

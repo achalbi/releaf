@@ -28,9 +28,12 @@ import app.releaf.mobile.data.drive.DriveRepository
 import app.releaf.mobile.data.drive.FakeDriveRepository
 import app.releaf.mobile.data.drive.InMemoryDriveClient
 import app.releaf.mobile.data.drive.OkHttpDriveClient
+import app.releaf.mobile.data.contact.ContactDirectoryRepository
+import app.releaf.mobile.data.contact.DeviceContactsProvider
 import app.releaf.mobile.data.notebook.ChapterRepository
 import app.releaf.mobile.data.notebook.NotebookRepository
 import app.releaf.mobile.data.notebook.PageRepository
+import app.releaf.mobile.data.shelf.ShelfRepository
 import app.releaf.mobile.data.notepad.NotepadRepository
 import app.releaf.mobile.data.perspective.PerspectiveRepository
 import app.releaf.mobile.data.reminder.ReminderAlarmReceiver
@@ -74,6 +77,15 @@ class ReleafApp : Application() {
     lateinit var pageRepository: PageRepository
         private set
 
+    lateinit var shelfRepository: ShelfRepository
+        private set
+
+    lateinit var contactDirectoryRepository: ContactDirectoryRepository
+        private set
+
+    lateinit var deviceContactsProvider: DeviceContactsProvider
+        private set
+
     lateinit var taskRepository: TaskRepository
         private set
 
@@ -108,15 +120,28 @@ class ReleafApp : Application() {
         database = ReleafDatabase.get(this)
         notepadRepository = NotepadRepository(database.notepadDao())
         notebookRepository = NotebookRepository(
-            notebookDao = database.notebookDao(),
-            chapterDao  = database.chapterDao(),
-            pageDao     = database.pageDao(),
+            notebookDao   = database.notebookDao(),
+            chapterDao    = database.chapterDao(),
+            pageDao       = database.pageDao(),
+            bookSeriesDao = database.bookSeriesDao(),
         )
         chapterRepository = ChapterRepository(
             chapterDao = database.chapterDao(),
             pageDao    = database.pageDao(),
         )
         pageRepository = PageRepository(database.pageDao())
+        shelfRepository = ShelfRepository(database.shelfDao())
+        contactDirectoryRepository = ContactDirectoryRepository(
+            notepadDao = database.notepadDao(),
+            pageDao    = database.pageDao(),
+        )
+        deviceContactsProvider = DeviceContactsProvider(context = this)
+        appScope.launch {
+            // Fresh installs land here before the migration seed has
+            // anything to backfill; ensure the General shelf always
+            // exists so the book-creation flow has a landing target.
+            shelfRepository.ensureDefaultShelf()
+        }
         taskRepository = TaskRepository(database.taskDao())
         perspectiveRepository = PerspectiveRepository(database.perspectiveDao())
         reminderRepository = ReminderRepository(

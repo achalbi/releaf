@@ -1,15 +1,17 @@
 /*
  * SettingsScreen.kt
  *
- * User-facing preferences screen. Today it hosts two things:
+ * User-facing preferences screen. Hosts:
+ *   • [ThemePickerSection] — theme mode (System / Light / Dark) +
+ *     accent palette (Coral / Green / Yellow / Dry). Moved here from
+ *     the Home screen so the Home surface stays content-focused.
+ *   • Drive sync settings.
  *   • The Tasks default-view picker — chooses which mode (List /
  *     Perspectives) the Tasks screen opens in. Writes the same
  *     [TaskDefaultView] preference the in-screen switcher uses, so
  *     toggling from either surface is equivalent.
+ *   • Notebook layout variant.
  *   • The Sign Out action.
- *
- * Appearance (theme-mode + palette) is still handled by the home-
- * screen [ThemePickerSection]; it hasn't moved here yet.
  */
 
 package app.releaf.mobile.features.settings
@@ -51,11 +53,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ui.components.AppButton
 import app.releaf.mobile.ui.components.AppButtonVariant
+import app.releaf.mobile.ui.components.ThemePickerSection
 import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
+import app.releaf.mobile.ui.theme.NotebookListVariant
 import app.releaf.mobile.ui.theme.TaskDefaultView
 import app.releaf.mobile.ui.theme.UiPreferences
 
@@ -86,6 +90,15 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(AppSpacing.s6))
 
+        // ── Appearance (theme mode + accent palette) ──────────────
+        // Lives at the top of the settings list now — was previously
+        // embedded in Home so it was one tap away from launch, but
+        // the Home cards grew enough that this picker was crowding
+        // them out.
+        ThemePickerSection()
+
+        Spacer(Modifier.height(AppSpacing.s6))
+
         // ── Drive sync ─────────────────────────────────────────────
         DriveSettingsSection()
 
@@ -95,6 +108,14 @@ fun SettingsScreen(
         DefaultTaskViewCard(
             selected = state.defaultTaskView,
             onSelect = prefs::setDefaultTaskView,
+        )
+
+        Spacer(Modifier.height(AppSpacing.s6))
+
+        // ── Notebook layout variant ────────────────────────────────
+        NotebookVariantCard(
+            selected = state.notebookVariant,
+            onSelect = prefs::setNotebookVariant,
         )
 
         Spacer(Modifier.height(AppSpacing.s6))
@@ -169,6 +190,101 @@ private fun DefaultTaskViewCard(
                 modifier = Modifier.weight(1f),
             )
         }
+    }
+}
+
+// ================================================================= Notebook variant card
+
+/**
+ * Two-option picker for which shelves/chapters/page treatment the
+ * notebook tab renders with. Mirrors the Tasks default-view card
+ * visually so the two prefs feel uniform.
+ */
+@Composable
+private fun NotebookVariantCard(
+    selected: NotebookListVariant,
+    onSelect: (NotebookListVariant) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppRadius.md))
+            .background(AppColors.CardSolid)
+            .border(1.dp, AppColors.BorderDefault, RoundedCornerShape(AppRadius.md))
+            .padding(AppSpacing.s4),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s1)) {
+            Text(
+                text = "NOTEBOOKS",
+                style = AppTypography.Eyebrow,
+                color = AppColors.TextSecondary,
+            )
+            Text(
+                text = "Layout",
+                style = AppTypography.SectionTitle,
+                color = AppColors.TextPrimary,
+            )
+            Text(
+                text = "Which visual treatment to use for shelves, chapters, and pages.",
+                style = AppTypography.Meta,
+                color = AppColors.TextSecondary,
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3)) {
+            VariantOption(
+                label = "Classic",
+                subtitle = "List cards, plain chapters",
+                isActive = selected == NotebookListVariant.Classic,
+                onClick = { onSelect(NotebookListVariant.Classic) },
+                modifier = Modifier.weight(1f),
+            )
+            VariantOption(
+                label = "Hero cards",
+                subtitle = "Colored volumes + editorial pages",
+                isActive = selected == NotebookListVariant.Variant1,
+                onClick = { onSelect(NotebookListVariant.Variant1) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun VariantOption(
+    label: String,
+    subtitle: String,
+    isActive: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val bg     = if (isActive) AppAccent.soft else AppColors.InputBg
+    val fg     = if (isActive) AppAccent.primary else AppColors.TextPrimary
+    val border = if (isActive) AppAccent.primary else Color.Transparent
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(AppRadius.md))
+            .background(bg)
+            .border(1.5.dp, border, RoundedCornerShape(AppRadius.md))
+            .clickable(
+                role = Role.RadioButton,
+                onClickLabel = "Set notebook layout to $label",
+            ) { onClick() }
+            .padding(AppSpacing.s3),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s1),
+    ) {
+        Text(
+            text  = label,
+            style = AppTypography.Button.copy(fontWeight = FontWeight.SemiBold),
+            color = fg,
+        )
+        Text(
+            text  = subtitle,
+            style = AppTypography.Meta,
+            color = AppColors.TextSecondary,
+        )
     }
 }
 

@@ -1,11 +1,14 @@
 /*
  * NotebookTabViewModel.swift
  *
- * Streams the user's live notebooks from `NotebookRepository` and
- * exposes create / delete / restore operations for the tab UI. No
- * "search" yet — the tab is currently just a list + add affordance.
- * When we wire a search field, extend with a `query` @Published and
- * debounce through `PageRepository.searchAll(...)`.
+ * Drives the classic notebook tab from the local GRDB-backed store.
+ * The screen needs two live feeds:
+ *   - active notebooks joined with chapter/page counts (`observeShelves`)
+ *   - page-content search hits with notebook/chapter context
+ *
+ * Search is intentionally split: notebook cards filter by title, while a
+ * second result list shows full-text page matches. That keeps the tab
+ * faithful to the data the local schema currently exposes on iOS.
  */
 
 import Foundation
@@ -15,61 +18,197 @@ import ReleafData
 @MainActor
 public final class NotebookTabViewModel: ObservableObject {
 
-    @Published public private(set) var notebooks: [NotebookEntity] = []
-    @Published public private(set) var isLoading: Bool = true
-
-    private let repository: NotebookRepository
-    private var streamTask: Task<Void, Never>?
-
-    public init(repository: NotebookRepository = NotebookRepository()) {
-        self.repository = repository
+    public struct Metrics: Equatable {
+        public let notebooks: Int
+        public let chapters: Int
+        public let pages: Int
     }
 
-    /// Start observing. Called by the view's `.task` lifecycle — the
-    /// task is bound to the view's body so it tears down on disappear.
+    @Published public private(set) var shelves: [ShelfRecord] = []
+    @Published public private(set) var shelfDirectory: [Shelf] = []
+    @Published public private(set) var matchingPages: [PageSearchHit] = []
+    @Published public private(set) var isLoading: Bool = true
+    @Published public var query: String = "" {
+        didSet {
+            if oldValue != query { reloadSearch() }
+        }
+    }
+
+    private let debounceNanos: UInt64 = 150_000_000
+
+    private let notebookRepository: NotebookRepository
+    private let pageRepository: PageRepository
+    private let shelfRepository: ShelfRepository
+
+    private var shelvesTask: Task<Void, Never>?
+    private var shelfDirectoryTask: Task<Void, Never>?
+    private var searchTask: Task<Void, Never>?
+
+    public init(
+        notebookRepository: NotebookRepository = NotebookRepository(),
+        pageRepository: PageRepository = PageRepository(),
+        shelfRepository: ShelfRepository = ShelfRepository()
+    ) {
+        self.notebookRepository = notebookRepository
+        self.pageRepository = pageRepository
+        self.shelfRepository = shelfRepository
+    }
+
     public func start() {
-        streamTask?.cancel()
-        streamTask = Task { [weak self, repository] in
+        if shelvesTask == nil { observeShelves() }
+        if shelfDirectoryTask == nil { observeShelfDirectory() }
+        reloadSearch()
+    }
+
+    public func stop() {
+        shelvesTask?.cancel()
+        shelvesTask = nil
+        shelfDirectoryTask?.cancel()
+        shelfDirectoryTask = nil
+        searchTask?.cancel()
+        searchTask = nil
+    }
+
+    public var metrics: Metrics {
+        Metrics(
+            notebooks: shelves.count,
+            chapters: shelves.reduce(0) { $0 + $1.chapterCount },
+            pages: shelves.reduce(0) { $0 + $1.pageCount }
+        )
+    }
+
+    public var filteredShelves: [ShelfRecord] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return shelves }
+        return shelves.filter {
+            $0.notebook.title.localizedCaseInsensitiveContains(trimmed)
+        }
+    }
+
+    public func clearQuery() {
+        query = ""
+    }
+
+    public func addNotebook(
+        title: String,
+        colorHex: String? = nil,
+        shelfId: String? = nil
+    ) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let resolvedShelf = shelfId.flatMap { $0.isEmpty ? nil : $0 }
+            ?? ShelfEntity.defaultGeneralId
+        Task { [notebookRepository] in
+            _ = try? await notebookRepository.createNotebook(
+                title:    trimmed,
+                colorHex: colorHex,
+                shelfId:  resolvedShelf
+            )
+        }
+    }
+
+    /// Create a fresh shelf — wired to the "+ New shelf…" row in
+    /// the notebook create sheet.
+    public func createShelf(name: String, onCreated: @escaping (String) -> Void = { _ in }) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolved = trimmed.isEmpty ? "Untitled shelf" : trimmed
+        Task { [shelfRepository] in
+            if let shelf = try? await shelfRepository.createShelf(name: resolved) {
+                await MainActor.run { onCreated(shelf.id) }
+            }
+        }
+    }
+
+    public func delete(notebookId: String) {
+        Task { [notebookRepository] in
+            try? await notebookRepository.softDeleteNotebook(id: notebookId)
+        }
+    }
+
+    private func observeShelves() {
+        shelvesTask?.cancel()
+        shelvesTask = Task { [weak self] in
             guard let self else { return }
             do {
-                for try await list in repository.observeActive() {
-                    self.notebooks = list
+                for try await list in self.notebookRepository.observeShelves() {
+                    if Task.isCancelled { break }
+                    self.shelves = list
                     self.isLoading = false
                 }
             } catch is CancellationError {
-                // ok — view left the hierarchy
+                // View left the hierarchy.
             } catch {
+                self.shelves = []
                 self.isLoading = false
             }
         }
     }
 
-    public func stop() {
-        streamTask?.cancel()
-        streamTask = nil
-    }
-
-    public func addNotebook(title: String) {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        Task { [repository] in
-            _ = try? await repository.createNotebook(title: trimmed)
+    private func observeShelfDirectory() {
+        shelfDirectoryTask?.cancel()
+        shelfDirectoryTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await list in self.shelfRepository.observeActive() {
+                    if Task.isCancelled { break }
+                    self.shelfDirectory = list.map {
+                        Shelf(
+                            id:        $0.id,
+                            name:      $0.name,
+                            colorHex:  $0.colorHex,
+                            position:  Int($0.position),
+                            updatedAt: Self.parseISO($0.updatedAt) ?? Date(timeIntervalSince1970: 0)
+                        )
+                    }
+                }
+            } catch is CancellationError {
+                // View left the hierarchy.
+            } catch {
+                self.shelfDirectory = []
+            }
         }
     }
 
-    public func delete(notebookId: String) {
-        Task { [repository] in
-            try? await repository.softDeleteNotebook(id: notebookId)
-        }
+    private static func parseISO(_ s: String) -> Date? {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: s)
     }
 
-    public func restore(notebookId: String) {
-        Task { [repository] in
-            try? await repository.undoSoftDeleteNotebook(id: notebookId)
+    private func reloadSearch() {
+        searchTask?.cancel()
+        let q = query
+
+        searchTask = Task { [weak self] in
+            guard let self else { return }
+
+            let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                self.matchingPages = []
+                return
+            }
+
+            try? await Task.sleep(nanoseconds: self.debounceNanos)
+            if Task.isCancelled { return }
+
+            do {
+                for try await hits in self.pageRepository.searchAllWithContext(rawQuery: trimmed) {
+                    if Task.isCancelled { break }
+                    self.matchingPages = hits
+                }
+            } catch is CancellationError {
+                // ok
+            } catch {
+                self.matchingPages = []
+            }
         }
     }
 
     deinit {
-        streamTask?.cancel()
+        shelvesTask?.cancel()
+        shelfDirectoryTask?.cancel()
+        searchTask?.cancel()
     }
 }

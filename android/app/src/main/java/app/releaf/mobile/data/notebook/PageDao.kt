@@ -55,6 +55,20 @@ interface PageDao {
     )
     fun observeById(id: String): Flow<PageEntity?>
 
+    /**
+     * Every live page across every chapter + notebook — used by the
+     * contacts directory to scan the `contacts` JSON column without
+     * having to load a notebook at a time.
+     */
+    @Query(
+        """
+        SELECT * FROM pages
+        WHERE deleted_at IS NULL
+        ORDER BY updated_at DESC
+        """
+    )
+    fun observeAllActive(): Flow<List<PageEntity>>
+
     @Query("SELECT * FROM pages WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): PageEntity?
 
@@ -78,6 +92,33 @@ interface PageDao {
         """
     )
     fun searchAllActive(query: String): Flow<List<PageEntity>>
+
+    /**
+     * Same global FTS search, but with notebook/chapter labels attached so
+     * the notebook tab can tell the user where a matching page lives.
+     */
+    @SkipQueryVerification
+    @Query(
+        """
+        SELECT
+            p.id AS id,
+            p.title AS title,
+            p.notes AS notes,
+            p.updated_at AS updatedAt,
+            n.title AS notebookTitle,
+            c.title AS chapterTitle
+        FROM pages p
+        JOIN chapters c ON c.id = p.chapter_id
+        JOIN notebooks n ON n.id = c.notebook_id
+        JOIN fts_page_notes fts ON fts.page_id = p.id
+        WHERE p.deleted_at IS NULL
+          AND c.deleted_at IS NULL
+          AND n.deleted_at IS NULL
+          AND fts_page_notes MATCH :query
+        ORDER BY rank
+        """
+    )
+    fun searchAllActiveWithContext(query: String): Flow<List<PageSearchHit>>
 
     /** Same as [searchAllActive] but scoped to one notebook. */
     @SkipQueryVerification

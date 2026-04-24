@@ -12,6 +12,7 @@ import app.releaf.mobile.data.domain.Contact
 import app.releaf.mobile.data.domain.LocationPin
 import app.releaf.mobile.data.domain.Note
 import app.releaf.mobile.data.domain.Notebook
+import app.releaf.mobile.data.domain.NotebookStatus
 import app.releaf.mobile.data.domain.Page
 import app.releaf.mobile.data.domain.PageCounts
 import app.releaf.mobile.data.domain.PageSummary
@@ -19,6 +20,7 @@ import app.releaf.mobile.data.domain.Photo
 import app.releaf.mobile.data.domain.ScannedDocument
 import app.releaf.mobile.data.domain.TodoItem
 import app.releaf.mobile.data.domain.VoiceNote
+import java.time.Instant
 import kotlinx.coroutines.delay
 
 /** Notebook + its chapters, returned as one shot from `loadNotebook`. */
@@ -64,35 +66,64 @@ class FakeDriveRepository(
 
     companion object {
         val SEEDED_NOTEBOOKS = listOf(
-            Notebook("nb-1", "Sabbatical 2026",
+            Notebook(
+                id = "nb-1", title = "Plant log 2026",
                 description = "A month off to walk, write, and cook again.",
-                colorToken = "coral", chapterCount = 2, pageCount = 4),
-            Notebook("nb-2", "Morning pages",
+                colorToken = "green", position = 0,
+                updatedAt = Instant.now().minusSeconds(2 * 3600),
+                chapterCount = 12, pageCount = 47,
+                shelfName = "GARDEN", volumeNumber = 2,
+                status = NotebookStatus.Active, iconKey = "plant",
+            ),
+            Notebook(
+                id = "nb-2", title = "Sprint notes",
                 description = "Three pages every day, in any form.",
-                colorToken = "green", chapterCount = 1, pageCount = 2),
-            Notebook("nb-3", "Recipes",
+                colorToken = "info", position = 1,
+                updatedAt = Instant.now().minusSeconds(30 * 60),
+                chapterCount = 6, pageCount = 28,
+                shelfName = "WORK", volumeNumber = 7,
+                status = NotebookStatus.Active, iconKey = "chart",
+            ),
+            Notebook(
+                id = "nb-3", title = "Morning pages",
                 description = "Things that worked at least twice.",
-                colorToken = "info",  chapterCount = 1, pageCount = 1),
+                colorToken = "dry", position = 2,
+                updatedAt = Instant.now().minusSeconds(24 * 3600),
+                chapterCount = 5, pageCount = 33,
+                shelfName = "DAILY", volumeNumber = 12,
+                status = NotebookStatus.Paused, iconKey = "sun",
+            ),
         )
 
         val SEEDED_CHAPTERS: Map<String, List<Chapter>> = mapOf(
             "nb-1" to listOf(
-                Chapter("ch-1", "nb-1", "Week 1", pages = listOf(
-                    PageSummary("pg-1", "Heron walk",
-                        capturedOn = "Apr 12, 2026",
-                        counts = PageCounts(photos = 2, todoItems = 3, locations = 1, voiceNotes = 1)),
-                    PageSummary("pg-2", "Coffee shop, 9am",
-                        capturedOn = "Apr 13, 2026",
-                        counts = PageCounts(voiceNotes = 1, scannedDocuments = 1, contacts = 1)),
-                )),
-                Chapter("ch-2", "nb-1", "Week 2", pages = listOf(
-                    PageSummary("pg-3", "Farmers market",
-                        capturedOn = "Apr 19, 2026",
-                        counts = PageCounts(photos = 3, contacts = 2, todoItems = 2)),
-                    PageSummary("pg-4", "Evening draft",
-                        capturedOn = "Apr 20, 2026",
-                        counts = PageCounts(todoItems = 5)),
-                )),
+                Chapter("ch-1", "nb-1", "Seedling diary — week 3",
+                    position = 7,
+                    updatedAt = Instant.now().minusSeconds(2 * 3600),
+                    pages = listOf(
+                        PageSummary("pg-1", "Seedlings found the light",
+                            capturedOn = "Fri · Apr 24 · 2026",
+                            updatedAt = Instant.now().minusSeconds(2 * 3600),
+                            counts = PageCounts(photos = 2, todoItems = 3, locations = 1, voiceNotes = 1),
+                            tags = listOf("tomato", "basil", "windowsill")),
+                        PageSummary("pg-2", "Coffee shop, 9am",
+                            capturedOn = "Apr 13, 2026",
+                            counts = PageCounts(voiceNotes = 1, scannedDocuments = 1, contacts = 1)),
+                    )),
+                Chapter("ch-2", "nb-1", "Soil mix experiments",
+                    position = 6,
+                    pages = listOf(
+                        PageSummary("pg-3", "Farmers market",
+                            capturedOn = "Apr 19, 2026",
+                            counts = PageCounts(photos = 3, contacts = 2, todoItems = 2)),
+                        PageSummary("pg-4", "Evening draft",
+                            capturedOn = "Apr 20, 2026",
+                            counts = PageCounts(todoItems = 5)),
+                    )),
+                Chapter("ch-5", "nb-1", "Herbs windowsill setup", position = 5),
+                Chapter("ch-6", "nb-1", "Composter first turn",   position = 4),
+                Chapter("ch-7", "nb-1", "Seed order & sourcing",  position = 3),
+                Chapter("ch-8", "nb-1", "Garden plan — layout",   position = 2),
             ),
             "nb-2" to listOf(
                 Chapter("ch-3", "nb-2", "April", pages = listOf(
@@ -114,21 +145,24 @@ class FakeDriveRepository(
         )
 
         val SEEDED_PAGES: Map<String, Page> = listOf(
-            // pg-1 — a walk, the flagship fake page
+            // pg-1 — the variant-1 flagship page
             Page(
                 id = "pg-1", notebookId = "nb-1", chapterId = "ch-1",
-                title = "Heron walk", capturedOn = "Apr 12, 2026",
+                title = "Seedlings found the light",
+                capturedOn = "Fri · Apr 24 · 2026",
                 notes = listOf(
-                    Note("n1", "Low tide, grey light. Three herons by the second bridge — " +
-                        "one of them stayed still for ten minutes. I sat on the bench and tried to " +
-                        "name what I was feeling. Mostly: that I've been holding my breath since " +
-                        "January."),
-                    Note("n2", "Coffee on the way back was terrible. The place next to the fish " +
-                        "stand is fine though, try that one next time."),
+                    Note("n1", "Moved the tray two feet closer to the window this morning. " +
+                        "The tomato sprouts that were leaning are already righting themselves — " +
+                        "by lunch, two had opened their first true leaves."),
+                    Note("n2", "The basil is still sulking. Three weeks in and only the " +
+                        "heartiest seedling has broken through. I'll give the rest until Sunday " +
+                        "before starting fresh."),
+                    Note("n-quote", "NOTE TO SELF\nRotate the tray each morning — " +
+                        "they're always reaching one way."),
                 ),
                 photos = listOf(
-                    Photo("ph1", caption = "Heron, second bridge",   width = 1620, height = 2160),
-                    Photo("ph2", caption = "Bench view, low tide",    width = 2160, height = 1620),
+                    Photo("ph1", caption = "TRAY A",        width = 1620, height = 2160),
+                    Photo("ph2", caption = "DETAIL · 11AM", width = 2160, height = 1620),
                 ),
                 voiceNotes = listOf(
                     VoiceNote("v1", durationMs = 47_000,
@@ -145,6 +179,7 @@ class FakeDriveRepository(
                         latitude = 40.8541, longitude = -124.0876,
                         notes = "Bring the longer lens next time."),
                 ),
+                tags = listOf("tomato", "basil", "windowsill"),
             ),
             // pg-2 — coffee shop, scans + contacts
             Page(

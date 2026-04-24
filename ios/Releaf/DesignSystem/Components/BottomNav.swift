@@ -44,7 +44,9 @@ public struct BottomNavItem: Identifiable, Equatable {
     /// Default Releaf IA.
     public static let defaults: [BottomNavItem] = [
         BottomNavItem(id: "home",     title: "Home",     systemIcon: "house"),
-        BottomNavItem(id: "notebook", title: "Notebook", systemIcon: "book"),
+        // Tab id stays "notebook" so existing navigation keeps
+        // working; label + icon reflect the Shelf rename.
+        BottomNavItem(id: "notebook", title: "Shelf",    systemIcon: "rectangle.split.3x1.fill"),
         BottomNavItem(id: "leaf",     title: "",         systemIcon: "leaf.fill", kind: .brand),
         BottomNavItem(id: "notepad",  title: "Notepad",  systemIcon: "note.text"),
         BottomNavItem(id: "settings", title: "Settings", systemIcon: "gearshape"),

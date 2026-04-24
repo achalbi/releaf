@@ -27,6 +27,16 @@ public struct NotebookEntity: Codable, FetchableRecord, PersistableRecord,
     /// Manual ordering hint. 1024-step spacing leaves room to re-order
     /// without renumbering neighbours.
     public var position: Int64
+    /// Shelf this book lives on. Required — every book belongs to
+    /// exactly one shelf. Migrated rows land on `shelf-general`.
+    public var shelfId: String
+    /// Series this book is a volume of. Nil = single-volume book.
+    public var seriesId: String?
+    /// 1 for the only (or first) volume; 2+ for subsequent volumes.
+    public var volumeNumber: Int
+    /// Optional per-volume label (e.g. "2026"). UI composes
+    /// "<series> vol <n>" when nil and the parent series has >1 volumes.
+    public var volumeName: String?
     public var driveFileId: String?
     public var createdAt: String
     public var updatedAt: String
@@ -40,6 +50,10 @@ public struct NotebookEntity: Codable, FetchableRecord, PersistableRecord,
         case title
         case colorHex     = "color_hex"
         case position
+        case shelfId      = "shelf_id"
+        case seriesId     = "series_id"
+        case volumeNumber = "volume_number"
+        case volumeName   = "volume_name"
         case driveFileId  = "drive_file_id"
         case createdAt    = "created_at"
         case updatedAt    = "updated_at"
@@ -52,6 +66,10 @@ public struct NotebookEntity: Codable, FetchableRecord, PersistableRecord,
         title: String,
         colorHex: String? = nil,
         position: Int64 = 1024,
+        shelfId: String = "shelf-general",
+        seriesId: String? = nil,
+        volumeNumber: Int = 1,
+        volumeName: String? = nil,
         driveFileId: String? = nil,
         createdAt: String,
         updatedAt: String,
@@ -62,6 +80,10 @@ public struct NotebookEntity: Codable, FetchableRecord, PersistableRecord,
         self.title = title
         self.colorHex = colorHex
         self.position = position
+        self.shelfId = shelfId
+        self.seriesId = seriesId
+        self.volumeNumber = volumeNumber
+        self.volumeName = volumeName
         self.driveFileId = driveFileId
         self.createdAt = createdAt
         self.updatedAt = updatedAt

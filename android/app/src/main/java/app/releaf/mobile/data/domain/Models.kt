@@ -14,6 +14,34 @@ import java.time.Instant
 // concept (the 7 tappable rows in the capture sheet / tab bar) and no
 // domain type references it.
 
+/** Lifecycle state shown on the variant-1 shelves cards. */
+enum class NotebookStatus { Active, Paused, Archived, Shared }
+
+/**
+ * Top-level container in the Shelf → Book → Chapter → Page
+ * hierarchy. Every book belongs to exactly one shelf; the default
+ * shelf is `"shelf-general"` and is seeded by migration on upgrade.
+ */
+data class Shelf(
+    val id: String,
+    val name: String,
+    val colorHex: String? = null,
+    val position: Int = 0,
+    val updatedAt: Instant = Instant.now(),
+)
+
+/**
+ * Groups multiple [Notebook] rows into "volumes of the same book".
+ * When a book has a single volume this type isn't materialized in
+ * the UI — the notebook renders its title on its own.
+ */
+data class BookSeries(
+    val id: String,
+    val shelfId: String,
+    val name: String,
+    val updatedAt: Instant = Instant.now(),
+)
+
 data class Notebook(
     val id: String,
     val title: String,
@@ -24,8 +52,34 @@ data class Notebook(
     val updatedAt: Instant = Instant.now(),
     val chapterCount: Int = 0,
     val pageCount: Int = 0,
+    /** Shelf grouping (e.g. "GARDEN"). Used by variant-1 shelves UI. */
+    val shelfName: String? = null,
+    /** Volume number (e.g. 2). Used by variant-1 shelves UI. */
+    val volumeNumber: Int? = null,
+    /** Lifecycle status. When null, derived from [archivedAt]. */
+    val status: NotebookStatus? = null,
+    /** Opaque key for the variant-1 hero-card icon. */
+    val iconKey: String? = null,
+
+    /**
+     * Shelf this book belongs to (FK to [Shelf.id]). Required in
+     * the schema; defaulted to the General shelf here so call
+     * sites that don't know the shelf yet still compile.
+     */
+    val shelfId: String = "shelf-general",
+    /** Series this book is a volume of. Null = single-volume book. */
+    val seriesId: String? = null,
+    /** 1 for the only (or first) volume; 2+ for subsequent volumes. */
+    val seriesVolumeNumber: Int = 1,
+    /** Per-volume label (e.g. "2026"). Null → UI composes
+     *  "<series> vol <n>". */
+    val volumeLabel: String? = null,
 ) {
     val isArchived: Boolean get() = archivedAt != null
+
+    /** Explicit [status] if set, else derived from [archivedAt]. */
+    val resolvedStatus: NotebookStatus
+        get() = status ?: if (isArchived) NotebookStatus.Archived else NotebookStatus.Active
 }
 
 data class Chapter(
@@ -43,6 +97,8 @@ data class PageSummary(
     val capturedOn: String? = null,
     val updatedAt: Instant = Instant.now(),
     val counts: PageCounts = PageCounts(),
+    /** Free-form tags shown as pills on variant-1 page views. */
+    val tags: List<String> = emptyList(),
 )
 
 data class PageCounts(
@@ -74,6 +130,8 @@ data class Page(
     val scannedDocuments: List<ScannedDocument> = emptyList(),
     val contacts: List<Contact> = emptyList(),
     val locations: List<LocationPin> = emptyList(),
+    /** Free-form tags shown as pills on variant-1 page views. */
+    val tags: List<String> = emptyList(),
 ) {
     val counts: PageCounts get() = PageCounts(
         photos = photos.size,

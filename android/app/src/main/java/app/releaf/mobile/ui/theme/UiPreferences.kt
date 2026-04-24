@@ -33,10 +33,18 @@ enum class AccentPaletteId { Coral, Green, Yellow, Dry }
  */
 enum class TaskDefaultView { Perspectives, List }
 
+/**
+ * Which visual treatment the notebook/chapter/page surfaces use.
+ * `Classic` keeps the existing list-card UI; `Variant1` swaps in
+ * the editorial hero-card Figma design.
+ */
+enum class NotebookListVariant { Classic, Variant1 }
+
 data class UiPreferencesState(
     val themeMode: ThemeMode = ThemeMode.System,
     val paletteId: AccentPaletteId = AccentPaletteId.Coral,
     val defaultTaskView: TaskDefaultView = TaskDefaultView.Perspectives,
+    val notebookVariant: NotebookListVariant = NotebookListVariant.Classic,
 )
 
 class UiPreferences(private val prefs: SharedPreferences) {
@@ -54,10 +62,14 @@ class UiPreferences(private val prefs: SharedPreferences) {
         val taskView = prefs.getString(KEY_DEFAULT_TASK_VIEW, null)
             ?.let { runCatching { TaskDefaultView.valueOf(it) }.getOrNull() }
             ?: TaskDefaultView.Perspectives
+        val variant = prefs.getString(KEY_NOTEBOOK_VARIANT, null)
+            ?.let { runCatching { NotebookListVariant.valueOf(it) }.getOrNull() }
+            ?: NotebookListVariant.Classic
         return UiPreferencesState(
             themeMode       = mode,
             paletteId       = palette,
             defaultTaskView = taskView,
+            notebookVariant = variant,
         )
     }
 
@@ -76,11 +88,17 @@ class UiPreferences(private val prefs: SharedPreferences) {
         _state.value = _state.value.copy(defaultTaskView = view)
     }
 
+    fun setNotebookVariant(variant: NotebookListVariant) {
+        prefs.edit().putString(KEY_NOTEBOOK_VARIANT, variant.name).apply()
+        _state.value = _state.value.copy(notebookVariant = variant)
+    }
+
     companion object {
         private const val FILE = "releaf_ui_prefs"
         private const val KEY_THEME_MODE        = "theme_mode"
         private const val KEY_PALETTE           = "accent_palette"
         private const val KEY_DEFAULT_TASK_VIEW = "default_task_view"
+        private const val KEY_NOTEBOOK_VARIANT  = "notebook_variant"
 
         @Volatile private var instance: UiPreferences? = null
 

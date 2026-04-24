@@ -1,6 +1,12 @@
 /*
  * HomeScreen.swift
- * Signed-in home. Lists notebooks. Each row pushes NotebookDetailView.
+ *
+ * Signed-in Home. Keeps the existing greeting / onboarding / tasks
+ * card, and appends two Room/GRDB-backed summary cards (Notebook +
+ * Notepad) at the end — a compact dashboard view of what the user
+ * has actually captured. The mid-screen raw notebook list from the
+ * classic design is gone; the Notebook summary card covers that
+ * affordance.
  */
 
 import SwiftUI
@@ -10,58 +16,73 @@ import ReleafData
 public struct HomeScreen: View {
     @EnvironmentObject private var authStore: AuthStore
     @Environment(\.showOnboardingWizard) private var showOnboarding
-    @StateObject private var viewModel = HomeViewModel()
+    @Environment(\.accentPalette) private var accent
+    @StateObject private var viewModel: HomeDashboardViewModel
 
-    public init() {}
+    private let onOpenNotebook: (String) -> Void
+    private let onOpenNotebooksTab: () -> Void
+    private let onOpenNotepadTab: () -> Void
+    private let onOpenNotepadEntry: (String) -> Void
+    private let onOpenContacts: () -> Void
+
+    public init(
+        userId: String,
+        onOpenNotebook: @escaping (String) -> Void = { _ in },
+        onOpenNotebooksTab: @escaping () -> Void = {},
+        onOpenNotepadTab: @escaping () -> Void = {},
+        onOpenNotepadEntry: @escaping (String) -> Void = { _ in },
+        onOpenContacts: @escaping () -> Void = {}
+    ) {
+        _viewModel = StateObject(wrappedValue: HomeDashboardViewModel(userId: userId))
+        self.onOpenNotebook      = onOpenNotebook
+        self.onOpenNotebooksTab  = onOpenNotebooksTab
+        self.onOpenNotepadTab    = onOpenNotepadTab
+        self.onOpenNotepadEntry  = onOpenNotepadEntry
+        self.onOpenContacts      = onOpenContacts
+    }
 
     public var body: some View {
         ZStack {
             DotGridBackground().ignoresSafeArea()
             content
         }
-        .task { await viewModel.load() }
+        .task { viewModel.start() }
+        .onDisappear { viewModel.stop() }
         .toolbar(.hidden, for: .navigationBar)
     }
 
     @ViewBuilder private var content: some View {
-        switch viewModel.state {
-        case .idle, .loading:
-            ProgressView()
-                .tint(AppColors.coral)
+        ScrollView {
+            VStack(alignment: .leading, spacing: AppSpacing.s6) {
+                header
+                OnboardingQuickGuideCard(onShowIntro: showOnboarding)
+                HomeTasksCard()
+                HomeContactsCard(onOpenContacts: onOpenContacts)
 
-        case .failed(let message):
-            VStack(spacing: AppSpacing.s3) {
-                Text(message)
-                    .font(AppText.body)
-                    .foregroundStyle(AppColors.textSecondary)
-                AppButton("Try again", variant: .secondary) {
-                    Task { await viewModel.load() }
-                }
-                .fixedSize(horizontal: true, vertical: false)
-            }
-
-        case .loaded(let notebooks):
-            ScrollView {
-                VStack(alignment: .leading, spacing: AppSpacing.s6) {
-                    header
-                    OnboardingQuickGuideCard(onShowIntro: showOnboarding)
-                    HomeTasksCard()
-                    ForEach(notebooks) { notebook in
-                        NavigationLink(value: NotebookRoute(id: notebook.id)) {
-                            NotebookRow(notebook: notebook)
-                        }
-                        .buttonStyle(.plain)
+                // ── Dashboard cards (new) ──────────────────────────
+                if viewModel.state.isLoading {
+                    ProgressView()
+                        .tint(AppColors.coral)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, AppSpacing.s6)
+                } else {
+                    VStack(spacing: AppSpacing.s4) {
+                        notebookCard
+                        notepadCard
                     }
-                    Spacer(minLength: AppSpacing.s10)
                 }
-                .padding(AppSpacing.s4)
+
+                Spacer(minLength: AppSpacing.s10)
             }
+            .padding(AppSpacing.s4)
         }
     }
 
+    // MARK: - Header
+
     private var header: some View {
         VStack(alignment: .leading, spacing: AppSpacing.s2) {
-            Text("NOTEBOOKS")
+            Text("RELEAF")
                 .font(AppText.eyebrow)
                 .tracking(AppLetterSpacing.eyebrow)
                 .foregroundStyle(AppColors.coral)
@@ -91,46 +112,108 @@ public struct HomeScreen: View {
         }
         return "Good morning"
     }
-}
 
-// MARK: - NotebookRow
+    // MARK: - Notebook card
 
-private struct NotebookRow: View {
-    let notebook: Notebook
-
-    var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: AppSpacing.s2) {
-                Text(notebook.title)
-                    .font(AppText.sectionTitle)
-                    .foregroundStyle(AppColors.textPrimary)
-
-                if let description = notebook.description, !description.isEmpty {
-                    Text(description)
-                        .font(AppText.body)
-                        .foregroundStyle(AppColors.textSecondary)
-                }
-
-                Text(metaLine)
-                    .font(AppText.meta)
-                    .foregroundStyle(AppColors.textSecondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private var notebookCard: some View {
+        PaletteSummaryCard(
+            title: "Notebook",
+            background: accent.primary,
+            action: onOpenNotebooksTab
+        ) {
+            SummaryStatsRow(items: [
+                SummaryStat(label: "Total", value: "\(viewModel.state.totalNotebooks)"),
+                SummaryStat(label: "Active", value: "\(viewModel.state.activeNotebooks)"),
+                SummaryStat(label: "Archived", value: "\(viewModel.state.archivedNotebooks)"),
+            ])
         }
     }
 
-    private var metaLine: String {
-        let chapters = "\(notebook.chapterCount) chapter\(notebook.chapterCount == 1 ? "" : "s")"
-        let pages    = "\(notebook.pageCount) page\(notebook.pageCount == 1 ? "" : "s")"
-        return "\(chapters) · \(pages)"
+    // MARK: - Notepad card
+
+    private var notepadCard: some View {
+        PaletteSummaryCard(
+            title: "Notepad",
+            background: accent.deep,
+            action: onOpenNotepadTab
+        ) {
+            SummaryStatsRow(items: [
+                SummaryStat(label: "Entries", value: "\(viewModel.state.totalNotepadEntries)"),
+                SummaryStat(label: "Today", value: "\(viewModel.state.todayNotepadCount)"),
+            ])
+        }
     }
 }
 
-#Preview {
-    HomeScreen()
-        .environmentObject({
-            let store = AuthStore(client: StubGoogleAuthClient())
-            Task { await store.signIn() }
-            return store
-        }())
+// MARK: - Summary card shell
+
+private struct SummaryStat: Equatable {
+    let label: String
+    let value: String
+}
+
+private struct PaletteSummaryCard<Content: View>: View {
+    let title: String
+    let background: Color
+    let action: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: AppSpacing.s4) {
+                HStack {
+                    Text(title)
+                        .font(AppText.sectionTitle)
+                        .foregroundStyle(AppColors.onAccent)
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AppColors.onAccent.opacity(0.86))
+                }
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(AppSpacing.s5)
+            .background(background)
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct SummaryStatsRow: View {
+    let items: [SummaryStat]
+
+    var body: some View {
+        HStack(spacing: AppSpacing.s3) {
+            ForEach(items, id: \.label) { item in
+                SummaryStatTile(item: item)
+            }
+        }
+    }
+}
+
+private struct SummaryStatTile: View {
+    let item: SummaryStat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s2) {
+            Text(item.value)
+                .font(.system(size: 32, weight: .bold, design: .default))
+                .foregroundStyle(AppColors.onAccent)
+            Text(item.label)
+                .font(AppText.meta)
+                .foregroundStyle(AppColors.onAccent.opacity(0.82))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(AppSpacing.s4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppColors.onAccent.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .stroke(AppColors.onAccent.opacity(0.14), lineWidth: 1)
+        )
+    }
 }

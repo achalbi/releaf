@@ -46,6 +46,13 @@ public struct TasksRoute: Hashable {
     public init() {}
 }
 
+/// Singleton-style tag for the Contacts directory destination.
+/// Payload-free: the screen reads the signed-in user from
+/// [AuthStore] and pulls contacts from the aggregator.
+public struct ContactsRoute: Hashable {
+    public init() {}
+}
+
 #Preview("Signed out") {
     RootView()
         .environmentObject(AuthStore(client: StubGoogleAuthClient()))

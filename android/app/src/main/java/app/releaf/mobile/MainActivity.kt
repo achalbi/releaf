@@ -51,11 +51,14 @@ import app.releaf.mobile.auth.AuthStore
 import app.releaf.mobile.auth.GoogleAuthSession
 import app.releaf.mobile.auth.rememberGoogleSignInAction
 import app.releaf.mobile.features.auth.SignInScreen
+import app.releaf.mobile.features.contacts.ContactsScreen
 import app.releaf.mobile.features.home.HomeScreen
+import app.releaf.mobile.features.home.HomeScreenVariant1
 import app.releaf.mobile.features.splash.SplashScreen
 import app.releaf.mobile.features.notebook.ChapterLocalDetailScreen
 import app.releaf.mobile.features.notebook.ChapterLocalDetailViewModel
 import app.releaf.mobile.features.notebook.NotebookDetailScreen
+import app.releaf.mobile.features.notebook.NotebookDetailScreenVariant1
 import app.releaf.mobile.features.notebook.NotebookDetailViewModel
 import app.releaf.mobile.features.notebook.NotebookLocalDetailScreen
 import app.releaf.mobile.features.notebook.NotebookLocalDetailViewModel
@@ -69,6 +72,7 @@ import app.releaf.mobile.features.onboarding.OnboardingCta
 import app.releaf.mobile.features.onboarding.OnboardingPreferences
 import app.releaf.mobile.features.onboarding.OnboardingWizard
 import app.releaf.mobile.features.page.PageDetailScreen
+import app.releaf.mobile.features.page.PageDetailScreenVariant1
 import app.releaf.mobile.features.page.PageDetailViewModel
 import app.releaf.mobile.features.reminder.ReminderEditorScreen
 import app.releaf.mobile.features.reminder.ReminderEditorViewModel
@@ -79,8 +83,10 @@ import app.releaf.mobile.ui.components.BottomNav
 import app.releaf.mobile.ui.components.BottomNavItem
 import app.releaf.mobile.ui.components.CaptureMode
 import app.releaf.mobile.ui.components.QuickCaptureSheet
+import app.releaf.mobile.ui.theme.NotebookListVariant
 import app.releaf.mobile.ui.theme.ReleafCanvas
 import app.releaf.mobile.ui.theme.ReleafTheme
+import app.releaf.mobile.ui.theme.UiPreferences
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -130,6 +136,7 @@ private object Routes {
     const val NOTEPAD_EDIT          = "notepad/edit/{entryId}"
     const val TASKS                 = "tasks"
     const val REMINDERS             = "reminders"
+    const val CONTACTS              = "contacts"
     const val REMINDER_EDIT         = "reminders/edit/{reminderId}"
 
     fun notebookDetail(id: String)      = "notebook/$id"
@@ -307,17 +314,45 @@ private fun SignedInNavHost(
             HomeScreen(
                 session = session,
                 onOpenNotebook = { id -> nav.navigate(Routes.notebookDetail(id)) },
-                onOpenTasks = { nav.navigate(Routes.TASKS) },
+                onOpenNotebooksTab = {
+                    nav.navigate(Routes.NOTEBOOKS) {
+                        popUpTo(Routes.HOME) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                onOpenNotepadTab = {
+                    nav.navigate(Routes.NOTEPAD) {
+                        popUpTo(Routes.HOME) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                onOpenNotepadEntry = { id -> nav.navigate(Routes.notepadEdit(id)) },
+                onOpenTasks     = { nav.navigate(Routes.TASKS) },
                 onOpenReminders = { nav.navigate(Routes.REMINDERS) },
-                onSignOut = onSignOut,
+                onOpenContacts  = { nav.navigate(Routes.CONTACTS) },
+                onSignOut       = onSignOut,
                 onShowOnboarding = onShowOnboarding,
             )
         }
         composable(Routes.NOTEBOOKS) {
-            NotebookTabScreen(
-                onOpenNotebook = { id -> nav.navigate(Routes.notebookLocalDetail(id)) },
-                onOpenPage     = { id -> nav.navigate(Routes.pageLocal(id)) },
-            )
+            val prefs   = UiPreferences.get(LocalContext.current)
+            val uiState by prefs.state.collectAsState()
+            when (uiState.notebookVariant) {
+                NotebookListVariant.Classic -> NotebookTabScreen(
+                    onOpenNotebook = { id -> nav.navigate(Routes.notebookLocalDetail(id)) },
+                    onOpenPage     = { id -> nav.navigate(Routes.pageLocal(id)) },
+                )
+                // Variant-1 replaces the Room-backed notebooks list with
+                // the editorial "Your shelves" screen; drill-in uses the
+                // drive-fake routes that match the seeded volumes.
+                NotebookListVariant.Variant1 -> HomeScreenVariant1(
+                    session        = session,
+                    onOpenNotebook = { id -> nav.navigate(Routes.notebookDetail(id)) },
+                    onSignOut      = onSignOut,
+                )
+            }
         }
 
         // Jump to the Notebooks tab from a breadcrumb. The common case is
@@ -376,6 +411,12 @@ private fun SignedInNavHost(
             TasksScreen(onBack = { nav.popBackStack() })
         }
 
+        // Contacts — drill-in surface from the Home Contacts card.
+        // No bottom-nav slot; back arrow returns to Home.
+        composable(Routes.CONTACTS) {
+            ContactsScreen(onBack = { nav.popBackStack() })
+        }
+
         // Reminders — same shape as Tasks. List view + per-reminder
         // editor route. Editor carries `reminderId` which the VM
         // factory reads from the SavedStateHandle.
@@ -403,10 +444,18 @@ private fun SignedInNavHost(
                 type = NavType.StringType
             }),
         ) {
-            NotebookDetailScreen(
-                onBack = { nav.popBackStack() },
-                onOpenPage = { id -> nav.navigate(Routes.page(id)) },
-            )
+            val prefs   = UiPreferences.get(LocalContext.current)
+            val uiState by prefs.state.collectAsState()
+            when (uiState.notebookVariant) {
+                NotebookListVariant.Classic -> NotebookDetailScreen(
+                    onBack = { nav.popBackStack() },
+                    onOpenPage = { id -> nav.navigate(Routes.page(id)) },
+                )
+                NotebookListVariant.Variant1 -> NotebookDetailScreenVariant1(
+                    onBack = { nav.popBackStack() },
+                    onOpenPage = { id -> nav.navigate(Routes.page(id)) },
+                )
+            }
         }
         composable(
             route = Routes.PAGE,
@@ -414,7 +463,12 @@ private fun SignedInNavHost(
                 type = NavType.StringType
             }),
         ) {
-            PageDetailScreen(onBack = { nav.popBackStack() })
+            val prefs   = UiPreferences.get(LocalContext.current)
+            val uiState by prefs.state.collectAsState()
+            when (uiState.notebookVariant) {
+                NotebookListVariant.Classic -> PageDetailScreen(onBack = { nav.popBackStack() })
+                NotebookListVariant.Variant1 -> PageDetailScreenVariant1(onBack = { nav.popBackStack() })
+            }
         }
         composable(
             route = Routes.NOTEPAD_EDIT,

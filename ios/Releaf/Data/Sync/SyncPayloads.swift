@@ -141,16 +141,27 @@ public struct NotebookPayloadV2: Codable, Equatable, Sendable {
     public let colorHex: String?
     public let position: Int64
     public let archivedAt: String?
+    /// Shelf this book belongs to. Optional on the wire so old
+    /// clients that don't yet send it can still round-trip; readers
+    /// default absent rows onto the "shelf-general" shelf.
+    public let shelfId: String?
+    public let seriesId: String?
+    public let volumeNumber: Int?
+    public let volumeName: String?
     public let createdAt: String
     public let updatedAt: String
 
     public enum CodingKeys: String, CodingKey {
         case id, title, description
-        case colorHex   = "color_hex"
+        case colorHex     = "color_hex"
         case position
-        case archivedAt = "archived_at"
-        case createdAt  = "created_at"
-        case updatedAt  = "updated_at"
+        case archivedAt   = "archived_at"
+        case shelfId      = "shelf_id"
+        case seriesId     = "series_id"
+        case volumeNumber = "volume_number"
+        case volumeName   = "volume_name"
+        case createdAt    = "created_at"
+        case updatedAt    = "updated_at"
     }
 }
 
@@ -163,6 +174,10 @@ public extension NotebookEntity {
             colorHex: colorHex,
             position: position,
             archivedAt: nil,
+            shelfId: shelfId,
+            seriesId: seriesId,
+            volumeNumber: volumeNumber,
+            volumeName: volumeName,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -176,7 +191,106 @@ public extension NotebookPayloadV2 {
             title: title,
             colorHex: colorHex,
             position: position,
+            shelfId: shelfId ?? "shelf-general",
+            seriesId: seriesId,
+            volumeNumber: volumeNumber ?? 1,
+            volumeName: volumeName,
             driveFileId: driveFileId,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            dirty: false,
+            deletedAt: nil
+        )
+    }
+}
+
+// =====================================================================
+// Shelf
+// =====================================================================
+
+public struct ShelfPayloadV2: Codable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let colorHex: String?
+    public let position: Int64
+    public let createdAt: String
+    public let updatedAt: String
+
+    public enum CodingKeys: String, CodingKey {
+        case id, name
+        case colorHex  = "color_hex"
+        case position
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+public extension ShelfEntity {
+    func toV2Payload() -> ShelfPayloadV2 {
+        ShelfPayloadV2(
+            id: id,
+            name: name,
+            colorHex: colorHex,
+            position: position,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+}
+
+public extension ShelfPayloadV2 {
+    func toEntity() -> ShelfEntity {
+        ShelfEntity(
+            id: id,
+            name: name,
+            colorHex: colorHex,
+            position: position,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            dirty: false,
+            deletedAt: nil
+        )
+    }
+}
+
+// =====================================================================
+// Book series
+// =====================================================================
+
+public struct BookSeriesPayloadV2: Codable, Equatable, Sendable {
+    public let id: String
+    public let shelfId: String
+    public let name: String
+    public let createdAt: String
+    public let updatedAt: String
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case shelfId   = "shelf_id"
+        case name
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+public extension BookSeriesEntity {
+    func toV2Payload() -> BookSeriesPayloadV2 {
+        BookSeriesPayloadV2(
+            id: id,
+            shelfId: shelfId,
+            name: name,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+}
+
+public extension BookSeriesPayloadV2 {
+    func toEntity() -> BookSeriesEntity {
+        BookSeriesEntity(
+            id: id,
+            shelfId: shelfId,
+            name: name,
             createdAt: createdAt,
             updatedAt: updatedAt,
             dirty: false,

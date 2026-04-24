@@ -24,6 +24,8 @@ import androidx.room.PrimaryKey
         Index("updated_at"),
         Index("deleted_at"),
         Index("archived_at"),
+        Index("shelf_id"),
+        Index("series_id"),
     ],
 )
 data class NotebookEntity(
@@ -45,6 +47,34 @@ data class NotebookEntity(
     /** Manual ordering hint. 1024-step spacing leaves room for re-ordering. */
     @ColumnInfo(name = "position", defaultValue = "1024")
     val position: Long = 1024L,
+
+    /**
+     * Shelf this book belongs to. Required — every book lives on
+     * some shelf. Existing rows are backfilled to `shelf-general`
+     * by Migration11To12.
+     */
+    @ColumnInfo(name = "shelf_id", defaultValue = "'shelf-general'")
+    val shelfId: String = "shelf-general",
+
+    /**
+     * Series this book is a volume of. NULL = standalone single-
+     * volume book (UI renders the title without a "Vol N" badge).
+     * When non-null, points at a `book_series` row; sibling volumes
+     * share this id.
+     */
+    @ColumnInfo(name = "series_id")
+    val seriesId: String? = null,
+
+    /** 1 for the first (or only) volume; 2+ for subsequent volumes. */
+    @ColumnInfo(name = "volume_number", defaultValue = "1")
+    val volumeNumber: Int = 1,
+
+    /**
+     * Optional per-volume label (e.g. "2026"). When null the UI
+     * composes `"<book> vol <n>"` from the parent series name.
+     */
+    @ColumnInfo(name = "volume_name")
+    val volumeName: String? = null,
 
     @ColumnInfo(name = "drive_file_id")
     val driveFileId: String? = null,

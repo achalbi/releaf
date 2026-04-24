@@ -309,6 +309,68 @@ public final class ReleafDatabase: @unchecked Sendable {
             try db.execute(sql: "CREATE INDEX idx_tasks_deleted_at ON tasks(deleted_at)")
         }
 
+        // v3 — introduces the Shelf → Book → Chapter → Page
+        // hierarchy. Adds `shelves` + `book_series` tables, four
+        // columns on `notebooks` (`shelf_id` NOT NULL with default
+        // 'shelf-general', `series_id` nullable, `volume_number`
+        // DEFAULT 1, `volume_name` nullable), and seeds the default
+        // "General" shelf. Mirrors Android's v11→v12 migration.
+        migrator.registerMigration("v3_shelves_and_volumes") { db in
+            try db.execute(sql: """
+                CREATE TABLE shelves (
+                    id              TEXT PRIMARY KEY NOT NULL,
+                    name            TEXT NOT NULL,
+                    color_hex       TEXT,
+                    position        INTEGER NOT NULL DEFAULT 1024,
+                    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty           INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at      TEXT
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_shelves_position   ON shelves(position)")
+            try db.execute(sql: "CREATE INDEX idx_shelves_deleted_at ON shelves(deleted_at)")
+
+            try db.execute(sql: """
+                CREATE TABLE book_series (
+                    id              TEXT PRIMARY KEY NOT NULL,
+                    shelf_id        TEXT NOT NULL,
+                    name            TEXT NOT NULL,
+                    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty           INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at      TEXT
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_book_series_shelf_id   ON book_series(shelf_id)")
+            try db.execute(sql: "CREATE INDEX idx_book_series_deleted_at ON book_series(deleted_at)")
+
+            // Seed the default shelf before the ALTER so the
+            // DEFAULT 'shelf-general' points at a live row.
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO shelves (
+                    id, name, color_hex, position, created_at, updated_at, dirty
+                ) VALUES (
+                    'shelf-general', 'General', '#7AA874', 1024,
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                    1
+                )
+                """)
+
+            // iOS's base `notebooks` table was created in v1 without
+            // `description` / `archived_at` (Android has them from
+            // migration 3→4). Those live on Android-only today;
+            // we're only adding the shelf/volume columns here so
+            // the two schemas converge on the new hierarchy.
+            try db.execute(sql: "ALTER TABLE notebooks ADD COLUMN shelf_id TEXT NOT NULL DEFAULT 'shelf-general'")
+            try db.execute(sql: "ALTER TABLE notebooks ADD COLUMN series_id TEXT")
+            try db.execute(sql: "ALTER TABLE notebooks ADD COLUMN volume_number INTEGER NOT NULL DEFAULT 1")
+            try db.execute(sql: "ALTER TABLE notebooks ADD COLUMN volume_name TEXT")
+            try db.execute(sql: "CREATE INDEX idx_notebooks_shelf_id  ON notebooks(shelf_id)")
+            try db.execute(sql: "CREATE INDEX idx_notebooks_series_id ON notebooks(series_id) WHERE series_id IS NOT NULL")
+        }
+
         return migrator
     }
 }

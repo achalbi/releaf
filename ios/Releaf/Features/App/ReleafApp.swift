@@ -24,6 +24,15 @@ public struct ReleafApp: App {
     public init() {
         // Wire the sync stack once per process. Idempotent.
         SyncEnvironment.shared.install(authStore: .shared)
+
+        // Ensure the default "General" shelf exists. The GRDB
+        // migration seeds it on upgrade; this covers fresh installs
+        // that run the migrator cleanly but never went through that
+        // INSERT path (eraseDatabaseOnSchemaChange dev wipes, etc.).
+        Task.detached(priority: .utility) {
+            let repo = ShelfRepository()
+            _ = try? await repo.ensureDefaultShelf()
+        }
     }
 
     public var body: some Scene {

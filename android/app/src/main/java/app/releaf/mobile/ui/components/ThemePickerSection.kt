@@ -50,14 +50,18 @@ fun ThemePickerSection(modifier: Modifier = Modifier) {
     val prefs = remember { UiPreferences.get(context) }
     val state by prefs.state.collectAsState()
 
+    // Compact layout: tighter card padding, shorter segmented-control
+    // chips, smaller swatches, no "Primary color" sub-label. Two rows
+    // still (one-row layout overflows on <400dp-wide phones) but each
+    // row is denser than before.
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(AppRadius.md))
             .background(AppColors.CardSolid)
             .border(1.dp, AppColors.BorderDefault, RoundedCornerShape(AppRadius.md))
-            .padding(AppSpacing.s4),
-        verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+            .padding(horizontal = AppSpacing.s3, vertical = AppSpacing.s3),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
     ) {
         Text(
             text  = "APPEARANCE",
@@ -65,14 +69,14 @@ fun ThemePickerSection(modifier: Modifier = Modifier) {
             color = AppColors.TextSecondary,
         )
 
-        // --- Theme-mode segmented control -------------------------------
+        // --- Theme-mode segmented control (compact) ---------------------
         Row(
             modifier              = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(AppRadius.pill))
                 .background(AppColors.Subtle)
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             ThemeMode.entries.forEach { mode ->
                 ThemeModeChip(
@@ -84,15 +88,10 @@ fun ThemePickerSection(modifier: Modifier = Modifier) {
             }
         }
 
-        // --- Primary-palette swatches ----------------------------------
-        Text(
-            text  = "Primary color",
-            style = AppTypography.Meta,
-            color = AppColors.TextSecondary,
-        )
+        // --- Palette swatches (compact, label dropped) -----------------
         Row(
             modifier              = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
         ) {
             AccentPaletteId.entries.forEach { id ->
                 ColorSwatch(
@@ -117,7 +116,7 @@ private fun ThemeModeChip(
             .clip(RoundedCornerShape(AppRadius.pill))
             .background(if (active) AppAccent.primary else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(vertical = AppSpacing.s2),
+            .padding(vertical = AppSpacing.s1),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -137,7 +136,7 @@ private fun ColorSwatch(
     val ringColor = if (selected) AppColors.TextPrimary else AppColors.BorderDefault
     Box(
         modifier = Modifier
-            .size(40.dp)
+            .size(28.dp)
             .clip(CircleShape)
             .background(color)
             .border(

@@ -126,7 +126,6 @@ fun NotebookLocalDetailScreen(
             ScreenHeader(
                 eyebrow = "Notebook",
                 title = "Your notebooks",
-                avatarInitial = "A",
                 // Match the Notebook tab + Notepad screen rhythm —
                 // top-level / drill-in headers all dock at s3 above
                 // the eyebrow.

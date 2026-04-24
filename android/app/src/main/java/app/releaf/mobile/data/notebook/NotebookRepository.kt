@@ -18,35 +18,154 @@ class NotebookRepository(
     private val notebookDao: NotebookDao,
     private val chapterDao: ChapterDao,
     private val pageDao: PageDao,
+    private val bookSeriesDao: BookSeriesDao,
 ) {
     /* ---------- reads ---------- */
 
     fun observeActive(): Flow<List<NotebookEntity>> = notebookDao.observeActive()
     fun observeArchived(): Flow<List<NotebookEntity>> = notebookDao.observeArchived()
+    fun observeForShelf(shelfId: String): Flow<List<NotebookEntity>> =
+        notebookDao.observeForShelf(shelfId)
+    fun observeForSeries(seriesId: String): Flow<List<NotebookEntity>> =
+        notebookDao.observeForSeries(seriesId)
     fun observeById(id: String): Flow<NotebookEntity?> = notebookDao.observeById(id)
     suspend fun findById(id: String): NotebookEntity? = notebookDao.findById(id)
 
     /* ---------- create / update ---------- */
 
     /**
-     * Create a notebook. The editor VM is fine passing `title` and an
-     * optional `colorHex`; everything else (id, timestamps, dirty) is filled
-     * in here so the UI layer isn't duplicating boilerplate.
+     * Create a standalone book (no series). If the caller wants the
+     * book to live in a series, use [createBookInNewSeries] or
+     * [addVolumeToSeries] instead.
+     *
+     * `shelfId` defaults to the General shelf so existing call-sites
+     * (Quick Capture fallback, legacy VM paths) continue to work
+     * without plumbing shelf awareness through every layer.
      */
     suspend fun createNotebook(
         title: String,
         colorHex: String? = null,
         description: String? = null,
+        shelfId: String = "shelf-general",
     ): NotebookEntity {
         val now = IsoClock.nowIso()
         val entity = NotebookEntity(
-            id          = Uuidv7.generate(),
-            title       = title.trim(),
-            description = description?.trim()?.ifEmpty { null },
-            colorHex    = colorHex,
-            createdAt   = now,
-            updatedAt   = now,
-            dirty       = true,
+            id           = Uuidv7.generate(),
+            title        = title.trim(),
+            description  = description?.trim()?.ifEmpty { null },
+            colorHex     = colorHex,
+            shelfId      = shelfId,
+            seriesId     = null,
+            volumeNumber = 1,
+            volumeName   = null,
+            createdAt    = now,
+            updatedAt    = now,
+            dirty        = true,
+        )
+        notebookDao.upsert(entity)
+        return entity
+    }
+
+    /**
+     * Promote an existing standalone book into a series so a second
+     * volume can be added. Returns the new series id (creating the
+     * `book_series` row in the process). If the book is already
+     * part of a series, returns the existing `seriesId`.
+     */
+    suspend fun ensureSeriesFor(notebookId: String, seriesName: String? = null): String {
+        val nb = notebookDao.findById(notebookId) ?: error("Notebook $notebookId not found")
+        nb.seriesId?.let { return it }
+
+        val now = IsoClock.nowIso()
+        val series = BookSeriesEntity(
+            id        = Uuidv7.generate(),
+            shelfId   = nb.shelfId,
+            name      = seriesName?.trim()?.ifEmpty { null } ?: nb.title,
+            createdAt = now,
+            updatedAt = now,
+            dirty     = true,
+        )
+        bookSeriesDao.upsert(series)
+        notebookDao.upsert(
+            nb.copy(
+                seriesId     = series.id,
+                volumeNumber = 1,
+                updatedAt    = now,
+                dirty        = true,
+            )
+        )
+        return series.id
+    }
+
+    /**
+     * Add a new volume under an existing series. `volumeName` may be
+     * blank — the UI derives "<series> vol <n>" from the series name
+     * and number when `volumeName` is null.
+     */
+    suspend fun addVolumeToSeries(
+        seriesId: String,
+        volumeName: String? = null,
+        colorHex: String? = null,
+    ): NotebookEntity {
+        val series = bookSeriesDao.findById(seriesId)
+            ?: error("Series $seriesId not found")
+        val next = (notebookDao.maxVolumeFor(seriesId) ?: 0) + 1
+        val cleanedVolumeName = volumeName?.trim()?.ifEmpty { null }
+        val displayTitle = cleanedVolumeName ?: "${series.name} vol $next"
+
+        val now = IsoClock.nowIso()
+        val entity = NotebookEntity(
+            id           = Uuidv7.generate(),
+            title        = displayTitle,
+            description  = null,
+            colorHex     = colorHex,
+            shelfId      = series.shelfId,
+            seriesId     = series.id,
+            volumeNumber = next,
+            volumeName   = cleanedVolumeName,
+            createdAt    = now,
+            updatedAt    = now,
+            dirty        = true,
+        )
+        notebookDao.upsert(entity)
+        return entity
+    }
+
+    /**
+     * Create a fresh book AND its enclosing series in one call — the
+     * common flow when a user says "New book" knowing they'll want
+     * multiple volumes. The first volume defaults to number 1 and
+     * inherits the book's title when `volumeName` is null.
+     */
+    suspend fun createBookInNewSeries(
+        shelfId: String,
+        seriesName: String,
+        volumeName: String? = null,
+        colorHex: String? = null,
+    ): NotebookEntity {
+        val now = IsoClock.nowIso()
+        val series = BookSeriesEntity(
+            id        = Uuidv7.generate(),
+            shelfId   = shelfId,
+            name      = seriesName.trim().ifEmpty { "Untitled book" },
+            createdAt = now,
+            updatedAt = now,
+            dirty     = true,
+        )
+        bookSeriesDao.upsert(series)
+        val cleanedVolumeName = volumeName?.trim()?.ifEmpty { null }
+        val entity = NotebookEntity(
+            id           = Uuidv7.generate(),
+            title        = cleanedVolumeName ?: series.name,
+            description  = null,
+            colorHex     = colorHex,
+            shelfId      = shelfId,
+            seriesId     = series.id,
+            volumeNumber = 1,
+            volumeName   = cleanedVolumeName,
+            createdAt    = now,
+            updatedAt    = now,
+            dirty        = true,
         )
         notebookDao.upsert(entity)
         return entity

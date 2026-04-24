@@ -13,6 +13,56 @@ import Foundation
 // (the 7 tappable rows in the capture sheet / tab bar) and no domain type
 // references it. See DesignSystem/CaptureMode.swift.
 
+/// Lifecycle state shown on the variant-1 shelves cards.
+public enum NotebookStatus: String, Equatable, Sendable {
+    case active
+    case paused
+    case archived
+    case shared
+}
+
+/// Top-level container in the Shelf → Book → Chapter → Page hierarchy.
+/// Every book belongs to exactly one shelf; the default shelf is
+/// `"shelf-general"` and is seeded by migration on upgrade.
+public struct Shelf: Identifiable, Equatable, Sendable {
+    public let id: String
+    public var name: String
+    public var colorHex: String?
+    public var position: Int
+    public var updatedAt: Date
+
+    public init(
+        id: String,
+        name: String,
+        colorHex: String? = nil,
+        position: Int = 0,
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.colorHex = colorHex
+        self.position = position
+        self.updatedAt = updatedAt
+    }
+}
+
+/// Groups multiple `Notebook` rows into "volumes of the same book".
+/// When a book has a single volume this type isn't materialized in
+/// the UI — the notebook renders its title on its own.
+public struct BookSeries: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let shelfId: String
+    public var name: String
+    public var updatedAt: Date
+
+    public init(id: String, shelfId: String, name: String, updatedAt: Date = Date()) {
+        self.id = id
+        self.shelfId = shelfId
+        self.name = name
+        self.updatedAt = updatedAt
+    }
+}
+
 public struct Notebook: Identifiable, Equatable, Sendable {
     public let id: String
     public var title: String
@@ -24,6 +74,30 @@ public struct Notebook: Identifiable, Equatable, Sendable {
     public var chapterCount: Int
     public var pageCount: Int
 
+    /// Shelf grouping (e.g. "GARDEN"). Used by variant-1 shelves UI.
+    public var shelfName: String?
+    /// Volume number (e.g. 2). Used by variant-1 shelves UI.
+    public var volumeNumber: Int?
+    /// Lifecycle status. When nil, derived from `archivedAt`.
+    public var status: NotebookStatus?
+    /// Opaque key selecting the variant-1 hero-card icon. See
+    /// `ShelfIcon` on iOS / Android for the supported values.
+    public var iconKey: String?
+
+    /// Shelf this book belongs to (FK to `Shelf.id`). Required in
+    /// the schema; defaulted to the General shelf here so call
+    /// sites that don't know the shelf yet still compile.
+    public var shelfId: String
+    /// Series this book is a volume of. Nil = single-volume book.
+    public var seriesId: String?
+    /// 1 for the only (or first) volume; 2+ for subsequent volumes.
+    /// Distinct from `volumeNumber` (the display hint) which may be
+    /// derived from `position` in older code paths.
+    public var seriesVolumeNumber: Int
+    /// Per-volume label (e.g. "2026"). Nil → UI composes
+    /// "<series> vol <n>".
+    public var volumeLabel: String?
+
     public init(
         id: String,
         title: String,
@@ -33,7 +107,15 @@ public struct Notebook: Identifiable, Equatable, Sendable {
         archivedAt: Date? = nil,
         updatedAt: Date = Date(),
         chapterCount: Int = 0,
-        pageCount: Int = 0
+        pageCount: Int = 0,
+        shelfName: String? = nil,
+        volumeNumber: Int? = nil,
+        status: NotebookStatus? = nil,
+        iconKey: String? = nil,
+        shelfId: String = "shelf-general",
+        seriesId: String? = nil,
+        seriesVolumeNumber: Int = 1,
+        volumeLabel: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -44,9 +126,23 @@ public struct Notebook: Identifiable, Equatable, Sendable {
         self.updatedAt = updatedAt
         self.chapterCount = chapterCount
         self.pageCount = pageCount
+        self.shelfName = shelfName
+        self.volumeNumber = volumeNumber
+        self.status = status
+        self.iconKey = iconKey
+        self.shelfId = shelfId
+        self.seriesId = seriesId
+        self.seriesVolumeNumber = seriesVolumeNumber
+        self.volumeLabel = volumeLabel
     }
 
     public var isArchived: Bool { archivedAt != nil }
+
+    /// Resolved status: explicit `status` if set, else derived from `archivedAt`.
+    public var resolvedStatus: NotebookStatus {
+        if let status { return status }
+        return isArchived ? .archived : .active
+    }
 }
 
 public struct Chapter: Identifiable, Equatable, Sendable {
@@ -80,13 +176,23 @@ public struct PageSummary: Identifiable, Equatable, Sendable {
     public var capturedOn: String?
     public var updatedAt: Date
     public var counts: PageCounts
+    /// Free-form tags shown as pills on variant-1 page views.
+    public var tags: [String]
 
-    public init(id: String, title: String, capturedOn: String? = nil, updatedAt: Date = Date(), counts: PageCounts = .zero) {
+    public init(
+        id: String,
+        title: String,
+        capturedOn: String? = nil,
+        updatedAt: Date = Date(),
+        counts: PageCounts = .zero,
+        tags: [String] = []
+    ) {
         self.id = id
         self.title = title
         self.capturedOn = capturedOn
         self.updatedAt = updatedAt
         self.counts = counts
+        self.tags = tags
     }
 }
 
@@ -133,6 +239,8 @@ public struct Page: Identifiable, Equatable, Sendable {
     public var scannedDocuments: [ScannedDocument]
     public var contacts: [Contact]
     public var locations: [LocationPin]
+    /// Free-form tags shown as pills on variant-1 page views.
+    public var tags: [String]
 
     public init(
         id: String,
@@ -147,7 +255,8 @@ public struct Page: Identifiable, Equatable, Sendable {
         todoItems: [TodoItem] = [],
         scannedDocuments: [ScannedDocument] = [],
         contacts: [Contact] = [],
-        locations: [LocationPin] = []
+        locations: [LocationPin] = [],
+        tags: [String] = []
     ) {
         self.id = id
         self.notebookId = notebookId
@@ -162,6 +271,7 @@ public struct Page: Identifiable, Equatable, Sendable {
         self.scannedDocuments = scannedDocuments
         self.contacts = contacts
         self.locations = locations
+        self.tags = tags
     }
 
     public var counts: PageCounts {

@@ -26,10 +26,12 @@
 
 package app.releaf.mobile.data.sync
 
+import app.releaf.mobile.data.notebook.BookSeriesEntity
 import app.releaf.mobile.data.notebook.ChapterEntity
 import app.releaf.mobile.data.notebook.NotebookEntity
 import app.releaf.mobile.data.notebook.PageEntity
 import app.releaf.mobile.data.notepad.NotepadEntry
+import app.releaf.mobile.data.shelf.ShelfEntity
 import app.releaf.mobile.data.task.TaskEntity
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -54,39 +56,121 @@ val SyncJson: Json = Json {
 
 @Serializable
 data class NotebookPayloadV2(
-    @SerialName("id")          val id: String,
-    @SerialName("title")       val title: String,
-    @SerialName("description") val description: String? = null,
-    @SerialName("color_hex")   val colorHex: String? = null,
-    @SerialName("position")    val position: Long,
-    @SerialName("archived_at") val archivedAt: String? = null,
-    @SerialName("created_at")  val createdAt: String,
-    @SerialName("updated_at")  val updatedAt: String,
+    @SerialName("id")            val id: String,
+    @SerialName("title")         val title: String,
+    @SerialName("description")   val description: String? = null,
+    @SerialName("color_hex")     val colorHex: String? = null,
+    @SerialName("position")      val position: Long,
+    @SerialName("archived_at")   val archivedAt: String? = null,
+    /**
+     * Shelf this book belongs to. Optional on the wire so old
+     * clients that don't yet send it still round-trip; readers
+     * default absent rows onto the "shelf-general" shelf.
+     */
+    @SerialName("shelf_id")      val shelfId: String? = null,
+    @SerialName("series_id")     val seriesId: String? = null,
+    @SerialName("volume_number") val volumeNumber: Int? = null,
+    @SerialName("volume_name")   val volumeName: String? = null,
+    @SerialName("created_at")    val createdAt: String,
+    @SerialName("updated_at")    val updatedAt: String,
 )
 
 fun NotebookEntity.toV2Payload(): NotebookPayloadV2 = NotebookPayloadV2(
-    id          = id,
-    title       = title,
-    description = description,
-    colorHex    = colorHex,
-    position    = position,
-    archivedAt  = archivedAt,
-    createdAt   = createdAt,
-    updatedAt   = updatedAt,
+    id           = id,
+    title        = title,
+    description  = description,
+    colorHex     = colorHex,
+    position     = position,
+    archivedAt   = archivedAt,
+    shelfId      = shelfId,
+    seriesId     = seriesId,
+    volumeNumber = volumeNumber,
+    volumeName   = this.volumeName,
+    createdAt    = createdAt,
+    updatedAt    = updatedAt,
 )
 
 fun NotebookPayloadV2.toEntity(driveFileId: String?): NotebookEntity = NotebookEntity(
-    id          = id,
-    title       = title,
-    description = description,
-    colorHex    = colorHex,
-    position    = position,
-    driveFileId = driveFileId,
-    createdAt   = createdAt,
-    updatedAt   = updatedAt,
-    dirty       = false,
-    archivedAt  = archivedAt,
-    deletedAt   = null,
+    id           = id,
+    title        = title,
+    description  = description,
+    colorHex     = colorHex,
+    position     = position,
+    shelfId      = shelfId ?: "shelf-general",
+    seriesId     = seriesId,
+    volumeNumber = volumeNumber ?: 1,
+    volumeName   = this.volumeName,
+    driveFileId  = driveFileId,
+    createdAt    = createdAt,
+    updatedAt    = updatedAt,
+    dirty        = false,
+    archivedAt   = archivedAt,
+    deletedAt    = null,
+)
+
+// =====================================================================
+// Shelf
+// =====================================================================
+
+@Serializable
+data class ShelfPayloadV2(
+    @SerialName("id")         val id: String,
+    @SerialName("name")       val name: String,
+    @SerialName("color_hex")  val colorHex: String? = null,
+    @SerialName("position")   val position: Long,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("updated_at") val updatedAt: String,
+)
+
+fun ShelfEntity.toV2Payload(): ShelfPayloadV2 = ShelfPayloadV2(
+    id        = id,
+    name      = name,
+    colorHex  = colorHex,
+    position  = position,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
+fun ShelfPayloadV2.toEntity(): ShelfEntity = ShelfEntity(
+    id        = id,
+    name      = name,
+    colorHex  = colorHex,
+    position  = position,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+    dirty     = false,
+    deletedAt = null,
+)
+
+// =====================================================================
+// Book series
+// =====================================================================
+
+@Serializable
+data class BookSeriesPayloadV2(
+    @SerialName("id")         val id: String,
+    @SerialName("shelf_id")   val shelfId: String,
+    @SerialName("name")       val name: String,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("updated_at") val updatedAt: String,
+)
+
+fun BookSeriesEntity.toV2Payload(): BookSeriesPayloadV2 = BookSeriesPayloadV2(
+    id        = id,
+    shelfId   = shelfId,
+    name      = name,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
+fun BookSeriesPayloadV2.toEntity(): BookSeriesEntity = BookSeriesEntity(
+    id        = id,
+    shelfId   = shelfId,
+    name      = name,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+    dirty     = false,
+    deletedAt = null,
 )
 
 // =====================================================================

@@ -16,6 +16,13 @@
          surface is visible. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Contacts screen. Required to surface device contacts alongside
+         the in-app contact directory when the user types in the search
+         field. Runtime-granted on first search attempt; the screen
+         shows an "Enable device contacts" CTA while permission is
+         missing. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+
     <!-- Reminders feature. Need POST_NOTIFICATIONS runtime-granted on API 33+
          to post the alarm notification, SCHEDULE_EXACT_ALARM on API 31+ so the
          ReminderScheduler can wake the device at the user's chosen time, and

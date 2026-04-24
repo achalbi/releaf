@@ -21,12 +21,16 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.releaf.mobile.ReleafApp
+import app.releaf.mobile.data.domain.Shelf
 import app.releaf.mobile.data.notebook.ChapterRepository
 import app.releaf.mobile.data.notebook.NotebookCountRow
 import app.releaf.mobile.data.notebook.NotebookEntity
 import app.releaf.mobile.data.notebook.NotebookRepository
-import app.releaf.mobile.data.notebook.PageEntity
+import app.releaf.mobile.data.notebook.PageSearchHit
 import app.releaf.mobile.data.notebook.PageRepository
+import app.releaf.mobile.data.shelf.ShelfEntity
+import app.releaf.mobile.data.shelf.ShelfRepository
+import java.time.Instant
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
@@ -55,11 +59,17 @@ data class NotebookTabUiState(
     val query: String = "",
     val tab: NotebookListTab = NotebookListTab.Current,
     val notebooks: List<NotebookSummary> = emptyList(),
+    /** Live shelves, ordered for list display. Consumed by the
+     *  notebooks list to group books under their parent shelf. */
+    val shelves: List<Shelf> = emptyList(),
     /** Only non-empty when searching; FTS hits across every live notebook. */
-    val matchingPages: List<PageEntity> = emptyList(),
+    val matchingPages: List<PageSearchHit> = emptyList(),
 ) {
     val isSearching: Boolean get() = query.isNotBlank()
     val isEmpty: Boolean get() = notebooks.isEmpty() && matchingPages.isEmpty()
+    val notebookCount: Int get() = notebooks.size
+    val chapterCount: Int get() = notebooks.sumOf { it.chapterCount }
+    val pageCount: Int get() = notebooks.sumOf { it.pageCount }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
@@ -68,6 +78,7 @@ class NotebookTabViewModel(
     private val notebookRepository: NotebookRepository,
     private val chapterRepository: ChapterRepository,
     private val pageRepository: PageRepository,
+    private val shelfRepository: ShelfRepository,
 ) : AndroidViewModel(application) {
 
     private val _query = MutableStateFlow("")
@@ -90,10 +101,10 @@ class NotebookTabViewModel(
 
     // Page FTS. Blank query → empty flow (no round-trip to SQLite). Only
     // debounce non-blank input so the first paint isn't delayed.
-    private val pageResultsFlow: Flow<List<PageEntity>> = _query
+    private val pageResultsFlow: Flow<List<PageSearchHit>> = _query
         .debounce { q -> if (q.isBlank()) 0L else 150L }
         .flatMapLatest { q ->
-            if (q.isBlank()) flowOf(emptyList()) else pageRepository.searchAll(q)
+            if (q.isBlank()) flowOf(emptyList()) else pageRepository.searchAllWithContext(q)
         }
 
     // Pre-combine to fit inside the 5-arg `combine` overload without
@@ -102,15 +113,18 @@ class NotebookTabViewModel(
     private val tabAndNotebooksFlow: Flow<Pair<NotebookListTab, List<NotebookEntity>>> =
         combine(_tab, notebooksFlow) { tab, notebooks -> tab to notebooks }
 
-    private val countsFlow: Flow<Pair<Map<String, Int>, Map<String, Int>>> =
-        combine(chapterCountsFlow, pageCountsFlow) { ch, pg -> ch to pg }
+    private val countsAndShelvesFlow:
+            Flow<Triple<Map<String, Int>, Map<String, Int>, List<ShelfEntity>>> =
+        combine(chapterCountsFlow, pageCountsFlow, shelfRepository.observeActive()) {
+            ch, pg, shelves -> Triple(ch, pg, shelves)
+        }
 
     val state: StateFlow<NotebookTabUiState> = combine(
         _query,
         tabAndNotebooksFlow,
-        countsFlow,
+        countsAndShelvesFlow,
         pageResultsFlow,
-    ) { q, (tab, notebooks), (chapterCounts, pageCounts), matchingPages ->
+    ) { q, (tab, notebooks), (chapterCounts, pageCounts, shelves), matchingPages ->
         val filteredNotebooks = if (q.isBlank()) {
             notebooks
         } else {
@@ -130,6 +144,7 @@ class NotebookTabViewModel(
             query         = q,
             tab           = tab,
             notebooks     = summaries,
+            shelves       = shelves.map { it.toDomain() },
             matchingPages = matchingPages,
         )
     }.stateIn(
@@ -137,6 +152,16 @@ class NotebookTabViewModel(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = NotebookTabUiState(),
     )
+
+    /** Create a fresh shelf — available to the "+ New shelf…" row
+     *  inside the notebook-create dialog. */
+    fun createShelf(name: String, onCreated: (String) -> Unit = {}) {
+        val resolved = name.trim().ifEmpty { "Untitled shelf" }
+        viewModelScope.launch {
+            val shelf = shelfRepository.createShelf(name = resolved)
+            onCreated(shelf.id)
+        }
+    }
 
     fun updateQuery(value: String) {
         _query.value = value
@@ -158,15 +183,18 @@ class NotebookTabViewModel(
         title: String,
         description: String? = null,
         colorHex: String? = null,
+        shelfId: String? = null,
         onCreated: (String) -> Unit = {},
     ) {
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
+        val resolvedShelf = shelfId?.takeIf { it.isNotBlank() } ?: ShelfEntity.DEFAULT_GENERAL_ID
         viewModelScope.launch {
             val created = notebookRepository.createNotebook(
-                title = trimmed,
-                colorHex = colorHex,
+                title       = trimmed,
+                colorHex    = colorHex,
                 description = description,
+                shelfId     = resolvedShelf,
             )
             onCreated(created.id)
         }
@@ -185,12 +213,20 @@ class NotebookTabViewModel(
         viewModelScope.launch { notebookRepository.undoSoftDeleteNotebook(id) }
     }
 
-    fun archive(id: String) {
-        viewModelScope.launch { notebookRepository.archiveNotebook(id) }
+    fun archive(id: String, onComplete: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            runCatching { notebookRepository.archiveNotebook(id) }
+                .onSuccess { onComplete(true) }
+                .onFailure { onComplete(false) }
+        }
     }
 
-    fun unarchive(id: String) {
-        viewModelScope.launch { notebookRepository.unarchiveNotebook(id) }
+    fun unarchive(id: String, onComplete: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            runCatching { notebookRepository.unarchiveNotebook(id) }
+                .onSuccess { onComplete(true) }
+                .onFailure { onComplete(false) }
+        }
     }
 
     companion object {
@@ -202,11 +238,22 @@ class NotebookTabViewModel(
                     notebookRepository = app.notebookRepository,
                     chapterRepository  = app.chapterRepository,
                     pageRepository     = app.pageRepository,
+                    shelfRepository    = app.shelfRepository,
                 )
             }
         }
     }
 }
+
+// ---------- helpers ----------
+
+private fun ShelfEntity.toDomain(): Shelf = Shelf(
+    id        = id,
+    name      = name,
+    colorHex  = colorHex,
+    position  = position.toInt(),
+    updatedAt = runCatching { Instant.parse(updatedAt) }.getOrDefault(Instant.EPOCH),
+)
 
 /** Collapse a repo-count feed into the `notebookId → count` lookup each row needs. */
 private fun Flow<List<NotebookCountRow>>.mapToCountMap(): Flow<Map<String, Int>> =

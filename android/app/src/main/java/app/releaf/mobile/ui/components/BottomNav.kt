@@ -6,7 +6,7 @@
  * canvas with a lifted coral leaf in the center.
  *
  * Layout:
- *   [ Home ] [ Notebook ] [ 🌿 Leaf ] [ Notepad ] [ Settings ]
+ *   [ Home ] [ Shelf ] [ 🌿 Leaf ] [ Notepad ] [ Settings ]
  *
  * Surface:
  *   - Shape  : rounded card @ AppRadius.nav (16dp).
@@ -43,10 +43,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Spa
+import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material.icons.automirrored.filled.EventNote
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -57,7 +57,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -67,6 +69,7 @@ import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
+import app.releaf.mobile.ui.theme.AppTypography
 
 // ---------- Item model ----------
 
@@ -82,7 +85,9 @@ data class BottomNavItem(
         /** Default Releaf IA. */
         val defaults = listOf(
             BottomNavItem("home",     "Home",     Icons.Filled.Home),
-            BottomNavItem("notebook", "Notebook", Icons.Filled.Book),
+            // Tab id stays "notebook" so existing nav routing keeps
+            // working; label + icon reflect the Shelf rename.
+            BottomNavItem("notebook", "Shelf",    Icons.Filled.ViewColumn),
             BottomNavItem("leaf",     "",         Icons.Filled.Spa, BottomNavKind.Brand),
             BottomNavItem("notepad",  "Notepad",  Icons.AutoMirrored.Filled.EventNote),
             BottomNavItem("settings", "Settings", Icons.Filled.Settings),
@@ -101,15 +106,16 @@ fun BottomNav(
 ) {
     val navShape = RoundedCornerShape(AppRadius.nav)
 
-    // Outer padding = the "float" — the dot-grid canvas shows through on the
-    // sides and below. Horizontal s8 keeps the bar visibly narrower than the
-    // screen; bottom s6 lifts it clear of the system nav handle.
+    // Outer padding = the "float" — the dot-grid canvas shows through
+    // on the sides and below. Horizontal s4 (was s6) widens the bar so
+    // 5 cells with text labels fit without crowding; bottom s6 still
+    // lifts it clear of the system nav handle.
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(
-                start = AppSpacing.s6,
-                end = AppSpacing.s6,
+                start  = AppSpacing.s4,
+                end    = AppSpacing.s4,
                 bottom = AppSpacing.s6,
             ),
     ) {
@@ -126,11 +132,14 @@ fun BottomNav(
         )
 
         Row(
+            // Tightened from s1 → s0 horizontal so each cell gets the
+            // full bar width to lay out its icon + label. Vertical s1
+            // stays so the selected pill doesn't kiss the bar edges.
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(
-                    horizontal = AppSpacing.s1,
-                    vertical = AppSpacing.s1,
+                    horizontal = AppSpacing.s0,
+                    vertical   = AppSpacing.s1,
                 ),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
@@ -163,15 +172,16 @@ private fun RegularTab(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val tint = if (isSelected) AppAccent.primary     else AppColors.TextPrimary
-    val bg   = if (isSelected) AppAccent.soft else Color.Transparent
+    val tint = if (isSelected) AppAccent.primary  else AppColors.TextPrimary
+    val bg   = if (isSelected) AppAccent.soft     else Color.Transparent
 
-    // Icon-only cell. Whole cell is the tap target (Box with weight(1f)); the
-    // visible chip is a 24dp icon with coralSoft rounded-rect background when
-    // selected. Title survives for contentDescription / TalkBack only.
+    // Vertical icon-over-label cell. When selected, both the icon and
+    // label are wrapped in a coral-soft rounded-rectangle pill so the
+    // tab reads as a single highlighted chip. Inactive tabs render flat
+    // — same icon + label, no background, primary-text colour.
     //
-    // `indication = null` suppresses the default rectangular ripple — the
-    // only affordance is the coralSoft chip swap on selection.
+    // `indication = null` suppresses the default rectangular ripple —
+    // the only affordance is the coral-soft chip swap on selection.
     val interactionSource = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
@@ -182,19 +192,43 @@ private fun RegularTab(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = item.icon,
-            contentDescription = item.title,
-            tint = tint,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            // Horizontal tightened from s3 → s2 so the selected pill
+            // hugs the icon + label more closely; gives long-ish
+            // labels like "Settings" / "Notebook" enough room without
+            // stealing too much from neighbours. Vertical kept at s2
+            // so the pill keeps its comfortable top/bottom breathing
+            // room.
             modifier = Modifier
                 .clip(RoundedCornerShape(AppRadius.md))
                 .background(bg)
                 .padding(
                     horizontal = AppSpacing.s2,
-                    vertical = AppSpacing.s2,
-                )
-                .size(24.dp),
-        )
+                    vertical   = AppSpacing.s2,
+                ),
+        ) {
+            Icon(
+                imageVector = item.icon,
+                contentDescription = item.title,
+                tint = tint,
+                modifier = Modifier.size(20.dp),
+            )
+            androidx.compose.material3.Text(
+                text  = item.title,
+                style = if (isSelected) {
+                    AppTypography.Tag.copy(
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    )
+                } else {
+                    AppTypography.Tag.copy(
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
+                    )
+                },
+                color = tint,
+            )
+        }
     }
 }
 
@@ -206,8 +240,15 @@ private fun BrandTab(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val diameter = 56.dp
-    val lift = 16.dp
+    // Outer canvas-coloured ring sits OUTSIDE the coral disc so the
+    // button reads as cleanly punched out of the cream nav bar / page
+    // canvas. Without it the coral edge can blur into the cream
+    // surface where they touch. Total visible diameter = inner +
+    // 2 × ring.
+    val innerDiameter = 56.dp
+    val ringWidth     = 4.dp
+    val outerDiameter = innerDiameter + ringWidth * 2
+    val lift          = 16.dp
 
     // Coral → CoralDeep vertical gradient: lighter at top, deeper at bottom —
     // reads as a subtle 3D lift under ambient light.
@@ -219,7 +260,7 @@ private fun BrandTab(
     val interactionSource = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
-            .height(diameter)
+            .height(outerDiameter)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -227,25 +268,78 @@ private fun BrandTab(
             ),
         contentAlignment = Alignment.Center,
     ) {
+        // Two stacked shadows — outer ring carries the bigger neutral
+        // drop shadow (lifts the whole disc off the cream nav bar);
+        // the inner coral disc gets its own coral-tinted shadow that
+        // reads as a warm glow inside the canvas ring.
+        //
+        // Default Compose shadow uses the M3 ambient/spot colours which
+        // are nearly invisible on the cream surface, so we override
+        // both with explicit dark + warm tints.
         Box(
             modifier = Modifier
                 .offset(y = -lift)
-                .size(diameter)
-                .shadow(
-                    elevation = 12.dp,
-                    shape = CircleShape,
-                    ambientColor = AppAccent.primary,
-                    spotColor = AppAccent.primary,
-                )
-                .background(coralGradient, CircleShape),
+                .size(outerDiameter)
+                // Layered drop shadow — a wider, lower-alpha ambient
+                // layer with a small downward offset (suggests light
+                // from above) plus a tighter contact halo right at
+                // the disc edge. Both use radial gradients with the
+                // colour fully concentrated at the disc edge then
+                // fading to transparent, so the falloff reads as a
+                // real shadow with penumbra rather than a solid ring.
+                .drawBehind {
+                    val cx        = size.width / 2f
+                    val cy        = size.height / 2f
+                    val r         = size.width / 2f
+
+                    // Ambient — wider, softer, offset down 3dp.
+                    val ambientR    = r + 8.dp.toPx()
+                    val ambientStop = r / ambientR
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colorStops = arrayOf(
+                                ambientStop to Color.Black.copy(alpha = 0.06f),
+                                1f          to Color.Transparent,
+                            ),
+                            center = Offset(cx, cy + 3.dp.toPx()),
+                            radius = ambientR,
+                        ),
+                        radius = ambientR,
+                        center = Offset(cx, cy + 3.dp.toPx()),
+                    )
+
+                    // Contact — tighter, darker, smaller offset.
+                    val contactR    = r + 3.dp.toPx()
+                    val contactStop = r / contactR
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colorStops = arrayOf(
+                                contactStop to Color.Black.copy(alpha = 0.14f),
+                                1f          to Color.Transparent,
+                            ),
+                            center = Offset(cx, cy + 1.dp.toPx()),
+                            radius = contactR,
+                        ),
+                        radius = contactR,
+                        center = Offset(cx, cy + 1.dp.toPx()),
+                    )
+                }
+                .background(AppColors.Canvas, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector = item.icon,
-                contentDescription = "Releaf",
-                tint = AppColors.TextOnAccent,
-                modifier = Modifier.size(24.dp),
-            )
+            Box(
+                modifier = Modifier
+                    .size(innerDiameter)
+                    .background(coralGradient, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = item.icon,
+                    contentDescription = "Releaf",
+                    tint = AppColors.TextOnAccent,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
         }
     }
 }

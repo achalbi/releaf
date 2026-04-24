@@ -46,6 +46,12 @@ class PageRepository(
         return pageDao.searchAllActive(match)
     }
 
+    /** Global FTS search with notebook/chapter labels for UI context. */
+    fun searchAllWithContext(rawQuery: String): Flow<List<PageSearchHit>> {
+        val match = FtsQuery.build(rawQuery) ?: return flowOf(emptyList())
+        return pageDao.searchAllActiveWithContext(match)
+    }
+
     /** Same as [searchAll] but scoped to a single notebook. */
     fun searchInNotebook(notebookId: String, rawQuery: String): Flow<List<PageEntity>> {
         val match = FtsQuery.build(rawQuery) ?: return flowOf(emptyList())

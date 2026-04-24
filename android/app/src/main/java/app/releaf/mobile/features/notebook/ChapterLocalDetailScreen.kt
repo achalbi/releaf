@@ -130,7 +130,6 @@ fun ChapterLocalDetailScreen(
             ScreenHeader(
                 eyebrow = "Notebook",
                 title = "Your notebooks",
-                avatarInitial = "A",
                 // Match the Notebook tab + Notepad screen rhythm.
                 topPadding = AppSpacing.s3,
             )

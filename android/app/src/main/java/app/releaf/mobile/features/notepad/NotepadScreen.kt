@@ -2,7 +2,7 @@
  * NotepadScreen.kt
  *
  * Top-level Notepad tab. Mirrors the notebook/chapter/page surfaces visually
- * — eyebrow + serif title + avatar header, then date-grouped
+ * — eyebrow + serif title header, then date-grouped
  * [CollapsibleCard]s whose bodies hold entry rows (green Releaf leaf
  * mark, title + relative timestamp top-right, and attribute pills that
  * surface which media the entry carries).
@@ -39,6 +39,7 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.DropdownMenu
@@ -86,6 +87,7 @@ import app.releaf.mobile.ui.components.DeleteConfirmationDialog
 import app.releaf.mobile.ui.components.HairlineDivider
 import app.releaf.mobile.ui.components.MetaPill
 import app.releaf.mobile.ui.components.ReleafLogo
+import app.releaf.mobile.ui.components.RoundIconButton
 import app.releaf.mobile.ui.components.relativeTimeAgo
 import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppColors
@@ -137,7 +139,6 @@ fun NotepadScreen(
                 .padding(innerPadding),
         ) {
             NotepadHeader(
-                avatarInitial = "A",
                 onOpenSettings = onOpenSettings,
                 onSignOut = onSignOut,
             )
@@ -202,11 +203,10 @@ fun NotepadScreen(
 /* ---------- header ---------- */
 
 // Notepad screen uses its own header instead of the shared `ScreenHeader` so
-// the title sits flush with the top of the content area and the avatar can
-// anchor a Settings / Sign out dropdown.
+// the title sits flush with the top of the content area and the settings menu
+// stays local to this surface.
 @Composable
 private fun NotepadHeader(
-    avatarInitial: String,
     onOpenSettings: () -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -241,21 +241,11 @@ private fun NotepadHeader(
             )
         }
         Box {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(AppAccent.soft)
-                    .border(1.dp, AppAccent.border, CircleShape)
-                    .clickable { menuOpen = true },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = avatarInitial.take(1).uppercase(),
-                    style = AppTypography.Button,
-                    color = AppAccent.deep,
-                )
-            }
+            RoundIconButton(
+                icon = Icons.Filled.MoreVert,
+                contentDescription = "More options",
+                onClick = { menuOpen = true },
+            )
             DropdownMenu(
                 expanded = menuOpen,
                 onDismissRequest = { menuOpen = false },

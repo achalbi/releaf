@@ -24,16 +24,27 @@ public enum ThemeMode: String, CaseIterable, Codable, Sendable {
     case dark
 }
 
+/// Which visual treatment the notebook/chapter/page surfaces use.
+/// `classic` keeps the current list-card UI; `variant1` swaps in the
+/// editorial hero-card Figma design.
+public enum NotebookListVariant: String, CaseIterable, Codable, Sendable {
+    case classic
+    case variant1
+}
+
 public struct UiPreferencesState: Equatable, Sendable {
     public let themeMode: ThemeMode
     public let paletteID: AccentPaletteID
+    public let notebookVariant: NotebookListVariant
 
     public init(
         themeMode: ThemeMode = .system,
-        paletteID: AccentPaletteID = .coral
+        paletteID: AccentPaletteID = .coral,
+        notebookVariant: NotebookListVariant = .classic
     ) {
         self.themeMode = themeMode
         self.paletteID = paletteID
+        self.notebookVariant = notebookVariant
     }
 }
 
@@ -45,8 +56,9 @@ public final class UiPreferences: ObservableObject {
     private let defaults: UserDefaults
 
     private enum Keys {
-        static let themeMode = "releaf.ui.themeMode"
-        static let palette   = "releaf.ui.paletteId"
+        static let themeMode       = "releaf.ui.themeMode"
+        static let palette         = "releaf.ui.paletteId"
+        static let notebookVariant = "releaf.ui.notebookVariant"
     }
 
     public init(defaults: UserDefaults = .standard) {
@@ -55,16 +67,35 @@ public final class UiPreferences: ObservableObject {
             .flatMap(ThemeMode.init(rawValue:)) ?? .system
         let palette = defaults.string(forKey: Keys.palette)
             .flatMap(AccentPaletteID.init(rawValue:)) ?? .coral
-        self.state = UiPreferencesState(themeMode: mode, paletteID: palette)
+        let variant = defaults.string(forKey: Keys.notebookVariant)
+            .flatMap(NotebookListVariant.init(rawValue:)) ?? .classic
+        self.state = UiPreferencesState(themeMode: mode, paletteID: palette, notebookVariant: variant)
     }
 
     public func setThemeMode(_ mode: ThemeMode) {
         defaults.set(mode.rawValue, forKey: Keys.themeMode)
-        state = UiPreferencesState(themeMode: mode, paletteID: state.paletteID)
+        state = UiPreferencesState(
+            themeMode: mode,
+            paletteID: state.paletteID,
+            notebookVariant: state.notebookVariant
+        )
     }
 
     public func setPalette(_ id: AccentPaletteID) {
         defaults.set(id.rawValue, forKey: Keys.palette)
-        state = UiPreferencesState(themeMode: state.themeMode, paletteID: id)
+        state = UiPreferencesState(
+            themeMode: state.themeMode,
+            paletteID: id,
+            notebookVariant: state.notebookVariant
+        )
+    }
+
+    public func setNotebookVariant(_ variant: NotebookListVariant) {
+        defaults.set(variant.rawValue, forKey: Keys.notebookVariant)
+        state = UiPreferencesState(
+            themeMode: state.themeMode,
+            paletteID: state.paletteID,
+            notebookVariant: variant
+        )
     }
 }
