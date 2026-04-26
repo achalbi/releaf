@@ -28,6 +28,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Eco
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -45,7 +47,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
@@ -64,6 +65,7 @@ import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 @Composable
 fun NotebookDetailScreenVariant1(
@@ -152,7 +154,7 @@ private fun Loaded(
             }
 
             if (sorted.isEmpty()) {
-                Text("No chapters yet.", style = AppTypography.Body, color = AppColors.TextSecondary)
+                NoChaptersCard(onAdd = onNewChapter)
             } else {
                 sorted.forEach { chapter ->
                     ChapterRow(
@@ -162,9 +164,8 @@ private fun Loaded(
                         onClick = { onChapterTap(chapter) },
                     )
                 }
+                NewChapterButton(palette = palette, onClick = onNewChapter)
             }
-
-            NewChapterButton(palette = palette, onClick = onNewChapter)
             Spacer(Modifier.height(AppSpacing.s10))
         }
     }
@@ -235,7 +236,7 @@ private fun Hero(
                 text = notebook.title,
                 color = palette.onBackground,
                 fontSize = 42.sp,
-                fontWeight = FontWeight.Bold,
+                fontWeight = LocalFontWeight.current,
                 fontFamily = FontFamily.Serif,
             )
             Text(
@@ -272,7 +273,7 @@ private fun StatBlock(label: String, value: String, palette: ShelfPalette) {
             text = value,
             color = palette.onBackground,
             fontSize = 22.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = LocalFontWeight.current,
             fontFamily = FontFamily.Serif,
         )
     }
@@ -318,7 +319,7 @@ private fun ChapterRow(
                 text = "%02d".format(chapter.position),
                 color = numberColor,
                 fontSize = 38.sp,
-                fontWeight = FontWeight.Bold,
+                fontWeight = LocalFontWeight.current,
                 fontFamily = FontFamily.Serif,
                 modifier = Modifier.width(64.dp),
             )
@@ -335,6 +336,77 @@ private fun ChapterRow(
                 ) {
                     Text("now", style = AppTypography.Tag, color = AppColors.GreenText)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Empty-state card surfaced when a notebook has no chapters yet.
+ * Mirrors the iOS `NoChaptersCard` — leaf glyph + warmer copy +
+ * a primary CTA pill that opens the existing create-chapter
+ * dialog. Saves the user from hunting for the small `+` row.
+ */
+@Composable
+private fun NoChaptersCard(onAdd: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppRadius.lg))
+            .background(AppColors.CardSolid)
+            .border(1.dp, AppColors.BorderDefault, RoundedCornerShape(AppRadius.lg))
+            .padding(AppSpacing.s4),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(AppRadius.md))
+                .background(AppColors.GreenSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.Eco,
+                contentDescription = null,
+                tint               = AppColors.ThemeGreenDeep,
+                modifier           = Modifier.size(22.dp),
+            )
+        }
+
+        Text(
+            text  = "No chapters yet",
+            style = AppTypography.SectionTitleLight,
+            color = AppColors.TextPrimary,
+        )
+
+        Text(
+            text  = "Chapters group pages inside a notebook — \"week 1\", \"recipes\", \"morning walks\".",
+            style = AppTypography.Body,
+            color = AppColors.TextSecondary,
+        )
+
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(AppRadius.pill))
+                .background(AppAccent.primary)
+                .clickable { onAdd() }
+                .padding(horizontal = AppSpacing.s4, vertical = AppSpacing.s2),
+        ) {
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+            ) {
+                Icon(
+                    imageVector        = Icons.Filled.Add,
+                    contentDescription = null,
+                    tint               = AppColors.OnAccent,
+                    modifier           = Modifier.size(14.dp),
+                )
+                Text(
+                    text  = "New chapter",
+                    style = AppTypography.Button,
+                    color = AppColors.OnAccent,
+                )
             }
         }
     }

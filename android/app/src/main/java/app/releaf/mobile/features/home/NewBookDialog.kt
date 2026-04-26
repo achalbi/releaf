@@ -87,7 +87,7 @@ fun NewBookDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         },
-        title = { Text("New notebook", style = AppTypography.SectionTitle) },
+        title = { Text("New book", style = AppTypography.SectionTitle) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s3)) {
                 LabeledField(label = "Book name") {

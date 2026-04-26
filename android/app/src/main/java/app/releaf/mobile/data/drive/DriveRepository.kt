@@ -16,6 +16,7 @@ import app.releaf.mobile.data.domain.NotebookStatus
 import app.releaf.mobile.data.domain.Page
 import app.releaf.mobile.data.domain.PageCounts
 import app.releaf.mobile.data.domain.PageSummary
+import app.releaf.mobile.data.domain.PageTemplate
 import app.releaf.mobile.data.domain.Photo
 import app.releaf.mobile.data.domain.ScannedDocument
 import app.releaf.mobile.data.domain.TodoItem
@@ -34,7 +35,84 @@ interface DriveRepository {
     suspend fun loadNotebook(id: String): NotebookDetail
     suspend fun loadChapters(notebookId: String): List<Chapter>
     suspend fun loadPage(id: String): Page
+
+    /** Re-parent a page under a different notebook + chapter. When
+     *  [toChapterId] is null the implementation chooses the
+     *  destination's first chapter; the picker uses the explicit
+     *  arg when the user drills in. */
+    suspend fun movePage(pageId: String, toNotebookId: String, toChapterId: String? = null)
+
+    /** All templates available to the user — app-seeded plus
+     *  user-saved. Returned in display order. */
+    suspend fun listPageTemplates(): List<PageTemplate>
+
+    /** Apply a template's pre-filled content onto an existing page.
+     *  Pre-fields prepend / concat onto the page's current content;
+     *  applying never deletes captures. Returns the updated page. */
+    suspend fun applyTemplate(toPageId: String, templateId: String): Page
+
+    /** Soft-delete the page by stamping `archivedAt = now`. Returns
+     *  the updated page so the ViewModel can refresh without a
+     *  re-fetch. Idempotent. */
+    suspend fun archivePage(id: String): Page
+
+    /** Inverse of [archivePage] — clears `archivedAt`. Idempotent. */
+    suspend fun restorePage(id: String): Page
+
+    /** Make a copy of [id] in the same chapter, with a new id and a
+     *  suffixed title ("X (copy)"). Notes / todos / captures carry
+     *  over by value; the duplicate has its own ids on every nested
+     *  row so edits don't leak across copies. */
+    suspend fun duplicatePage(id: String): Page
+
+    /** Archived pages across every notebook. Used by the Notebook
+     *  list's "Archived" overflow item to surface a flat picker.
+     *  Each row carries notebook + chapter context for the
+     *  breadcrumb line. */
+    suspend fun listArchivedPages(): List<ArchivedPage>
+
+    /** Rename a notebook. Returns the updated notebook so callers
+     *  can refresh state without a re-fetch. */
+    suspend fun renameNotebook(id: String, title: String): Notebook
+
+    /** Create a new empty chapter under [notebookId]. Position is
+     *  end-of-list. Returns the new chapter so the caller can
+     *  navigate or scroll to it. */
+    suspend fun createChapter(notebookId: String, title: String): Chapter
+
+    /** Soft-delete the notebook. Idempotent. */
+    suspend fun archiveNotebook(id: String): Notebook
+
+    /** Inverse of [archiveNotebook] — clears archivedAt. Idempotent. */
+    suspend fun restoreNotebook(id: String): Notebook
+
+    /** Soft-delete the chapter. Idempotent. */
+    suspend fun archiveChapter(id: String): Chapter
+
+    /** Inverse of [archiveChapter] — clears archivedAt. Idempotent. */
+    suspend fun restoreChapter(id: String): Chapter
+
+    /** Update a chapter's title. Returns the updated chapter.
+     *  Mirrors `renameChapter` on iOS so the title-only edit path
+     *  has a dedicated entry point on both platforms. */
+    suspend fun renameChapter(id: String, title: String): Chapter
+
+    /** Replace a page's tags with [tags]. Order is preserved
+     *  exactly; duplicates are de-duped case-insensitively at the
+     *  call site, not here. */
+    suspend fun setPageTags(pageId: String, tags: List<String>): Page
 }
+
+/** One entry in the cross-notebook archive picker. */
+data class ArchivedPage(
+    val id: String,
+    val title: String,
+    val notebookId: String,
+    val notebookTitle: String,
+    val chapterId: String,
+    val chapterTitle: String,
+    val archivedAt: java.time.Instant,
+)
 
 /** In-memory fake. Use for previews, tests, and the skeleton signed-in state. */
 class FakeDriveRepository(
@@ -64,7 +142,259 @@ class FakeDriveRepository(
         return pagesById[id] ?: throw DriveError.NotFound
     }
 
+    override suspend fun movePage(pageId: String, toNotebookId: String, toChapterId: String?) {
+        // Stub: simulates a write round-trip but doesn't mutate the
+        // seeded pages map (would require it be a `var`). Real impl
+        // will update the page row's `chapter_id` to the resolved
+        // chapter (explicit `toChapterId` if non-null; else the
+        // destination notebook's first chapter) and rewrite the
+        // manifest entry. Tracked under TODO in the ViewModel call site.
+        delay(200)
+        pagesById[pageId] ?: throw DriveError.NotFound
+        notebooks.firstOrNull { it.id == toNotebookId } ?: throw DriveError.NotFound
+        if (toChapterId != null) {
+            chaptersByNotebook[toNotebookId].orEmpty()
+                .firstOrNull { it.id == toChapterId }
+                ?: throw DriveError.NotFound
+        }
+    }
+
+    override suspend fun archivePage(id: String): Page {
+        delay(150)
+        val page = pagesById[id] ?: throw DriveError.NotFound
+        if (page.archivedAt != null) return page
+        return page.copy(updatedAt = Instant.now(), archivedAt = Instant.now())
+    }
+
+    override suspend fun restorePage(id: String): Page {
+        delay(150)
+        val page = pagesById[id] ?: throw DriveError.NotFound
+        if (page.archivedAt == null) return page
+        return page.copy(updatedAt = Instant.now(), archivedAt = null)
+    }
+
+    override suspend fun renameNotebook(id: String, title: String): Notebook {
+        delay(150)
+        val nb = notebooks.firstOrNull { it.id == id } ?: throw DriveError.NotFound
+        return nb.copy(title = title, updatedAt = Instant.now())
+    }
+
+    override suspend fun createChapter(notebookId: String, title: String): Chapter {
+        delay(150)
+        notebooks.firstOrNull { it.id == notebookId } ?: throw DriveError.NotFound
+        val existing = chaptersByNotebook[notebookId].orEmpty()
+        val nextPosition = (existing.maxOfOrNull { it.position } ?: 0) + 1
+        val resolved = title.trim().ifEmpty { "Untitled chapter" }
+        return Chapter(
+            id         = "ch-${java.util.UUID.randomUUID().toString().take(8)}",
+            notebookId = notebookId,
+            title      = resolved,
+            position   = nextPosition,
+            updatedAt  = Instant.now(),
+        )
+    }
+
+    override suspend fun archiveNotebook(id: String): Notebook {
+        delay(150)
+        val nb = notebooks.firstOrNull { it.id == id } ?: throw DriveError.NotFound
+        if (nb.archivedAt != null) return nb
+        return nb.copy(
+            archivedAt = Instant.now(),
+            status     = NotebookStatus.Archived,
+            updatedAt  = Instant.now(),
+        )
+    }
+
+    override suspend fun archiveChapter(id: String): Chapter {
+        delay(150)
+        for ((_, chapters) in chaptersByNotebook) {
+            val chapter = chapters.firstOrNull { it.id == id } ?: continue
+            if (chapter.archivedAt != null) return chapter
+            return chapter.copy(
+                archivedAt = Instant.now(),
+                updatedAt  = Instant.now(),
+            )
+        }
+        throw DriveError.NotFound
+    }
+
+    override suspend fun restoreNotebook(id: String): Notebook {
+        delay(150)
+        val nb = notebooks.firstOrNull { it.id == id } ?: throw DriveError.NotFound
+        if (nb.archivedAt == null) return nb
+        return nb.copy(
+            archivedAt = null,
+            status     = NotebookStatus.Active,
+            updatedAt  = Instant.now(),
+        )
+    }
+
+    override suspend fun setPageTags(pageId: String, tags: List<String>): Page {
+        delay(150)
+        val page = pagesById[pageId] ?: throw DriveError.NotFound
+        return page.copy(updatedAt = Instant.now(), tags = tags)
+    }
+
+    override suspend fun restoreChapter(id: String): Chapter {
+        delay(150)
+        for ((_, chapters) in chaptersByNotebook) {
+            val chapter = chapters.firstOrNull { it.id == id } ?: continue
+            if (chapter.archivedAt == null) return chapter
+            return chapter.copy(archivedAt = null, updatedAt = Instant.now())
+        }
+        throw DriveError.NotFound
+    }
+
+    override suspend fun renameChapter(id: String, title: String): Chapter {
+        delay(150)
+        val resolved = title.trim().ifEmpty { "Untitled chapter" }
+        for ((_, chapters) in chaptersByNotebook) {
+            val chapter = chapters.firstOrNull { it.id == id } ?: continue
+            return chapter.copy(title = resolved, updatedAt = Instant.now())
+        }
+        throw DriveError.NotFound
+    }
+
+    override suspend fun listArchivedPages(): List<ArchivedPage> {
+        delay(150)
+        // Build a chapterId → (notebookId, chapterTitle) lookup so
+        // we can fan archived-page rows out with full breadcrumb
+        // context in one pass.
+        val chapterIndex: Map<String, Pair<String, String>> =
+            chaptersByNotebook.flatMap { it.value }
+                .associate { ch -> ch.id to (ch.notebookId to ch.title) }
+        val notebookTitle: Map<String, String> =
+            notebooks.associate { it.id to it.title }
+        return pagesById.values
+            .mapNotNull { page ->
+                val archivedAt = page.archivedAt ?: return@mapNotNull null
+                val (nbId, chTitle) = chapterIndex[page.chapterId] ?: (page.notebookId to "")
+                ArchivedPage(
+                    id            = page.id,
+                    title         = page.title,
+                    notebookId    = page.notebookId,
+                    notebookTitle = notebookTitle[nbId].orEmpty(),
+                    chapterId     = page.chapterId,
+                    chapterTitle  = chTitle,
+                    archivedAt    = archivedAt,
+                )
+            }
+            .sortedByDescending { it.archivedAt }
+    }
+
+    override suspend fun duplicatePage(id: String): Page {
+        delay(200)
+        val page = pagesById[id] ?: throw DriveError.NotFound
+        val newId = "dup-${java.util.UUID.randomUUID().toString().take(8)}"
+        return page.copy(
+            id         = newId,
+            title      = "${page.title} (copy)",
+            updatedAt  = Instant.now(),
+            archivedAt = null,
+            notes      = page.notes.map { it.copy(id = "$newId-n-${it.id}") },
+            photos     = page.photos.map { it.copy(id = "$newId-ph-${it.id}") },
+            voiceNotes = page.voiceNotes.map { it.copy(id = "$newId-v-${it.id}") },
+            todoItems  = page.todoItems.map { it.copy(id = "$newId-t-${it.id}") },
+            scannedDocuments = page.scannedDocuments.map { it.copy(id = "$newId-s-${it.id}") },
+            contacts   = page.contacts.map { it.copy(id = "$newId-c-${it.id}") },
+            locations  = page.locations.map { it.copy(id = "$newId-l-${it.id}") },
+        )
+    }
+
+    override suspend fun listPageTemplates(): List<PageTemplate> {
+        delay(100)
+        return SEEDED_TEMPLATES
+    }
+
+    override suspend fun applyTemplate(toPageId: String, templateId: String): Page {
+        // Stub: simulates a write round-trip and returns a Page with
+        // the template's pre-fills concatenated onto the existing
+        // content. Doesn't persist to the seeded map; real impl will
+        // write through.
+        delay(200)
+        val page = pagesById[toPageId] ?: throw DriveError.NotFound
+        val template = SEEDED_TEMPLATES.firstOrNull { it.id == templateId }
+            ?: throw DriveError.NotFound
+        val newNotes = template.preNotes.mapIndexed { idx, body ->
+            Note(id = "tmpl-n-${template.id}-$idx", body = body)
+        }
+        val basePosition = (page.todoItems.maxOfOrNull { it.position } ?: -1) + 1
+        val newTodos = template.preTodos.mapIndexed { idx, body ->
+            TodoItem(
+                id       = "tmpl-t-${template.id}-$idx",
+                body     = body,
+                done     = false,
+                position = basePosition + idx,
+            )
+        }
+        return page.copy(
+            updatedAt  = Instant.now(),
+            notes      = page.notes + newNotes,
+            todoItems  = page.todoItems + newTodos,
+        )
+    }
+
     companion object {
+        /** Seeded set of page templates surfaced by [listPageTemplates].
+         *  Hand-curated to cover the most common shapes the variant-1
+         *  "what arrived?" surface invites. Order is the display order. */
+        val SEEDED_TEMPLATES: List<PageTemplate> = listOf(
+            PageTemplate(
+                id          = "tmpl-walk",
+                title       = "Daily walk",
+                description = "Three to-dos for a walk and a place to drop a thought.",
+                iconKey     = "plant",
+                preNotes    = listOf("What surprised me on the walk today —"),
+                preTodos    = listOf(
+                    "Stretch before heading out",
+                    "Photograph one new thing",
+                    "Stop somewhere I haven't before",
+                ),
+            ),
+            PageTemplate(
+                id          = "tmpl-recipe",
+                title       = "Recipe",
+                description = "Ingredients on the left, steps on the right.",
+                iconKey     = "coffee",
+                preNotes    = listOf(
+                    "INGREDIENTS\n— \n— \n— ",
+                    "METHOD\n1. \n2. \n3. ",
+                    "NOTES\nWhat I'd change next time —",
+                ),
+            ),
+            PageTemplate(
+                id          = "tmpl-meeting",
+                title       = "Meeting notes",
+                description = "Attendees, agenda, decisions, follow-ups.",
+                iconKey     = "chart",
+                preNotes    = listOf(
+                    "ATTENDEES\n— ",
+                    "AGENDA\n1. \n2. ",
+                    "DECISIONS\n— ",
+                    "FOLLOW-UPS\n— ",
+                ),
+                preTodos    = listOf("Send minutes within 24 hours"),
+            ),
+            PageTemplate(
+                id          = "tmpl-field",
+                title       = "Field journal",
+                description = "Date, weather, observations, sketch.",
+                iconKey     = "sun",
+                preNotes    = listOf(
+                    "WEATHER\n",
+                    "OBSERVATIONS\n— ",
+                    "SKETCH\n(snap a photo or doodle)",
+                ),
+            ),
+            PageTemplate(
+                id          = "tmpl-morning",
+                title       = "Morning pages",
+                description = "Three blank pages, no rules, no editing.",
+                iconKey     = "book",
+                preNotes    = listOf("", "", ""),
+            ),
+        )
+
         val SEEDED_NOTEBOOKS = listOf(
             Notebook(
                 id = "nb-1", title = "Plant log 2026",
@@ -250,10 +580,13 @@ class FakeDriveRepository(
                             "for a breakthrough and I should stop. Three — the point was rest."),
                 ),
             ),
-            // pg-6 — empty morning page
+            // pg-6 — empty morning page; pre-seeded as archived so
+            // the cross-notebook archive picker has at least one row
+            // to render against the FakeDriveRepository state.
             Page(
                 id = "pg-6", notebookId = "nb-2", chapterId = "ch-3",
                 title = "Sunday", capturedOn = "Apr 19, 2026",
+                archivedAt = Instant.now().minusSeconds(3 * 24 * 3600),
             ),
             // pg-7 — a recipe
             Page(

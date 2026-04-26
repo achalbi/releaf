@@ -89,7 +89,13 @@ data class Chapter(
     val position: Int = 0,
     val updatedAt: Instant = Instant.now(),
     val pages: List<PageSummary> = emptyList(),
-)
+    /** Soft-delete timestamp. Non-null means the chapter is in
+     *  archive — the list filters it out by default; the archive
+     *  view surfaces it with a Restore affordance. */
+    val archivedAt: Instant? = null,
+) {
+    val isArchived: Boolean get() = archivedAt != null
+}
 
 data class PageSummary(
     val id: String,
@@ -132,7 +138,13 @@ data class Page(
     val locations: List<LocationPin> = emptyList(),
     /** Free-form tags shown as pills on variant-1 page views. */
     val tags: List<String> = emptyList(),
+    /** Soft-delete timestamp. Non-null means the page is in archive
+     *  — it still renders, but the page detail surfaces an
+     *  ArchivedBanner with a Restore action. */
+    val archivedAt: Instant? = null,
 ) {
+    val isArchived: Boolean get() = archivedAt != null
+
     val counts: PageCounts get() = PageCounts(
         photos = photos.size,
         voiceNotes = voiceNotes.size,
@@ -198,3 +210,38 @@ data class LocationPin(
     val capturedAt: Instant = Instant.now(),
     val notes: String? = null,
 )
+
+/**
+ * A reusable page seed. Carries a small block of content that
+ * `applyTemplate(toPageId, templateId)` writes onto an existing
+ * page. Templates are user-curated *and* app-seeded; the seed set
+ * in `FakeDriveRepository` covers the most common shapes
+ * (daily walk, recipe, meeting notes, field journal, morning pages).
+ *
+ * `pre*` fields are content that the apply step prepends/concats
+ * to whatever the page already contains. Empty lists mean
+ * "leave that section alone" — applying a template never deletes
+ * existing captures.
+ */
+data class PageTemplate(
+    val id: String,
+    val title: String,
+    val description: String,
+    /** Lookup key into ShelfTheme.iconSystemName so the picker row
+     *  can render a small icon matching the template's shape. */
+    val iconKey: String? = null,
+    /** Pre-filled note bodies — each becomes one Note when applied. */
+    val preNotes: List<String> = emptyList(),
+    /** Pre-filled todo bodies — each becomes one TodoItem when applied. */
+    val preTodos: List<String> = emptyList(),
+) {
+    /** Lightweight summary of what the template touches. */
+    val summary: String
+        get() {
+            val parts = buildList {
+                if (preNotes.isNotEmpty()) add("${preNotes.size} note${if (preNotes.size == 1) "" else "s"}")
+                if (preTodos.isNotEmpty()) add("${preTodos.size} to-do${if (preTodos.size == 1) "" else "s"}")
+            }
+            return if (parts.isEmpty()) "blank scaffold" else parts.joinToString(" · ")
+        }
+}

@@ -14,6 +14,19 @@ import PackageDescription
 let package = Package(
     name: "Releaf",
     platforms: [
+        // iOS-only. The Features layer uses UIKit (UITextView via
+        // UIViewRepresentable for the rich-text editor), VisionKit
+        // (document scanner), CallKit (call attribution),
+        // AVAudioSession (voice memo recording), and SwiftUI
+        // modifiers like `fullScreenCover` / `.toolbar(_, for:
+        // .navigationBar)` that don't exist on macOS. Adding macOS
+        // support here would mean stubbing or redesigning all of
+        // those — much bigger than just declaring `.macOS(...)`.
+        //
+        // SwiftUI Previews still work on a Mac: they run in an iOS
+        // Simulator, so set Xcode's destination to an iOS Simulator
+        // (e.g. "iPhone 16") rather than "My Mac" before building or
+        // previewing.
         .iOS(.v16),
     ],
     products: [
@@ -57,8 +70,15 @@ let package = Package(
             path: "Tests/ReleafDataTests",
             resources: [
                 // Shared canonical-JSON fixture lives at repo root
-                // so both platforms' tests feed from the same file.
-                .copy("../../../design-system/fixtures/canonical-json-fixture.json"),
+                // (`design-system/fixtures/canonical-json-fixture.json`)
+                // so both platforms' tests feed from the same bytes.
+                // SwiftPM rejects resource paths that escape the package
+                // dir, so we reference it via a symlink at
+                // `Resources/canonical-json-fixture.json` that points
+                // back at the canonical file. Don't replace the symlink
+                // with a real copy — Android reads the same source and
+                // keeping a single source of truth prevents drift.
+                .copy("Resources/canonical-json-fixture.json"),
             ]
         ),
     ]

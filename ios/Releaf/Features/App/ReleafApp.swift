@@ -38,10 +38,12 @@ public struct ReleafApp: App {
     public var body: some Scene {
         WindowGroup {
             let palette = AccentPalettes.forID(uiPrefs.state.paletteID)
+            let weight  = uiPrefs.state.fontWeight.fontWeight
             RootView()
                 .environmentObject(authStore)
                 .environmentObject(uiPrefs)
                 .accentPalette(palette)
+                .appFontWeight(weight)
                 .tint(palette.primary)
         }
     }

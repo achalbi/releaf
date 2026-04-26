@@ -40,7 +40,7 @@ struct NotesEditorSheet: View {
                     RichTextEditor(
                         markdown:        $notes,
                         controller:      controller,
-                        tintColor:       UIColor(AppColors.coral),
+                        tintColor:       AppColors.coral,
                         isScrollEnabled: true
                     )
                     .padding(.horizontal, AppSpacing.s4)
@@ -63,9 +63,14 @@ struct NotesEditorSheet: View {
                         // binding catches up. Writing to `notes`
                         // explicitly here guarantees the Overview
                         // preview shows the latest body on return.
+                        // The serialize-from-UITextView path is iOS-only;
+                        // on macOS the `notes` binding already reflects
+                        // the plain TextEditor content.
+                        #if os(iOS)
                         if let tv = controller.textView {
                             notes = MarkdownBridge.serialize(tv.attributedText)
                         }
+                        #endif
                         onDismiss()
                     }
                     .foregroundStyle(AppColors.coral)

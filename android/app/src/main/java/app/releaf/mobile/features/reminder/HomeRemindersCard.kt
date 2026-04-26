@@ -47,7 +47,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ReleafApp
 import app.releaf.mobile.auth.AuthState
@@ -64,6 +63,7 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 @Composable
 fun HomeRemindersCard(onOpenReminders: () -> Unit) {
@@ -153,14 +153,14 @@ fun HomeRemindersCard(onOpenReminders: () -> Unit) {
                 if (next != null) {
                     Text(
                         text  = countdownLabel(next.remindAt - now),
-                        style = AppTypography.Tag.copy(fontWeight = FontWeight.Normal),
+                        style = AppTypography.Tag.copy(fontWeight = LocalFontWeight.current),
                         color = AppAccent.primary,
                     )
                 }
             }
             Text(
                 text  = headline(firedToday = firedToday, total = upcoming.size),
-                style = AppTypography.SectionTitle.copy(fontWeight = FontWeight.Medium),
+                style = AppTypography.SectionTitle.copy(fontWeight = LocalFontWeight.current),
                 color = AppColors.TextPrimary,
             )
             Spacer(Modifier.height(4.dp))
@@ -193,13 +193,13 @@ private fun StatInline(value: Int, label: String, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             text  = value.toString(),
-            style = AppTypography.Meta.copy(fontWeight = FontWeight.Medium),
+            style = AppTypography.Meta.copy(fontWeight = LocalFontWeight.current),
             color = color,
         )
         Spacer(Modifier.width(3.dp))
         Text(
             text  = label,
-            style = AppTypography.Tag.copy(fontWeight = FontWeight.Normal),
+            style = AppTypography.Tag.copy(fontWeight = LocalFontWeight.current),
             color = color,
         )
     }
@@ -233,7 +233,7 @@ private fun NextLine(next: ReminderEntity?) {
         )
         Text(
             text  = next.title,
-            style = AppTypography.Meta.copy(fontWeight = FontWeight.Medium),
+            style = AppTypography.Meta.copy(fontWeight = LocalFontWeight.current),
             color = AppColors.TextPrimary,
             maxLines = 1,
         )

@@ -9,6 +9,7 @@ import ReleafData
 
 public struct RootView: View {
     @EnvironmentObject private var authStore: AuthStore
+    @EnvironmentObject private var uiPrefs: UiPreferences
 
     public init() {}
 
@@ -21,7 +22,17 @@ public struct RootView: View {
             case .signingIn:
                 SplashScreen()
             case .signedIn:
-                MainShell()
+                // Onboarding gates the main shell on first launch.
+                // Once dismissed (CTA on the onboarding view), the
+                // flag persists in UiPreferences so subsequent
+                // launches go straight to MainShell.
+                if !uiPrefs.state.hasSeenOnboarding {
+                    OnboardingView(onContinue: {
+                        uiPrefs.markOnboardingSeen()
+                    })
+                } else {
+                    MainShell()
+                }
             }
         }
     }
@@ -50,6 +61,21 @@ public struct TasksRoute: Hashable {
 /// Payload-free: the screen reads the signed-in user from
 /// [AuthStore] and pulls contacts from the aggregator.
 public struct ContactsRoute: Hashable {
+    public init() {}
+}
+
+/// Singleton-style tag for the Call History destination.
+/// Payload-free: the screen reads the signed-in user from
+/// [AuthStore] and observes the local call-history log.
+public struct CallHistoryRoute: Hashable {
+    public init() {}
+}
+
+/// Singleton-style tag for the full Activity Log destination.
+/// Payload-free: the screen reads the signed-in user from
+/// [AuthStore] and reuses [RecentActivityViewModel] with the larger
+/// `FULL_LIMIT` window.
+public struct ActivityRoute: Hashable {
     public init() {}
 }
 

@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -43,6 +44,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,8 +54,12 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.releaf.mobile.ReleafApp
+import app.releaf.mobile.auth.AuthState
+import app.releaf.mobile.data.callhistory.CallHistoryRecord
 import app.releaf.mobile.data.contact.DirectoryContact
 import app.releaf.mobile.data.contact.DirectoryContactSource
+import kotlinx.coroutines.launch
 import app.releaf.mobile.ui.components.ScreenHeader
 import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppColors
@@ -63,6 +70,7 @@ import app.releaf.mobile.ui.theme.AppTypography
 @Composable
 fun ContactsScreen(
     onBack: () -> Unit,
+    onOpenHistory: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ContactsViewModel = viewModel(factory = ContactsViewModel.Factory),
 ) {
@@ -71,8 +79,133 @@ fun ContactsScreen(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted -> viewModel.onPermissionResult(granted) }
     var selectedContact by remember { mutableStateOf<DirectoryContact?>(null) }
+    var phonePicker by remember { mutableStateOf<DirectoryContact?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val releafApp = context.applicationContext as ReleafApp
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
-    Column(modifier = modifier.fillMaxSize()) {
+    // Pending (contact, phone, historyId) parked while the
+    // CALL_PHONE + READ_PHONE_STATE permission sheet is up. The
+    // history row was already written — we just need to pair it
+    // with the observer once READ_PHONE_STATE resolves.
+    var pendingCall by remember {
+        mutableStateOf<Triple<DirectoryContact, String, String>?>(null)
+    }
+
+    // Multi-permission launcher. CALL_PHONE gates ACTION_CALL;
+    // READ_PHONE_STATE gates the TelephonyCallback that captures
+    // duration. Asking together avoids a two-step prompt and lets
+    // the user opt-in to duration tracking on first dial.
+    val callPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) { results ->
+        val (contact, phone, historyId) = pendingCall ?: return@rememberLauncherForActivityResult
+        pendingCall = null
+        val callGranted       = results[android.Manifest.permission.CALL_PHONE] == true
+        val phoneStateGranted = results[android.Manifest.permission.READ_PHONE_STATE] == true
+        if (phoneStateGranted) {
+            releafApp.callObserver.attach(historyId)
+        }
+        val intent = android.content.Intent(
+            if (callGranted) android.content.Intent.ACTION_CALL else android.content.Intent.ACTION_DIAL,
+            android.net.Uri.parse("tel:$phone"),
+        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        val launched = runCatching { context.startActivity(intent) }.isSuccess
+        if (!launched) selectedContact = contact
+    }
+
+    /**
+     * Place a call and record a history row. If both CALL_PHONE
+     * and READ_PHONE_STATE are already granted the dial goes out
+     * immediately and the observer captures duration. Missing
+     * permissions trigger a joint prompt — the call still goes
+     * through (via ACTION_DIAL when CALL_PHONE is denied), just
+     * without duration when READ_PHONE_STATE is denied.
+     */
+    val dialNumber: (DirectoryContact, String) -> Unit = { contact, phone ->
+        val cleaned = telSanitize(phone)
+        if (cleaned.isEmpty()) {
+            selectedContact = contact
+        } else {
+            val userId = (releafApp.authStore.state.value as? AuthState.SignedIn)
+                ?.session?.userId ?: "local"
+            val historySource = when (contact.source) {
+                DirectoryContactSource.App    -> CallHistoryRecord.Source.APP
+                DirectoryContactSource.Device -> CallHistoryRecord.Source.DEVICE
+            }
+            scope.launch {
+                val historyId = releafApp.callHistoryRepository.recordStarted(
+                    userId      = userId,
+                    contactName = contact.name,
+                    phoneNumber = cleaned,
+                    source      = historySource,
+                )
+                val hasCallPerm = androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.CALL_PHONE,
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                val hasPhoneStatePerm = releafApp.callObserver.hasPermission()
+                if (hasCallPerm && hasPhoneStatePerm) {
+                    releafApp.callObserver.attach(historyId)
+                    val intent = android.content.Intent(
+                        android.content.Intent.ACTION_CALL,
+                        android.net.Uri.parse("tel:$cleaned"),
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    val launched = runCatching { context.startActivity(intent) }.isSuccess
+                    if (!launched) selectedContact = contact
+                } else {
+                    pendingCall = Triple(contact, cleaned, historyId)
+                    callPermissionLauncher.launch(
+                        arrayOf(
+                            android.Manifest.permission.CALL_PHONE,
+                            android.Manifest.permission.READ_PHONE_STATE,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    /** Drop search-field focus + hide the IME. Invoked from row
+     *  taps, empty-space taps on the scroll area, and back/action
+     *  buttons so typing a query then tapping elsewhere behaves
+     *  the way a native iOS list does. */
+    val dismissKeyboard = {
+        focusManager.clearFocus()
+        keyboardController?.hide()
+    }
+
+    /**
+     * Row-tap policy:
+     *   - 0 phones → open the detail dialog so email / notes are still reachable.
+     *   - 1 phone  → one tap places the call directly (or asks for
+     *     `CALL_PHONE` on first run, falling back to the dialer on deny).
+     *   - 2+ phones → show the picker dialog so the user chooses
+     *     which number to dial.
+     */
+    val handleContactTap: (DirectoryContact) -> Unit = { contact ->
+        dismissKeyboard()
+        when {
+            contact.phones.size >= 2 -> phonePicker = contact
+            contact.phones.size == 1 -> dialNumber(contact, contact.phones[0])
+            else                     -> selectedContact = contact
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            // Empty-space taps anywhere on the screen drop focus
+            // on the search field and dismiss the IME. `detectTapGestures`
+            // only fires when a child doesn't consume the tap, so
+            // clickable rows/buttons still trigger their own handlers
+            // normally (and they call `dismissKeyboard()` themselves).
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { dismissKeyboard() })
+            },
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -87,6 +220,18 @@ fun ContactsScreen(
                 modifier = Modifier
                     .size(24.dp)
                     .clickable { onBack() },
+            )
+            Spacer(Modifier.weight(1f))
+            Icon(
+                imageVector = Icons.Filled.History,
+                contentDescription = "Call history",
+                tint = AppColors.TextPrimary,
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable {
+                        dismissKeyboard()
+                        onOpenHistory()
+                    },
             )
         }
         ScreenHeader(
@@ -153,7 +298,7 @@ fun ContactsScreen(
                 items(state.filteredAppContacts, key = { it.id }) { contact ->
                     ContactRow(
                         contact = contact,
-                        onClick = { selectedContact = contact },
+                        onClick = { handleContactTap(contact) },
                     )
                 }
             }
@@ -184,9 +329,15 @@ fun ContactsScreen(
                     }
                 } else if (state.deviceContacts.isNotEmpty()) {
                     items(state.deviceContacts, key = { it.id }) { contact ->
+                        // Device contacts route through the same
+                        // single-phone-direct-call / multi-phone-picker
+                        // flow as app contacts — a one-number row
+                        // dials immediately once CALL_PHONE is
+                        // granted, instead of opening the detail
+                        // dialog.
                         ContactRow(
                             contact = contact,
-                            onClick = { selectedContact = contact },
+                            onClick = { handleContactTap(contact) },
                         )
                     }
                 }
@@ -200,7 +351,25 @@ fun ContactsScreen(
     if (current != null) {
         ContactDetailDialog(
             contact = current,
+            onDial = { phone ->
+                val target = current
+                selectedContact = null
+                dialNumber(target, phone)
+            },
             onDismiss = { selectedContact = null },
+        )
+    }
+
+    val picker = phonePicker
+    if (picker != null) {
+        PhoneNumberPickerDialog(
+            contact  = picker,
+            onCall   = { phone ->
+                val c = picker
+                phonePicker = null
+                dialNumber(c, phone)
+            },
+            onDismiss = { phonePicker = null },
         )
     }
 }
@@ -316,9 +485,19 @@ private fun ContactRow(
             contact.organization?.let {
                 Text(it, style = AppTypography.Meta, color = AppColors.TextSecondary)
             }
-            val meta = listOfNotNull(contact.phone, contact.email).joinToString(" · ")
-            if (meta.isNotEmpty()) {
-                Text(meta, style = AppTypography.Meta, color = AppColors.TextSecondary)
+            // One line per phone number so multi-number contacts
+            // surface every reachable digit in the list itself —
+            // the picker on tap lets the user decide which one to
+            // dial. Email hangs off the bottom if set.
+            contact.phones.forEach { phone ->
+                Text(
+                    phone,
+                    style = AppTypography.Meta,
+                    color = AppColors.TextSecondary,
+                )
+            }
+            contact.email?.let { email ->
+                Text(email, style = AppTypography.Meta, color = AppColors.TextSecondary)
             }
         }
         if (contact.source == DirectoryContactSource.App && contact.appOccurrences > 0) {
@@ -411,6 +590,7 @@ private fun PermissionCta(onGrant: () -> Unit) {
 @Composable
 private fun ContactDetailDialog(
     contact: DirectoryContact,
+    onDial: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -424,8 +604,23 @@ private fun ContactDetailDialog(
                 contact.organization?.let {
                     Text(it, style = AppTypography.Body, color = AppColors.TextSecondary)
                 }
-                contact.phone?.let { phone ->
-                    DetailField(label = "Phone", value = phone)
+                // List every phone as its own tappable row. Each
+                // tap routes through `onDial`, which requests
+                // `CALL_PHONE` on first use and then dials directly.
+                if (contact.phones.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+                        Text(
+                            "PHONE${if (contact.phones.size == 1) "" else "S"}",
+                            style = AppTypography.Eyebrow,
+                            color = AppColors.TextSecondary,
+                        )
+                        contact.phones.forEach { phone ->
+                            PhoneActionRow(
+                                label = phone,
+                                onClick = { onDial(phone) },
+                            )
+                        }
+                    }
                 }
                 contact.email?.let { email ->
                     DetailField(label = "Email", value = email)
@@ -442,17 +637,6 @@ private fun ContactDetailDialog(
         },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
-                contact.phone?.let { phone ->
-                    androidx.compose.material3.TextButton(
-                        onClick = {
-                            val intent = android.content.Intent(
-                                android.content.Intent.ACTION_DIAL,
-                                android.net.Uri.parse("tel:$phone"),
-                            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                            runCatching { context.startActivity(intent) }
-                        },
-                    ) { Text("Call", color = AppAccent.primary) }
-                }
                 contact.email?.let { email ->
                     androidx.compose.material3.TextButton(
                         onClick = {
@@ -467,6 +651,78 @@ private fun ContactDetailDialog(
                 androidx.compose.material3.TextButton(onClick = onDismiss) {
                     Text("Close", color = AppColors.TextSecondary)
                 }
+            }
+        },
+        containerColor = AppColors.CardSolid,
+    )
+}
+
+/**
+ * Tappable phone row used by the detail dialog + the multi-phone
+ * picker. Shows the number with a small "Call" chip so the action
+ * is explicit even when the row already has a filled affordance.
+ */
+@Composable
+private fun PhoneActionRow(label: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppRadius.md))
+            .background(AppColors.CardSolid)
+            .border(1.dp, AppColors.BorderDefault, RoundedCornerShape(AppRadius.md))
+            .clickable { onClick() }
+            .padding(horizontal = AppSpacing.s3, vertical = AppSpacing.s3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = AppTypography.Body,
+            color = AppColors.TextPrimary,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(AppRadius.pill))
+                .background(AppAccent.soft)
+                .padding(horizontal = AppSpacing.s3, vertical = 4.dp),
+        ) {
+            Text("Call", style = AppTypography.Tag, color = AppAccent.primary)
+        }
+    }
+}
+
+/**
+ * Pops up when the user taps a contact that has more than one
+ * phone number. One row per number, plus a Cancel footer.
+ */
+@Composable
+private fun PhoneNumberPickerDialog(
+    contact: DirectoryContact,
+    onCall: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(contact.name, style = AppTypography.SectionTitle, color = AppColors.TextPrimary)
+                Text(
+                    "Pick a number to call",
+                    style = AppTypography.Meta,
+                    color = AppColors.TextSecondary,
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+                contact.phones.forEach { phone ->
+                    PhoneActionRow(label = phone, onClick = { onCall(phone) })
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Cancel", color = AppColors.TextSecondary)
             }
         },
         containerColor = AppColors.CardSolid,
@@ -500,4 +756,19 @@ private fun EmptyCard(title: String, subtitle: String) {
             color = AppColors.TextTertiary,
         )
     }
+}
+
+/**
+ * Strip everything except digits and a leading `+` so the
+ * resulting `tel:` URI parses cleanly. Numbers captured in-app
+ * or on the device often carry spaces, dashes, parentheses, or
+ * unicode formatting that `Uri.parse("tel:...")` rejects.
+ */
+internal fun telSanitize(raw: String?): String {
+    val trimmed = raw?.trim().orEmpty()
+    if (trimmed.isEmpty()) return ""
+    val leadingPlus = trimmed.startsWith("+")
+    val digits = trimmed.filter { it.isDigit() }
+    if (digits.isEmpty()) return ""
+    return if (leadingPlus) "+$digits" else digits
 }

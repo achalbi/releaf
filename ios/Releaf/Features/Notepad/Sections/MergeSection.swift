@@ -102,7 +102,7 @@ public struct MergeSection: View {
     private var bodyCard: some View {
         VStack(alignment: .leading, spacing: AppSpacing.s3) {
             Text("Merge this page with another notepad page")
-                .font(AppText.body.weight(.semibold))
+                .font(AppText.body.weight(.light))
                 .foregroundStyle(AppColors.textPrimary)
 
             Text("Choose the other page, then decide which one stays primary. The primary page keeps its title and date, while notes, photos, voice notes, to-dos, and scans from the secondary page are appended into it.")
@@ -111,7 +111,7 @@ public struct MergeSection: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Text("Other page")
-                .font(AppText.body.weight(.semibold))
+                .font(AppText.body.weight(.light))
                 .foregroundStyle(AppColors.textPrimary)
                 .padding(.top, AppSpacing.s1)
 
@@ -141,7 +141,7 @@ public struct MergeSection: View {
             .buttonStyle(.plain)
 
             Text("Primary page")
-                .font(AppText.body.weight(.semibold))
+                .font(AppText.body.weight(.light))
                 .foregroundStyle(AppColors.textPrimary)
                 .padding(.top, AppSpacing.s1)
 
@@ -255,7 +255,7 @@ private struct PickerSheet: View {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(rowLabel(entry))
-                                            .font(AppText.body.weight(.semibold))
+                                            .font(AppText.body.weight(.light))
                                             .foregroundStyle(AppColors.textPrimary)
                                         Text(entry.entryDate)
                                             .font(AppText.meta)
@@ -264,7 +264,7 @@ private struct PickerSheet: View {
                                     Spacer()
                                     if selected?.id == entry.id {
                                         Text("✓")
-                                            .font(.system(size: 16, weight: .bold))
+                                            .font(.system(size: 16))
                                             .foregroundStyle(accent.primary)
                                     }
                                 }

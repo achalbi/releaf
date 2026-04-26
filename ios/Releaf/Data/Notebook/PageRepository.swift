@@ -198,7 +198,10 @@ public final class PageRepository: @unchecked Sendable {
         row.title = entity.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         row.updatedAt = IsoClock.nowIso()
         row.dirty = true
-        try await dbQueue.write { db in try row.update(db) }
+        // `let` snapshot before the @Sendable write closure — Swift 6
+        // rejects capture-by-reference of mutable locals.
+        let snapshot = row
+        try await dbQueue.write { db in try snapshot.update(db) }
     }
 
     // MARK: - Soft delete

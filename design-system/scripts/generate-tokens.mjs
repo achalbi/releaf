@@ -37,8 +37,12 @@ const INPUT = join(REPO_ROOT, 'design-system', 'design-tokens.json');
 // Relative paths under the destination root where the platform files land.
 // Shared between the real write and the --out scratch mode so both paths are
 // computed the same way — the CI check diffs by overlaying the scratch root.
-const IOS_REL     = ['ios', 'Releaf', 'DesignSystem', 'AppColors.generated.swift'];
-const ANDROID_REL = ['android', 'app', 'src', 'main', 'java', 'app', 'releaf', 'mobile', 'ui', 'theme', 'AppColors.generated.kt'];
+const IOS_REL              = ['ios', 'Releaf', 'DesignSystem', 'AppColors.generated.swift'];
+const ANDROID_REL          = ['android', 'app', 'src', 'main', 'java', 'app', 'releaf', 'mobile', 'ui', 'theme', 'AppColors.generated.kt'];
+const IOS_METRICS_REL      = ['ios', 'Releaf', 'DesignSystem', 'AppMetrics.generated.swift'];
+const ANDROID_METRICS_REL  = ['android', 'app', 'src', 'main', 'java', 'app', 'releaf', 'mobile', 'ui', 'theme', 'AppMetrics.generated.kt'];
+const IOS_PLANTS_REL       = ['ios', 'Releaf', 'DesignSystem', 'DailyPlants.generated.swift'];
+const ANDROID_PLANTS_REL   = ['android', 'app', 'src', 'main', 'java', 'app', 'releaf', 'mobile', 'ui', 'theme', 'DailyPlants.generated.kt'];
 
 function parseRoot(argv) {
     const idx = argv.indexOf('--out');
@@ -49,8 +53,12 @@ function parseRoot(argv) {
 }
 
 const ROOT = parseRoot(process.argv.slice(2));
-const IOS_OUT     = join(ROOT, ...IOS_REL);
-const ANDROID_OUT = join(ROOT, ...ANDROID_REL);
+const IOS_OUT             = join(ROOT, ...IOS_REL);
+const ANDROID_OUT         = join(ROOT, ...ANDROID_REL);
+const IOS_METRICS_OUT     = join(ROOT, ...IOS_METRICS_REL);
+const ANDROID_METRICS_OUT = join(ROOT, ...ANDROID_METRICS_REL);
+const IOS_PLANTS_OUT      = join(ROOT, ...IOS_PLANTS_REL);
+const ANDROID_PLANTS_OUT  = join(ROOT, ...ANDROID_PLANTS_REL);
 
 // ---------- Token inventory ----------
 
@@ -149,6 +157,25 @@ const ROLE_TOKENS = [
 
     // Pattern
     { path: ['pattern', 'dotGrid'], swift: 'dotGrid', kotlin: 'DotGrid' },
+];
+
+// ---------- Metric inventory ----------
+
+/**
+ * Per-capture paper-saved multipliers consumed by the Re-Leaf strip + the
+ * paper-saved detail sheet. Each entry maps a capture kind (used as the field
+ * suffix on both platforms) to its JSON key under `metric.paperPerCapture.*`.
+ *
+ * Edit values in design-tokens.json, regenerate, both platforms move together.
+ */
+const PAPER_PER_CAPTURE = [
+    { jsonKey: 'scan',    swiftSuffix: 'scan',    kotlinSuffix: 'Scan'    },
+    { jsonKey: 'note',    swiftSuffix: 'note',    kotlinSuffix: 'Note'    },
+    { jsonKey: 'voice',   swiftSuffix: 'voice',   kotlinSuffix: 'Voice'   },
+    { jsonKey: 'contact', swiftSuffix: 'contact', kotlinSuffix: 'Contact' },
+    { jsonKey: 'place',   swiftSuffix: 'place',   kotlinSuffix: 'Place'   },
+    { jsonKey: 'photo',   swiftSuffix: 'photo',   kotlinSuffix: 'Photo'   },
+    { jsonKey: 'todo',    swiftSuffix: 'todo',    kotlinSuffix: 'Todo'    },
 ];
 
 // ---------- Color parsing ----------
@@ -442,19 +469,293 @@ function emitKotlin(tokens) {
     return lines.join('\n') + '\n';
 }
 
+// ---------- Metric emitters ----------
+
+/** Read a numeric token under `metric.<...path>` from the JSON. */
+function metricNumber(tokens, path) {
+    let node = tokens.metric;
+    for (const seg of path) {
+        node = node?.[seg];
+        if (!node) throw new Error(`Missing metric token metric.${path.join('.')}`);
+    }
+    const v = node.value;
+    if (typeof v !== 'number') {
+        throw new Error(`Metric metric.${path.join('.')} must be a number (got ${typeof v})`);
+    }
+    return { value: v, description: node.description || null };
+}
+
+/** Render a Double literal in a way Swift accepts and humans can read. */
+function swiftNumber(n) {
+    return Number.isInteger(n) ? `${n}.0` : `${n}`;
+}
+
+/** Render a Double literal Kotlin will accept (integer values need `.0`). */
+function kotlinDouble(n) {
+    return Number.isInteger(n) ? `${n}.0` : `${n}`;
+}
+
+function emitSwiftMetrics(tokens) {
+    const lines = [];
+    const p = (s) => lines.push(s);
+
+    p('// GENERATED — DO NOT EDIT.');
+    p('// Run `node design-system/scripts/generate-tokens.mjs` to regenerate.');
+    p('//');
+    p('// Source: design-system/design-tokens.json (metric.*)');
+    p('');
+    p('import Foundation');
+    p('');
+    p('/// Non-color, non-typographic metrics shared between iOS and Android.');
+    p('/// Today this is the Re-Leaf paper-saved math: per-capture multipliers');
+    p('/// plus the sheets-per-tree constant.');
+    p('public enum AppMetrics {');
+    p('');
+    p('    /// Sheets of paper a single capture of each kind would have replaced.');
+    p('    /// Multiply against `Page.counts.<kind>` to get sheets saved.');
+    p('    public enum PaperPerCapture {');
+    for (const m of PAPER_PER_CAPTURE) {
+        const { value, description } = metricNumber(tokens, ['paperPerCapture', m.jsonKey]);
+        if (description) p(`        /// ${description}`);
+        p(`        public static let ${m.swiftSuffix}: Double = ${swiftNumber(value)}`);
+    }
+    p('    }');
+    p('');
+
+    const tree = metricNumber(tokens, ['sheetsPerTree']);
+    if (tree.description) p(`    /// ${tree.description}`);
+    p(`    public static let sheetsPerTree: Double = ${swiftNumber(tree.value)}`);
+    p('}');
+
+    return lines.join('\n') + '\n';
+}
+
+function emitKotlinMetrics(tokens) {
+    const lines = [];
+    const p = (s) => lines.push(s);
+
+    p('// GENERATED — DO NOT EDIT.');
+    p('// Run `node design-system/scripts/generate-tokens.mjs` to regenerate.');
+    p('//');
+    p('// Source: design-system/design-tokens.json (metric.*)');
+    p('');
+    p('package app.releaf.mobile.ui.theme');
+    p('');
+    p('/**');
+    p(' * Non-color, non-typographic metrics shared between iOS and Android.');
+    p(' * Today this is the Re-Leaf paper-saved math: per-capture multipliers');
+    p(' * plus the sheets-per-tree constant.');
+    p(' */');
+    p('object AppMetrics {');
+    p('');
+    p('    /** Sheets of paper a single capture of each kind would have replaced. */');
+    p('    object PaperPerCapture {');
+    for (const m of PAPER_PER_CAPTURE) {
+        const { value, description } = metricNumber(tokens, ['paperPerCapture', m.jsonKey]);
+        if (description) p(`        /** ${description} */`);
+        p(`        const val ${m.kotlinSuffix}: Double = ${kotlinDouble(value)}`);
+    }
+    p('    }');
+    p('');
+
+    const tree = metricNumber(tokens, ['sheetsPerTree']);
+    if (tree.description) p(`    /** ${tree.description} */`);
+    p(`    const val sheetsPerTree: Double = ${kotlinDouble(tree.value)}`);
+    p('}');
+
+    return lines.join('\n') + '\n';
+}
+
+// ---------- Plant emitters ----------
+
+/** Read the daily-plant array from `plants.daily`. Each entry must
+ *  carry name + commonName + epithet + usedFor. Validation is loud
+ *  rather than silent so a malformed JSON entry fails the build, not
+ *  the runtime. */
+function plantEntries(tokens) {
+    const arr = tokens.plants?.daily;
+    if (!Array.isArray(arr) || arr.length === 0) {
+        throw new Error(`Missing or empty plants.daily — must be a non-empty array.`);
+    }
+    arr.forEach((entry, idx) => {
+        for (const key of ['name', 'commonName', 'epithet', 'usedFor']) {
+            if (typeof entry[key] !== 'string') {
+                throw new Error(`plants.daily[${idx}].${key} must be a string`);
+            }
+        }
+    });
+    return arr;
+}
+
+/** Escape a value for inclusion inside a Swift double-quoted string
+ *  literal. Apostrophes and most punctuation pass through; only the
+ *  backslash and double-quote need escaping. Newlines aren't expected
+ *  in plant data; if they appear, they're escaped to `\n`. */
+function swiftStringEscape(value) {
+    return String(value)
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n');
+}
+
+/** Same idea for Kotlin double-quoted strings. Kotlin also needs `$`
+ *  escaped to avoid string-template interpolation. */
+function kotlinStringEscape(value) {
+    return String(value)
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\$/g, '\\$')
+        .replace(/\n/g, '\\n');
+}
+
+function emitSwiftPlants(tokens) {
+    const plants = plantEntries(tokens);
+    const lines = [];
+    const p = (s) => lines.push(s);
+
+    p('// GENERATED — DO NOT EDIT.');
+    p('// Run `node design-system/scripts/generate-tokens.mjs` to regenerate.');
+    p('//');
+    p('// Source: design-system/design-tokens.json (plants.daily)');
+    p('');
+    p('import Foundation');
+    p('');
+    p('/// One ayurvedic plant in the daily-rotation list.');
+    p('public struct DailyPlant: Equatable, Sendable {');
+    p('    /// Sanskrit name shown as the page title (lowercase serif).');
+    p('    public let name: String');
+    p('    /// English / common name shown in a parenthetical after the');
+    p('    /// Sanskrit. Empty string when the Sanskrit name is already the');
+    p('    /// recognised English form.');
+    p('    public let commonName: String');
+    p('    /// One-line poetic descriptor. Sits at the head of the subtitle.');
+    p('    public let epithet: String');
+    p('    /// Comma-separated practical uses. Sits after the epithet,');
+    p('    /// separated by a center dot.');
+    p('    public let usedFor: String');
+    p('');
+    p('    public init(name: String, commonName: String, epithet: String, usedFor: String) {');
+    p('        self.name = name');
+    p('        self.commonName = commonName');
+    p('        self.epithet = epithet');
+    p('        self.usedFor = usedFor');
+    p('    }');
+    p('}');
+    p('');
+    p('/// Daily-plant rotation source for the page header. Each calendar');
+    p('/// day picks one plant from the curated set below. Selection is');
+    p('/// deterministic — same `dayOfYear`, same plant — and identical');
+    p('/// to the Android side (`DailyPlants.generated.kt`).');
+    p('public enum DailyPlants {');
+    p('');
+    p('    /// Stable, append-only list. Reordering changes which plant');
+    p('    /// shows on which day in the user\'s archive — append, never reshuffle.');
+    p('    public static let all: [DailyPlant] = [');
+    plants.forEach((plant, idx) => {
+        const tail = idx === plants.length - 1 ? '' : ',';
+        p(`        DailyPlant(name: "${swiftStringEscape(plant.name)}", commonName: "${swiftStringEscape(plant.commonName)}", epithet: "${swiftStringEscape(plant.epithet)}", usedFor: "${swiftStringEscape(plant.usedFor)}")${tail}`);
+    });
+    p('    ]');
+    p('');
+    p('    /// The plant for `date`, default today. Selection is');
+    p('    /// `(dayOfYear - 1) % count` against the user\'s calendar — stable');
+    p('    /// within a day, rotates across days.');
+    p('    public static func forToday(');
+    p('        date: Date = Date(),');
+    p('        calendar: Calendar = .current');
+    p('    ) -> DailyPlant {');
+    p('        let dayOfYear = calendar.ordinality(of: .day, in: .year, for: date) ?? 1');
+    p('        let index = (dayOfYear - 1) % all.count');
+    p('        return all[index]');
+    p('    }');
+    p('}');
+
+    return lines.join('\n') + '\n';
+}
+
+function emitKotlinPlants(tokens) {
+    const plants = plantEntries(tokens);
+    const lines = [];
+    const p = (s) => lines.push(s);
+
+    p('// GENERATED — DO NOT EDIT.');
+    p('// Run `node design-system/scripts/generate-tokens.mjs` to regenerate.');
+    p('//');
+    p('// Source: design-system/design-tokens.json (plants.daily)');
+    p('');
+    p('package app.releaf.mobile.ui.theme');
+    p('');
+    p('import java.time.LocalDate');
+    p('');
+    p('/** One ayurvedic plant in the daily-rotation list. */');
+    p('data class DailyPlant(');
+    p('    /** Sanskrit name shown as the page title (lowercase serif). */');
+    p('    val name: String,');
+    p('    /** English / common name shown in a parenthetical after the');
+    p('     *  Sanskrit. Empty string when the Sanskrit name is already the');
+    p('     *  recognised English form. */');
+    p('    val commonName: String,');
+    p('    /** One-line poetic descriptor. Sits at the head of the subtitle. */');
+    p('    val epithet: String,');
+    p('    /** Comma-separated practical uses. Sits after the epithet,');
+    p('     *  separated by a center dot. */');
+    p('    val usedFor: String,');
+    p(')');
+    p('');
+    p('/**');
+    p(' * Daily-plant rotation source for the page header. Each calendar');
+    p(' * day picks one plant from the curated set below. Selection is');
+    p(' * deterministic — same `dayOfYear`, same plant — and identical');
+    p(' * to the iOS side (`DailyPlants.generated.swift`).');
+    p(' */');
+    p('object DailyPlants {');
+    p('');
+    p('    /** Stable, append-only list. Reordering changes which plant');
+    p('     *  shows on which day in the user\'s archive — append, never reshuffle. */');
+    p('    val all: List<DailyPlant> = listOf(');
+    plants.forEach((plant, idx) => {
+        const tail = idx === plants.length - 1 ? '' : ',';
+        p(`        DailyPlant("${kotlinStringEscape(plant.name)}", "${kotlinStringEscape(plant.commonName)}", "${kotlinStringEscape(plant.epithet)}", "${kotlinStringEscape(plant.usedFor)}")${tail}`);
+    });
+    p('    )');
+    p('');
+    p('    /** The plant for [date], default today. Selection is');
+    p('     *  `(dayOfYear - 1) % count` against the user\'s local calendar —');
+    p('     *  stable within a day, rotates across days. */');
+    p('    fun forToday(date: LocalDate = LocalDate.now()): DailyPlant {');
+    p('        val index = (date.dayOfYear - 1).mod(all.size)');
+    p('        return all[index]');
+    p('    }');
+    p('}');
+
+    return lines.join('\n') + '\n';
+}
+
 // ---------- Drive ----------
 
 function main() {
     const tokens = JSON.parse(readFileSync(INPUT, 'utf8'));
 
-    mkdirSync(dirname(IOS_OUT),     { recursive: true });
-    mkdirSync(dirname(ANDROID_OUT), { recursive: true });
+    mkdirSync(dirname(IOS_OUT),             { recursive: true });
+    mkdirSync(dirname(ANDROID_OUT),         { recursive: true });
+    mkdirSync(dirname(IOS_METRICS_OUT),     { recursive: true });
+    mkdirSync(dirname(ANDROID_METRICS_OUT), { recursive: true });
+    mkdirSync(dirname(IOS_PLANTS_OUT),      { recursive: true });
+    mkdirSync(dirname(ANDROID_PLANTS_OUT),  { recursive: true });
 
-    writeFileSync(IOS_OUT,     emitSwift(tokens));
-    writeFileSync(ANDROID_OUT, emitKotlin(tokens));
+    writeFileSync(IOS_OUT,             emitSwift(tokens));
+    writeFileSync(ANDROID_OUT,         emitKotlin(tokens));
+    writeFileSync(IOS_METRICS_OUT,     emitSwiftMetrics(tokens));
+    writeFileSync(ANDROID_METRICS_OUT, emitKotlinMetrics(tokens));
+    writeFileSync(IOS_PLANTS_OUT,      emitSwiftPlants(tokens));
+    writeFileSync(ANDROID_PLANTS_OUT,  emitKotlinPlants(tokens));
 
     console.log(`Wrote ${IOS_OUT}`);
     console.log(`Wrote ${ANDROID_OUT}`);
+    console.log(`Wrote ${IOS_METRICS_OUT}`);
+    console.log(`Wrote ${ANDROID_METRICS_OUT}`);
+    console.log(`Wrote ${IOS_PLANTS_OUT}`);
+    console.log(`Wrote ${ANDROID_PLANTS_OUT}`);
 }
 
 main();

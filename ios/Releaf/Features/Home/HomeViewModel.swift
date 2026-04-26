@@ -19,7 +19,7 @@ public final class HomeViewModel: ObservableObject {
 
     private let repository: DriveRepository
 
-    public init(repository: DriveRepository = FakeDriveRepository()) {
+    public init(repository: DriveRepository = LocalDriveRepository.shared) {
         self.repository = repository
     }
 

@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.releaf.mobile.ui.theme.AppAccent
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 enum class OnboardingCta { Notebook, Notepad }
 
@@ -169,6 +170,7 @@ private fun StepContent(
     onFinish: () -> Unit,
     onCta: (OnboardingCta) -> Unit,
 ) {
+    val weight = LocalFontWeight.current
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -206,7 +208,7 @@ private fun StepContent(
         )
         Spacer(Modifier.height(10.dp))
         Text(
-            renderBody(content.body),
+            renderBody(content.body, weight),
             style = OnboardTokens.Body,
             color = OnboardTokens.TextBody,
             textAlign = TextAlign.Center,
@@ -310,7 +312,7 @@ private fun CtaCard(
             )
             Text(
                 trailingLine,
-                style = OnboardTokens.CtaLabel.copy(fontWeight = FontWeight.Bold),
+                style = OnboardTokens.CtaLabel.copy(fontWeight = LocalFontWeight.current),
                 color = OnboardTokens.TextPrimary,
             )
         }
@@ -378,7 +380,7 @@ private val CONTENT = listOf(
 // Minimal `**bold**` inline renderer — the body copy uses that syntax
 // verbatim and the web source emits a single <strong> per segment, so
 // a literal toggle is enough without pulling in a markdown dep.
-private fun renderBody(source: String): AnnotatedString = buildAnnotatedString {
+private fun renderBody(source: String, weight: FontWeight): AnnotatedString = buildAnnotatedString {
     var i = 0
     var bold = false
     while (i < source.length) {
@@ -386,7 +388,7 @@ private fun renderBody(source: String): AnnotatedString = buildAnnotatedString {
             if (bold) {
                 pop()
             } else {
-                pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+                pushStyle(SpanStyle(fontWeight = weight))
             }
             bold = !bold
             i += 2

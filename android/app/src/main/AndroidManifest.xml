@@ -23,6 +23,20 @@
          missing. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
 
+    <!-- Contacts screen: tap-to-dial. With CALL_PHONE granted the
+         row tap places the call immediately via ACTION_CALL.
+         Without it we fall back to ACTION_DIAL (which hops through
+         the dialer app so the user still confirms). The permission
+         is runtime-granted on first tap and remembered across
+         sessions. -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+
+    <!-- Call history: observe OFFHOOK → IDLE transitions so the
+         app can record duration on calls placed from the Contacts
+         screen. Runtime-granted on first dial attempt; if denied
+         the call still goes through, just without duration. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
     <!-- Reminders feature. Need POST_NOTIFICATIONS runtime-granted on API 33+
          to post the alarm notification, SCHEDULE_EXACT_ALARM on API 31+ so the
          ReminderScheduler can wake the device at the user's chosen time, and

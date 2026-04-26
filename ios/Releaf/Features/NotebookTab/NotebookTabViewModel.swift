@@ -24,10 +24,24 @@ public final class NotebookTabViewModel: ObservableObject {
         public let pages: Int
     }
 
+    /// `NotebookSortMode` lives in DesignSystem (persisted via
+    /// UiPreferences) so the picker survives a cold start. Re-export
+    /// here as a typealias so existing call sites that read
+    /// `NotebookTabViewModel.SortMode` keep compiling.
+    public typealias SortMode = NotebookSortMode
+
     @Published public private(set) var shelves: [ShelfRecord] = []
     @Published public private(set) var shelfDirectory: [Shelf] = []
     @Published public private(set) var matchingPages: [PageSearchHit] = []
     @Published public private(set) var isLoading: Bool = true
+    /// Persisted across launches via UiPreferences. Reading the
+    /// initial value here means a freshly-mounted view shows the
+    /// user's last sort without flashing through the default.
+    @Published public var sortMode: SortMode = UiPreferences.shared.state.notebookSortMode {
+        didSet {
+            if oldValue != sortMode { UiPreferences.shared.setNotebookSortMode(sortMode) }
+        }
+    }
     @Published public var query: String = "" {
         didSet {
             if oldValue != query { reloadSearch() }
@@ -79,9 +93,23 @@ public final class NotebookTabViewModel: ObservableObject {
 
     public var filteredShelves: [ShelfRecord] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return shelves }
-        return shelves.filter {
-            $0.notebook.title.localizedCaseInsensitiveContains(trimmed)
+        let base: [ShelfRecord]
+        if trimmed.isEmpty {
+            base = shelves
+        } else {
+            base = shelves.filter {
+                $0.notebook.title.localizedCaseInsensitiveContains(trimmed)
+            }
+        }
+        switch sortMode {
+        case .recent:
+            return base.sorted { $0.notebook.updatedAt > $1.notebook.updatedAt }
+        case .name:
+            return base.sorted {
+                $0.notebook.title.localizedCaseInsensitiveCompare($1.notebook.title) == .orderedAscending
+            }
+        case .pages:
+            return base.sorted { $0.pageCount > $1.pageCount }
         }
     }
 
@@ -92,31 +120,71 @@ public final class NotebookTabViewModel: ObservableObject {
     public func addNotebook(
         title: String,
         colorHex: String? = nil,
+        colorToken: String? = nil,
         shelfId: String? = nil
     ) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let resolvedShelf = shelfId.flatMap { $0.isEmpty ? nil : $0 }
             ?? ShelfEntity.defaultGeneralId
+        // Caller may pass either a leaf-theme token (preferred) or a
+        // raw hex string (legacy). Token wins when both are set.
+        let resolvedHex = colorToken.flatMap(Self.themeHex(forToken:)) ?? colorHex
         Task { [notebookRepository] in
             _ = try? await notebookRepository.createNotebook(
                 title:    trimmed,
-                colorHex: colorHex,
+                colorHex: resolvedHex,
                 shelfId:  resolvedShelf
             )
         }
     }
 
     /// Create a fresh shelf — wired to the "+ New shelf…" row in
-    /// the notebook create sheet.
-    public func createShelf(name: String, onCreated: @escaping (String) -> Void = { _ in }) {
+    /// the notebook create sheet *and* the overflow's New shelf
+    /// item. The optional `colorToken` lets the caller pick one of
+    /// the four leaf themes; we convert it to the hex string the
+    /// shelf repository expects so persistence stays a thin layer.
+    public func createShelf(
+        name: String,
+        colorToken: String? = nil,
+        onCreated: @escaping (String) -> Void = { _ in }
+    ) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolved = trimmed.isEmpty ? "Untitled shelf" : trimmed
+        let hex = colorToken.flatMap(Self.themeHex(forToken:))
         Task { [shelfRepository] in
-            if let shelf = try? await shelfRepository.createShelf(name: resolved) {
+            if let shelf = try? await shelfRepository.createShelf(
+                name: resolved,
+                colorHex: hex
+            ) {
                 await MainActor.run { onCreated(shelf.id) }
             }
         }
+    }
+
+    /// Map a leaf-theme token ("coral" / "green" / "yellow" / "dry")
+    /// to the hex string the shelf entity stores. Source of truth
+    /// is `ShelfTheme.palette(...)` so any color-token change in
+    /// the design system flows through.
+    private static func themeHex(forToken token: String) -> String? {
+        let palette = ShelfTheme.palette(for: token)
+        // Drop alpha; shelves store opaque RGB strings.
+        return Self.hexString(from: palette.background)
+    }
+
+    private static func hexString(from color: Color) -> String {
+        // Lossy round-trip through UIColor; close enough for the
+        // four flat theme primaries since none use alpha.
+        #if canImport(UIKit)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
+        return String(
+            format: "#%02X%02X%02X",
+            Int(r * 255), Int(g * 255), Int(b * 255)
+        )
+        #else
+        return "#000000"
+        #endif
     }
 
     public func delete(notebookId: String) {

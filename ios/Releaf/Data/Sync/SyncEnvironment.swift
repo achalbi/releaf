@@ -45,7 +45,13 @@ public final class SyncEnvironment {
     /// Idempotent — call from the app entry point. Builds the sync
     /// repository, registers the background refresh handler, and
     /// observes auth for enable/cancel.
-    public func install(authStore: AuthStore = .shared) {
+    ///
+    /// `authStore` is no longer defaulted to `.shared` — `AuthStore`
+    /// is `@MainActor`-isolated and Swift 6 rejects MainActor singleton
+    /// access from the nonisolated default-value evaluation context.
+    /// Callers always pass `AuthStore.shared` from a @MainActor scope
+    /// (the app's `init`); this just makes that explicit.
+    public func install(authStore: AuthStore) {
         if installed { return }
         installed = true
 

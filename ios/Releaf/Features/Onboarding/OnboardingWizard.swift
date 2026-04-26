@@ -362,7 +362,7 @@ private func renderBody(_ source: String) -> AttributedString {
         }
         var ch = AttributedString(String(source[i]))
         if bold {
-            ch.font = Font.system(size: 15, weight: .semibold)
+            ch.font = Font.system(size: 15, weight: UiPreferences.shared.state.fontWeight.fontWeight)
         }
         result.append(ch)
         i = source.index(after: i)

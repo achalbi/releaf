@@ -37,7 +37,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.data.notebook.SubPage
 import app.releaf.mobile.ui.theme.AppColors
@@ -46,6 +45,7 @@ import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 import androidx.compose.foundation.Canvas
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 private const val MinScale = 0.5f
 private const val MaxScale = 2.0f
@@ -223,7 +223,7 @@ private fun PatternSwatch(
         }
         Text(
             text  = label,
-            style = AppTypography.Meta.copy(fontWeight = FontWeight.SemiBold),
+            style = AppTypography.Meta.copy(fontWeight = LocalFontWeight.current),
             color = if (selected) AppAccent.primary else AppColors.TextSecondary,
         )
     }

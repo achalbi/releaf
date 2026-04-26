@@ -151,6 +151,7 @@ fun NotebookLocalDetailScreen(
                         chaptersExpanded = chaptersExpanded,
                         onToggleChapters = { chaptersExpanded = !chaptersExpanded },
                         onEditNotebook = { showEditNotebookDialog = true },
+                        onRestoreNotebook = viewModel::restoreNotebook,
                         onAddChapter = { showCreateChapterDialog = true },
                         onOpenChapter = onOpenChapter,
                         onDeleteChapter = { chapter -> pendingChapterDelete = chapter },
@@ -227,6 +228,7 @@ private fun NotebookDetailBody(
     state: NotebookLocalDetailUiState,
     heroExpanded: Boolean,
     onToggleHero: () -> Unit,
+    onRestoreNotebook: () -> Unit,
     chaptersExpanded: Boolean,
     onToggleChapters: () -> Unit,
     onEditNotebook: () -> Unit,
@@ -254,6 +256,7 @@ private fun NotebookDetailBody(
                 expanded = heroExpanded,
                 onToggle = onToggleHero,
                 onEdit = onEditNotebook,
+                onRestore = onRestoreNotebook,
             )
         }
         item(key = "chapters_card") {
@@ -280,6 +283,7 @@ private fun NotebookHeroCard(
     expanded: Boolean,
     onToggle: () -> Unit,
     onEdit: () -> Unit,
+    onRestore: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -321,6 +325,25 @@ private fun NotebookHeroCard(
                     if (notebook.archivedAt == null) MetaPill("Active", accent = true)
                     else MetaPill("Archived")
                     Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+                        if (notebook.archivedAt != null) {
+                            // Inline Restore pill — same vocabulary as
+                            // the page-level ArchivedBanner so the
+                            // restore affordance is recognisable
+                            // across surfaces.
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(AppRadius.pill))
+                                    .background(AppColors.GreenSoft)
+                                    .clickable(onClick = onRestore)
+                                    .padding(horizontal = AppSpacing.s3, vertical = AppSpacing.s1),
+                            ) {
+                                Text(
+                                    text  = "Restore",
+                                    style = AppTypography.Button,
+                                    color = AppColors.GreenText,
+                                )
+                            }
+                        }
                         RoundIconButton(
                             icon = Icons.Filled.Edit,
                             contentDescription = "Edit notebook",

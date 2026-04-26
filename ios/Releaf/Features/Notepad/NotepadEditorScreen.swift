@@ -89,6 +89,15 @@ private struct EditorContent: View {
     @State private var showDeleteDialog: Bool = false
     @State private var showMergeSheet: Bool = false
     @State private var showMoveSheet: Bool = false
+    /// Daily-plant info sheet — opened on tap of the composed-header
+    /// title block. Mirrors the same affordance on PageDetailView so
+    /// the editorial plant rotation is reachable from both editors.
+    @State private var showPlantInfo: Bool = false
+
+    /// Today's rotated plant. Pulled once at init; the rotation is
+    /// per-day deterministic so a stored let is fine for the screen's
+    /// lifetime.
+    private let plant: DailyPlant = DailyPlants.forToday()
 
     init(entryId: String, repository: NotepadRepository, userId: String) {
         _vm = StateObject(wrappedValue: NotepadEditorViewModel(
@@ -223,6 +232,16 @@ private struct EditorContent: View {
                 }
             }
         }
+        // Plant-of-the-day info sheet. Surfaced by tapping the title
+        // block in the composed top zone. Same shape as the equivalent
+        // sheet on PageDetailView so the editorial layer reads
+        // consistently across both editors.
+        .sheet(isPresented: $showPlantInfo) {
+            NotepadDailyPlantInfoSheet(
+                plant: plant,
+                onClose: { showPlantInfo = false }
+            )
+        }
     }
 
     // MARK: Overview
@@ -256,83 +275,119 @@ private struct EditorContent: View {
         )
     }
 
-    // MARK: Top bar
+    // MARK: Top bar (composed top zone)
+    //
+    // Slot 1: leaf-glyph eyebrow ("NOTEPAD · TODAY"), tappable as Back —
+    //         flushes the rich-text buffer + saves before popping so the
+    //         tap behaves identically to the prior Breadcrumbs "Notepad"
+    //         segment.
+    // Slot 2: PageViewToggle pill — the visual matches PageDetailView.
+    //         Since the notepad's existing modes are Edit ⇄ Overview
+    //         (not List ⇄ Grid), the binding translates one to the
+    //         other (Overview ⇄ Grid, Edit ⇄ List) so the body still
+    //         flips between EditorBody and OverviewPane exactly as
+    //         before — only the chrome around the toggle changed.
+    // Slot 3: PageOverflowButton — gated on the same "there's something
+    //         to act on" check the prior Menu used. Holds Merge / Move
+    //         and folds the prior inline Delete into the same menu so
+    //         the trailing edge has a single round button.
+    // Slot 4: Auto-rotated daily plant title; tap opens the info sheet.
 
     private var topBar: some View {
-        HStack(spacing: AppSpacing.s3) {
-            Breadcrumbs([
-                BreadcrumbSegment(label: "Notepad") {
-                    flushBeforeExit()
-                    vm.save()
-                    dismiss()
-                },
-                BreadcrumbSegment(label: Self.formatEntryDateLabel(vm.entryDate)),
-            ])
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Both modes share `richTextController` — the controller's
-            // UITextView keeps the buffer consistent across mode
-            // switches — so no flush is needed on toggle. (Back-tap
-            // + onDisappear still flush for persistence.)
-            EditorModeIconToggle(mode: $editorMode)
-
-            if vm.entry != nil {
-                Button {
-                    // Confirmation guard — the actual soft-delete
-                    // runs only after the user confirms in the alert.
-                    showDeleteDialog = true
-                } label: {
-                    Text("Delete")
-                        .font(AppText.button)
-                        .foregroundStyle(AppColors.danger)
+        VStack(alignment: .leading, spacing: AppSpacing.s4) {
+            HStack(alignment: .center) {
+                LeafEyebrow(
+                    "notepad · today",
+                    onTap: {
+                        flushBeforeExit()
+                        vm.save()
+                        dismiss()
+                    }
+                )
+                Spacer()
+                HStack(spacing: AppSpacing.s2) {
+                    PageViewToggle(selected: editorModeAsViewMode)
+                    if vm.canSave || vm.entry != nil {
+                        PageOverflowButton {
+                            Button {
+                                showMergeSheet = true
+                            } label: { Label("Merge with another page", systemImage: "rectangle.on.rectangle") }
+                            Button {
+                                showMoveSheet = true
+                            } label: { Label("Move to notebook", systemImage: "tray.and.arrow.up") }
+                            if vm.entry != nil {
+                                Divider()
+                                Button(role: .destructive) {
+                                    // Confirmation guard — the actual
+                                    // soft-delete runs only after the
+                                    // user confirms in the alert.
+                                    showDeleteDialog = true
+                                } label: { Label("Delete entry", systemImage: "trash") }
+                            }
+                        }
+                    }
                 }
-                .buttonStyle(.plain)
             }
 
-            // Overflow menu for Merge + Move-to-notebook — surfaces
-            // both destination-changing actions without requiring the
-            // user to scroll to the bottom of the editor. Gated on the
-            // same "there's something to act on" check MergeSection
-            // uses.
-            if vm.canSave || vm.entry != nil {
-                Menu {
-                    Button("Merge with another page") {
-                        showMergeSheet = true
-                    }
-                    Button("Move to notebook") {
-                        showMoveSheet = true
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 18, weight: .semibold))
+            // Tappable plant title block. Sanskrit name (32pt serif)
+            // + English parenthetical (16pt serif italic muted) share
+            // a baseline via Text concatenation. Italic subtitle below
+            // carries epithet · usedFor. Whole block is the hit target
+            // so a tap anywhere opens the info sheet.
+            Button {
+                showPlantInfo = true
+            } label: {
+                VStack(alignment: .leading, spacing: AppSpacing.s1) {
+                    titleLine(plant: plant)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.7)
+                    Text("\(plant.epithet)  ·  \(plant.usedFor)")
+                        .font(.system(size: 14, weight: .regular, design: .serif).italic())
                         .foregroundStyle(AppColors.textSecondary)
-                        .frame(width: 32, height: 32)
+                        .lineLimit(3)
                 }
-                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                Text("\(plant.name)\(plant.commonName.isEmpty ? "" : ", \(plant.commonName)"). \(plant.epithet). Used for \(plant.usedFor).")
+            )
+            .accessibilityHint("Tap for plant details")
         }
         .padding(.horizontal, AppSpacing.s4)
-        .padding(.top, AppSpacing.s3)
+        .padding(.top, AppSpacing.s4)
         .padding(.bottom, AppSpacing.s3)
     }
 
-    /// `YYYY-MM-DD` → "Today" / "Yesterday" / "Apr 21, 2026". Matches
-    /// the labels `EntryDateRow` uses so the breadcrumb and the date
-    /// chip below render the same text.
-    private static func formatEntryDateLabel(_ iso: String) -> String {
-        let parser = DateFormatter()
-        parser.dateFormat = "yyyy-MM-dd"
-        parser.locale     = Locale(identifier: "en_US_POSIX")
-        parser.timeZone   = .current
-        guard let date = parser.date(from: iso) else {
-            return iso.isEmpty ? "Today" : iso
+    /// Translates the notepad's `EditorMode` to the PageViewToggle's
+    /// `PageViewMode` and back. Lets the toggle's visual match the
+    /// page-detail header pill while the underlying body switch
+    /// stays exactly as it was (`overview` ↔ `grid`, `edit` ↔ `list`).
+    private var editorModeAsViewMode: Binding<PageViewMode> {
+        Binding(
+            get: { editorMode == .overview ? .grid : .list },
+            set: { editorMode = ($0 == .grid) ? .overview : .edit }
+        )
+    }
+
+    /// Title row rendered as one Text composition so the Sanskrit
+    /// name and the parenthetical English share a baseline. Sanskrit
+    /// at 32pt serif, English at 16pt serif italic muted — same
+    /// treatment used by `PageDetailView.titleLine(plant:)` so both
+    /// editor surfaces render the day's title identically.
+    private func titleLine(plant: DailyPlant) -> some View {
+        let primary = Text(plant.name)
+            .font(.system(size: 32, weight: .regular, design: .serif))
+            .foregroundColor(AppColors.textPrimary)
+        if plant.commonName.isEmpty {
+            return primary
         }
-        let cal = Calendar.current
-        if cal.isDateInToday(date)     { return "Today" }
-        if cal.isDateInYesterday(date) { return "Yesterday" }
-        let display = DateFormatter()
-        display.dateStyle = .medium
-        return display.string(from: date)
+        let secondary = Text("  (\(plant.commonName))")
+            .font(.system(size: 16, weight: .regular, design: .serif).italic())
+            .foregroundColor(AppColors.textSecondary)
+        return primary + secondary
     }
 
     /// Push the latest rich-text markdown into the VM before popping.
@@ -350,6 +405,11 @@ private struct EditorContent: View {
 private struct EditorBody: View {
     @ObservedObject var vm: NotepadEditorViewModel
     @ObservedObject var richTextController: RichTextEditorController
+    // Used by the merge action below (and any future "pop after
+    // mutation" CTA in this body). Lives here on the inner view so
+    // it's resolved against the same NavigationStack the screen-level
+    // dismiss reads from.
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ScrollView {
@@ -439,7 +499,7 @@ private struct TitleField: View {
     // Oversized serif so the title reads as the primary heading on the
     // screen. Uses the same weight + design as `pageTitle` so the
     // typography still feels cohesive — only the size grows.
-    private static let big = Font.system(size: 32, weight: .semibold, design: .serif)
+    private static let big = Font.system(size: 32, design: .serif)
 
     var body: some View {
         // Placeholder shown via `prompt` so cursor positioning is native.
@@ -475,7 +535,7 @@ private struct NotesField: View {
             RichTextEditor(
                 markdown: $markdown,
                 controller: controller,
-                tintColor: UIColor(AppColors.coral)
+                tintColor: AppColors.coral
             )
             .frame(minHeight: 240, alignment: .top)
         }
@@ -555,6 +615,72 @@ private struct MarkdownBody: View {
             return parsed
         }
         return AttributedString(raw)
+    }
+}
+
+// MARK: - Daily plant info sheet
+//
+// Bottom-sheet that explains the day's rotated plant. Reached by
+// tapping the title block in the composed top zone. Same shape and
+// copy as the equivalent sheet on PageDetailView so the editorial
+// surface reads identically across both editors.
+
+private struct NotepadDailyPlantInfoSheet: View {
+    let plant: DailyPlant
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s4) {
+            VStack(alignment: .leading, spacing: AppSpacing.s2) {
+                Text("PLANT OF THE DAY")
+                    .font(AppText.eyebrow)
+                    .tracking(AppLetterSpacing.eyebrow)
+                    .foregroundStyle(AppColors.themeGreenDeep)
+                Text(plant.name)
+                    .font(.system(size: 36, weight: .regular, design: .serif))
+                    .foregroundStyle(AppColors.textPrimary)
+                if !plant.commonName.isEmpty {
+                    Text(plant.commonName)
+                        .font(.system(size: 18, weight: .regular, design: .serif).italic())
+                        .foregroundStyle(AppColors.textSecondary)
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: AppSpacing.s4) {
+                NotepadInfoBlock(title: "EPITHET",          body: plant.epithet)
+                NotepadInfoBlock(title: "TRADITIONAL USES", body: plant.usedFor)
+            }
+
+            Spacer(minLength: AppSpacing.s4)
+
+            AppButton("Close", variant: .secondary, action: onClose)
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, AppSpacing.s5)
+        .padding(.vertical, AppSpacing.s5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppColors.cardSolid.ignoresSafeArea())
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+}
+
+private struct NotepadInfoBlock: View {
+    let title: String
+    let body: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s1) {
+            Text(title)
+                .font(AppText.eyebrow)
+                .tracking(AppLetterSpacing.eyebrow)
+                .foregroundStyle(AppColors.textSecondary)
+            Text(body)
+                .font(AppText.body)
+                .foregroundStyle(AppColors.textPrimary)
+        }
     }
 }
 

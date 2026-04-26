@@ -27,6 +27,7 @@ import androidx.room.PrimaryKey
         Index("project_id"),
         Index("updated_at"),
         Index("deleted_at"),
+        Index("archived_at"),
     ],
 )
 data class PageEntity(
@@ -118,4 +119,34 @@ data class PageEntity(
 
     @ColumnInfo(name = "deleted_at")
     val deletedAt: String? = null,
+
+    /**
+     * JSON array of free-form tag strings. Added in v17 — never
+     * null at the row level (Migration16To17 backfills `'[]'` and
+     * the column default keeps it that way for new rows). Drive
+     * surfaces tag pills under the page title.
+     */
+    @ColumnInfo(name = "tags", defaultValue = "'[]'")
+    val tags: String = "[]",
+
+    /**
+     * JSON array of `{id, body, createdAt}` objects — the typed
+     * `Note` collection on the Drive-facing `Page` model. Added in
+     * v18 so each note round-trips with its own id + timestamp
+     * instead of being collapsed into a single markdown blob in
+     * `notes`. The `notes` column still carries the joined
+     * markdown for FTS indexing; this column is the source of
+     * truth for note identity.
+     */
+    @ColumnInfo(name = "page_notes_json", defaultValue = "'[]'")
+    val pageNotesJson: String = "[]",
+
+    /**
+     * Soft-archive timestamp (separate from `deletedAt`). Added in
+     * v17 — non-nil means the page lives in the archive bin and is
+     * filtered out of the active page list. Independent of
+     * `deletedAt` (true tombstone).
+     */
+    @ColumnInfo(name = "archived_at")
+    val archivedAt: String? = null,
 )

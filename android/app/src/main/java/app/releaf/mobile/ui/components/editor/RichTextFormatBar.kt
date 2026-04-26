@@ -43,13 +43,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppSpacing
 import com.mohamedrejeb.richeditor.model.RichTextState
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 @Composable
 fun RichTextFormatBar(
@@ -63,8 +63,9 @@ fun RichTextFormatBar(
      */
     onEnterDrawing: (() -> Unit)? = null,
 ) {
+    val weight = LocalFontWeight.current
     val currentSpan = state.currentSpanStyle
-    val boldActive      = currentSpan.fontWeight == FontWeight.Bold
+    val boldActive      = currentSpan.fontWeight == weight
     val italicActive    = currentSpan.fontStyle == FontStyle.Italic
     val underlineActive = currentSpan.textDecoration?.contains(TextDecoration.Underline) == true
 
@@ -77,7 +78,7 @@ fun RichTextFormatBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ToggleButton(Icons.Filled.FormatBold, "Bold", active = boldActive) {
-            state.toggleSpanStyle(SpanStyle(fontWeight = FontWeight.Bold))
+            state.toggleSpanStyle(SpanStyle(fontWeight = weight))
         }
         ToggleButton(Icons.Filled.FormatItalic, "Italic", active = italicActive) {
             state.toggleSpanStyle(SpanStyle(fontStyle = FontStyle.Italic))

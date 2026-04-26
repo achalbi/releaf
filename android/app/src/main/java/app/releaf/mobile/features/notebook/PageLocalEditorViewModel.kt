@@ -201,6 +201,15 @@ class PageLocalEditorViewModel(
         )
     }
 
+    /** Update the free-form title shown above the ledger rows. */
+    fun updateSubPageLedgerTitle(id: String, title: String) {
+        _state.value = _state.value.copy(
+            subPages = _state.value.subPages.map {
+                if (it.id == id) it.copy(ledgerTitle = title) else it
+            },
+        )
+    }
+
     /** Append a fresh empty sub-page. Returns the new id so the UI can flip to it. */
     fun addSubPage(): String {
         val new = SubPage(id = Uuidv7.generate())

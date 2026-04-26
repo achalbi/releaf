@@ -17,7 +17,10 @@ public enum DirectoryContactSource: Equatable, Sendable {
 public struct DirectoryContact: Identifiable, Equatable, Sendable {
     public let id: String
     public let name: String
-    public let phone: String?
+    /// All phone numbers stored for this contact, de-duplicated and
+    /// in capture order. Empty when there's no phone at all. Single-
+    /// phone displays use the `phone` computed accessor below.
+    public let phones: [String]
     public let email: String?
     public let organization: String?
     public let notes: String?
@@ -29,7 +32,7 @@ public struct DirectoryContact: Identifiable, Equatable, Sendable {
     public init(
         id: String,
         name: String,
-        phone: String? = nil,
+        phones: [String] = [],
         email: String? = nil,
         organization: String? = nil,
         notes: String? = nil,
@@ -39,7 +42,7 @@ public struct DirectoryContact: Identifiable, Equatable, Sendable {
     ) {
         self.id = id
         self.name = name
-        self.phone = phone
+        self.phones = phones
         self.email = email
         self.organization = organization
         self.notes = notes
@@ -47,6 +50,10 @@ public struct DirectoryContact: Identifiable, Equatable, Sendable {
         self.appOccurrences = appOccurrences
         self.updatedAt = updatedAt
     }
+
+    /// First phone, for single-phone UI paths. `phones` is the source
+    /// of truth.
+    public var phone: String? { phones.first }
 }
 
 /// Signature used to collapse duplicate app contacts into one row.
@@ -61,4 +68,38 @@ internal func identitySignature(
     out.append("|")
     out.append((email ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
     return out
+}
+
+/// Collapse phone numbers that differ only by a country-code prefix
+/// (e.g. "+91 98765 43210" vs "98765 43210"). The last ten digits
+/// are the subscriber number for every major numbering plan we care
+/// about, so we group by that suffix and keep the richer
+/// representation (more digits → likely carries the country code).
+///
+/// Preserves first-seen order for visually stable lists.
+internal func dedupePhones(_ raw: [String]) -> [String] {
+    var order: [String] = []
+    var winners: [String: String] = [:]
+    for phone in raw {
+        let trimmed = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { continue }
+        let digits = trimmed.filter { $0.isNumber }
+        if digits.isEmpty { continue }
+        let key: String
+        if digits.count >= 10 {
+            key = String(digits.suffix(10))
+        } else {
+            key = digits
+        }
+        if let existing = winners[key] {
+            let existingDigits = existing.filter { $0.isNumber }.count
+            if digits.count > existingDigits {
+                winners[key] = trimmed
+            }
+        } else {
+            winners[key] = trimmed
+            order.append(key)
+        }
+    }
+    return order.compactMap { winners[$0] }
 }

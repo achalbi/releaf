@@ -25,6 +25,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
+import app.releaf.mobile.data.callhistory.CallHistoryDao
+import app.releaf.mobile.data.callhistory.CallHistoryEntity
 import app.releaf.mobile.data.notebook.BookSeriesDao
 import app.releaf.mobile.data.notebook.BookSeriesEntity
 import app.releaf.mobile.data.notebook.ChapterDao
@@ -58,13 +60,36 @@ import app.releaf.mobile.data.task.TaskEntity
         TaskEntity::class,
         ReminderEntity::class,
         PerspectiveEntity::class,
+        CallHistoryEntity::class,
+        app.releaf.mobile.data.activity.AuditEvent::class,
     ],
-    // v12: Shelf → Book(Notebook) → Chapter → Page hierarchy. Adds
-    // `shelves` + `book_series` tables and four new columns on
-    // `notebooks` (`shelf_id`, `series_id`, `volume_number`,
-    // `volume_name`). Backfills existing notebooks into the default
-    // "General" shelf and seeds that shelf on upgrade.
-    version = 12,
+    // v19: rebuilds archive-column indices under Room's naming. v17
+    // shipped raw `idx_pages_archived_at` / `idx_chapters_archived_at`
+    // partial indices that the entity declarations didn't match, so
+    // Room's schema validator rejected them on cold start. Both
+    // entities now carry `@Index("archived_at")`; this migration
+    // drops the old names and creates the Room-owned ones, while
+    // Migration16To17 stops creating the orphan indices for fresh
+    // installs.
+    //
+    // v18: adds `pages.page_notes_json` so each `Note` round-trips
+    // with its own id + createdAt instead of being collapsed into
+    // the single markdown blob in `pages.notes`. The markdown column
+    // sticks around — FTS triggers index it, and the legacy fallback
+    // path on read still wraps it as one Note when `page_notes_json`
+    // is empty (covers rows written before this migration).
+    //
+    // v17: backfills the columns the real `LocalDriveRepository`
+    // depends on but the original schema never carried —
+    //   pages.tags        JSON array, default `[]`. Page-level free-form
+    //                     tags, persisted alongside the page row.
+    //   pages.archived_at ISO timestamp, nullable. Page-level archive
+    //                     bin separate from `deleted_at` (true tombstone).
+    //   chapters.archived_at  Same shape as pages.archived_at — gives the
+    //                         chapter detail a recoverable archive state.
+    // Notebooks already have archived_at (added in v3→v4) so v17 only
+    // touches pages + chapters.
+    version = 19,
     exportSchema = true,
 )
 abstract class ReleafDatabase : RoomDatabase() {
@@ -79,6 +104,8 @@ abstract class ReleafDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
     abstract fun reminderDao(): ReminderDao
     abstract fun perspectiveDao(): PerspectiveDao
+    abstract fun callHistoryDao(): CallHistoryDao
+    abstract fun auditDao(): app.releaf.mobile.data.activity.AuditDao
 
     /**
      * One-shot schema installer for SQL that Room's annotation model can't
@@ -509,6 +536,162 @@ abstract class ReleafDatabase : RoomDatabase() {
         }
     }
 
+    /**
+     * v12 → v13: adds the `call_history` table. Local log of
+     * outbound calls placed from inside the app; rows are written
+     * on dial and updated in-place by the TelephonyCallback
+     * observer once OFFHOOK → IDLE transitions fire. Not sync'd to
+     * Drive.
+     */
+    private object Migration12To13 : Migration(12, 13) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS call_history (
+                    id                TEXT NOT NULL PRIMARY KEY,
+                    user_id           TEXT NOT NULL,
+                    contact_name      TEXT NOT NULL,
+                    phone_number      TEXT NOT NULL,
+                    source            TEXT NOT NULL,
+                    started_at        TEXT NOT NULL,
+                    connected_at      TEXT,
+                    ended_at          TEXT,
+                    duration_seconds  INTEGER
+                )
+                """.trimIndent()
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_call_history_user_id ON call_history(user_id)"
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_call_history_started_at ON call_history(started_at)"
+            )
+        }
+    }
+
+    /**
+     * v13 → v14: adds the `audit_events` table — phase 2 of the
+     * activity tracker. Append-only log written by the four user-
+     * facing repositories on every successful mutation. Indexed by
+     * user_id, timestamp (descending feed reads), and (entity_type,
+     * entity_id) so per-entity history lookups stay cheap.
+     */
+    private object Migration13To14 : Migration(13, 14) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS audit_events (
+                    id           TEXT NOT NULL PRIMARY KEY,
+                    user_id      TEXT NOT NULL,
+                    timestamp    TEXT NOT NULL,
+                    action       TEXT NOT NULL,
+                    entity_type  TEXT NOT NULL,
+                    entity_id    TEXT NOT NULL,
+                    title        TEXT,
+                    source       TEXT NOT NULL DEFAULT 'user',
+                    dirty        INTEGER NOT NULL DEFAULT 1
+                )
+                """.trimIndent()
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_audit_events_user_id ON audit_events(user_id)"
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_audit_events_timestamp ON audit_events(timestamp)"
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_audit_events_entity_type_entity_id " +
+                    "ON audit_events(entity_type, entity_id)"
+            )
+        }
+    }
+
+    /**
+     * v14 → v15: adds the `context` column to `audit_events`. Holds the
+     * free-form hierarchy breadcrumb the timeline UI renders next to
+     * sub-event captures (photo / voice / todo / contact / location /
+     * scan) — e.g. "Releaf garden › Chapter 1 › Page A" — snapshotted
+     * at log time so it survives parent renames.
+     */
+    private object Migration14To15 : Migration(14, 15) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL("ALTER TABLE audit_events ADD COLUMN context TEXT")
+        }
+    }
+
+    /**
+     * v15 → v16: adds the `description` column on `notepad_entries`.
+     * Nullable, no default — existing rows treat NULL as "no description
+     * yet" (same convention as the notebooks/chapters description
+     * columns added in 3 → 4). Mirrors the shared
+     * design-system/migrations/v2_notepad_description.sql file.
+     */
+    private object Migration15To16 : Migration(15, 16) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL("ALTER TABLE notepad_entries ADD COLUMN description TEXT")
+        }
+    }
+
+    /**
+     * v16 → v17: real-only foundation. Adds the three columns that
+     * `LocalDriveRepository` reads + writes today but the v1 schema
+     * never carried. Mirrors iOS's `v6_archive_and_tags` migration
+     * so a row from one platform deserialises cleanly on the other.
+     *
+     *   pages.tags          JSON array of free-form tag strings.
+     *                       Defaults to `'[]'` so existing rows
+     *                       round-trip as zero tags.
+     *   pages.archived_at   ISO timestamp; nullable. Splits archive
+     *                       (recoverable, in archive bin) from
+     *                       deleted_at (true tombstone).
+     *   chapters.archived_at Same shape — chapters can now be archived
+     *                       without being soft-deleted.
+     */
+    private object Migration16To17 : Migration(16, 17) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL("ALTER TABLE pages ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
+            connection.execSQL("ALTER TABLE pages ADD COLUMN archived_at TEXT")
+            connection.execSQL("ALTER TABLE chapters ADD COLUMN archived_at TEXT")
+        }
+    }
+
+    /**
+     * v17 → v18: add `pages.page_notes_json`. Stores the typed Note
+     * array (id + body + createdAt per element) so each Note keeps
+     * its identity through the persistence round-trip — joining the
+     * bodies into the existing markdown column lost ids and
+     * timestamps. The markdown column stays so FTS keeps working;
+     * the mapper joins all note bodies into it on every write.
+     */
+    private object Migration17To18 : Migration(17, 18) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL("ALTER TABLE pages ADD COLUMN page_notes_json TEXT NOT NULL DEFAULT '[]'")
+        }
+    }
+
+    /**
+     * v18 → v19: replaces the orphan `idx_*_archived_at` partial
+     * indices that Migration16To17 used to create with full indices
+     * Room owns directly (`index_pages_archived_at`,
+     * `index_chapters_archived_at`). The entities now declare
+     * `@Index("archived_at")` on both tables, so the validator
+     * expects the Room-naming variants. `IF EXISTS` on the drops
+     * keeps fresh installs happy (they never had the old names
+     * after the Migration16To17 fix).
+     */
+    private object Migration18To19 : Migration(18, 19) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL("DROP INDEX IF EXISTS idx_pages_archived_at")
+            connection.execSQL("DROP INDEX IF EXISTS idx_chapters_archived_at")
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_pages_archived_at ON pages(archived_at)"
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_chapters_archived_at ON chapters(archived_at)"
+            )
+        }
+    }
+
     companion object {
         private const val DB_NAME = "releaf.db"
 
@@ -541,6 +724,13 @@ abstract class ReleafDatabase : RoomDatabase() {
                         Migration9To10,
                         Migration10To11,
                         Migration11To12,
+                        Migration12To13,
+                        Migration13To14,
+                        Migration14To15,
+                        Migration15To16,
+                        Migration16To17,
+                        Migration17To18,
+                        Migration18To19,
                     )
                     // Dogfood installs at v2-v6 (pre-flatten) are handled
                     // here as a downgrade: the DB wipes, Room recreates

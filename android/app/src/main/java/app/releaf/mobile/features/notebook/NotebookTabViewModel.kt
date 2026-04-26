@@ -30,6 +30,8 @@ import app.releaf.mobile.data.notebook.PageSearchHit
 import app.releaf.mobile.data.notebook.PageRepository
 import app.releaf.mobile.data.shelf.ShelfEntity
 import app.releaf.mobile.data.shelf.ShelfRepository
+import app.releaf.mobile.ui.theme.NotebookSortPreference
+import app.releaf.mobile.ui.theme.UiPreferences
 import java.time.Instant
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -47,6 +49,44 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 enum class NotebookListTab { Current, Archive }
+
+/** How the notebooks list is ordered. The user's choice is
+ *  persisted via [UiPreferences] (see [NotebookSortPreference]) so
+ *  it survives a cold start. The picker lives in the notebook-tab
+ *  overflow menu. */
+enum class NotebookSortMode(val label: String) {
+    Recent("Recent activity"),
+    Name("Name (A → Z)"),
+    Pages("Most pages"),
+}
+
+/** Bridge between the persistence shape and the in-memory shape.
+ *  Kept top-level so they're callable during property
+ *  initialization (Kotlin doesn't let you call class methods
+ *  inside property initializers). */
+private fun NotebookSortMode.toPref(): NotebookSortPreference = when (this) {
+    NotebookSortMode.Recent -> NotebookSortPreference.Recent
+    NotebookSortMode.Name   -> NotebookSortPreference.Name
+    NotebookSortMode.Pages  -> NotebookSortPreference.Pages
+}
+
+/** Map a leaf-theme token to the hex string the shelf entity
+ *  stores. Source of truth for the four primaries lives in the
+ *  generated `AppColors`; this lookup keeps any color-token
+ *  change in `design-tokens.json` flowing through. */
+private fun themeHex(token: String): String = when (token.lowercase()) {
+    "coral"  -> "#E07856"
+    "green"  -> "#7AA874"
+    "yellow" -> "#F4C430"
+    "dry"    -> "#B8956A"
+    else     -> "#E07856"
+}
+
+private fun NotebookSortPreference.toUi(): NotebookSortMode = when (this) {
+    NotebookSortPreference.Recent -> NotebookSortMode.Recent
+    NotebookSortPreference.Name   -> NotebookSortMode.Name
+    NotebookSortPreference.Pages  -> NotebookSortMode.Pages
+}
 
 /** Notebook row with chapter / page counts pre-computed. */
 data class NotebookSummary(
@@ -79,12 +119,20 @@ class NotebookTabViewModel(
     private val chapterRepository: ChapterRepository,
     private val pageRepository: PageRepository,
     private val shelfRepository: ShelfRepository,
+    private val uiPreferences: UiPreferences = UiPreferences.get(application),
 ) : AndroidViewModel(application) {
 
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
     private val _tab = MutableStateFlow(NotebookListTab.Current)
+
+    /** Initial value pulled from the persisted [UiPreferences] so a
+     *  freshly-mounted view shows the user's last sort without
+     *  flashing through Recent. Updates write back through
+     *  [setSortMode] so the choice survives a cold start. */
+    private val _sortMode = MutableStateFlow(uiPreferences.state.value.notebookSort.toUi())
+    val sortMode: StateFlow<NotebookSortMode> = _sortMode.asStateFlow()
 
     private val notebooksFlow: Flow<List<NotebookEntity>> = _tab.flatMapLatest { tab ->
         when (tab) {
@@ -153,12 +201,20 @@ class NotebookTabViewModel(
         initialValue = NotebookTabUiState(),
     )
 
-    /** Create a fresh shelf — available to the "+ New shelf…" row
-     *  inside the notebook-create dialog. */
-    fun createShelf(name: String, onCreated: (String) -> Unit = {}) {
+    /** Create a fresh shelf — wired to the New-shelf overflow item
+     *  *and* the inline "+ New shelf…" row inside the notebook-create
+     *  dialog. The optional `colorToken` lets the caller pick one of
+     *  the four leaf themes; we convert it to the hex string the
+     *  shelf entity stores. */
+    fun createShelf(
+        name: String,
+        colorToken: String? = null,
+        onCreated: (String) -> Unit = {},
+    ) {
         val resolved = name.trim().ifEmpty { "Untitled shelf" }
+        val hex = colorToken?.let(::themeHex)
         viewModelScope.launch {
-            val shelf = shelfRepository.createShelf(name = resolved)
+            val shelf = shelfRepository.createShelf(name = resolved, colorHex = hex)
             onCreated(shelf.id)
         }
     }
@@ -169,6 +225,11 @@ class NotebookTabViewModel(
 
     fun clearQuery() {
         _query.value = ""
+    }
+
+    fun setSortMode(mode: NotebookSortMode) {
+        _sortMode.value = mode
+        uiPreferences.setNotebookSort(mode.toPref())
     }
 
     fun setTab(tab: NotebookListTab) {
@@ -183,16 +244,20 @@ class NotebookTabViewModel(
         title: String,
         description: String? = null,
         colorHex: String? = null,
+        colorToken: String? = null,
         shelfId: String? = null,
         onCreated: (String) -> Unit = {},
     ) {
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
         val resolvedShelf = shelfId?.takeIf { it.isNotBlank() } ?: ShelfEntity.DEFAULT_GENERAL_ID
+        // Caller may pass either a leaf-theme token (preferred) or a
+        // raw hex string (legacy). Token wins when both are set.
+        val resolvedHex = colorToken?.let(::themeHex) ?: colorHex
         viewModelScope.launch {
             val created = notebookRepository.createNotebook(
                 title       = trimmed,
-                colorHex    = colorHex,
+                colorHex    = resolvedHex,
                 description = description,
                 shelfId     = resolvedShelf,
             )

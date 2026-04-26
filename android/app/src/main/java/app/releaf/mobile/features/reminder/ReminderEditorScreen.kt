@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -79,6 +78,7 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -333,7 +333,7 @@ private fun PerspectivePickerRow(
                 ) {
                     Text(
                         text  = "@${p.name}",
-                        style = AppTypography.Meta.copy(fontWeight = FontWeight.SemiBold),
+                        style = AppTypography.Meta.copy(fontWeight = LocalFontWeight.current),
                         color = if (active) AppColors.OnAccent else AppColors.TextPrimary,
                     )
                 }

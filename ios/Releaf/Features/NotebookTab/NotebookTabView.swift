@@ -18,6 +18,12 @@ public struct NotebookTabView: View {
     @State private var isAdding: Bool = false
     @State private var newTitle: String = ""
     @State private var pendingDelete: ShelfRecord?
+    @State private var presentingNewShelfSheet: Bool = false
+    @State private var presentingArchivedSheet: Bool = false
+    @State private var newShelfName: String = ""
+    @State private var newShelfColorToken: String = "coral"
+    @State private var newNotebookColorToken: String = "coral"
+    @State private var openArchivedPageId: String? = nil
     @FocusState private var addFocused: Bool
 
     public init() {}
@@ -60,28 +66,98 @@ public struct NotebookTabView: View {
                 Text("“\(displayNotebookTitle(pendingDelete.notebook.title))” and all of its chapters and pages will be deleted.")
             }
         }
+        .sheet(isPresented: $presentingNewShelfSheet) {
+            NewShelfSheet(
+                name: $newShelfName,
+                colorToken: $newShelfColorToken,
+                onCreate: { trimmed, token in
+                    vm.createShelf(name: trimmed, colorToken: token)
+                    presentingNewShelfSheet = false
+                    newShelfColorToken = "coral"   // reset for next open
+                },
+                onCancel: {
+                    presentingNewShelfSheet = false
+                    newShelfColorToken = "coral"
+                }
+            )
+        }
+        .sheet(isPresented: $presentingArchivedSheet) {
+            ArchivedNotebooksSheet(
+                onClose: { presentingArchivedSheet = false },
+                onOpenPage: { id in
+                    // Dismiss first so the navigation destination
+                    // picks up cleanly after the sheet collapses.
+                    presentingArchivedSheet = false
+                    openArchivedPageId = id
+                }
+            )
+        }
+        .navigationDestination(
+            isPresented: Binding(
+                get: { openArchivedPageId != nil },
+                set: { if !$0 { openArchivedPageId = nil } }
+            )
+        ) {
+            if let id = openArchivedPageId {
+                PageDetailView(pageId: id)
+            }
+        }
     }
 
     private var header: some View {
+        // Composed top zone — leaf eyebrow on the left, overflow menu
+        // on the right, big serif title. No view toggle here: this
+        // screen is the shelves list and there's no second layout to
+        // toggle to. Stat tiles + search field stay below the title.
         VStack(alignment: .leading, spacing: AppSpacing.s3) {
-            Text("SHELVES")
-                .font(AppText.eyebrow)
-                .tracking(AppLetterSpacing.eyebrow)
-                .foregroundStyle(AppColors.coral)
+            HStack(alignment: .center) {
+                LeafEyebrow("releaf · shelves")
+                Spacer()
+                PageOverflowButton {
+                    Button {
+                        newShelfName = ""
+                        presentingNewShelfSheet = true
+                    } label: { Label("New shelf", systemImage: "books.vertical") }
+                    Button {
+                        isAdding = true
+                    } label: { Label("New notebook", systemImage: "book") }
+                    Divider()
+                    Menu {
+                        ForEach(NotebookTabViewModel.SortMode.allCases, id: \.self) { mode in
+                            Button {
+                                vm.sortMode = mode
+                            } label: {
+                                if vm.sortMode == mode {
+                                    Label(mode.label, systemImage: "checkmark")
+                                } else {
+                                    Label(mode.label, systemImage: mode.systemIcon)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Sort by…", systemImage: "arrow.up.arrow.down")
+                    }
+                    Button {
+                        presentingArchivedSheet = true
+                    } label: { Label("Archived", systemImage: "archivebox") }
+                }
+            }
 
-            Text("Your shelves")
-                .font(AppText.editorialTitle)
+            Text("your shelves")
+                .font(.system(size: 32, weight: .regular, design: .serif))
                 .foregroundStyle(AppColors.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
 
             Text(headerSummary)
                 .font(AppText.meta)
                 .foregroundStyle(AppColors.textSecondary)
 
             StatGrid(items: [
-                StatItem(label: "Notebooks", value: "\(vm.metrics.notebooks)", tone: .coral),
-                StatItem(label: "Chapters",  value: "\(vm.metrics.chapters)",  tone: .neutral),
-                StatItem(label: "Pages",     value: "\(vm.metrics.pages)",     tone: .green),
-            ])
+                StatItem(label: "Notebooks", value: "\(vm.metrics.notebooks)", tone: .green,   mode: .overview),
+                StatItem(label: "Chapters",  value: "\(vm.metrics.chapters)",  tone: .neutral, mode: nil),
+                StatItem(label: "Pages",     value: "\(vm.metrics.pages)",     tone: .green,   mode: nil),
+            ], valueDesign: .serif)
 
             NotebookSearchField(
                 query: Binding(get: { vm.query }, set: { vm.query = $0 }),
@@ -126,7 +202,9 @@ public struct NotebookTabView: View {
                 if notebookMatches.isEmpty && !isAdding {
                     EmptyStateCard(
                         title: "No notebooks yet",
-                        subtitle: "Create your first notebook to start grouping chapters and pages in one place."
+                        subtitle: "Notebooks group chapters and pages in one place — perfect for a project, a trip, or a season.",
+                        actionLabel: "Create your first notebook",
+                        onAction: { withAnimation { isAdding = true } }
                     )
                     .notebookListRow()
                 } else if !notebookMatches.isEmpty {
@@ -156,7 +234,10 @@ public struct NotebookTabView: View {
 
                         ForEach(books, id: \.notebook.id) { record in
                             NavigationLink(value: NotebookRoute(id: record.notebook.id)) {
-                                NotebookShelfRow(summary: record)
+                                NotebookShelfRow(
+                                    summary: record,
+                                    shelfColorHex: shelf.colorHex
+                                )
                             }
                             .buttonStyle(.plain)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -179,7 +260,10 @@ public struct NotebookTabView: View {
                         .notebookListRow(bottom: AppSpacing.s2)
                         ForEach(orphanBooks, id: \.notebook.id) { record in
                             NavigationLink(value: NotebookRoute(id: record.notebook.id)) {
-                                NotebookShelfRow(summary: record)
+                                NotebookShelfRow(
+                                    summary: record,
+                                    shelfColorHex: nil
+                                )
                             }
                             .buttonStyle(.plain)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -211,7 +295,12 @@ public struct NotebookTabView: View {
 
                         ForEach(notebookMatches, id: \.notebook.id) { shelf in
                             NavigationLink(value: NotebookRoute(id: shelf.notebook.id)) {
-                                NotebookShelfRow(summary: shelf)
+                                NotebookShelfRow(
+                                    summary: shelf,
+                                    shelfColorHex: vm.shelfDirectory.first(
+                                        where: { $0.id == shelf.notebook.shelfId }
+                                    )?.colorHex
+                                )
                             }
                             .buttonStyle(.plain)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -267,7 +356,7 @@ public struct NotebookTabView: View {
                     Spacer()
                     Button(action: cancelAdd) {
                         Image(systemName: "xmark")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 12))
                             .foregroundStyle(AppColors.textTertiary)
                             .frame(width: 28, height: 28)
                             .background(
@@ -285,7 +374,7 @@ public struct NotebookTabView: View {
 
                 HStack(spacing: AppSpacing.s2) {
                     Image(systemName: "book.closed")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 16))
                         .foregroundStyle(AppColors.coral)
 
                     TextField(
@@ -308,6 +397,19 @@ public struct NotebookTabView: View {
                         .stroke(AppColors.borderDefault, lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
+
+                // Leaf-theme color row — same shape as the new-shelf
+                // sheet so users learn the picker once.
+                VStack(alignment: .leading, spacing: AppSpacing.s2) {
+                    Text("COLOR")
+                        .font(AppText.eyebrow)
+                        .tracking(AppLetterSpacing.eyebrow)
+                        .foregroundStyle(AppColors.textSecondary)
+                    LeafColorPicker(
+                        selection: $newNotebookColorToken,
+                        showPreview: true
+                    )
+                }
 
                 HStack(spacing: AppSpacing.s2) {
                     Button("Cancel", action: cancelAdd)
@@ -353,7 +455,7 @@ public struct NotebookTabView: View {
         } label: {
             HStack(spacing: AppSpacing.s2) {
                 Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 16))
                 Text("New notebook")
                     .font(AppText.button)
             }
@@ -395,13 +497,15 @@ public struct NotebookTabView: View {
     private func commitAdd() {
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        vm.addNotebook(title: trimmed)
+        vm.addNotebook(title: trimmed, colorToken: newNotebookColorToken)
         newTitle = ""
+        newNotebookColorToken = "coral"
         isAdding = false
     }
 
     private func cancelAdd() {
         newTitle = ""
+        newNotebookColorToken = "coral"
         isAdding = false
     }
 }
@@ -413,7 +517,7 @@ private struct NotebookSearchField: View {
     var body: some View {
         HStack(spacing: AppSpacing.s2) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 15, weight: .regular))
+                .font(.system(size: 15))
                 .foregroundStyle(AppColors.textTertiary)
 
             TextField("Search notebooks or page content…", text: $query)
@@ -502,6 +606,24 @@ private struct NotebookShelfSectionHeader: View {
 private struct EmptyStateCard: View {
     let title: String
     let subtitle: String
+    /// Optional CTA pill rendered under the body copy. When
+    /// `actionLabel` and `onAction` are both provided, the card
+    /// gives the user a one-tap path forward instead of leaving
+    /// them to find the floating + elsewhere on the screen.
+    let actionLabel: String?
+    let onAction: (() -> Void)?
+
+    init(
+        title: String,
+        subtitle: String,
+        actionLabel: String? = nil,
+        onAction: (() -> Void)? = nil
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.actionLabel = actionLabel
+        self.onAction = onAction
+    }
 
     var body: some View {
         Card(radius: AppRadius.lg) {
@@ -509,8 +631,8 @@ private struct EmptyStateCard: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                         .fill(AppColors.coralSoft)
-                    Image(systemName: "books.vertical")
-                        .font(.system(size: 18, weight: .semibold))
+                    Image(systemName: "leaf.fill")
+                        .font(.system(size: 18))
                         .foregroundStyle(AppColors.coralDeep)
                 }
                 .frame(width: 44, height: 44)
@@ -522,6 +644,24 @@ private struct EmptyStateCard: View {
                 Text(subtitle)
                     .font(AppText.body)
                     .foregroundStyle(AppColors.textSecondary)
+
+                if let label = actionLabel, let onAction {
+                    Button(action: onAction) {
+                        HStack(spacing: AppSpacing.s2) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(label)
+                                .font(AppText.button)
+                        }
+                        .foregroundStyle(AppColors.onAccent)
+                        .padding(.horizontal, AppSpacing.s4)
+                        .padding(.vertical, AppSpacing.s2)
+                        .background(Capsule().fill(AppColors.coral))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, AppSpacing.s2)
+                    .accessibilityLabel(Text(label))
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -531,6 +671,10 @@ private struct EmptyStateCard: View {
 
 private struct NotebookShelfRow: View {
     let summary: ShelfRecord
+    /// Hex of the parent shelf — used as a per-shelf fallback when
+    /// the notebook itself has no color set, so all books on the
+    /// same shelf read as one visual family in the list.
+    let shelfColorHex: String?
 
     var body: some View {
         let notebook = summary.notebook
@@ -554,7 +698,7 @@ private struct NotebookShelfRow: View {
                     )
 
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 13))
                         .foregroundStyle(AppColors.textTertiary)
                 }
 
@@ -596,11 +740,19 @@ private struct NotebookShelfRow: View {
     }
 
     private var notebookColor: Color {
-        guard let hex = summary.notebook.colorHex,
-              let parsed = Color(hexString: hex) else {
-            return AppColors.coral
+        // Preference order: notebook's own color → parent shelf's
+        // color → coral fallback. The shelf step is what makes
+        // every book on the same shelf read as one visual family
+        // when the user hasn't picked a color per book.
+        if let hex = summary.notebook.colorHex,
+           let parsed = Color(hexString: hex) {
+            return parsed
         }
-        return parsed
+        if let hex = shelfColorHex,
+           let parsed = Color(hexString: hex) {
+            return parsed
+        }
+        return AppColors.coral
     }
 
     private var helperText: String? {
@@ -620,7 +772,7 @@ private struct NotebookColorChip: View {
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                 .stroke(color.opacity(0.24), lineWidth: 1)
             Image(systemName: "book.closed")
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 18))
                 .foregroundStyle(color)
         }
         .frame(width: 42, height: 42)
@@ -654,7 +806,7 @@ private struct CountChip: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: systemIcon)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 13))
                 .foregroundStyle(AppColors.textSecondary)
             Text(text)
                 .font(AppText.meta)
@@ -748,5 +900,220 @@ private extension Color {
         let g = Double((rgb >> 8) & 0xFF) / 255.0
         let b = Double(rgb & 0xFF) / 255.0
         self.init(red: r, green: g, blue: b)
+    }
+}
+
+// MARK: - Overflow sheets
+
+/// Compact sheet that takes a shelf name + color and creates it
+/// via the NotebookTabViewModel. Title in the sheet is the same
+/// lowercase serif used elsewhere; the color row uses the shared
+/// `LeafColorPicker`.
+private struct NewShelfSheet: View {
+    @Binding var name: String
+    @Binding var colorToken: String
+    let onCreate: (String, String) -> Void
+    let onCancel: () -> Void
+    @FocusState private var nameFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s4) {
+            Text("NEW SHELF")
+                .font(AppText.eyebrow)
+                .tracking(AppLetterSpacing.eyebrow)
+                .foregroundStyle(AppColors.themeGreenDeep)
+            Text("name your shelf")
+                .font(.system(size: 28, weight: .regular, design: .serif))
+                .foregroundStyle(AppColors.textPrimary)
+            Text("Shelves group notebooks by area of life — \"work\", \"garden\", \"daily\".")
+                .font(AppText.meta)
+                .foregroundStyle(AppColors.textSecondary)
+
+            TextField("Shelf name", text: $name)
+                .textInputAutocapitalization(.words)
+                .focused($nameFocused)
+                .padding(AppSpacing.s3)
+                .background(AppColors.inputBg)
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                        .stroke(AppColors.borderDefault, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+
+            VStack(alignment: .leading, spacing: AppSpacing.s2) {
+                Text("COLOR")
+                    .font(AppText.eyebrow)
+                    .tracking(AppLetterSpacing.eyebrow)
+                    .foregroundStyle(AppColors.textSecondary)
+                LeafColorPicker(selection: $colorToken, showPreview: true)
+            }
+
+            HStack(spacing: AppSpacing.s3) {
+                AppButton("Cancel", variant: .secondary, action: onCancel)
+                AppButton("Create shelf", variant: .primary) {
+                    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    onCreate(
+                        trimmed.isEmpty ? "Untitled shelf" : trimmed,
+                        colorToken
+                    )
+                }
+            }
+            .padding(.top, AppSpacing.s2)
+        }
+        .padding(.horizontal, AppSpacing.s5)
+        .padding(.vertical, AppSpacing.s5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppColors.cardSolid.ignoresSafeArea())
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+        .onAppear { nameFocused = true }
+    }
+}
+
+/// Cross-notebook archive picker. Fetches archived pages from
+/// `DriveRepository.listArchivedPages()` on appear, renders each
+/// row with title + breadcrumb (notebook / chapter) + a Restore
+/// button. Self-contained: holds its own @State + repo so the
+/// surrounding NotebookTabViewModel doesn't take on a Drive
+/// dependency for this single feature.
+private struct ArchivedNotebooksSheet: View {
+    let onClose: () -> Void
+    let onOpenPage: (String) -> Void
+
+    @State private var rows: [ArchivedPage] = []
+    @State private var isLoading: Bool = true
+
+    private let repository: DriveRepository = LocalDriveRepository.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s3) {
+            Text("ARCHIVED")
+                .font(AppText.eyebrow)
+                .tracking(AppLetterSpacing.eyebrow)
+                .foregroundStyle(AppColors.themeGreenDeep)
+            Text("nothing's lost")
+                .font(.system(size: 28, weight: .regular, design: .serif))
+                .foregroundStyle(AppColors.textPrimary)
+            Text("Pages you've archived stay here, sorted by when they went in. Restore brings them back to their original chapter.")
+                .font(AppText.meta)
+                .foregroundStyle(AppColors.textSecondary)
+                .padding(.bottom, AppSpacing.s2)
+
+            content
+                .frame(maxWidth: .infinity)
+
+            Spacer(minLength: AppSpacing.s2)
+            AppButton("Done", variant: .primary, action: onClose)
+        }
+        .padding(.horizontal, AppSpacing.s5)
+        .padding(.vertical, AppSpacing.s5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppColors.cardSolid.ignoresSafeArea())
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .task { await load() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if isLoading && rows.isEmpty {
+            HStack {
+                Spacer()
+                ProgressView().tint(AppColors.themeGreenPrimary)
+                Spacer()
+            }
+            .padding(.vertical, AppSpacing.s5)
+        } else if rows.isEmpty {
+            VStack(alignment: .leading, spacing: AppSpacing.s2) {
+                Text("Nothing here")
+                    .font(.system(size: 18, weight: .regular, design: .serif))
+                    .foregroundStyle(AppColors.textPrimary)
+                Text("Archive a page from its overflow menu and it'll show up here.")
+                    .font(AppText.body)
+                    .foregroundStyle(AppColors.textSecondary)
+            }
+            .padding(.vertical, AppSpacing.s4)
+        } else {
+            ScrollView {
+                VStack(spacing: AppSpacing.s2) {
+                    ForEach(rows) { row in
+                        ArchivedPageRow(
+                            row: row,
+                            onOpen: { onOpenPage(row.id) },
+                            onRestore: { Task { await restore(id: row.id) } }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        rows = (try? await repository.listArchivedPages()) ?? []
+    }
+
+    private func restore(id: String) async {
+        _ = try? await repository.restorePage(id: id)
+        await load()
+    }
+}
+
+private struct ArchivedPageRow: View {
+    let row: ArchivedPage
+    let onOpen: () -> Void
+    let onRestore: () -> Void
+
+    var body: some View {
+        // The row body is a tappable region that opens the page;
+        // the Restore pill handles its own tap and stops the open
+        // gesture from firing via `.buttonStyle(.plain)` and
+        // explicit `.contentShape` on the outer button.
+        Button(action: onOpen) {
+            HStack(alignment: .center, spacing: AppSpacing.s3) {
+                Image(systemName: "archivebox.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(AppColors.greenText)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.title)
+                        .font(AppText.button)
+                        .foregroundStyle(AppColors.textPrimary)
+                        .lineLimit(1)
+                    Text("\(row.notebookTitle) / \(row.chapterTitle)")
+                        .font(AppText.tag)
+                        .foregroundStyle(AppColors.textSecondary)
+                        .lineLimit(1)
+                    Text(row.archivedAt, format: .relative(presentation: .named))
+                        .font(AppText.tag)
+                        .foregroundStyle(AppColors.textTertiary)
+                }
+                Spacer(minLength: AppSpacing.s2)
+                Button(action: onRestore) {
+                    Text("Restore")
+                        .font(AppText.button)
+                        .foregroundStyle(AppColors.greenText)
+                        .padding(.horizontal, AppSpacing.s3)
+                        .padding(.vertical, AppSpacing.s1)
+                        .background(Capsule().fill(AppColors.greenSoft))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, AppSpacing.s3)
+            .padding(.vertical, AppSpacing.s2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    .fill(AppColors.canvas)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    .stroke(AppColors.borderDefault, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Open page")
     }
 }

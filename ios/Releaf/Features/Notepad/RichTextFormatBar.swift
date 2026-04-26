@@ -62,7 +62,7 @@ private struct ToggleButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 18))
                 .foregroundStyle(AppColors.coral)
                 .frame(width: 40, height: 40)
                 .background(

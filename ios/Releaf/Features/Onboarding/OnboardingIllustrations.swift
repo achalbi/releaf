@@ -261,7 +261,7 @@ struct TodoIllustration: View {
                 TodoRow(checked: false, label: "Finish report", trailing: {
                     AnyView(
                         Text("Task")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 10))
                             .foregroundStyle(accent.deep)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 1)
@@ -300,7 +300,7 @@ private struct TodoRow: View {
                     )
                 if checked {
                     Text("✓")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 10))
                         .foregroundStyle(.white)
                 }
             }
@@ -431,7 +431,7 @@ struct MigrateIllustration: View {
                         .tracking(0.5)
                         .foregroundStyle(accent.primary)
                     Text("\(day)")
-                        .font(.system(size: 22, weight: .heavy))
+                        .font(.system(size: 22))
                         .foregroundStyle(OnboardTokens.textPrimary)
                 }
                 .padding(.horizontal, 8)
@@ -442,7 +442,7 @@ struct MigrateIllustration: View {
                 .shadow(color: Color.black.opacity(0.10), radius: 4, x: 0, y: 2)
 
                 Text("→")
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: 26))
                     .foregroundStyle(accent.primary)
 
                 Text("📓")
@@ -465,7 +465,7 @@ struct BackupIllustration: View {
             HStack(spacing: 16) {
                 AppIconMark(size: 56)
                 Text("→")
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: 26))
                     .foregroundStyle(accent.primary)
                 GoogleDriveLogo(size: 36)
                     .frame(width: 56, height: 56)

@@ -6,15 +6,21 @@
  * uses fixed coral values (rather than the themeable [AppAccent]) so
  * the first-run experience has a consistent brand identity regardless
  * of the active accent palette.
+ *
+ * Typography roles are composable getters so they pick up the user's
+ * global font-weight preference via [LocalFontWeight] — the wizard
+ * lives behind the same setting as the rest of the app.
  */
 
 package app.releaf.mobile.features.onboarding
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 internal object OnboardTokens {
     // Colours (from onboarding.css)
@@ -46,65 +52,87 @@ internal object OnboardTokens {
     val IconDotFill       = Color(0xFFD98324)
 
     // Typography
-    val Headline = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.ExtraBold,
-        fontSize   = 23.sp,
-        lineHeight = 29.sp,
-    )
-    val Body = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize   = 15.sp,
-        lineHeight = 24.sp,
-    )
-    val Badge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
-        fontSize   = 11.sp,
-        letterSpacing = 0.6.sp,
-    )
-    val Button = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
-        fontSize   = 14.sp,
-    )
-    val Skip = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize   = 12.sp,
-    )
-    val CalendarHeader = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
-        fontSize   = 11.sp,
-        letterSpacing = 0.5.sp,
-    )
-    val CalendarNumber = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.ExtraBold,
-        fontSize   = 38.sp,
-        lineHeight = 38.sp,
-    )
-    val CtaLabel = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize   = 13.sp,
-        lineHeight = 18.sp,
-    )
-    val ScanPill = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize   = 10.sp,
-    )
-    val TodoItem = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize   = 13.sp,
-    )
-    val PhotoBadge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize   = 12.sp,
-    )
+    val Headline: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize   = 23.sp,
+            lineHeight = 29.sp,
+        )
+    val Body: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize   = 15.sp,
+            lineHeight = 24.sp,
+        )
+    val Badge: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize   = 11.sp,
+            letterSpacing = 0.6.sp,
+        )
+    val Button: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize   = 14.sp,
+        )
+    val Skip: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize   = 12.sp,
+        )
+    val CalendarHeader: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize   = 11.sp,
+            letterSpacing = 0.5.sp,
+        )
+    val CalendarNumber: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize   = 38.sp,
+            lineHeight = 38.sp,
+        )
+    val CtaLabel: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize   = 13.sp,
+            lineHeight = 18.sp,
+        )
+    val ScanPill: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize   = 10.sp,
+        )
+    val TodoItem: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize   = 13.sp,
+        )
+    val PhotoBadge: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize   = 12.sp,
+        )
 }

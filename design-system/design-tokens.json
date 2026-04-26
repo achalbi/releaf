@@ -324,5 +324,58 @@
       "accelerate": { "value": "cubic-bezier(0.4, 0, 1, 1)", "type": "cubicBezier" },
       "decelerate": { "value": "cubic-bezier(0, 0, 0.2, 1)", "type": "cubicBezier" }
     }
+  },
+  "plants": {
+    "_notes": "Daily-plant rotation source for the page header. 31 ayurvedic plants, append-only — reordering changes which plant shows on which day in users' archives. iOS emits DailyPlants.generated.swift, Android emits DailyPlants.generated.kt with identical contents so two devices on the same date pick the same plant. Edit entries here, regenerate, both platforms move together.",
+    "daily": [
+      { "name": "tulasi",       "commonName": "holy basil",         "epithet": "the immune mother",          "usedFor": "immunity, respiratory, stress, sacred rituals" },
+      { "name": "nimba",        "commonName": "neem",               "epithet": "the village pharmacy",       "usedFor": "skin, dental care, blood purifier, antibacterial" },
+      { "name": "ashwagandha",  "commonName": "winter cherry",      "epithet": "strength of a horse",        "usedFor": "stress, vitality, sleep, strength" },
+      { "name": "amalaki",      "commonName": "Indian gooseberry",  "epithet": "the rejuvenator",            "usedFor": "vitamin C, hair, digestion, chyawanprash" },
+      { "name": "brahmi",       "commonName": "water hyssop",       "epithet": "the brain's gardener",       "usedFor": "memory, focus, anxiety relief" },
+      { "name": "shatavari",    "commonName": "wild asparagus",     "epithet": "she of a hundred roots",     "usedFor": "women's health, hormones, lactation" },
+      { "name": "arjuna",       "commonName": "arjun tree",         "epithet": "keeper of the heart",        "usedFor": "heart health, blood pressure" },
+      { "name": "haridra",      "commonName": "turmeric",           "epithet": "the golden anti-flame",      "usedFor": "anti-inflammatory, wounds, daily cooking" },
+      { "name": "bilva",        "commonName": "bael",               "epithet": "sacred three-leaf",          "usedFor": "digestion, sacred offerings, jaundice" },
+      { "name": "ashvattha",    "commonName": "sacred fig",         "epithet": "the breathing tree",         "usedFor": "air purification, longevity, sacred shade" },
+      { "name": "nyagrodha",    "commonName": "banyan",             "epithet": "roots that walk",            "usedFor": "longevity, shelter, spiritual rest" },
+      { "name": "guduchi",      "commonName": "giloy",              "epithet": "the nectar of immortality",  "usedFor": "fever, immunity, detox" },
+      { "name": "manjishtha",   "commonName": "Indian madder",      "epithet": "the blood's broom",          "usedFor": "skin, blood purifier, lymph" },
+      { "name": "bhringraj",    "commonName": "false daisy",        "epithet": "king of hair",               "usedFor": "hair growth, scalp health, liver" },
+      { "name": "lashuna",      "commonName": "garlic",             "epithet": "the kitchen's first cure",   "usedFor": "cold, cholesterol, immunity, daily cooking" },
+      { "name": "ardraka",      "commonName": "ginger",             "epithet": "fire root of the kitchen",   "usedFor": "digestion, nausea, cold, chai and curries" },
+      { "name": "maricha",      "commonName": "black pepper",       "epithet": "the king of spices",         "usedFor": "digestion, cold, seasoning, every kitchen" },
+      { "name": "jeeraka",      "commonName": "cumin",              "epithet": "the everyday ember",         "usedFor": "digestion, gas, tempering, masala" },
+      { "name": "dhanyaka",     "commonName": "coriander",          "epithet": "the cooling green",          "usedFor": "cooling, digestion, fresh garnish" },
+      { "name": "methika",      "commonName": "fenugreek",          "epithet": "the bitter blessing",        "usedFor": "diabetes, hair, digestion, sabzi" },
+      { "name": "ela",          "commonName": "cardamom",           "epithet": "the queen of spices",        "usedFor": "digestion, breath, chai, sweets" },
+      { "name": "lavanga",      "commonName": "cloves",             "epithet": "the pinpoint flame",         "usedFor": "toothache, digestion, biryani" },
+      { "name": "twak",         "commonName": "cinnamon",           "epithet": "the sweet bark",             "usedFor": "blood sugar, warming, baking, masala" },
+      { "name": "tamalapatra",  "commonName": "bay leaf",           "epithet": "leaf of the slow-cooked",    "usedFor": "flavoring, digestion, garam masala" },
+      { "name": "hingu",        "commonName": "asafoetida",         "epithet": "the loud resin",             "usedFor": "gas, digestion, dal tadka" },
+      { "name": "krishnanimba", "commonName": "curry leaf",         "epithet": "the leaf of every pot",      "usedFor": "hair, eye health, daily tempering" },
+      { "name": "shigru",       "commonName": "moringa",            "epithet": "the miracle tree",           "usedFor": "nutrition, anemia, leaves and pods" },
+      { "name": "kumari",       "commonName": "aloe vera",          "epithet": "the youthful one",           "usedFor": "burns, skin, hair, gentle laxative" },
+      { "name": "haritaki",     "commonName": "chebulic myrobalan", "epithet": "mother of all herbs",        "usedFor": "constipation, detox, triphala" },
+      { "name": "yashtimadhu",  "commonName": "licorice",           "epithet": "the sweet root",             "usedFor": "sore throat, ulcers, cough" },
+      { "name": "pippali",      "commonName": "long pepper",        "epithet": "the long warming flame",     "usedFor": "respiratory, digestion, cough" }
+    ]
+  },
+  "metric": {
+    "_notes": "Non-color, non-typographic metrics consumed by both platforms. Today this is just the Re-Leaf paper-saved math: each capture kind is rated against what it would have replaced on paper, and a mature pine is held at 8,333 letter-size sheets. iOS emits AppMetrics.generated.swift, Android emits AppMetrics.generated.kt. Edit values here, regenerate, both platforms move together.",
+    "paperPerCapture": {
+      "scan":    { "value": 1.00, "type": "number", "description": "One scan replaces one printed page." },
+      "note":    { "value": 0.30, "type": "number", "description": "Per Note row — roughly a quarter-page of writing each." },
+      "voice":   { "value": 0.10, "type": "number", "description": "A voice memo replaces a tenth of a sheet of dictation." },
+      "contact": { "value": 0.10, "type": "number", "description": "A captured contact replaces a business card." },
+      "place":   { "value": 0.05, "type": "number", "description": "A pinned place replaces a sliver of a printed map / address slip." },
+      "photo":   { "value": 0.05, "type": "number", "description": "A captured photo replaces a small printed reference image." },
+      "todo":    { "value": 0.05, "type": "number", "description": "A todo replaces a sticky-note's worth of paper." }
+    },
+    "sheetsPerTree": {
+      "value": 8333,
+      "type": "number",
+      "description": "Letter-size sheets a mature pine yields. Used to convert sheets saved into a tree-fraction for the FOREST tile and the paper-saved detail sheet."
+    }
   }
 }

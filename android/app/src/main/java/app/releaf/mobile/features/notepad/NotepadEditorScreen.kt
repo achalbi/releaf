@@ -40,33 +40,34 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -89,9 +90,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import app.releaf.mobile.data.notebook.Attachment
 import app.releaf.mobile.data.notebook.Stroke
 import app.releaf.mobile.ui.components.AppToastHost
-import app.releaf.mobile.ui.components.BreadcrumbSegment
-import app.releaf.mobile.ui.components.Breadcrumbs
 import app.releaf.mobile.ui.components.DotGridBackground
+import app.releaf.mobile.ui.components.HairlineDivider
+import app.releaf.mobile.ui.components.LeafEyebrow
+import app.releaf.mobile.ui.components.PageOverflowButton
+import app.releaf.mobile.ui.components.PageViewMode
+import app.releaf.mobile.ui.components.PageViewToggle
+import app.releaf.mobile.ui.components.RoundIconButton
 import app.releaf.mobile.ui.components.rememberToastState
 import app.releaf.mobile.ui.components.editor.ContactsSection
 import app.releaf.mobile.ui.components.editor.DrawingColorSaver
@@ -101,7 +106,6 @@ import app.releaf.mobile.ui.components.editor.DrawingPalette
 import app.releaf.mobile.ui.components.editor.DrawingThicknesses
 import app.releaf.mobile.ui.components.editor.DrawingToolbar
 import app.releaf.mobile.ui.components.editor.EditorMode
-import app.releaf.mobile.ui.components.editor.EditorModeIconToggle
 import app.releaf.mobile.ui.components.editor.LocationSection
 import app.releaf.mobile.ui.components.editor.MergeSection
 import app.releaf.mobile.ui.components.editor.MoveToNotebookSection
@@ -119,6 +123,8 @@ import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
+import app.releaf.mobile.ui.theme.DailyPlant
+import app.releaf.mobile.ui.theme.DailyPlants
 import com.mohamedrejeb.richeditor.model.RichTextState
 import java.time.Instant
 import java.time.LocalDate
@@ -142,6 +148,11 @@ fun NotepadEditorScreen(
     var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
     var showMergeSheet by rememberSaveable { mutableStateOf(false) }
     var showMoveSheet  by rememberSaveable { mutableStateOf(false) }
+    // Daily-plant info sheet — opened on tap of the composed-header
+    // title block. Mirrors the same affordance on PageDetailScreen so
+    // the editorial plant rotation is reachable from both editors.
+    var showPlantInfo by rememberSaveable { mutableStateOf(false) }
+    val plant = remember { DailyPlants.forToday() }
     val focusManager = LocalFocusManager.current
 
     // Drawing overlay controls. Persisted strokes come from the VM;
@@ -255,22 +266,21 @@ fun NotepadEditorScreen(
             onBack()
         }
 
-        TopBar(
-            segments = listOf(
-                BreadcrumbSegment(label = "Notepad", onTap = popBack),
-                BreadcrumbSegment(label = formatEntryDateLabel(parseLocalDate(state.entryDate))),
-            ),
-            showDelete  = state.entry != null,
-            // Merge and Move-to-notebook only make sense once there's
-            // something to act on. Same guard as MergeSection's enabled
-            // flag — surfaces consistent behavior wherever the action
-            // can be triggered.
-            showActions = state.canSave || state.entry != null,
-            editorMode  = editorMode,
-            onChangeMode = { newMode -> editorMode = newMode },
-            onDelete    = { showDeleteDialog = true },
-            onOpenMerge = { showMergeSheet = true },
-            onOpenMove  = { showMoveSheet  = true },
+        ComposedTopZone(
+            editorMode    = editorMode,
+            onChangeMode  = { newMode -> editorMode = newMode },
+            // Merge / Move / Delete share the same gate as the prior
+            // breadcrumb TopBar — surface them only once there's
+            // something worth acting on. `showDelete` is the inner
+            // guard for the destructive row; the rest of the menu
+            // appears whenever `showActions` is true.
+            showActions   = state.canSave || state.entry != null,
+            showDelete    = state.entry != null,
+            onBack        = popBack,
+            onShowPlantInfo = { showPlantInfo = true },
+            onOpenMerge   = { showMergeSheet = true },
+            onOpenMove    = { showMoveSheet  = true },
+            onDelete      = { showDeleteDialog = true },
         )
 
         // Title + date share one row at screen level: title takes the
@@ -283,7 +293,7 @@ fun NotepadEditorScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = AppSpacing.s4)
-                    .padding(bottom = AppSpacing.s3),
+                    .padding(bottom = AppSpacing.s2),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
             ) {
@@ -297,6 +307,18 @@ fun NotepadEditorScreen(
                     onEntryDateChange = viewModel::updateEntryDate,
                 )
             }
+            // Description sits flush against the title — italic serif
+            // subtitle bound to state.description. Auto-seeded on
+            // create as `(commonName) epithet` from the day's
+            // Ayurvedic plant; the user can edit or clear it.
+            DescriptionField(
+                value         = state.description,
+                onValueChange = viewModel::updateDescription,
+                modifier      = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = AppSpacing.s4)
+                    .padding(bottom = AppSpacing.s3),
+            )
         }
 
         when {
@@ -377,6 +399,7 @@ fun NotepadEditorScreen(
                         onSubPageStrokesChange    = viewModel::updateSubPageStrokes,
                         onSubPageTextBoxesChange  = viewModel::updateSubPageTextBoxes,
                         onSubPageLedgerChange     = viewModel::updateSubPageLedger,
+                        onSubPageLedgerTitleChange = viewModel::updateSubPageLedgerTitle,
                         onAddSubPage              = viewModel::addSubPage,
                         onRemoveSubPage           = viewModel::removeSubPage,
                         onSubPageBackgroundChange = viewModel::updateSubPageBackground,
@@ -549,179 +572,187 @@ fun NotepadEditorScreen(
             }
         }
     }
+
+    // Plant-of-the-day info sheet. Surfaced by tapping the title block
+    // in the composed top zone. Same content / shape as the equivalent
+    // sheet on PageDetailScreen so the editorial layer reads
+    // consistently across both editors.
+    if (showPlantInfo) {
+        NotepadDailyPlantInfoSheet(
+            plant     = plant,
+            onDismiss = { showPlantInfo = false },
+        )
+    }
 }
 
+/**
+ * Composed top zone — slot 1 leaf eyebrow (also tappable as Back),
+ * slot 2 view-toggle pill, slot 3 plant-info leaf icon (taps open
+ * the daily-plant modal drawer), slot 4 overflow menu.
+ *
+ * The big serif "plant title" hero that used to sit below this row
+ * was removed: its content (plant name + common name) now seeds the
+ * entry's actual title + description fields at create time, and the
+ * full record (incl. "Used for …") is reachable via the leaf icon's
+ * modal drawer. Keeping the hero would have duplicated those fields
+ * and tied the daily plant to the editorial layer instead of to the
+ * row itself.
+ *
+ * Behaviour preservation note: the notepad's existing Overview/Edit
+ * mode is wired through the same toggle visual that the page-detail
+ * header uses for List/Grid. We translate one to the other at the
+ * binding (Overview ⇄ Grid, Edit ⇄ List) so the body still flips
+ * between OverviewPane and EditorBody exactly as before.
+ */
 @Composable
-private fun TopBar(
-    segments: List<BreadcrumbSegment>,
-    showDelete: Boolean,
-    showActions: Boolean,
+private fun ComposedTopZone(
     editorMode: EditorMode,
     onChangeMode: (EditorMode) -> Unit,
-    onDelete: () -> Unit,
+    showActions: Boolean,
+    showDelete: Boolean,
+    onBack: () -> Unit,
+    onShowPlantInfo: () -> Unit,
     onOpenMerge: () -> Unit,
     onOpenMove: () -> Unit,
+    onDelete: () -> Unit,
 ) {
-    // Delete now lives inside the overflow menu — surface the icon
-    // button only when neither Merge nor Move are available (i.e. the
-    // entry isn't yet persisted) so the top bar isn't completely
-    // empty on the trailing edge during a fresh draft.
-    var menuOpen by remember { mutableStateOf(false) }
-
     Row(
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
         modifier = Modifier
             .fillMaxWidth()
             .padding(
                 start  = AppSpacing.s4,
                 end    = AppSpacing.s4,
-                top    = AppSpacing.s3,
+                top    = AppSpacing.s4,
                 bottom = AppSpacing.s3,
             ),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Breadcrumbs(segments = segments, modifier = Modifier.weight(1f))
-        EditorModeIconToggle(mode = editorMode, onChange = onChangeMode)
-
+        LeafEyebrow(
+            label    = "notepad · today",
+            modifier = Modifier
+                .weight(1f)
+                .clickable { onBack() },
+        )
+        // EditorMode <-> PageViewMode translation. PageViewToggle
+        // exposes a List/Grid pill; on this surface the pill drives
+        // Edit/Overview instead. Visual matches the page-detail
+        // header; behaviour matches what the prior
+        // EditorModeIconToggle did.
+        PageViewToggle(
+            selected = if (editorMode == EditorMode.OVERVIEW) PageViewMode.Grid else PageViewMode.List,
+            onSelect = { mode ->
+                onChangeMode(if (mode == PageViewMode.Grid) EditorMode.OVERVIEW else EditorMode.EDIT)
+            },
+        )
+        // Plant-info leaf icon. Green-soft chip so it reads as the
+        // botanical/editorial accent rather than a coral "primary"
+        // action. Tap → existing daily-plant modal drawer.
+        RoundIconButton(
+            icon               = Icons.Filled.Spa,
+            contentDescription = "Plant of the day",
+            onClick            = onShowPlantInfo,
+            background         = AppColors.GreenSoft,
+            tint               = AppColors.ThemeGreenDeep,
+        )
         if (showActions) {
-            Spacer(Modifier.size(AppSpacing.s2))
-            Box {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .clickable { menuOpen = true },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector        = Icons.Filled.MoreVert,
-                        contentDescription = "More actions",
-                        tint               = AppColors.TextSecondary,
-                        modifier           = Modifier.size(22.dp),
+            PageOverflowButton {
+                DropdownMenuItem(
+                    text    = { Text("Merge with another page") },
+                    onClick = onOpenMerge,
+                )
+                DropdownMenuItem(
+                    text    = { Text("Move to notebook") },
+                    onClick = onOpenMove,
+                )
+                if (showDelete) {
+                    DropdownMenuItem(
+                        text    = { Text("Delete entry", color = AppColors.Danger) },
+                        onClick = onDelete,
                     )
                 }
-                // Popup (not DropdownMenu) — Material 3's DropdownMenu
-                // wraps its content in its own Surface whose shape,
-                // elevation, and color aren't reachable from the
-                // `modifier` slot. That Surface paints a white rounded
-                // rectangle behind our cream card, producing the
-                // double-layer look. Popup draws only what we give it.
-                if (menuOpen) {
-                    Popup(
-                        alignment = Alignment.TopEnd,
-                        // Offset below the anchor icon's 40dp bounds so
-                        // the card doesn't cover the "More" button.
-                        offset = IntOffset(0, with(androidx.compose.ui.platform.LocalDensity.current) {
-                            (40.dp + AppSpacing.s1).roundToPx()
-                        }),
-                        onDismissRequest = { menuOpen = false },
-                        properties = PopupProperties(focusable = true),
-                    ) {
-                        Column(
-                            // Fixed width so the menu doesn't reflow
-                            // when the destructive "Delete entry" row
-                            // is conditionally hidden — and so the
-                            // visual stays identical across the two
-                            // editor surfaces (notepad / page) that
-                            // host the same overflow.
-                            modifier = Modifier
-                                .width(260.dp)
-                                .shadow(8.dp, RoundedCornerShape(AppRadius.md))
-                                .clip(RoundedCornerShape(AppRadius.md))
-                                .background(AppColors.CardSolid)
-                                .border(
-                                    width = 1.dp,
-                                    color = AppColors.BorderDefault,
-                                    shape = RoundedCornerShape(AppRadius.md),
-                                )
-                                .padding(vertical = AppSpacing.s2),
-                        ) {
-                            TokenMenuItem(
-                                label = "Merge with another page",
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenMerge()
-                                },
-                            )
-                            TokenMenuItem(
-                                label = "Move to notebook",
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenMove()
-                                },
-                            )
-                            if (showDelete) {
-                                TokenMenuDivider()
-                                TokenMenuItem(
-                                    label = "Delete entry",
-                                    color = AppColors.Danger,
-                                    onClick = {
-                                        menuOpen = false
-                                        onDelete()
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        } else if (showDelete) {
-            // Pre-persistence only — Merge / Move need a row, but Delete
-            // makes sense as soon as one exists. This branch is a safety
-            // net; in practice `showActions` opens as soon as there's
-            // anything to save, which subsumes the Delete visibility.
-            Spacer(Modifier.size(AppSpacing.s2))
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .clickable { onDelete() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector        = Icons.Filled.DeleteOutline,
-                    contentDescription = "Delete entry",
-                    tint               = AppColors.Danger,
-                    modifier           = Modifier.size(22.dp),
-                )
             }
         }
     }
 }
 
 /**
- * Menu item styled with design tokens — body typography, primary
- * text color (or a passed override for destructive actions), and
- * padding matching other app rows.
+ * Bottom-sheet that explains the day's rotated plant. Same shape and
+ * copy as the equivalent sheet on PageDetailScreen — the editorial
+ * surface should read identically whichever editor surfaced it.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TokenMenuItem(
-    label: String,
-    onClick: () -> Unit,
-    color: androidx.compose.ui.graphics.Color = AppColors.TextPrimary,
+private fun NotepadDailyPlantInfoSheet(
+    plant: DailyPlant,
+    onDismiss: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(horizontal = AppSpacing.s4, vertical = AppSpacing.s3),
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(
+        skipPartiallyExpanded = false,
+    )
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = AppColors.CardSolid,
     ) {
-        Text(
-            text  = label,
-            style = AppTypography.Body,
-            color = color,
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start  = AppSpacing.s5,
+                    end    = AppSpacing.s5,
+                    top    = AppSpacing.s2,
+                    bottom = AppSpacing.s6,
+                ),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s4),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+                Text(
+                    text  = "PLANT OF THE DAY",
+                    style = AppTypography.Eyebrow,
+                    color = AppColors.ThemeGreenDeep,
+                )
+                Text(
+                    text  = plant.name,
+                    style = TextStyle(fontFamily = FontFamily.Serif, fontSize = 36.sp),
+                    color = AppColors.TextPrimary,
+                )
+                if (plant.commonName.isNotEmpty()) {
+                    Text(
+                        text  = plant.commonName,
+                        style = TextStyle(
+                            fontFamily = FontFamily.Serif,
+                            fontSize   = 18.sp,
+                            fontStyle  = FontStyle.Italic,
+                        ),
+                        color = AppColors.TextSecondary,
+                    )
+                }
+            }
+
+            HairlineDivider()
+
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s4)) {
+                NotepadPlantInfoBlock(title = "EPITHET",          body = plant.epithet)
+                NotepadPlantInfoBlock(title = "TRADITIONAL USES", body = plant.usedFor)
+            }
+
+            TextButton(
+                onClick  = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Close", color = AppColors.TextSecondary)
+            }
+        }
     }
 }
 
 @Composable
-private fun TokenMenuDivider() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = AppSpacing.s3)
-            .height(1.dp)
-            .background(AppColors.BorderDefault),
-    )
+private fun NotepadPlantInfoBlock(title: String, body: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s1)) {
+        Text(text = title, style = AppTypography.Eyebrow, color = AppColors.TextSecondary)
+        Text(text = body,  style = AppTypography.Body,    color = AppColors.TextPrimary)
+    }
 }
 
 @Composable
@@ -755,6 +786,7 @@ private fun EditorBody(
             onStrokesChange    = viewModel::updateSubPageStrokes,
             onTextBoxesChange  = viewModel::updateSubPageTextBoxes,
             onLedgerChange     = viewModel::updateSubPageLedger,
+            onLedgerTitleChange = viewModel::updateSubPageLedgerTitle,
             onAddSubPage       = viewModel::addSubPage,
             onRemoveSubPage    = viewModel::removeSubPage,
             onBackgroundChange = viewModel::updateSubPageBackground,
@@ -1008,6 +1040,39 @@ private fun TitleField(
             onValueChange = onValueChange,
             singleLine    = true,
             textStyle     = titleStyle,
+            cursorBrush   = SolidColor(AppAccent.primary),
+            modifier      = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun DescriptionField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // Italic serif at 14sp — visually subordinate to the 34sp title
+    // above, matching the "(cinnamon) the sweet bark" subtitle the
+    // hero block used to render. Stays a free-text field so the user
+    // can edit or clear the auto-seeded value.
+    val descStyle = TextStyle(
+        fontFamily = FontFamily.Serif,
+        fontStyle  = FontStyle.Italic,
+        fontSize   = 14.sp,
+        color      = AppColors.TextSecondary,
+    )
+    val placeholderStyle = descStyle.copy(color = AppColors.TextTertiary)
+    Box(modifier) {
+        if (value.isEmpty()) {
+            Text("Description", style = placeholderStyle)
+        }
+        BasicTextField(
+            value         = value,
+            onValueChange = onValueChange,
+            singleLine    = false,
+            maxLines      = 2,
+            textStyle     = descStyle,
             cursorBrush   = SolidColor(AppAccent.primary),
             modifier      = Modifier.fillMaxWidth(),
         )

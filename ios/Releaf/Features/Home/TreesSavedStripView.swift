@@ -25,27 +25,30 @@ public struct TreesSavedMetrics: Equatable {
     public let scans: Int
     public let voice: Int
     public let contacts: Int
+    public let locations: Int
 
     public init(
         notes: Int,
         photos: Int = 0,
         scans: Int = 0,
         voice: Int = 0,
-        contacts: Int = 0
+        contacts: Int = 0,
+        locations: Int = 0
     ) {
         self.notes = notes
         self.photos = photos
         self.scans = scans
         self.voice = voice
         self.contacts = contacts
+        self.locations = locations
     }
 
-    /// Total captures across all five modes. Pages count as "notes".
+    /// Total captures across all six modes. Pages count as "notes".
     public var total: Int {
-        notes + photos + scans + voice + contacts
+        notes + photos + scans + voice + contacts + locations
     }
 
-    /// Trees-saved figure. 8000 captures ≈ 1 tree (~8,333 pages / tree).
+    /// Trees-saved figure. ~8,333 sheets ≈ 1 tree (Conservatree heuristic).
     public var trees: Double {
         Double(total) / TreesSavedMetrics.capturesPerTree
     }
@@ -58,7 +61,7 @@ public struct TreesSavedMetrics: Equatable {
         return remainder / TreesSavedMetrics.capturesPerTree
     }
 
-    public static let capturesPerTree: Double = 8000
+    public static let capturesPerTree: Double = 8333
 }
 
 // MARK: - Strip view
@@ -80,19 +83,24 @@ public struct TreesSavedStripView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(String(format: "%.1f", displayedTrees))
-                        .font(.system(size: 30, weight: .medium))
+                    Text(formatTreesStrip(displayedTrees))
+                        .font(.system(size: 30))
                         .foregroundStyle(AppColors.themeGreenDeep)
                         .monospacedDigit()
                     Text("trees saved")
                         .font(AppText.meta)
                         .foregroundStyle(AppColors.textSecondary)
                 }
-                Text("\(formattedTotal) captures · notes, photos, scans, voice, contacts")
+                // The total spans both notebook pages AND notepad
+                // entries (plus their attachments + contacts + locations)
+                // — the "kept digital" copy framing captures the user
+                // impact: each count is a paper page that didn't get
+                // printed.
+                Text("\(formattedTotal) captures kept digital")
                     .font(AppText.tag)
                     .foregroundStyle(AppColors.textTertiary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .minimumScaleFactor(0.8)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -142,9 +150,19 @@ public struct TreesSavedStripView: View {
     }
 
     private var accessibilitySummary: String {
-        let trees = String(format: "%.1f", metrics.trees)
-        return "\(trees) trees saved from \(formattedTotal) captures"
+        "\(formatTreesStrip(metrics.trees)) trees saved from \(formattedTotal) captures"
     }
+}
+
+/// Trees number formatter — up to 3 decimal places, trailing zeros
+/// dropped (so "3.2", "3.25", "3.251" but never "3.200").
+private func formatTreesStrip(_ value: Double) -> String {
+    let f = NumberFormatter()
+    f.numberStyle = .decimal
+    f.minimumFractionDigits = 0
+    f.maximumFractionDigits = 3
+    f.usesGroupingSeparator = false
+    return f.string(from: NSNumber(value: value)) ?? String(value)
 }
 
 // MARK: - Tree glyph

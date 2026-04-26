@@ -57,7 +57,7 @@ public struct NotebookRow: View {
                         Spacer(minLength: AppSpacing.s2)
                         if isActive { activePill }
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 13))
                             .foregroundColor(AppColors.textTertiary)
                     }
 
@@ -97,7 +97,7 @@ public struct NotebookRow: View {
             RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
                 .fill(AppColors.coralSoft)
             Image(systemName: systemIcon)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 18))
                 .foregroundColor(AppColors.coralDeep)
         }
         .frame(width: 40, height: 40)

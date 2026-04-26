@@ -46,7 +46,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -59,6 +58,7 @@ import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 @Composable
 fun PageDetailScreenVariant1(
@@ -111,7 +111,7 @@ private fun Loaded(page: Page, onBack: () -> Unit) {
                     text = page.title,
                     color = AppColors.TextPrimary,
                     fontSize = 34.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = LocalFontWeight.current,
                     fontFamily = FontFamily.Serif,
                 )
                 if (page.tags.isNotEmpty()) {

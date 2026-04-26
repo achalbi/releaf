@@ -26,6 +26,12 @@
  */
 
 import SwiftUI
+
+// The rich-text editor wraps `UITextView` via `UIViewRepresentable`,
+// so the production implementation is iOS-only. macOS preview / test
+// builds get a stub controller + a placeholder SwiftUI editor at the
+// bottom of this file so the rest of the Notepad feature compiles.
+#if os(iOS)
 import UIKit
 
 // MARK: - Controller
@@ -129,7 +135,10 @@ final class RichTextEditorController: ObservableObject {
 struct RichTextEditor: UIViewRepresentable {
     @Binding var markdown: String
     @ObservedObject var controller: RichTextEditorController
-    var tintColor: UIColor
+    /// SwiftUI `Color` rather than `UIColor` so the call sites stay
+    /// cross-platform. We bridge to `UIColor` internally for
+    /// `UITextView.tintColor`.
+    var tintColor: Color
     /// When `true`, the UITextView scrolls its own content and should NOT
     /// be nested in a SwiftUI ScrollView. When `false` (default), the
     /// UITextView expands to content height and the caller owns
@@ -147,7 +156,7 @@ struct RichTextEditor: UIViewRepresentable {
         // surrounding SwiftUI padding the caller applies.
         tv.textContainerInset = .zero
         tv.textContainer.lineFragmentPadding = 0
-        tv.tintColor = tintColor
+        tv.tintColor = UIColor(tintColor)
         tv.isScrollEnabled = isScrollEnabled
         tv.attributedText = MarkdownBridge.parse(markdown)
         controller.textView = tv
@@ -166,8 +175,9 @@ struct RichTextEditor: UIViewRepresentable {
                 tv.selectedRange = sel
             }
         }
-        if tv.tintColor != tintColor {
-            tv.tintColor = tintColor
+        let bridgedTint = UIColor(tintColor)
+        if tv.tintColor != bridgedTint {
+            tv.tintColor = bridgedTint
         }
         if tv.isScrollEnabled != isScrollEnabled {
             tv.isScrollEnabled = isScrollEnabled
@@ -243,3 +253,39 @@ enum MarkdownBridge {
         return result
     }
 }
+
+#else
+
+// MARK: - macOS stub
+
+// macOS preview/test build — the rich-text editor's `UIViewRepresentable`
+// implementation is iOS-only. We expose the same public surface so the
+// rest of the Notepad feature compiles and previews can render.
+
+@MainActor
+final class RichTextEditorController: ObservableObject {
+    @Published private(set) var isBoldActive: Bool = false
+    @Published private(set) var isItalicActive: Bool = false
+    @Published private(set) var isUnderlineActive: Bool = false
+
+    func toggleBold() {}
+    func toggleItalic() {}
+    func toggleUnderline() {}
+    func refreshActiveStyles() {}
+}
+
+struct RichTextEditor: View {
+    @Binding var markdown: String
+    @ObservedObject var controller: RichTextEditorController
+    var tintColor: Color
+    var isScrollEnabled: Bool = false
+
+    var body: some View {
+        // Plain TextEditor is the cross-platform fallback; markdown
+        // formatting toggles are no-ops via the stub controller.
+        TextEditor(text: $markdown)
+            .tint(tintColor)
+    }
+}
+
+#endif

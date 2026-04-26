@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.flowOf
 
 class PageRepository(
     private val pageDao: PageDao,
+    /** See note on NotepadRepository — nullable for tests. */
+    private val auditLogger: app.releaf.mobile.data.activity.AuditLogger? = null,
 ) {
     fun observeForChapter(chapterId: String): Flow<List<PageEntity>> =
         pageDao.observeForChapter(chapterId)
@@ -33,6 +35,13 @@ class PageRepository(
     /** page-count-per-chapter feed for the notebook detail Chapter rows. */
     fun observePageCountsByChapter(): Flow<List<ChapterCountRow>> =
         pageDao.observePageCountsByChapter()
+
+    /** Pages that carry at least one todo (open or done), newest-edit
+     *  first. The caller is responsible for parsing the per-row
+     *  `todos` JSON and filtering to open items. Drives the Open-todos
+     *  modal on the library header. */
+    fun observePagesWithTodos(): Flow<List<PageTodosRow>> =
+        pageDao.observePagesWithTodos()
 
     suspend fun findById(id: String): PageEntity? = pageDao.findById(id)
 
@@ -74,6 +83,12 @@ class PageRepository(
             dirty     = true,
         )
         pageDao.upsert(entity)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Created,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.Page,
+            entityId   = entity.id,
+            title      = entity.title ?: "Untitled page",
+        )
         return entity
     }
 
@@ -107,24 +122,49 @@ class PageRepository(
             dirty         = true,
         )
         pageDao.upsert(page)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Created,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.Page,
+            entityId   = page.id,
+            title      = page.title ?: "Untitled page",
+        )
         return page
     }
 
     suspend fun savePage(entity: PageEntity) {
-        pageDao.upsert(
-            entity.copy(
-                title     = entity.title?.trim()?.ifEmpty { null },
-                updatedAt = IsoClock.nowIso(),
-                dirty     = true,
-            )
+        val updated = entity.copy(
+            title     = entity.title?.trim()?.ifEmpty { null },
+            updatedAt = IsoClock.nowIso(),
+            dirty     = true,
+        )
+        pageDao.upsert(updated)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Updated,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.Page,
+            entityId   = updated.id,
+            title      = updated.title ?: "Untitled page",
         )
     }
 
     suspend fun softDeletePage(id: String) {
+        val snapshot = pageDao.findById(id)
         pageDao.softDelete(id = id, nowIso = IsoClock.nowIso())
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Deleted,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.Page,
+            entityId   = id,
+            title      = snapshot?.title ?: "Untitled page",
+        )
     }
 
     suspend fun undoSoftDeletePage(id: String) {
         pageDao.restore(id = id, nowIso = IsoClock.nowIso())
+        val snapshot = pageDao.findById(id)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Restored,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.Page,
+            entityId   = id,
+            title      = snapshot?.title ?: "Untitled page",
+        )
     }
 }

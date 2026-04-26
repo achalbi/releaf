@@ -32,7 +32,7 @@ public struct CaptureFAB: View {
             ZStack {
                 Circle().fill(AppColors.coral)
                 Image(systemName: icon)
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 22))
                     .foregroundColor(AppColors.textOnAccent)
             }
             .frame(width: size, height: size)

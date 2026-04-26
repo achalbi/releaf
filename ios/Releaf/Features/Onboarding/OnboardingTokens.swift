@@ -39,16 +39,19 @@ enum OnboardTokens {
     static let iconDotFill       = Color(hex: 0xD98324)
 
     // Typography
-    static let headline      = Font.system(size: 23, weight: .heavy, design: .default)
-    static let body          = Font.system(size: 15, weight: .regular, design: .default)
-    static let badge         = Font.system(size: 11, weight: .bold, design: .default)
-    static let button        = Font.system(size: 14, weight: .bold, design: .default)
-    static let skip          = Font.system(size: 12, weight: .regular, design: .default)
-    static let calendarHeader = Font.system(size: 11, weight: .bold, design: .default)
-    static let calendarNumber = Font.system(size: 38, weight: .heavy, design: .default)
-    static let ctaLabel      = Font.system(size: 13, weight: .regular, design: .default)
-    static let ctaLabelBold  = Font.system(size: 13, weight: .bold,    design: .default)
-    static let scanPill      = Font.system(size: 10, weight: .semibold, design: .default)
-    static let todoItem      = Font.system(size: 13, weight: .regular, design: .default)
-    static let photoBadge    = Font.system(size: 12, weight: .semibold, design: .default)
+    // Weights deliberately omitted — the app root applies
+    // `.fontWeight(uiPrefs.fontWeight)` and SwiftUI cascades it to
+    // every Text below that doesn't already have an explicit weight.
+    static let headline      = Font.system(size: 23, design: .default)
+    static let body          = Font.system(size: 15, design: .default)
+    static let badge         = Font.system(size: 11, design: .default)
+    static let button        = Font.system(size: 14, design: .default)
+    static let skip          = Font.system(size: 12, design: .default)
+    static let calendarHeader = Font.system(size: 11, design: .default)
+    static let calendarNumber = Font.system(size: 38, design: .default)
+    static let ctaLabel      = Font.system(size: 13, design: .default)
+    static let ctaLabelBold  = Font.system(size: 13, design: .default)
+    static let scanPill      = Font.system(size: 10, design: .default)
+    static let todoItem      = Font.system(size: 13, design: .default)
+    static let photoBadge    = Font.system(size: 12, design: .default)
 }

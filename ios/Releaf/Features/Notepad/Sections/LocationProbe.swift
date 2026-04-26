@@ -114,7 +114,12 @@ final class LocationProbe: NSObject, ObservableObject, CLLocationManagerDelegate
 
     /// Short one-line address. Falls back to nil when the placemark has
     /// nothing useful — the row then shows raw coordinates.
-    private static func formatAddress(_ placemark: CLPlacemark?) -> String? {
+    ///
+    /// `nonisolated` so the CLGeocoder reverse-geocode completion
+    /// callback (which runs on a CoreLocation-owned queue) can call
+    /// it directly without a MainActor hop. The function is pure —
+    /// no state to protect.
+    private nonisolated static func formatAddress(_ placemark: CLPlacemark?) -> String? {
         guard let p = placemark else { return nil }
         let parts: [String?] = [
             [p.subThoroughfare, p.thoroughfare].compactMap { $0 }.joined(separator: " ").nilIfEmpty,

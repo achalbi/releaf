@@ -73,6 +73,37 @@ interface PageDao {
     suspend fun findById(id: String): PageEntity?
 
     /**
+     * One-shot list of live pages in a chapter, ordered the same
+     * way `observeForChapter` does. Used by the request/response
+     * `LocalDriveRepository` reads — that layer doesn't subscribe
+     * to flows, just snapshots.
+     */
+    @Query(
+        """
+        SELECT * FROM pages
+        WHERE chapter_id = :chapterId AND deleted_at IS NULL
+        ORDER BY position ASC, created_at ASC
+        """
+    )
+    suspend fun findByChapterActive(chapterId: String): List<PageEntity>
+
+    /**
+     * All pages where `archived_at IS NOT NULL` and the row hasn't
+     * been soft-deleted. Used by `LocalDriveRepository.listArchivedPages`
+     * to populate the cross-notebook archive picker. Ordered
+     * newest-archived first so the picker surfaces fresh entries
+     * at the top.
+     */
+    @Query(
+        """
+        SELECT * FROM pages
+        WHERE archived_at IS NOT NULL AND deleted_at IS NULL
+        ORDER BY archived_at DESC
+        """
+    )
+    suspend fun findArchived(): List<PageEntity>
+
+    /**
      * Full-text search across *every* live page the user can see. `query` must
      * already be in FTS5 MATCH syntax — the repo sanitizes it (reuses the
      * same builder as notepad; see `NotebookSearchUtils.buildFtsQuery`).
@@ -218,6 +249,38 @@ interface PageDao {
         """
     )
     fun observePageCountsByChapter(): Flow<List<ChapterCountRow>>
+
+    /**
+     * Live pages (joined to their chapter + notebook) that carry at least
+     * one todo JSON entry. Cheap server-side filter — the `todos != '[]'`
+     * clause drops pages with no todos; the caller still has to parse the
+     * JSON string to separate open vs done. Ordered newest-edit first so
+     * the open-todos modal on the library header can show the user the
+     * most recently touched items without an additional sort pass.
+     */
+    @Query(
+        """
+        SELECT
+            p.id AS id,
+            p.title AS title,
+            p.todos AS todos,
+            p.updated_at AS updatedAt,
+            n.id AS notebookId,
+            n.title AS notebookTitle,
+            c.id AS chapterId,
+            c.title AS chapterTitle
+        FROM pages p
+        JOIN chapters c ON c.id = p.chapter_id
+        JOIN notebooks n ON n.id = c.notebook_id
+        WHERE p.deleted_at IS NULL
+          AND c.deleted_at IS NULL
+          AND n.deleted_at IS NULL
+          AND p.todos IS NOT NULL
+          AND p.todos != '[]'
+        ORDER BY p.updated_at DESC
+        """
+    )
+    fun observePagesWithTodos(): Flow<List<PageTodosRow>>
 
     /** Race-safe — see NotepadDao.markSynced for the design note. */
     @Query(

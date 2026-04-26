@@ -24,7 +24,7 @@
  */
 
 import Foundation
-#if canImport(BackgroundTasks)
+#if os(iOS)
 import BackgroundTasks
 #endif
 
@@ -66,7 +66,7 @@ public final class SyncScheduler: @unchecked Sendable {
     /// Register the BGAppRefreshTask handler. Call from the app's
     /// `@main App.init()` (or `AppDelegate.didFinishLaunching`) so iOS
     /// knows which identifier we own.
-    #if canImport(BackgroundTasks)
+    #if os(iOS)
     public func registerBackgroundRefreshHandler() {
         BGTaskScheduler.shared.register(
             forTaskWithIdentifier: Self.backgroundTaskId,

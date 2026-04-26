@@ -105,7 +105,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -120,6 +119,7 @@ import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 import java.time.LocalDate
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 /** Special context value meaning "no filter" — show all tasks. */
 internal const val CONTEXT_ALL = "all"
@@ -404,7 +404,7 @@ private fun ContextTile(
         Spacer(Modifier.height(AppSpacing.s1))
         Text(
             text  = label,
-            style = AppTypography.Meta.copy(fontWeight = FontWeight.SemiBold),
+            style = AppTypography.Meta.copy(fontWeight = LocalFontWeight.current),
             color = fg,
         )
         Text(
@@ -436,7 +436,7 @@ private fun AddTile(onClick: () -> Unit) {
         Spacer(Modifier.height(AppSpacing.s1))
         Text(
             text  = "Add",
-            style = AppTypography.Meta.copy(fontWeight = FontWeight.SemiBold),
+            style = AppTypography.Meta.copy(fontWeight = LocalFontWeight.current),
             color = AppAccent.primary,
         )
         Text(
@@ -495,7 +495,7 @@ private fun BoardColumn(
             Spacer(Modifier.width(AppSpacing.s2))
             Text(
                 text  = title,
-                style = AppTypography.Button.copy(fontWeight = FontWeight.Bold),
+                style = AppTypography.Button.copy(fontWeight = LocalFontWeight.current),
                 color = AppColors.TextPrimary,
             )
             Spacer(Modifier.width(AppSpacing.s2))
@@ -507,7 +507,7 @@ private fun BoardColumn(
             ) {
                 Text(
                     text  = count.toString(),
-                    style = AppTypography.Tag.copy(fontWeight = FontWeight.Bold),
+                    style = AppTypography.Tag.copy(fontWeight = LocalFontWeight.current),
                     color = dotFill,
                 )
             }
@@ -613,7 +613,7 @@ private fun BoardCard(
             Text(
                 text = stripContext(task.title),
                 style = AppTypography.Body.copy(
-                    fontWeight = if (currentStatus == TaskStatus.Done) FontWeight.Normal else FontWeight.SemiBold,
+                    fontWeight = if (currentStatus == TaskStatus.Done) LocalFontWeight.current else LocalFontWeight.current,
                 ),
                 color = if (currentStatus == TaskStatus.Done) AppColors.TextSecondary else AppColors.TextPrimary,
                 textDecoration = if (currentStatus == TaskStatus.Done) TextDecoration.LineThrough else null,
@@ -764,7 +764,7 @@ private fun ActionChip(
         }
         Text(
             text  = text,
-            style = AppTypography.Tag.copy(fontWeight = FontWeight.SemiBold),
+            style = AppTypography.Tag.copy(fontWeight = LocalFontWeight.current),
             color = fg,
         )
     }
@@ -853,7 +853,7 @@ private fun ContextQuickAdd(
                 ) {
                     Text(
                         text  = "@$activeContext",
-                        style = AppTypography.Tag.copy(fontWeight = FontWeight.SemiBold),
+                        style = AppTypography.Tag.copy(fontWeight = LocalFontWeight.current),
                         color = AppAccent.primary,
                     )
                 }
@@ -949,7 +949,7 @@ private fun SuggestionRow(
                 Spacer(Modifier.width(4.dp))
                 Text(
                     text  = "@${p.name}",
-                    style = AppTypography.Tag.copy(fontWeight = FontWeight.SemiBold),
+                    style = AppTypography.Tag.copy(fontWeight = LocalFontWeight.current),
                     color = AppAccent.primary,
                 )
             }
@@ -1079,7 +1079,7 @@ private fun AddPerspectiveSheet(
                 ) {
                     Text(
                         text  = "@",
-                        style = AppTypography.Body.copy(fontWeight = FontWeight.SemiBold),
+                        style = AppTypography.Body.copy(fontWeight = LocalFontWeight.current),
                         color = AppAccent.primary,
                     )
                     Spacer(Modifier.width(4.dp))
@@ -1089,7 +1089,7 @@ private fun AddPerspectiveSheet(
                         singleLine = true,
                         textStyle = AppTypography.Body.copy(
                             color = AppColors.TextPrimary,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = LocalFontWeight.current,
                         ),
                         cursorBrush = SolidColor(AppAccent.primary),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),

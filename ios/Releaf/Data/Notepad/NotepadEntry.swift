@@ -48,6 +48,12 @@ public struct NotepadEntry: Codable, FetchableRecord, PersistableRecord,
 
     public var title: String?
 
+    /// Optional free-text subtitle — short summary the editor header
+    /// shows under `title`. Same role the column plays on `notebooks`.
+    /// Nil = "no description yet" (the v5 migration adds the column
+    /// without a default so existing rows round-trip cleanly).
+    public var description: String?
+
     /// Canonical CommonMark. Empty string is valid.
     public var notes: String
 
@@ -99,6 +105,7 @@ public struct NotepadEntry: Codable, FetchableRecord, PersistableRecord,
         case entryDate          = "entry_date"
         case projectId          = "project_id"
         case title
+        case description
         case notes
         case contacts
         case locations
@@ -121,6 +128,7 @@ public struct NotepadEntry: Codable, FetchableRecord, PersistableRecord,
         entryDate: String,
         projectId: String? = nil,
         title: String? = nil,
+        description: String? = nil,
         notes: String = "",
         contacts: String = "[]",
         locations: String = "[]",
@@ -139,6 +147,7 @@ public struct NotepadEntry: Codable, FetchableRecord, PersistableRecord,
         self.entryDate = entryDate
         self.projectId = projectId
         self.title = title
+        self.description = description
         self.notes = notes
         self.contacts = contacts
         self.locations = locations

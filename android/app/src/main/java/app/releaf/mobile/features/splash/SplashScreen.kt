@@ -45,7 +45,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -54,6 +53,7 @@ import app.releaf.mobile.ui.components.ReleafLogo
 import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppSpacing
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 @Composable
 fun SplashScreen(modifier: Modifier = Modifier) {
@@ -92,7 +92,7 @@ fun SplashScreen(modifier: Modifier = Modifier) {
                 text = "Releaf",
                 style = TextStyle(
                     fontFamily = FontFamily.SansSerif,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = LocalFontWeight.current,
                     fontSize = 48.sp,
                     letterSpacing = (-0.025).em,
                 ),
@@ -105,7 +105,7 @@ fun SplashScreen(modifier: Modifier = Modifier) {
                 text = "The notebook that grows back.",
                 style = TextStyle(
                     fontFamily = FontFamily.SansSerif,
-                    fontWeight = FontWeight.Normal,
+                    fontWeight = LocalFontWeight.current,
                     fontSize = 18.sp,
                 ),
                 color = AppColors.OnAccent.copy(alpha = 0.9f),

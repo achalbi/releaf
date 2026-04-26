@@ -69,13 +69,19 @@ public final class ContactDirectoryRepository: @unchecked Sendable {
         updated: Date?,
         bucket: inout [String: DirectoryBuilder]
     ) {
+        let phone = c.phone?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        let email = c.email?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        let org   = c.organization?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
         let signature = identitySignature(
             name: c.name,
-            phone: nil,    // NotepadContact has no phone field on iOS today
-            email: nil     // likewise no email
+            phone: phone,
+            email: email
         )
         if var builder = bucket[signature] {
             builder.occurrences += 1
+            if let phone { builder.addPhone(phone) }
+            if builder.email == nil, let email { builder.email = email }
+            if builder.organization == nil, let org { builder.organization = org }
             if let updated, builder.updatedAt == nil || updated > builder.updatedAt! {
                 builder.updatedAt = updated
             }
@@ -84,32 +90,50 @@ public final class ContactDirectoryRepository: @unchecked Sendable {
             var builder = DirectoryBuilder(
                 signature:    signature,
                 name:         c.name.trimmingCharacters(in: .whitespacesAndNewlines),
-                phone:        nil,
-                email:        nil,
-                organization: nil,
+                email:        email,
+                organization: org,
                 notes:        c.role?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
             )
+            if let phone { builder.addPhone(phone) }
             builder.occurrences = 1
             builder.updatedAt = updated
             bucket[signature] = builder
         }
     }
 
-    private struct DirectoryBuilder {
+    // `fileprivate` so the implicit memberwise init is callable from
+    // the enclosing static `record(...)` method below. With `private`,
+    // the init is locked to the struct body itself and the call site
+    // gets "initializer is inaccessible due to 'private'".
+    //
+    // The `phones` storage is also `fileprivate` (rather than the
+    // tighter `private`) — a `private` property would drag the synth
+    // memberwise init back down to `private` regardless of the struct
+    // declaration's level.
+    fileprivate struct DirectoryBuilder {
         let signature: String
         let name: String
-        let phone: String?
-        let email: String?
-        let organization: String?
+        var email: String?
+        var organization: String?
         let notes: String?
         var occurrences: Int = 0
         var updatedAt: Date? = nil
+
+        fileprivate var phones: [String] = []
+
+        mutating func addPhone(_ raw: String) {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            phones.append(trimmed)
+        }
 
         func build() -> DirectoryContact {
             DirectoryContact(
                 id:             signature,
                 name:           name.isEmpty ? "Unnamed" : name,
-                phone:          phone,
+                // Collapse entries that differ only by a country-code
+                // prefix (e.g. "+91 …" vs "…").
+                phones:         dedupePhones(phones),
                 email:          email,
                 organization:   organization,
                 notes:          notes,

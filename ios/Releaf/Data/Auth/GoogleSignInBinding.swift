@@ -29,7 +29,7 @@ public enum GoogleSignInBinding {
     /// `GIDClientID` is configured in Info.plist, the returned
     /// closure falls back to [AuthStore.signIn] (stub).
     @MainActor
-    public static func signInAction(authStore: AuthStore) -> () async -> Void {
+    public static func signInAction(authStore: AuthStore) -> @MainActor () async -> Void {
         let clientId = Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? String
         guard let clientId, !clientId.isEmpty else {
             return {
@@ -38,14 +38,19 @@ public enum GoogleSignInBinding {
         }
         let client = RealGoogleAuthClient(iosClientId: clientId)
         return {
-            await authStore.beginExternalSignIn()
+            // The returned closure is `@MainActor`, so synchronous
+            // @MainActor methods on `authStore` (beginExternalSignIn,
+            // adoptSession, cancelSignIn, failSignIn) call directly
+            // without `await`. Only the actually-async
+            // `client.signIn()` keeps `try await`.
+            authStore.beginExternalSignIn()
             do {
                 let session = try await client.signIn()
-                await authStore.adoptSession(session)
+                authStore.adoptSession(session)
             } catch GoogleAuthError.cancelled {
-                await authStore.cancelSignIn()
+                authStore.cancelSignIn()
             } catch {
-                await authStore.failSignIn((error as? LocalizedError)?.errorDescription
+                authStore.failSignIn((error as? LocalizedError)?.errorDescription
                                             ?? "\(error)")
             }
         }
@@ -61,7 +66,9 @@ public enum GoogleSignInBinding {
         let client = RealGoogleAuthClient(iosClientId: clientId)
         do {
             let session = try await client.restorePreviousSignIn()
-            await authStore.adoptSession(session)
+            // We're already on @MainActor (function attribute), so the
+            // sync `adoptSession` call is direct — no `await` needed.
+            authStore.adoptSession(session)
             return true
         } catch {
             return false

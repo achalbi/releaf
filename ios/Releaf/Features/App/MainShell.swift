@@ -31,6 +31,14 @@ public struct MainShell: View {
     @State private var settingsPath = NavigationPath()
 
     @State private var hideBottomBar: Bool = false
+    // Hoisted here so the drawer can sit above the tab content AND
+    // the BottomNav safe-area inset, covering the full screen.
+    @State private var showDrawer: Bool = false
+
+    // Live metrics driving the drawer's subtitles — reactive to every
+    // repository emission, so the numbers update as the user creates
+    // notebooks, notepad entries, tasks, and contacts.
+    @StateObject private var drawerMetrics = DrawerMetricsViewModel()
 
     // First-run onboarding state. Auto-shown when
     // `completedAt == 0`; the Home-screen widget re-opens it later.
@@ -40,33 +48,63 @@ public struct MainShell: View {
     public init() {}
 
     public var body: some View {
-        tabContent
-            .environment(\.showOnboardingWizard, { showOnboarding = true })
-            .onPreferenceChange(HideBottomBarKey.self) { hideBottomBar = $0 }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !hideBottomBar {
-                    BottomNav(
-                        selection: Binding(
-                            get: { selection },
-                            set: { newValue in
-                                // Tapping the selected tab pops its stack to root.
-                                if newValue == selection {
-                                    popToRoot(for: newValue)
-                                } else {
-                                    selection = newValue
+        ZStack {
+            tabContent
+                .environment(\.showOnboardingWizard, { showOnboarding = true })
+                .onPreferenceChange(HideBottomBarKey.self) { hideBottomBar = $0 }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if !hideBottomBar {
+                        BottomNav(
+                            selection: Binding(
+                                get: { selection },
+                                set: { newValue in
+                                    // Tapping the selected tab pops its stack to root.
+                                    if newValue == selection {
+                                        popToRoot(for: newValue)
+                                    } else {
+                                        selection = newValue
+                                    }
                                 }
-                            }
-                        ),
-                        onBrandTap: { showCapture = true }
-                    )
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                            ),
+                            onBrandTap: { showCapture = true }
+                        )
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
+                .animation(.easeInOut(duration: 0.18), value: hideBottomBar)
+
+            // Drawer overlay — lives at shell level so it sits above
+            // the BottomNav safe-area inset, giving the forest banner
+            // a true edge-to-edge (top to bottom) presence.
+            if showDrawer {
+                HomeDrawerOverlay(
+                    displayName:       authStore.session?.displayName ?? "",
+                    email:             authStore.session?.email ?? "",
+                    librarySubtitle:   drawerMetrics.state.librarySubtitle,
+                    notepadSubtitle:   drawerMetrics.state.notepadSubtitle,
+                    tasksSubtitle:     drawerMetrics.state.tasksSubtitle,
+                    remindersSubtitle: drawerMetrics.state.remindersSubtitle,
+                    contactsSubtitle:  drawerMetrics.state.contactsSubtitle,
+                    onClose:           { withAnimation(.easeInOut(duration: 0.22)) { showDrawer = false } },
+                    onSignOut: {
+                        withAnimation(.easeInOut(duration: 0.22)) { showDrawer = false }
+                        Task { await authStore.signOut() }
+                    }
+                )
+                .transition(.move(edge: .leading))
+                .zIndex(1)
             }
-            .animation(.easeInOut(duration: 0.18), value: hideBottomBar)
+        }
             .sheet(isPresented: $showCapture) {
-                QuickCaptureSheet { _ in
-                    // TODO: route to capture flow once implemented
+                QuickCaptureSheet { mode in
+                    // Hide the sheet first so the navigation push
+                    // animates over a clean canvas. Capture work
+                    // runs in a detached task — it talks to the
+                    // shared in-memory repo + a few ms of fake
+                    // latency, so we don't want to block the
+                    // sheet dismissal on it.
                     showCapture = false
+                    Task { await beginQuickCapture(mode: mode) }
                 }
             }
             .sheet(
@@ -95,7 +133,14 @@ public struct MainShell: View {
                 // guard against re-fire handles tab switches that would
                 // otherwise re-trigger this block.
                 if completedAt == 0 && !showOnboarding { showOnboarding = true }
+                // Kick off live drawer metrics for the signed-in user
+                // so counts are ready the first time the user opens
+                // the drawer.
+                if let userId = authStore.session?.userId, !userId.isEmpty {
+                    drawerMetrics.start(userId: userId)
+                }
             }
+            .onDisappear { drawerMetrics.stop() }
             .tint(AppColors.coral)
     }
 
@@ -115,7 +160,9 @@ public struct MainShell: View {
                     onOpenNotebooksTab: { selection = "notebook" },
                     onOpenNotepadTab:   { selection = "notepad" },
                     onOpenNotepadEntry: { id in homePath.append(NotepadEditorRoute(entryId: id)) },
-                    onOpenContacts:     { homePath.append(ContactsRoute()) }
+                    onOpenContacts:     { homePath.append(ContactsRoute()) },
+                    onOpenDrawer:       { withAnimation(.easeInOut(duration: 0.22)) { showDrawer = true } },
+                    onOpenActivityLog:  { homePath.append(ActivityRoute()) }
                 )
                 .navigationDestination(for: NotebookRoute.self) { route in
                     notebookDetail(id: route.id)
@@ -132,6 +179,12 @@ public struct MainShell: View {
                 .navigationDestination(for: ContactsRoute.self) { _ in
                     ContactsView(userId: authStore.session?.userId ?? "")
                 }
+                .navigationDestination(for: CallHistoryRoute.self) { _ in
+                    CallHistoryView(userId: authStore.session?.userId ?? "")
+                }
+                .navigationDestination(for: ActivityRoute.self) { _ in
+                    ActivityScreen(userId: authStore.session?.userId ?? "")
+                }
             }
 
         case "notebook":
@@ -147,7 +200,11 @@ public struct MainShell: View {
 
         case "notepad":
             NavigationStack(path: $notepadPath) {
-                NotepadView()
+                NotepadView(
+                    onOpenEntry: { id in
+                        notepadPath.append(NotepadEditorRoute(entryId: id))
+                    }
+                )
                     .navigationDestination(for: NotepadEditorRoute.self) { route in
                         NotepadEditorScreen(entryId: route.entryId)
                     }
@@ -159,7 +216,12 @@ public struct MainShell: View {
             }
 
         default:
-            NavigationStack { HomeScreen() }
+            // Fallback when `selection` doesn't match a known tab.
+            // Pass the same userId the real "home" case uses so the
+            // dashboard's repository observers actually fire.
+            NavigationStack {
+                HomeScreen(userId: authStore.session?.userId ?? "")
+            }
         }
     }
 
@@ -197,6 +259,45 @@ public struct MainShell: View {
         case "notepad":  notepadPath  = NavigationPath()
         case "settings": settingsPath = NavigationPath()
         default: break
+        }
+    }
+
+    /// Quick Capture handler — picks a default destination, creates
+    /// a fresh page in it, and pushes the user straight into the
+    /// page editor. The capture-mode argument isn't propagated to
+    /// the page yet (the page detail always opens on Overview); a
+    /// follow-up can thread an initial mode through PageRoute when
+    /// each section grows real add-affordances. For now the user
+    /// lands on a new page and uses the existing capture-tab bar
+    /// to pick the section they want.
+    @MainActor
+    private func beginQuickCapture(mode: CaptureMode) async {
+        let repo = LocalDriveRepository.shared
+        do {
+            let (notebookId, chapterId) = try await repo.defaultCaptureDestination()
+            let page = try await repo.createPage(
+                notebookId: notebookId,
+                chapterId:  chapterId,
+                title:      "New page"
+            )
+            // Land in the notebook tab with the freshly-created
+            // page on top of the stack. Pushing both the notebook
+            // and the page means a back-tap returns the user to
+            // the parent notebook rather than the tab root.
+            selection = "notebook"
+            notebookPath = NavigationPath()
+            notebookPath.append(NotebookRoute(id: notebookId))
+            notebookPath.append(PageRoute(id: page.id))
+        } catch {
+            // Most likely cause is `defaultCaptureDestination`
+            // throwing because the user has no active notebooks.
+            // Surface a thin route so they can see what to do
+            // next instead of swallowing silently — a small
+            // toast or inline empty-state is the natural
+            // follow-up; for now leave a clear breadcrumb.
+            #if DEBUG
+            print("[QuickCapture] failed to start capture: \(error)")
+            #endif
         }
     }
 }

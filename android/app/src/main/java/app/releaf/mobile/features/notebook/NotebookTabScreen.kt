@@ -80,10 +80,17 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.releaf.mobile.data.notebook.NotebookEntity
 import app.releaf.mobile.data.notebook.PageSearchHit
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.sp
 import app.releaf.mobile.ui.components.CollapsibleCard
 import app.releaf.mobile.ui.components.DeleteConfirmationDialog
 import app.releaf.mobile.ui.components.HairlineDivider
+import app.releaf.mobile.ui.components.LeafColorPicker
+import app.releaf.mobile.ui.components.LeafEyebrow
 import app.releaf.mobile.ui.components.MetaPill
+import app.releaf.mobile.ui.components.PageOverflowButton
 import app.releaf.mobile.ui.components.RoundIconButton
 import app.releaf.mobile.ui.components.ScreenHeader
 import app.releaf.mobile.ui.components.StatGrid
@@ -104,10 +111,28 @@ fun NotebookTabScreen(
     modifier: Modifier = Modifier,
     viewModel: NotebookTabViewModel = viewModel(factory = NotebookTabViewModel.Factory),
 ) {
-    val state by viewModel.state.collectAsState()
+    val rawState by viewModel.state.collectAsState()
+    val sortMode by viewModel.sortMode.collectAsState()
+    // View-side sort layer — applied on top of the ViewModel's
+    // unsorted `state.notebooks` so the existing 4-arg combine()
+    // doesn't have to grow. Recomputes only when sortMode or
+    // notebooks change.
+    val state = remember(rawState, sortMode) {
+        rawState.copy(
+            notebooks = when (sortMode) {
+                NotebookSortMode.Recent -> rawState.notebooks.sortedByDescending { it.entity.updatedAt }
+                NotebookSortMode.Name   -> rawState.notebooks.sortedBy { it.entity.title.lowercase() }
+                NotebookSortMode.Pages  -> rawState.notebooks.sortedByDescending { it.pageCount }
+            }
+        )
+    }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
+    var showCreateShelfDialog by rememberSaveable { mutableStateOf(false) }
+    var showArchivedSheet by rememberSaveable { mutableStateOf(false) }
+    var newShelfName by rememberSaveable { mutableStateOf("") }
+    var newShelfColorToken by rememberSaveable { mutableStateOf("coral") }
     var listExpanded by rememberSaveable { mutableStateOf(true) }
     var pagesExpanded by rememberSaveable { mutableStateOf(true) }
     var hiddenNotebookIds by rememberSaveable(state.tab) { mutableStateOf(setOf<String>()) }
@@ -143,20 +168,73 @@ fun NotebookTabScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            ScreenHeader(
-                eyebrow = "Shelves",
-                title = "Your shelves",
-                // Match the Notepad screen's top rhythm — its custom
-                // header uses s3 above the eyebrow, so we drop the
-                // default s4 here to keep the two top-level tabs
-                // aligned vertically.
-                topPadding = AppSpacing.s3,
-                // Lighter serif weight than the default heavy
-                // EditorialTitle — reads as a tab label rather than a
-                // display heading, which fits the more list-heavy
-                // notebook surface.
-                titleStyle = AppTypography.EditorialTitleLight,
-            )
+            // Composed top zone — leaf eyebrow on the left, overflow
+            // menu on the right, big serif title below. No view
+            // toggle here: this screen IS the shelves list and there's
+            // no second layout to toggle to.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = AppSpacing.s4, end = AppSpacing.s4,
+                        top = AppSpacing.s3, bottom = AppSpacing.s3,
+                    ),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+            ) {
+                Row(
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+                    modifier              = Modifier.fillMaxWidth(),
+                ) {
+                    LeafEyebrow(
+                        label    = "releaf · shelves",
+                        modifier = Modifier.weight(1f),
+                    )
+                    PageOverflowButton {
+                        DropdownMenuItem(
+                            text = { Text("New shelf") },
+                            onClick = {
+                                newShelfName = ""
+                                showCreateShelfDialog = true
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("New notebook") },
+                            onClick = { showCreateDialog = true },
+                        )
+                        // Sort sub-section — single tap rotates through
+                        // the three modes; the active mode is marked.
+                        // A nested DropdownMenu would have been the
+                        // ideal UX but Material3 doesn't ship a
+                        // nested-menu primitive yet, so we surface
+                        // each mode as its own row.
+                        NotebookSortMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = if (sortMode == mode) "✓ ${mode.label}" else mode.label,
+                                    )
+                                },
+                                onClick = { viewModel.setSortMode(mode) },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Archived pages") },
+                            onClick = { showArchivedSheet = true },
+                        )
+                    }
+                }
+                Text(
+                    text     = "your shelves",
+                    style    = TextStyle(
+                        fontFamily = FontFamily.Serif,
+                        fontSize   = 32.sp,
+                    ),
+                    color    = AppColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
 
             Column(
                 modifier = Modifier
@@ -234,6 +312,73 @@ fun NotebookTabScreen(
         )
     }
 
+    if (showArchivedSheet) {
+        ArchivedPagesSheet(
+            onDismiss = { showArchivedSheet = false },
+            onOpenPage = { id ->
+                showArchivedSheet = false
+                onOpenPage(id)
+            },
+        )
+    }
+
+    if (showCreateShelfDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showCreateShelfDialog = false
+                newShelfColorToken = "coral"
+            },
+            title  = { Text("New shelf") },
+            text   = {
+                Column {
+                    Text(
+                        text  = "Shelves group notebooks by area of life — \"work\", \"garden\", \"daily\".",
+                        style = AppTypography.Meta,
+                        color = AppColors.TextSecondary,
+                    )
+                    Spacer(Modifier.height(AppSpacing.s3))
+                    androidx.compose.material3.OutlinedTextField(
+                        value         = newShelfName,
+                        onValueChange = { newShelfName = it },
+                        label         = { Text("Shelf name") },
+                        singleLine    = true,
+                        modifier      = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(AppSpacing.s3))
+                    Text(
+                        text  = "COLOR",
+                        style = AppTypography.Eyebrow,
+                        color = AppColors.TextSecondary,
+                    )
+                    Spacer(Modifier.height(AppSpacing.s2))
+                    LeafColorPicker(
+                        selection   = newShelfColorToken,
+                        onSelect    = { newShelfColorToken = it },
+                        showPreview = true,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val trimmed = newShelfName.trim().ifEmpty { "Untitled shelf" }
+                    viewModel.createShelf(trimmed, colorToken = newShelfColorToken)
+                    showCreateShelfDialog = false
+                    newShelfColorToken = "coral"
+                }) {
+                    Text("Create shelf")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showCreateShelfDialog = false
+                    newShelfColorToken = "coral"
+                }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
     if (showCreateDialog) {
         CreateNotebookDialog(
             shelves  = state.shelves,
@@ -241,11 +386,12 @@ fun NotebookTabScreen(
             onCreateShelf = { name, onCreated ->
                 viewModel.createShelf(name) { id -> onCreated(id) }
             },
-            onConfirm = { title, description, shelfId ->
+            onConfirm = { title, description, shelfId, colorToken ->
                 viewModel.createNotebook(
                     title       = title,
                     description = description,
                     shelfId     = shelfId,
+                    colorToken  = colorToken,
                 ) { newId -> onOpenNotebook(newId) }
                 showCreateDialog = false
             },
@@ -592,8 +738,17 @@ private fun NotebookCard(
                 visibleBooks.forEachIndexed { index, summary ->
                     if (index > 0) HairlineDivider()
                     key(summary.entity.id) {
+                        // Resolve the per-row palette once: notebook
+                        // token wins; otherwise fall back to the
+                        // parent shelf's color so all books on the
+                        // same shelf read as one visual family.
+                        val palette = resolveBookPalette(
+                            notebook = summary.entity,
+                            shelves  = state.shelves,
+                        )
                         SwipeableNotebookListItem(
                             summary = summary,
+                            palette = palette,
                             archive = archive,
                             onOpen = { onOpenNotebook(summary.entity.id) },
                             onArchive = { onArchive(summary.entity) },
@@ -636,6 +791,7 @@ private fun EmptyListBody(state: NotebookTabUiState, shelfName: String? = null) 
 @Composable
 private fun SwipeableNotebookListItem(
     summary: NotebookSummary,
+    palette: app.releaf.mobile.ui.components.ShelfPalette?,
     archive: Boolean,
     onOpen: () -> Unit,
     onArchive: () -> Unit,
@@ -665,13 +821,14 @@ private fun SwipeableNotebookListItem(
             )
         },
     ) {
-        NotebookListItem(summary = summary, onClick = onOpen)
+        NotebookListItem(summary = summary, palette = palette, onClick = onOpen)
     }
 }
 
 @Composable
 private fun NotebookListItem(
     summary: NotebookSummary,
+    palette: app.releaf.mobile.ui.components.ShelfPalette?,
     onClick: () -> Unit,
 ) {
     val notebook = summary.entity
@@ -687,7 +844,11 @@ private fun NotebookListItem(
         horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
         verticalAlignment = Alignment.Top,
     ) {
-        IconChipSquare(icon = Icons.Filled.Book)
+        IconChipSquare(
+            icon = Icons.Filled.Book,
+            fillColor = palette?.accentSoft,
+            iconTint  = palette?.background,
+        )
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.s1),
@@ -766,19 +927,56 @@ private fun CountChip(icon: ImageVector, label: String) {
     }
 }
 
+/**
+ * Resolve which palette colors should drive a notebook row's chip.
+ * Order: notebook's own color (mapped from hex to a leaf-theme
+ * token) → parent shelf's color (same mapping) → null (caller falls
+ * back to the generic accent). Returning null lets the chip stay
+ * neutral when neither the notebook nor its shelf has been colored.
+ */
+private fun resolveBookPalette(
+    notebook: NotebookEntity,
+    shelves: List<app.releaf.mobile.data.domain.Shelf>,
+): app.releaf.mobile.ui.components.ShelfPalette? {
+    val token = hexToLeafToken(notebook.colorHex)
+        ?: shelves.firstOrNull { it.id == notebook.shelfId }
+            ?.let { hexToLeafToken(it.colorHex) }
+    return token?.let { app.releaf.mobile.ui.components.ShelfTheme.palette(it) }
+}
+
+/**
+ * Inverse of `themeHex` — maps the four leaf-theme primary hexes
+ * back to their token name. Anything that doesn't match returns
+ * null so the caller can fall through to the default chrome.
+ */
+private fun hexToLeafToken(hex: String?): String? {
+    val normalized = hex?.uppercase()?.removePrefix("#") ?: return null
+    return when (normalized) {
+        "7AA874" -> "green"
+        "E07856" -> "coral"
+        "F4C430" -> "yellow"
+        "B8956A" -> "dry"
+        else     -> null
+    }
+}
+
 @Composable
-private fun IconChipSquare(icon: ImageVector) {
+private fun IconChipSquare(
+    icon: ImageVector,
+    fillColor: Color? = null,
+    iconTint: Color? = null,
+) {
     Box(
         modifier = Modifier
             .size(40.dp)
             .clip(RoundedCornerShape(AppRadius.md))
-            .background(AppAccent.soft),
+            .background(fillColor ?: AppAccent.soft),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = AppAccent.deep,
+            tint = iconTint ?: AppAccent.deep,
             modifier = Modifier.size(20.dp),
         )
     }
@@ -915,13 +1113,14 @@ private fun CreateNotebookDialog(
     shelves: List<app.releaf.mobile.data.domain.Shelf>,
     onDismiss: () -> Unit,
     onCreateShelf: (String, (String) -> Unit) -> Unit,
-    onConfirm: (title: String, description: String, shelfId: String) -> Unit,
+    onConfirm: (title: String, description: String, shelfId: String, colorToken: String) -> Unit,
 ) {
     var title by rememberSaveable { mutableStateOf("") }
     var description by rememberSaveable { mutableStateOf("") }
     var selectedShelfId by rememberSaveable(shelves.firstOrNull()?.id) {
         mutableStateOf(shelves.firstOrNull()?.id ?: "shelf-general")
     }
+    var colorToken by rememberSaveable { mutableStateOf("coral") }
     var showShelfList by remember { mutableStateOf(false) }
     var showNewShelfPrompt by remember { mutableStateOf(false) }
     val canConfirm = title.isNotBlank()
@@ -1025,11 +1224,24 @@ private fun CreateNotebookDialog(
                         }
                     }
                 }
+
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+                    Text(
+                        "Color",
+                        style = AppTypography.Eyebrow,
+                        color = AppColors.TextSecondary,
+                    )
+                    LeafColorPicker(
+                        selection   = colorToken,
+                        onSelect    = { colorToken = it },
+                        showPreview = true,
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { if (canConfirm) onConfirm(title, description, selectedShelfId) },
+                onClick = { if (canConfirm) onConfirm(title, description, selectedShelfId, colorToken) },
                 enabled = canConfirm,
             ) {
                 Text("Create", color = AppAccent.primary)
@@ -1179,3 +1391,179 @@ private fun displayNotebookTitle(title: String): String =
 
 private fun displayChapterTitle(title: String): String =
     title.trim().ifEmpty { "Untitled chapter" }
+
+/**
+ * Cross-notebook archive picker. Mirrors the iOS
+ * `ArchivedNotebooksSheet`: fetches archived pages from
+ * `DriveRepository.listArchivedPages()` on appear, renders each
+ * row with title + breadcrumb (notebook / chapter) + a Restore
+ * button. Self-contained — instantiates a FakeDriveRepository
+ * directly so NotebookTabViewModel doesn't take on a Drive
+ * dependency for one feature.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun ArchivedPagesSheet(
+    onDismiss: () -> Unit,
+    onOpenPage: (String) -> Unit,
+) {
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(
+        skipPartiallyExpanded = false,
+    )
+    var rows by remember {
+        mutableStateOf<List<app.releaf.mobile.data.drive.ArchivedPage>>(emptyList())
+    }
+    var isLoading by remember { mutableStateOf(true) }
+    val repository = remember { app.releaf.mobile.data.drive.FakeDriveRepository() }
+
+    suspend fun reload() {
+        isLoading = true
+        rows = try { repository.listArchivedPages() } catch (e: Exception) { emptyList() }
+        isLoading = false
+    }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) { reload() }
+    val coroutineScope = rememberCoroutineScope()
+
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = AppColors.CardSolid,
+        contentColor     = AppColors.TextPrimary,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.s5)
+                .padding(bottom = AppSpacing.s5),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+        ) {
+            Text("ARCHIVED",
+                style = AppTypography.Eyebrow,
+                color = AppColors.ThemeGreenDeep)
+            Text(
+                text  = "nothing's lost",
+                style = TextStyle(fontFamily = FontFamily.Serif, fontSize = 28.sp),
+                color = AppColors.TextPrimary,
+            )
+            Text(
+                text  = "Pages you've archived stay here, sorted by when they went in. Restore brings them back to their original chapter.",
+                style = AppTypography.Meta,
+                color = AppColors.TextSecondary,
+            )
+
+            when {
+                isLoading && rows.isEmpty() -> {
+                    Box(
+                        modifier         = Modifier.fillMaxWidth().padding(vertical = AppSpacing.s5),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            color = AppColors.ThemeGreenPrimary,
+                        )
+                    }
+                }
+                rows.isEmpty() -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+                        Text(
+                            text  = "Nothing here",
+                            style = TextStyle(fontFamily = FontFamily.Serif, fontSize = 18.sp),
+                            color = AppColors.TextPrimary,
+                        )
+                        Text(
+                            text  = "Archive a page from its overflow menu and it'll show up here.",
+                            style = AppTypography.Body,
+                            color = AppColors.TextSecondary,
+                        )
+                    }
+                }
+                else -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+                        rows.forEach { row ->
+                            ArchivedPageRow(
+                                row       = row,
+                                onOpen    = { onOpenPage(row.id) },
+                                onRestore = {
+                                    coroutineScope.launch {
+                                        try { repository.restorePage(row.id) } catch (_: Exception) {}
+                                        reload()
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(AppSpacing.s2))
+            app.releaf.mobile.ui.components.AppButton(
+                text     = "Done",
+                onClick  = onDismiss,
+                variant  = app.releaf.mobile.ui.components.AppButtonVariant.Primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ArchivedPageRow(
+    row: app.releaf.mobile.data.drive.ArchivedPage,
+    onOpen: () -> Unit,
+    onRestore: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppRadius.md))
+            .background(AppColors.Canvas)
+            .border(1.dp, AppColors.BorderDefault, RoundedCornerShape(AppRadius.md))
+            .clickable(onClick = onOpen)
+            .padding(horizontal = AppSpacing.s3, vertical = AppSpacing.s2),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+    ) {
+        androidx.compose.material3.Icon(
+            imageVector        = Icons.Filled.Archive,
+            contentDescription = null,
+            tint               = AppColors.GreenText,
+            modifier           = Modifier.size(13.dp),
+        )
+        Column(
+            modifier            = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text     = row.title,
+                style    = AppTypography.Button,
+                color    = AppColors.TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text     = "${row.notebookTitle} / ${row.chapterTitle}",
+                style    = AppTypography.Tag,
+                color    = AppColors.TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text  = app.releaf.mobile.ui.components.relativeTimeAgo(row.archivedAt.toString()),
+                style = AppTypography.Tag,
+                color = AppColors.TextTertiary,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(AppRadius.pill))
+                .background(AppColors.GreenSoft)
+                .clickable(onClick = onRestore)
+                .padding(horizontal = AppSpacing.s3, vertical = AppSpacing.s1),
+        ) {
+            Text(
+                text  = "Restore",
+                style = AppTypography.Button,
+                color = AppColors.GreenText,
+            )
+        }
+    }
+}

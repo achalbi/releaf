@@ -126,7 +126,7 @@ private struct Loaded: View {
 
     private var title: some View {
         Text(page.title)
-            .font(.system(size: 34, weight: .bold, design: .serif))
+            .font(.system(size: 34, design: .serif))
             .foregroundStyle(AppColors.textPrimary)
             .lineLimit(3)
             .fixedSize(horizontal: false, vertical: true)
@@ -149,7 +149,7 @@ private struct Loaded: View {
         VStack(alignment: .leading, spacing: AppSpacing.s4) {
             ForEach(proseNotes) { note in
                 Text(note.body)
-                    .font(.system(size: 17, weight: .regular, design: .serif))
+                    .font(.system(size: 17, design: .serif))
                     .foregroundStyle(AppColors.textPrimary)
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
@@ -219,7 +219,7 @@ private struct PullQuote: View {
                     .tracking(AppLetterSpacing.eyebrow)
                     .foregroundStyle(AppColors.themeGreenDeep)
                 Text(body)
-                    .font(.system(size: 17, weight: .regular, design: .serif).italic())
+                    .font(.system(size: 17, design: .serif).italic())
                     .foregroundStyle(AppColors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -268,7 +268,7 @@ private struct PageActionBar: View {
                 Image(systemName: "photo")
                 Image(systemName: "plus")
             }
-            .font(.system(size: 16, weight: .medium))
+            .font(.system(size: 16))
             .foregroundStyle(AppColors.textPrimary)
 
             Spacer()

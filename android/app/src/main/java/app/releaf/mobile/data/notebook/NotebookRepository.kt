@@ -19,6 +19,8 @@ class NotebookRepository(
     private val chapterDao: ChapterDao,
     private val pageDao: PageDao,
     private val bookSeriesDao: BookSeriesDao,
+    /** See note on NotepadRepository — nullable for tests. */
+    private val auditLogger: app.releaf.mobile.data.activity.AuditLogger? = null,
 ) {
     /* ---------- reads ---------- */
 
@@ -63,6 +65,12 @@ class NotebookRepository(
             dirty        = true,
         )
         notebookDao.upsert(entity)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Created,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.Notebook,
+            entityId   = entity.id,
+            title      = entity.title.ifBlank { "Untitled notebook" },
+        )
         return entity
     }
 
@@ -128,6 +136,12 @@ class NotebookRepository(
             dirty        = true,
         )
         notebookDao.upsert(entity)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Created,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.Notebook,
+            entityId   = entity.id,
+            title      = entity.title.ifBlank { "Untitled notebook" },
+        )
         return entity
     }
 
@@ -168,6 +182,12 @@ class NotebookRepository(
             dirty        = true,
         )
         notebookDao.upsert(entity)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Created,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.Notebook,
+            entityId   = entity.id,
+            title      = entity.title.ifBlank { "Untitled notebook" },
+        )
         return entity
     }
 
@@ -206,13 +226,18 @@ class NotebookRepository(
     }
 
     suspend fun saveNotebook(entity: NotebookEntity) {
-        notebookDao.upsert(
-            entity.copy(
-                title       = entity.title.trim(),
-                description = entity.description?.trim()?.ifEmpty { null },
-                updatedAt   = IsoClock.nowIso(),
-                dirty       = true,
-            )
+        val updated = entity.copy(
+            title       = entity.title.trim(),
+            description = entity.description?.trim()?.ifEmpty { null },
+            updatedAt   = IsoClock.nowIso(),
+            dirty       = true,
+        )
+        notebookDao.upsert(updated)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Updated,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.Notebook,
+            entityId   = updated.id,
+            title      = updated.title.ifBlank { "Untitled notebook" },
         )
     }
 
@@ -220,10 +245,24 @@ class NotebookRepository(
 
     suspend fun archiveNotebook(id: String) {
         notebookDao.archive(id = id, nowIso = IsoClock.nowIso())
+        val snapshot = notebookDao.findById(id)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Updated,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.Notebook,
+            entityId   = id,
+            title      = snapshot?.title?.ifBlank { "Untitled notebook" } ?: "Untitled notebook",
+        )
     }
 
     suspend fun unarchiveNotebook(id: String) {
         notebookDao.unarchive(id = id, nowIso = IsoClock.nowIso())
+        val snapshot = notebookDao.findById(id)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Restored,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.Notebook,
+            entityId   = id,
+            title      = snapshot?.title?.ifBlank { "Untitled notebook" } ?: "Untitled notebook",
+        )
     }
 
     /* ---------- soft delete + cascade ---------- */
@@ -239,6 +278,7 @@ class NotebookRepository(
      * flicks rows out in sequence). When we care, wrap in `db.withTransaction`.
      */
     suspend fun softDeleteNotebook(id: String) {
+        val snapshot = notebookDao.findById(id)
         val now = IsoClock.nowIso()
         // Collect live chapter ids *before* the cascade so we know which ones
         // we own (for potential undo use). Pages cascade per-chapter below.
@@ -248,6 +288,15 @@ class NotebookRepository(
         }
         chapterDao.softDeleteCascadeForNotebook(notebookId = id, nowIso = now)
         notebookDao.softDelete(id = id, nowIso = now)
+        // One audit row for the notebook itself — cascaded pages /
+        // chapters intentionally don't emit per-row events; the
+        // notebook delete is the user-visible action.
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Deleted,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.Notebook,
+            entityId   = id,
+            title      = snapshot?.title?.ifBlank { "Untitled notebook" } ?: "Untitled notebook",
+        )
     }
 
     /**
@@ -259,5 +308,12 @@ class NotebookRepository(
      */
     suspend fun undoSoftDeleteNotebook(id: String) {
         notebookDao.restore(id = id, nowIso = IsoClock.nowIso())
+        val snapshot = notebookDao.findById(id)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Restored,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.Notebook,
+            entityId   = id,
+            title      = snapshot?.title?.ifBlank { "Untitled notebook" } ?: "Untitled notebook",
+        )
     }
 }

@@ -26,6 +26,21 @@ interface ChapterDao {
     )
     fun observeForNotebook(notebookId: String): Flow<List<ChapterEntity>>
 
+    /**
+     * All active chapters across every notebook, newest-edited first.
+     * Powers the activity-feed roll-up — the home timeline + the
+     * full-screen activity log read this to surface chapter-level
+     * edits alongside notebook + page + notepad updates.
+     */
+    @Query(
+        """
+        SELECT * FROM chapters
+        WHERE deleted_at IS NULL
+        ORDER BY updated_at DESC
+        """
+    )
+    fun observeAllActive(): Flow<List<ChapterEntity>>
+
     @Query(
         """
         SELECT * FROM chapters
@@ -37,6 +52,21 @@ interface ChapterDao {
 
     @Query("SELECT * FROM chapters WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): ChapterEntity?
+
+    /**
+     * One-shot list of live chapters under a notebook, in the
+     * same position order `observeForNotebook` uses. Companion
+     * to the flow read for the request/response repo layer
+     * (`LocalDriveRepository`) that doesn't subscribe.
+     */
+    @Query(
+        """
+        SELECT * FROM chapters
+        WHERE notebook_id = :notebookId AND deleted_at IS NULL
+        ORDER BY position ASC, created_at ASC
+        """
+    )
+    suspend fun activeForNotebookOnce(notebookId: String): List<ChapterEntity>
 
     /**
      * First active chapter under a notebook, in the same ordering the

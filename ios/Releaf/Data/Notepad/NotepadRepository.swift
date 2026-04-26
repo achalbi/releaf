@@ -111,17 +111,40 @@ public final class NotepadRepository: @unchecked Sendable {
         title: String?,
         notes: String,
         entryDate: String? = nil,
+        description: String? = nil,
         contacts: String = "[]",
         locations: String = "[]",
         todos: String = "[]",
         attachments: String = "[]"
     ) async throws -> NotepadEntry {
         let now = IsoClock.nowIso()
+        let newId = Uuidv7.generate()
+
+        // Auto-seed title + description as a *pair* from the same
+        // Ayurvedic plant — title gets the Sanskrit/Hindi name, the
+        // description gets "(commonName), epithet, Used for usedFor".
+        // We only seed when BOTH fields were left blank: mixing an
+        // authored title with an unrelated auto-description (or
+        // vice-versa) would produce internally mismatched rows.
+        let cleanedTitle       = title?.cleanedTitle
+        let cleanedDescription = description?.cleanedTitle
+        let seededTitle: String?
+        let seededDescription: String?
+        if cleanedTitle == nil && cleanedDescription == nil {
+            let plant = AyurvedicCatalog.plant(forId: newId)
+            seededTitle       = plant.name
+            seededDescription = AyurvedicCatalog.description(for: plant)
+        } else {
+            seededTitle       = cleanedTitle
+            seededDescription = cleanedDescription
+        }
+
         let entry = NotepadEntry(
-            id:          Uuidv7.generate(),
+            id:          newId,
             userId:      userId,
             entryDate:   entryDate ?? IsoClock.todayLocalDate(),
-            title:       title?.cleanedTitle,
+            title:       seededTitle,
+            description: seededDescription,
             notes:       notes,
             contacts:    contacts,
             locations:   locations,
@@ -145,10 +168,14 @@ public final class NotepadRepository: @unchecked Sendable {
     public func save(_ entry: NotepadEntry) async throws {
         var row = entry
         row.title = entry.title?.cleanedTitle
+        row.description = entry.description?.cleanedTitle
         row.updatedAt = IsoClock.nowIso()
         row.dirty = true
+        // Snapshot to a `let` before the @Sendable write closure —
+        // Swift 6 rejects capture-by-reference of mutable locals.
+        let snapshot = row
         try await dbQueue.write { db in
-            try row.update(db)
+            try snapshot.update(db)
         }
     }
 
@@ -200,8 +227,15 @@ public final class NotepadRepository: @unchecked Sendable {
                 }
             }()
 
+            // Description: prefer primary's; fall back to secondary's
+            // only when primary has none, so a merge never silently
+            // overwrites text the user authored on the surviving row.
+            let mergedDescription = primary.description?.cleanedTitle
+                ?? secondary.description?.cleanedTitle
+
             let now = IsoClock.nowIso()
             var updated = primary
+            updated.description = mergedDescription
             updated.notes       = mergedNotes
             updated.contacts    = mergedContacts.toJsonString()
             updated.todos       = mergedTodos.toJsonString()
@@ -348,9 +382,11 @@ where S.Element: Sendable {
 // MARK: - String helpers
 
 private extension String {
-    /// Title-cleaning rule shared across create/save: trim, and treat the
-    /// empty string as "no title" (so we never store an empty-string title
-    /// when the user deletes all characters from the field).
+    /// Optional-text-field cleaning rule shared across create/save —
+    /// trim, and treat the empty string as nil so we never store an
+    /// empty-string title or description when the user deletes every
+    /// character from the field. (Original use was title; description
+    /// joined as a second caller with the same behavior.)
     var cleanedTitle: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed

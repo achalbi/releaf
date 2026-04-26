@@ -109,10 +109,12 @@ fun ReleafTheme(content: @Composable () -> Unit) {
         }
     }
     val accent = AccentPalettes.forId(state.paletteId)
+    val weight = state.fontWeight.toFontWeight()
 
     CompositionLocalProvider(
         LocalConfiguration provides overrideConfig,
         LocalAccent        provides accent,
+        LocalFontWeight    provides weight,
     ) {
         MaterialTheme(
             colorScheme = releafColorScheme(isDark = effectiveDark, accent = accent),

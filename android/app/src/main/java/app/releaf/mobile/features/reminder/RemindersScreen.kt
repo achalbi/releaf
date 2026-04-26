@@ -95,7 +95,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -125,6 +124,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 @Composable
 fun RemindersScreen(
@@ -392,7 +392,7 @@ private fun HeroNextUp(
             Spacer(Modifier.height(AppSpacing.s2))
             Text(
                 text  = whenLabel,
-                style = AppTypography.Meta.copy(fontWeight = FontWeight.SemiBold),
+                style = AppTypography.Meta.copy(fontWeight = LocalFontWeight.current),
                 color = AppAccent.primary,
             )
         }
@@ -490,7 +490,7 @@ private fun TimeRailRow(
                 text  = timeLine1,
                 style = AppTypography.Button.copy(
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = LocalFontWeight.current,
                 ),
                 color = if (isDone) AppColors.TextTertiary else AppColors.TextPrimary,
                 textDecoration = if (isDone) TextDecoration.LineThrough else null,
@@ -514,7 +514,7 @@ private fun TimeRailRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text  = stripped,
-                style = AppTypography.Body.copy(fontWeight = FontWeight.SemiBold),
+                style = AppTypography.Body.copy(fontWeight = LocalFontWeight.current),
                 color = if (isDone) AppColors.TextTertiary else AppColors.TextPrimary,
                 textDecoration = if (isDone) TextDecoration.LineThrough else null,
                 maxLines = 2,
@@ -557,7 +557,7 @@ private fun Chip(text: String, fg: Color, bg: Color) {
     ) {
         Text(
             text  = text,
-            style = AppTypography.Tag.copy(fontWeight = FontWeight.SemiBold),
+            style = AppTypography.Tag.copy(fontWeight = LocalFontWeight.current),
             color = fg,
         )
     }
@@ -583,7 +583,7 @@ private fun TagChip(perspective: PerspectiveEntity?, fallbackName: String?) {
         Spacer(Modifier.width(3.dp))
         Text(
             text  = "@$name",
-            style = AppTypography.Tag.copy(fontWeight = FontWeight.SemiBold),
+            style = AppTypography.Tag.copy(fontWeight = LocalFontWeight.current),
             color = AppAccent.primary,
         )
     }
@@ -614,7 +614,7 @@ private fun RecurrenceChip(days: Int) {
         Spacer(Modifier.width(3.dp))
         Text(
             text  = label,
-            style = AppTypography.Tag.copy(fontWeight = FontWeight.SemiBold),
+            style = AppTypography.Tag.copy(fontWeight = LocalFontWeight.current),
             color = AppColors.Info,
         )
     }

@@ -12,4 +12,13 @@
     <files-path
         name="attachments"
         path="releaf/attachments/" />
+    <!--
+      PDF export drops files into cacheDir/exports/. Cache lives
+      outside the camera-grant scope on purpose: PDFs are big-ish,
+      shouldn't sit alongside the user's permanent attachments,
+      and survive only until the system reclaims cache pressure.
+    -->
+    <cache-path
+        name="exports"
+        path="exports/" />
 </paths>

@@ -66,11 +66,15 @@ public final class ChapterRepository: @unchecked Sendable {
     }
 
     public func saveChapter(_ entity: ChapterEntity) async throws {
+        // Materialize the mutated entity into an immutable `let` before
+        // handing it to the @Sendable write closure — capturing a `var`
+        // by reference is a Swift 6 concurrency error.
         var row = entity
         row.title = entity.title.trimmingCharacters(in: .whitespacesAndNewlines)
         row.updatedAt = IsoClock.nowIso()
         row.dirty = true
-        try await dbQueue.write { db in try row.update(db) }
+        let snapshot = row
+        try await dbQueue.write { db in try snapshot.update(db) }
     }
 
     // MARK: - Soft delete (cascade to pages)

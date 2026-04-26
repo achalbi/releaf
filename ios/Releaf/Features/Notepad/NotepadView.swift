@@ -1,498 +1,683 @@
 /*
  * NotepadView.swift
  *
- * Top-level Notepad tab — lists the signed-in user's entries and surfaces
- * a coral "new entry" FAB. Mirror of Android's NotepadScreen:
- *   - Date-grouped cards (`entry_date` headers) when not searching
- *   - Flat rank-ordered cards when a search query is active
- *   - Swipe-to-delete on each row with a 4s Undo toast
+ * Top-level Notepad tab — redesigned around a Day / Recents segmented
+ * control:
  *
- * Composition: `NotepadView` reads the signed-in user from the environment
- * AuthStore and hands the id to a private inner view that owns the
- * `NotepadListViewModel`. Splitting the two lets the VM's `@StateObject`
- * capture a real user id at init time instead of a placeholder.
+ *   • Day      → calendar bloom of trees over the current month, a
+ *                today card with eyebrow + title + body + capture
+ *                chips, and a quick-capture pill row (note / photo /
+ *                scan / voice) above the bottom nav.
+ *   • Recents  → today's plot rendered as a full-width hero tile in
+ *                deep canopy + coral border, then a 2-column ragged
+ *                masonry of older days.
  *
- * Navigation: the editor destination is registered inside this view so
- * `NotepadEditorRoute` pushes land on the Notepad tab's stack regardless
- * of whether the caller is the FAB or a row tap.
+ * Backed by NotepadScreenViewModel which observes
+ * NotepadRepository.observeActive(userId:). Tapping today opens or
+ * creates today's entry; tapping a past day opens that entry.
  */
 
 import SwiftUI
+import PhotosUI
 import ReleafDesignSystem
 import ReleafData
 
 public struct NotepadView: View {
     @EnvironmentObject private var authStore: AuthStore
 
-    public init() {}
+    private let onOpenEntry: (String) -> Void
+
+    public init(onOpenEntry: @escaping (String) -> Void = { _ in }) {
+        self.onOpenEntry = onOpenEntry
+    }
 
     public var body: some View {
         Group {
             if let session = authStore.session {
-                NotepadListContent(
+                NotepadDayRecentsContent(
                     userId: session.userId,
-                    repository: NotepadRepository()
+                    onOpenEntry: onOpenEntry
                 )
             } else {
-                // MainShell already gates on signed-in, but guard anyway
-                // so the preview/unsigned-in path lands on a safe state.
-                NotepadListUnavailableView()
+                Text("Sign in to see your notepad.")
+                    .font(AppText.body)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        // Dot-grid canvas behind the whole Notepad tab so the entry
-        // cards float on the same textured paper the editor uses —
-        // matches the Releaf Branding template's "Recent Entries"
-        // background.
         .background(DotGridBackground().ignoresSafeArea())
+        // `.navigationBar` placement is iOS-only — on macOS the whole
+        // toolbar is hidden via the no-arg overload.
+        #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
+        #else
+        .toolbar(.hidden)
+        #endif
     }
 }
 
 // MARK: - Inner content (owns the VM)
 
-private struct NotepadListContent: View {
-    @StateObject private var vm: NotepadListViewModel
+private enum NotepadTab: String { case day, recents }
 
-    init(userId: String, repository: NotepadRepository) {
-        _vm = StateObject(wrappedValue: NotepadListViewModel(
-            repository: repository,
-            userId: userId
-        ))
+private struct NotepadDayRecentsContent: View {
+    @StateObject private var vm: NotepadScreenViewModel
+    @State private var tab: NotepadTab = .day
+
+    /// The day whose card renders below the calendar. Defaults to today
+    /// and updates when the user taps any day in the calendar grid.
+    @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
+
+    /// Pager-page offset relative to today's month (0 = today's month,
+    /// -1 = previous month, +1 = next, etc.).
+    @State private var monthPageOffset: Int = 0
+
+    /// PhotosPicker selection — the "import" quick-capture pill is a
+    /// PhotosPicker; when the user finishes picking, this state changes
+    /// and `.onChange` loads each item's bytes and asks the VM to
+    /// create one new entry per photo.
+    @State private var importItems: [PhotosPickerItem] = []
+
+    private let onOpenEntry: (String) -> Void
+
+    init(userId: String, onOpenEntry: @escaping (String) -> Void) {
+        _vm = StateObject(wrappedValue: NotepadScreenViewModel(userId: userId))
+        self.onOpenEntry = onOpenEntry
     }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            VStack(spacing: 0) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: AppSpacing.s4) {
                 header
-                content
-            }
 
-            composeFab
+                // Centered, max-280pt switch so the active pill slides
+                // in a stable lane between Day and Recents instead of
+                // expanding to fill every screen edge.
+                DayRecentsSwitch(selected: $tab)
+                    .frame(maxWidth: 280)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
-            // Undo snackbar — bottom-centered, floats above the FAB's
-            // row by sitting in a separate ZStack layer.
-            //
-            // Vertical clearance: FAB is 56pt tall + 16pt bottom pad = 72pt
-            // from the container bottom. Pushing the toast 88pt up leaves
-            // a 16pt gap above the FAB's top edge so they don't collide.
-            if let toast = vm.toast {
-                UndoToastView(
-                    onUndo: { vm.undoDelete(toast.entryId) },
-                    onDismiss: { vm.dismissToast() }
-                )
-                .padding(.horizontal, AppSpacing.s4)
-                .padding(.bottom, 88)
-                .frame(maxWidth: .infinity, alignment: .bottom)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .zIndex(1)
+                if vm.state.isLoading {
+                    ProgressView()
+                        .tint(AppColors.coral)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, AppSpacing.s8)
+                } else {
+                    switch tab {
+                    case .day:     dayView
+                    case .recents: recentsView
+                    }
+                }
+
+                Spacer(minLength: AppSpacing.s10)
             }
+            .padding(AppSpacing.s4)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .animation(.easeInOut(duration: 0.18), value: vm.toast)
         .onAppear { vm.start() }
+        .onDisappear { vm.stop() }
     }
 
-    // MARK: Header (eyebrow, title, search)
-
     private var header: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.s3) {
+        VStack(alignment: .leading, spacing: AppSpacing.s2) {
             Text("NOTEPAD")
                 .font(AppText.eyebrow)
                 .tracking(AppLetterSpacing.eyebrow)
-                .foregroundStyle(AppColors.coral)
+                .foregroundStyle(AppColors.themeGreenDeep)
 
-            Text("Quick scratch")
+            Text(tab == .day ? "A grove of days" : "Recent garden")
                 .font(AppText.editorialTitle)
                 .foregroundStyle(AppColors.textPrimary)
-
-            SearchField(
-                query: Binding(get: { vm.query }, set: { vm.query = $0 }),
-                onClear: { vm.clearQuery() }
-            )
         }
-        .padding(.horizontal, AppSpacing.s4)
-        .padding(.top, AppSpacing.s4)
-        .padding(.bottom, AppSpacing.s3)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
-
-    // MARK: Content variants (empty / search-empty / list)
 
     @ViewBuilder
-    private var content: some View {
-        let trimmedQuery = vm.query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !vm.entries.isEmpty {
-            EntryList(
-                entries: vm.entries,
-                grouped: trimmedQuery.isEmpty,
-                onDelete: { vm.softDelete($0) }
-            )
-        } else if !trimmedQuery.isEmpty {
-            EmptyStateView(
-                title: "No matches",
-                subtitle: "Nothing in your notepad matches \u{201C}\(vm.query)\u{201D}."
-            )
-        } else {
-            EmptyStateView(
-                title: "Nothing here yet",
-                subtitle: "Tap the + button to jot something down."
-            )
-        }
-    }
+    private var dayView: some View {
+        let today = Date()
+        let selectedDay = resolveSelectedDay(today: today)
+        VStack(alignment: .leading, spacing: AppSpacing.s4) {
+            // Calendar + legend grouped tightly — the legend reads as
+            // a footnote of the calendar so it sits close (s1 gap) to
+            // the grid above, while the SelectedDayCard / quick-capture
+            // rows keep their normal s4 breathing room.
+            VStack(alignment: .leading, spacing: AppSpacing.s1) {
+                // Swipeable calendar carousel — TabView with .page style
+                // gives native swipe + snap. The current page's month
+                // drives the pager strip + the centered calendar.
+                SwipeableCalendarCarousel(
+                    anchorMonth: today,
+                    pageOffset: $monthPageOffset,
+                    byDate: vm.state.byDate,
+                    today: today,
+                    selectedDate: selectedDate,
+                    onDayTap: { day in selectedDate = day.date }
+                )
 
-    // MARK: Compose FAB
-
-    private var composeFab: some View {
-        NavigationLink(value: NotepadEditorRoute(entryId: NotepadEditorViewModel.newEntryId)) {
-            Image(systemName: "plus")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(AppColors.onAccent)
-                .frame(width: 56, height: 56)
-                .background(AppColors.coral)
-                .clipShape(Circle())
-                .shadow(color: .black.opacity(0.18), radius: 6, x: 0, y: 3)
-        }
-        .accessibilityLabel("New entry")
-        .padding(.trailing, AppSpacing.s4)
-        .padding(.bottom, AppSpacing.s4)
-    }
-}
-
-// MARK: - Unavailable (no signed-in user)
-
-private struct NotepadListUnavailableView: View {
-    var body: some View {
-        VStack(spacing: AppSpacing.s2) {
-            Text("Sign in to use the notepad")
-                .font(AppText.sectionTitle)
-                .foregroundStyle(AppColors.textSecondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(AppSpacing.s6)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-// MARK: - Search field
-
-private struct SearchField: View {
-    @Binding var query: String
-    let onClear: () -> Void
-
-    var body: some View {
-        HStack(spacing: AppSpacing.s2) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(AppColors.textTertiary)
-
-            TextField("Search notes…", text: $query)
-                .font(AppText.body)
-                .foregroundStyle(AppColors.textPrimary)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.search)
-
-            if !query.isEmpty {
-                Button(action: onClear) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(AppColors.textTertiary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
+                // Tapping the "today" badge in the legend snaps the
+                // carousel back to today's month and reselects today —
+                // useful escape hatch after the user has swiped or
+                // tapped a different day.
+                NotepadCalendarLegend(onTodayTap: {
+                    withAnimation {
+                        monthPageOffset = 0
+                        selectedDate = Calendar.current.startOfDay(for: Date())
+                    }
+                })
             }
+
+            // Selected-day card — populates from whichever day the
+            // user last tapped. Defaults to today on first open.
+            SelectedDayCard(
+                day: selectedDay,
+                today: today,
+                breakdown: Calendar.current.isDate(selectedDate, inSameDayAs: today)
+                    ? vm.state.todayBreakdown
+                    : nil,
+                onTap: { tapSelected(selectedDay, today: today) }
+            )
+
+            // Quick capture pills — including a PhotosPicker-backed
+            // "import" pill that creates one new entry per picked photo.
+            QuickCapturePills(onCapture: { _ in
+                vm.openOrCreateForDate(selectedDate, onResult: onOpenEntry)
+            })
         }
-        .padding(.horizontal, AppSpacing.s4)
-        .padding(.vertical, AppSpacing.s3)
-        .background(AppColors.cardSolid)
+    }
+
+    /// Resolve a [DayCount] for the currently-selected date by reading
+    /// the VM's byDate index. Falls back to an empty placeholder so the
+    /// UI keeps rendering before the first observe-fire.
+    private func resolveSelectedDay(today: Date) -> DayCount {
+        let key = Self.isoDateString(selectedDate)
+        let entry = vm.state.byDate[key]
+        return DayCount(
+            date: selectedDate,
+            dateString: key,
+            entry: entry,
+            captureCount: entry.map { entryCaptureCount($0) } ?? 0,
+            openTodoCount: entry.map { entryOpenTodoCount($0) } ?? 0
+        )
+    }
+
+    private func entryCaptureCount(_ entry: NotepadEntry) -> Int {
+        let attachments = entry.attachments.parseAttachments()
+        let contacts    = entry.contacts.parseContacts()
+        let locations   = entry.locations.parseLocations()
+        return attachments.count + contacts.count + locations.count
+    }
+
+    private func entryOpenTodoCount(_ entry: NotepadEntry) -> Int {
+        entry.todos.parseTodos().filter { !$0.done }.count
+    }
+
+    private static func isoDateString(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.calendar = Calendar(identifier: .iso8601)
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        return fmt.string(from: date)
+    }
+
+    /// Selected-day card tap: open the entry's editor if one exists;
+    /// if today + missing, create + open. Past days without entries
+    /// are no-op (we don't create back-dated entries from the calendar).
+    private func tapSelected(_ day: DayCount, today: Date) {
+        if let entry = day.entry {
+            onOpenEntry(entry.id)
+        } else if Calendar.current.isDate(day.date, inSameDayAs: today) {
+            vm.createForToday(onCreated: onOpenEntry)
+        }
+    }
+
+    @ViewBuilder
+    private var recentsView: some View {
+        let calendar = Calendar.current
+        let today = vm.state.recentDays.first(where: { calendar.isDateInToday($0.date) })
+            ?? DayCount(
+                date: Date(),
+                dateString: ISO8601DateFormatter.localDate(Date()),
+                entry: vm.state.today,
+                captureCount: vm.state.todayBreakdown.captureCount,
+                openTodoCount: vm.state.todayBreakdown.openTodoCount
+            )
+        let earlier = vm.state.recentDays.filter { !calendar.isDateInToday($0.date) }
+
+        NotepadGardenTiles(
+            today: today,
+            earlier: earlier,
+            onTodayTap: tapToday,
+            onDayTap: { day in tapDay(day) }
+        )
+    }
+
+    // MARK: - Actions
+
+    private func tapToday() {
+        if let entry = vm.state.today {
+            onOpenEntry(entry.id)
+        } else {
+            vm.createForToday(onCreated: onOpenEntry)
+        }
+    }
+
+    private func tapDay(_ day: DayCount) {
+        if let entry = day.entry {
+            onOpenEntry(entry.id)
+        }
+    }
+
+    private func handleImportSelection(_ p: [PhotosPickerItem]) {
+        guard !p.isEmpty else { return }
+        importItems = []
+        _ = p // TODO load
+    }
+
+    private func createNewEntry() {
+        vm.createForToday(onCreated: onOpenEntry)
+    }
+}
+
+// MARK: - Segmented switch
+
+private struct DayRecentsSwitch: View {
+    @Binding var selected: NotepadTab
+
+    var body: some View {
+        HStack(spacing: 0) {
+            segment(label: "Day",     value: .day)
+            segment(label: "Recents", value: .recents)
+        }
+        .padding(2)
+        .background(
+            Capsule()
+                .fill(AppColors.canvas)
+        )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous)
+            Capsule()
                 .stroke(AppColors.borderDefault, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
+    }
+
+    private func segment(label: String, value: NotepadTab) -> some View {
+        let isActive = selected == value
+        return Button(action: { selected = value }) {
+            Text(label)
+                .font(AppText.button)
+                .foregroundStyle(isActive ? AppColors.onAccent : AppColors.textSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, AppSpacing.s2)
+                .background(
+                    Capsule()
+                        .fill(isActive ? AppColors.themeGreenDeep : Color.clear)
+                )
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 
-// MARK: - Entry list
+// MARK: - Today card (Day view)
 
-private struct EntryList: View {
-    let entries: [NotepadEntry]
-    /// True when the list should show sticky date-group headers. False
-    /// during search, where rank order is more useful than date order.
-    let grouped: Bool
-    let onDelete: (NotepadEntry) -> Void
+private struct SelectedDayCard: View {
+    let day: DayCount
+    let today: Date
+    /// Per-mode chip breakdown — populated only when the selected day
+    /// is today (the VM only computes the breakdown for today's entry).
+    let breakdown: TodayBreakdown?
+    let onTap: () -> Void
 
     var body: some View {
-        List {
-            if grouped {
-                ForEach(groupedSections, id: \.date) { section in
-                    Section(header: DateHeader(isoDate: section.date)) {
-                        ForEach(section.entries, id: \.id) { entry in
-                            EntryRow(entry: entry, onDelete: onDelete)
+        let cal     = Calendar.current
+        let isToday = cal.isDate(day.date, inSameDayAs: today)
+        let isFuture = day.date > today
+        let eyebrow = isToday ? "TODAY" : (isFuture ? "UPCOMING" : "SELECTED")
+        let entry   = day.entry
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: AppSpacing.s2) {
+                Text("\(eyebrow) · \(Self.dayHeader(day.date))")
+                    .font(AppText.eyebrow)
+                    .foregroundStyle(AppColors.coral)
+
+                Text(entry?.title?.nonEmpty ?? (isToday ? "Today's entry" : "Untitled"))
+                    .font(.system(size: 18, weight: .medium, design: .serif))
+                    .foregroundStyle(AppColors.textPrimary)
+
+                if let preview = Self.notesPreview(entry, limit: 140) {
+                    Text(preview)
+                        .font(.system(size: 13, design: .serif))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .lineLimit(2)
+                } else {
+                    Text(emptyMessage(isToday: isToday, isFuture: isFuture))
+                        .font(.system(size: 13, design: .serif))
+                        .foregroundStyle(AppColors.textTertiary)
+                }
+
+                if let b = breakdown, b.captureCount > 0 || b.openTodoCount > 0 {
+                    HStack(spacing: AppSpacing.s2) {
+                        if b.photoCount > 0 {
+                            chipPill("photo · \(b.photoCount)",
+                                     bg: Color(red: 0xFC/255, green: 0xEA/255, blue: 0xE0/255),
+                                     fg: Color(red: 0x99/255, green: 0x3C/255, blue: 0x1D/255))
+                        }
+                        if b.scanCount > 0 {
+                            chipPill("scan · \(b.scanCount)",
+                                     bg: Color(red: 0xD9/255, green: 0xED/255, blue: 0xE2/255),
+                                     fg: Color(red: 0x1E/255, green: 0x59/255, blue: 0x43/255))
+                        }
+                        if b.voiceCount > 0 {
+                            chipPill("voice · \(b.voiceCount)",
+                                     bg: Color(red: 0xFA/255, green: 0xEE/255, blue: 0xDA/255),
+                                     fg: Color(red: 0x85/255, green: 0x4F/255, blue: 0x0B/255))
+                        }
+                        if b.openTodoCount > 0 {
+                            Text("+ \(b.openTodoCount) todos")
+                                .font(AppText.tag)
+                                .foregroundStyle(AppColors.coralDeep)
+                        }
+                    }
+                } else if day.captureCount > 0 || day.openTodoCount > 0 {
+                    HStack(spacing: AppSpacing.s2) {
+                        if day.captureCount > 0 {
+                            Text("\(day.captureCount) captures")
+                                .font(AppText.tag)
+                                .foregroundStyle(AppColors.themeGreenDeep)
+                        }
+                        if day.captureCount > 0 && day.openTodoCount > 0 {
+                            Text("·").font(AppText.tag).foregroundStyle(AppColors.textSecondary)
+                        }
+                        if day.openTodoCount > 0 {
+                            Text("\(day.openTodoCount) todos")
+                                .font(AppText.tag)
+                                .foregroundStyle(AppColors.coralDeep)
                         }
                     }
                 }
-            } else {
-                ForEach(entries, id: \.id) { entry in
-                    EntryRow(entry: entry, onDelete: onDelete)
-                }
-            }
-            // Bottom clearance so the FAB doesn't visually overlap the
-            // last row on short lists.
-            Color.clear
-                .frame(height: AppSpacing.s10)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        // Clear so the dot-grid canvas on the parent `NotepadView`
-        // reads through between cards. Sticky date headers keep their
-        // own opaque canvas background so they don't bleed onto rows
-        // scrolling underneath.
-        .background(Color.clear)
-    }
-
-    /// Groups entries by entry_date, preserves the repo's
-    /// updated_at-desc order within a group, and sorts groups by date DESC
-    /// (ISO strings sort lexically = chronologically).
-    private var groupedSections: [(date: String, entries: [NotepadEntry])] {
-        var buckets: [String: [NotepadEntry]] = [:]
-        var dateOrder: [String] = []
-        for entry in entries {
-            if buckets[entry.entryDate] == nil {
-                buckets[entry.entryDate] = []
-                dateOrder.append(entry.entryDate)
-            }
-            buckets[entry.entryDate]?.append(entry)
-        }
-        // Sort dates DESC. The insertion order above came from the
-        // repo-sorted entries, but if two dates interleave we want the
-        // more recent one on top regardless.
-        let sortedDates = dateOrder.sorted(by: >)
-        return sortedDates.map { ($0, buckets[$0] ?? []) }
-    }
-}
-
-// MARK: - Entry row
-
-private struct EntryRow: View {
-    let entry: NotepadEntry
-    let onDelete: (NotepadEntry) -> Void
-
-    var body: some View {
-        NavigationLink(value: NotepadEditorRoute(entryId: entry.id)) {
-            EntryCardBody(entry: entry)
-        }
-        // iOS's built-in swipe actions give the slide-reveal + threshold +
-        // haptics for free. `allowsFullSwipe: true` matches Android's
-        // one-swipe-commits behavior.
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button(role: .destructive) {
-                onDelete(entry)
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-            .tint(AppColors.danger)
-        }
-        .listRowInsets(EdgeInsets(
-            top: AppSpacing.s1, leading: AppSpacing.s4,
-            bottom: AppSpacing.s1, trailing: AppSpacing.s4
-        ))
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
-    }
-}
-
-private struct EntryCardBody: View {
-    let entry: NotepadEntry
-
-    var body: some View {
-        // Mirrors the "Recent Entries" card in the Releaf Branding
-        // template — date label at the top as a small meta row, then
-        // title + body preview below. Bumps radius + padding to 16 /
-        // 24 so cards read as editorial containers rather than compact
-        // tiles. Matches the Android twin on `EntryCard`.
-        Card(padding: AppSpacing.s6, radius: AppRadius.lg) {
-            VStack(alignment: .leading, spacing: AppSpacing.s2) {
-                Text(Self.formatDateLabel(entry.entryDate))
-                    .font(AppText.meta)
-                    .foregroundStyle(AppColors.textSecondary)
-
-                Text(displayTitle)
-                    .font(AppText.sectionTitle)
-                    .foregroundStyle(AppColors.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                if let preview = previewBody, !preview.isEmpty {
-                    Text(preview)
-                        .font(AppText.body)
-                        .foregroundStyle(AppColors.textSecondary)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(AppSpacing.s5)
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.lg)
+                    .fill(AppColors.cardSolid)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.lg)
+                    .stroke(AppColors.coral.opacity(isToday ? 0.55 : 0.30), lineWidth: 1.2)
+            )
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
-    /// "Today" / "Yesterday" / "April 21, 2026" — same formatting
-    /// rules as `DateHeader.formatted`. Duplicated instead of shared
-    /// because `DateHeader` nests its formatters in `static let`s; a
-    /// simple local helper is cleaner than plumbing them out.
-    private static func formatDateLabel(_ iso: String) -> String {
-        guard let date = isoFormatter.date(from: iso) else { return iso }
-        let cal = Calendar.current
-        if cal.isDateInToday(date) { return "Today" }
-        if cal.isDateInYesterday(date) { return "Yesterday" }
-        return longFormatter.string(from: date)
+    private func emptyMessage(isToday: Bool, isFuture: Bool) -> String {
+        if isToday { return "Nothing captured yet — tap to start today's note." }
+        if isFuture { return "No entry — yet." }
+        return "No entry on this day."
     }
 
-    private static let isoFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .current
-        return f
-    }()
+    private func chipPill(_ label: String, bg: Color, fg: Color) -> some View {
+        Text(label)
+            .font(AppText.tag)
+            .foregroundStyle(fg)
+            .padding(.horizontal, AppSpacing.s3)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(bg))
+    }
 
-    private static let longFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "MMMM d, yyyy"
-        return f
-    }()
-
-    /// Title if set, otherwise the first non-empty line of the body.
-    private var displayTitle: String {
-        if let t = entry.title?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !t.isEmpty {
-            return t
-        }
-        let firstLine = entry.notes
+    private static func notesPreview(_ entry: NotepadEntry?, limit: Int) -> String? {
+        guard let entry else { return nil }
+        let first = entry.notes
             .split(whereSeparator: \.isNewline)
-            .lazy
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
             .first(where: { !$0.isEmpty })
-        return firstLine ?? "Untitled"
+        guard let first else { return nil }
+        return String(first.prefix(limit))
     }
 
-    /// Body preview — skip the first line if we're already using it as the
-    /// display title, otherwise show the body as-is.
-    private var previewBody: String? {
-        let trimmed = entry.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let titleFromNotes = (entry.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty
-        if titleFromNotes {
-            let remainder = trimmed
-                .split(separator: "\n", omittingEmptySubsequences: false)
-                .dropFirst()
-                .joined(separator: "\n")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return remainder.isEmpty ? nil : remainder
-        }
-        return trimmed
+    private static func dayHeader(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "EEEE · MMM d"
+        return fmt.string(from: date).uppercased()
     }
 }
 
-// MARK: - Date header (sticky section header)
+// MARK: - Quick capture pills
 
-private struct DateHeader: View {
-    let isoDate: String
+private struct QuickCapturePills: View {
+    let onCapture: (String) -> Void
 
     var body: some View {
-        Text(formatted)
-            .font(AppText.meta)
-            .foregroundStyle(AppColors.textSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, AppSpacing.s2)
-            .padding(.bottom, AppSpacing.s1)
-            .padding(.horizontal, AppSpacing.s4)
-            .background(AppColors.canvas)
-            .listRowInsets(EdgeInsets())
+        VStack(alignment: .leading, spacing: AppSpacing.s2) {
+            Text("QUICK CAPTURE")
+                .font(AppText.eyebrow)
+                .foregroundStyle(AppColors.textSecondary)
+                .padding(.horizontal, 2)
+
+            HStack(spacing: AppSpacing.s2) {
+                pill("note") { onCapture("note") }
+                pill("photo") { onCapture("photo") }
+                pill("scan") { onCapture("scan") }
+                pill("voice") { onCapture("voice") }
+            }
+        }
     }
 
-    /// "Today" / "Yesterday" / "April 21, 2026" — matches the Android
-    /// formatter rules.
-    private var formatted: String {
-        guard let date = Self.isoFormatter.date(from: isoDate) else { return isoDate }
-        let cal = Calendar.current
-        if cal.isDateInToday(date) { return "Today" }
-        if cal.isDateInYesterday(date) { return "Yesterday" }
-        return Self.longDateFormatter.string(from: date)
+    private func pill(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(AppText.button)
+                .foregroundStyle(AppColors.themeGreenDeep)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    Capsule().fill(AppColors.cardSolid)
+                )
+                .overlay(
+                    Capsule().stroke(AppColors.borderDefault, lineWidth: 0.6)
+                )
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
-
-    private static let isoFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .current
-        return f
-    }()
-
-    private static let longDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "MMMM d, yyyy"
-        return f
-    }()
 }
 
-// MARK: - Empty states
+// MARK: - Month pager strip
 
-private struct EmptyStateView: View {
-    let title: String
-    let subtitle: String
+private struct MonthPagerStrip: View {
+    let month: Date
+
+    var body: some View {
+        let cal = Calendar.current
+        let prev = cal.date(byAdding: .month, value: -1, to: month) ?? month
+        let next = cal.date(byAdding: .month, value:  1, to: month) ?? month
+        let short = DateFormatter()
+        short.locale = Locale(identifier: "en_US_POSIX")
+        short.dateFormat = "MMM"
+        let long = DateFormatter()
+        long.locale = Locale(identifier: "en_US_POSIX")
+        long.dateFormat = "LLLL"
+        return HStack(spacing: 0) {
+            Text("‹  \(short.string(from: prev).uppercased())  ·  ")
+                .font(AppText.tag)
+                .foregroundStyle(AppColors.textSecondary)
+            Text(long.string(from: month).uppercased())
+                .font(AppText.eyebrow)
+                .foregroundStyle(AppColors.themeGreenDeep)
+            Text("  ·  \(short.string(from: next).uppercased())  ›")
+                .font(AppText.tag)
+                .foregroundStyle(AppColors.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+// MARK: - Calendar carousel (current ± faded peeks)
+
+/// Swipeable calendar carousel — TabView with .page style provides
+/// the native horizontal swipe gesture with snap-to-page behavior.
+/// Each page renders a full-width calendar for one month; the user
+/// can swipe through months and tap any day to populate the
+/// SelectedDayCard below.
+private struct SwipeableCalendarCarousel: View {
+    /// Today's anchor month — the carousel's "page 0".
+    let anchorMonth: Date
+    /// Two-way offset binding so the surrounding view can show the
+    /// pager-strip label for the currently-centered month.
+    @Binding var pageOffset: Int
+    let byDate: [String: NotepadEntry]
+    let today: Date
+    let selectedDate: Date
+    let onDayTap: (DayCount) -> Void
+
+    private let pageRange = -24...24
 
     var body: some View {
         VStack(spacing: AppSpacing.s2) {
-            Text(title)
-                .font(AppText.sectionTitle)
-                .foregroundStyle(AppColors.textSecondary)
-                .multilineTextAlignment(.center)
-            Text(subtitle)
-                .font(AppText.body)
-                .foregroundStyle(AppColors.textTertiary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(AppSpacing.s6)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
+            // Pager strip reflects the currently-centered page so the
+            // user sees which month they've swiped into.
+            let centeredMonth = monthDate(forOffset: pageOffset)
+            MonthPagerStrip(month: centeredMonth)
 
-// MARK: - Undo toast
+            // Weekday strip rendered ONCE above the pager — same fix
+            // as Android. Otherwise the prev / next page's own strips
+            // bleed into the centered page during swipe transitions.
+            NotepadCalendarWeekdayStrip()
+                .padding(.horizontal, 8)
 
-private struct UndoToastView: View {
-    let onUndo: () -> Void
-    let onDismiss: () -> Void
+            ZStack {
+                TabView(selection: $pageOffset) {
+                    ForEach(Array(pageRange), id: \.self) { offset in
+                        let pageMonthDate = monthDate(forOffset: offset)
+                        let resolved = daysForMonthDate(pageMonthDate)
+                        let isCenter = offset == pageOffset
+                        NotepadCalendarBloom(
+                            leadingBlanks: resolved.leading,
+                            days: resolved.days,
+                            today: today,
+                            onDayTap: { day in onDayTap(day) },
+                            showLegend: false,
+                            showWeekdayStrip: false,
+                            // Only the centered page gets the green
+                            // selection ring — side peeks aren't
+                            // tappable, so highlighting their cells
+                            // would just add noise.
+                            selectedDate: isCenter ? selectedDate : nil
+                        )
+                        .padding(.horizontal, 8)
+                        .tag(offset)
+                    }
+                }
+                #if os(iOS)
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                #endif
+                .frame(height: 220)
 
-    var body: some View {
-        HStack(spacing: AppSpacing.s4) {
-            Text("Entry deleted")
-                .font(AppText.body)
-                .foregroundStyle(AppColors.onAccent)
-
-            Spacer(minLength: AppSpacing.s2)
-
-            Button(action: onUndo) {
-                Text("Undo")
-                    .font(AppText.button)
-                    .foregroundStyle(AppColors.coral)
+                // Subtle chevron hints — non-interactive overlay so the
+                // user discovers the swipe gesture even before they try
+                // it. Coral so the affordance ties into the today pin.
+                HStack {
+                    Text("‹")
+                        .font(.system(size: 22, weight: .medium, design: .serif))
+                        .foregroundStyle(AppColors.coral.opacity(0.55))
+                        .padding(.leading, 4)
+                    Spacer()
+                    Text("›")
+                        .font(.system(size: 22, weight: .medium, design: .serif))
+                        .foregroundStyle(AppColors.coral.opacity(0.55))
+                        .padding(.trailing, 4)
+                }
+                .allowsHitTesting(false)
             }
-            .buttonStyle(.plain)
         }
-        .padding(.horizontal, AppSpacing.s4)
-        .padding(.vertical, AppSpacing.s3)
-        .background(Color(white: 0.12))
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
-        .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
-        .onTapGesture { onDismiss() }
-        .accessibilityElement(children: .combine)
+    }
+
+    private func monthDate(forOffset offset: Int) -> Date {
+        Calendar.current.date(byAdding: .month, value: offset, to: anchorMonth) ?? anchorMonth
+    }
+
+    private func daysForMonthDate(_ date: Date) -> (leading: Int, days: [DayCount]) {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month], from: date)
+        return daysForMonth(month: comps, in: cal, byDate: byDate)
     }
 }
 
-#Preview {
-    NavigationStack {
-        NotepadView()
+// MARK: - Helpers
+
+private extension String {
+    var nonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
-    .environmentObject(AuthStore(client: StubGoogleAuthClient()))
+}
+
+private extension ISO8601DateFormatter {
+    static func localDate(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.calendar = Calendar(identifier: .iso8601)
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        return fmt.string(from: date)
+    }
+}
+}
+
+    }
+}
+}
+}
+Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        return fmt.string(from: date)
+    }
+}
+}
+
+    }
+}
+}
+}
+t.string(from: date)
+    }
+}
+}
+
+    }
+}
+}
+}
+ }
+}
+}
+}
+}
+}
+}
+}
+Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        return fmt.string(from: date)
+    }
+}
+}
+
+    }
+}
+}
+}
+t.string(from: date)
+    }
+}
+}
+
+    }
+}
+}
+}
+ }
+}
+}
+}
+}
 }

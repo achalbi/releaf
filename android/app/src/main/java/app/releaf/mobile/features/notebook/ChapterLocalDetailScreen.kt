@@ -77,12 +77,18 @@ import app.releaf.mobile.data.notebook.Attachment
 import app.releaf.mobile.data.notebook.PageEntity
 import app.releaf.mobile.data.notebook.parseAttachments
 import app.releaf.mobile.data.notebook.parseLocations
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.sp
 import app.releaf.mobile.ui.components.BreadcrumbSegment
 import app.releaf.mobile.ui.components.Breadcrumbs
 import app.releaf.mobile.ui.components.CollapsibleCard
 import app.releaf.mobile.ui.components.DeleteConfirmationDialog
 import app.releaf.mobile.ui.components.HairlineDivider
+import app.releaf.mobile.ui.components.LeafEyebrow
 import app.releaf.mobile.ui.components.MetaPill
+import app.releaf.mobile.ui.components.PageOverflowButton
 import app.releaf.mobile.ui.components.RoundIconButton
 import app.releaf.mobile.ui.components.ScreenHeader
 import app.releaf.mobile.ui.components.absoluteDate
@@ -104,6 +110,8 @@ fun ChapterLocalDetailScreen(
     viewModel: ChapterLocalDetailViewModel = viewModel(factory = ChapterLocalDetailViewModel.Factory),
 ) {
     val state by viewModel.state.collectAsState()
+    val confirmingArchive by viewModel.confirmingArchive.collectAsState()
+    val archiveToast by viewModel.archiveToast.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var showEditDialog by rememberSaveable { mutableStateOf(false) }
@@ -112,6 +120,16 @@ fun ChapterLocalDetailScreen(
     // Pending delete — holds the page the user swiped until they confirm
     // via the guard dialog.
     var pendingPageDelete by remember { mutableStateOf<PageEntity?>(null) }
+
+    // When the ViewModel emits an archive toast, surface it through
+    // the existing snackbar host and clear it so we don't re-fire on
+    // recomposition.
+    androidx.compose.runtime.LaunchedEffect(archiveToast) {
+        archiveToast?.let { msg ->
+            snackbarHostState.showSnackbar(msg, duration = SnackbarDuration.Short)
+            viewModel.consumeArchiveToast()
+        }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -127,24 +145,89 @@ fun ChapterLocalDetailScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            ScreenHeader(
-                eyebrow = "Notebook",
-                title = "Your notebooks",
-                // Match the Notebook tab + Notepad screen rhythm.
-                topPadding = AppSpacing.s3,
-            )
-            Breadcrumbs(
-                segments = listOf(
-                    BreadcrumbSegment("Home", onTap = onHome),
-                    BreadcrumbSegment("Notebook", onTap = onBack),
-                    BreadcrumbSegment(
-                        label = state.notebook?.title?.ifBlank { "Notebook" } ?: "Notebook",
-                        onTap = onOpenNotebook,
+            // Composed top zone — leaf eyebrow on the left, overflow
+            // menu on the right, big serif title (the chapter name)
+            // below. Breadcrumbs sit underneath as a thin row so the
+            // user still sees the full Home › Notebook › Chapter path.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = AppSpacing.s4, end = AppSpacing.s4,
+                        top = AppSpacing.s3, bottom = AppSpacing.s3,
                     ),
-                    BreadcrumbSegment(state.chapter?.title?.ifBlank { "Chapter" } ?: "Chapter"),
-                ),
-                modifier = Modifier.padding(horizontal = AppSpacing.s4),
-            )
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+            ) {
+                Row(
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+                    modifier              = Modifier.fillMaxWidth(),
+                ) {
+                    // Eyebrow tint follows the parent notebook's
+                    // color so the chapter screen reads as part of
+                    // the same visual family as the notebook it
+                    // lives in. Default green stays for notebooks
+                    // without a recognized color.
+                    val parentToken = chapterEyebrowToken(state.notebook?.colorHex)
+                    val parentPalette = app.releaf.mobile.ui.components.ShelfTheme
+                        .palette(parentToken)
+                    val usesCustomTint = parentToken != null
+                    LeafEyebrow(
+                        label     = "releaf · chapter",
+                        modifier  = Modifier
+                            .weight(1f)
+                            .clickable { onBack() },
+                        glyphTint = if (usesCustomTint) parentPalette.background else null,
+                        labelTint = if (usesCustomTint) parentPalette.background else null,
+                    )
+                    PageOverflowButton {
+                        DropdownMenuItem(
+                            text    = { Text("Rename chapter") },
+                            onClick = { showEditDialog = true },
+                        )
+                        DropdownMenuItem(
+                            text    = { Text("New page") },
+                            onClick = {
+                                viewModel.createPage(onCreated = { id -> onOpenPage(id) })
+                            },
+                        )
+                        DropdownMenuItem(
+                            text    = { Text("Archive chapter") },
+                            onClick = { viewModel.archiveChapter() },
+                        )
+                    }
+                }
+                // Chapter title — tappable shortcut to the rename
+                // dialog. Avoids forcing users through the
+                // overflow for the most common chapter edit; the
+                // overflow still hosts the full action set so
+                // discoverability isn't lost.
+                Text(
+                    text     = (state.chapter?.title?.ifBlank { "Untitled chapter" } ?: "Chapter").lowercase(),
+                    style    = TextStyle(
+                        fontFamily = FontFamily.Serif,
+                        fontSize   = 32.sp,
+                    ),
+                    color    = AppColors.TextPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .clickable(enabled = state.chapter != null) {
+                            showEditDialog = true
+                        },
+                )
+                Breadcrumbs(
+                    segments = listOf(
+                        BreadcrumbSegment("Home", onTap = onHome),
+                        BreadcrumbSegment("Notebook", onTap = onBack),
+                        BreadcrumbSegment(
+                            label = state.notebook?.title?.ifBlank { "Notebook" } ?: "Notebook",
+                            onTap = onOpenNotebook,
+                        ),
+                        BreadcrumbSegment(state.chapter?.title?.ifBlank { "Chapter" } ?: "Chapter"),
+                    ),
+                )
+            }
 
             when {
                 state.isLoading -> Spacer(Modifier.weight(1f))
@@ -207,6 +290,30 @@ fun ChapterLocalDetailScreen(
                 },
             )
         }
+    }
+
+    if (confirmingArchive) {
+        AlertDialog(
+            onDismissRequest = viewModel::cancelArchive,
+            title = { Text("Archive this chapter?") },
+            text  = { Text("All its pages move to archive together. You can restore from there.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    // Archive chapter, then return to the parent
+                    // notebook — the chapter row no longer exists
+                    // in the active list and the screen would
+                    // collapse to a not-found state otherwise.
+                    viewModel.confirmArchiveChapter(onArchived = onBack)
+                }) {
+                    Text("Archive")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelArchive) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
 
@@ -607,6 +714,27 @@ private fun NotFoundState(onBack: () -> Unit, modifier: Modifier = Modifier) {
         TextButton(onClick = onBack) {
             Text("Back", color = AppAccent.primary, style = AppTypography.Body)
         }
+    }
+}
+
+/**
+ * Inverse of `themeHex` — maps the four leaf-theme primary hexes
+ * back to their token name. Anything that doesn't match returns
+ * null so the caller can fall through to the default chrome.
+ *
+ * Kept as a private file-local helper here (and mirrored on
+ * NotebookTabScreen) rather than promoting to a shared util — the
+ * mapping is tiny and only used in two places that already deal in
+ * raw hex strings from the Room schema.
+ */
+private fun chapterEyebrowToken(hex: String?): String? {
+    val normalized = hex?.uppercase()?.removePrefix("#") ?: return null
+    return when (normalized) {
+        "7AA874" -> "green"
+        "E07856" -> "coral"
+        "F4C430" -> "yellow"
+        "B8956A" -> "dry"
+        else     -> null
     }
 }
 

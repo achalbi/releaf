@@ -26,6 +26,7 @@ import androidx.room.PrimaryKey
         Index(value = ["notebook_id", "position"]),
         Index("updated_at"),
         Index("deleted_at"),
+        Index("archived_at"),
     ],
 )
 data class ChapterEntity(
@@ -60,4 +61,13 @@ data class ChapterEntity(
 
     @ColumnInfo(name = "deleted_at")
     val deletedAt: String? = null,
+
+    /**
+     * Soft-archive timestamp (separate from `deletedAt`). Added in
+     * v17 — non-nil means the chapter lives in the archive bin and
+     * is filtered out of the active chapter list. Independent of
+     * `deletedAt` (true tombstone).
+     */
+    @ColumnInfo(name = "archived_at")
+    val archivedAt: String? = null,
 )

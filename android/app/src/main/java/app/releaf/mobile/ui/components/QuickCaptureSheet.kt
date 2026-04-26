@@ -38,11 +38,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ui.theme.AppColors
@@ -51,6 +53,7 @@ import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 import kotlinx.coroutines.launch
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 // ---------- QuickCaptureSheet ----------
 
@@ -91,7 +94,11 @@ fun QuickCaptureSheet(
                     .background(AppColors.BorderStrong),
             )
 
-            // Header
+            // Header — same vocabulary as the page header (leaf
+            // eyebrow + lowercase serif title) compressed for the
+            // bottom-sheet form factor: smaller serif, no view
+            // toggle, no overflow. Title is a writing-first prompt
+            // rather than a Material-style "New capture" header.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -100,16 +107,12 @@ fun QuickCaptureSheet(
                         end = AppSpacing.s4,
                         bottom = AppSpacing.s3,
                     ),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
             ) {
+                LeafEyebrow("releaf · capture")
                 Text(
-                    text = "NEW CAPTURE",
-                    style = AppTypography.Eyebrow.copy(fontWeight = FontWeight.SemiBold),
-                    color = AppAccent.deep,
-                )
-                Text(
-                    text = "What do you want to add?",
-                    style = AppTypography.PageTitle,
+                    text  = "what arrived?",
+                    style = TextStyle(fontFamily = FontFamily.Serif, fontSize = 28.sp),
                     color = AppColors.TextPrimary,
                 )
             }
@@ -243,16 +246,12 @@ private fun QuickCaptureSheetPreview() {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = AppSpacing.s4),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
         ) {
+            LeafEyebrow("releaf · capture")
             Text(
-                text = "NEW CAPTURE",
-                style = AppTypography.Eyebrow,
-                color = AppAccent.deep,
-            )
-            Text(
-                text = "What do you want to add?",
-                style = AppTypography.PageTitle,
+                text  = "what arrived?",
+                style = TextStyle(fontFamily = FontFamily.Serif, fontSize = 28.sp),
                 color = AppColors.TextPrimary,
             )
         }

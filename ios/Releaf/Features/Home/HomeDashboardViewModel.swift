@@ -35,8 +35,15 @@ public struct HomeDashboardState: Equatable {
     public var archivedNotebooks: Int
     public var totalNotepadEntries: Int
     public var todayNotepadCount: Int
+    public var totalNotepadPhotos: Int
+    public var totalNotepadScans: Int
+    public var totalNotepadVoice: Int
+    public var totalNotepadContacts: Int
+    public var totalNotepadLocations: Int
+    public var openNotepadTodos: Int
     public var recentNotebooks: [NotebookListItem]
     public var recentNotepadEntries: [NotepadListItem]
+    public var captureCounts: CaptureCountsByMode
 
     public static let initial = HomeDashboardState(
         isLoading: true,
@@ -45,8 +52,15 @@ public struct HomeDashboardState: Equatable {
         archivedNotebooks: 0,
         totalNotepadEntries: 0,
         todayNotepadCount: 0,
+        totalNotepadPhotos: 0,
+        totalNotepadScans: 0,
+        totalNotepadVoice: 0,
+        totalNotepadContacts: 0,
+        totalNotepadLocations: 0,
+        openNotepadTodos: 0,
         recentNotebooks: [],
-        recentNotepadEntries: []
+        recentNotepadEntries: [],
+        captureCounts: .empty
     )
 }
 
@@ -158,6 +172,41 @@ public final class HomeDashboardViewModel: ObservableObject {
                 )
             }
 
+        // Aggregate notepad-page feature stats across every entry:
+        // photos / scans / voice come from the `attachments` JSON
+        // discriminated by `type`, todos from `todos` JSON (open
+        // only), contacts from the `contacts` JSON column. All are
+        // in-memory reductions — no extra DB hit. Declared here
+        // (above the `captureCounts` initializer) so the trees-saved
+        // hero numbers can read them without a forward reference.
+        let parsedAttachments = latestNotepad.map { $0.attachments.parseAttachments() }
+        let totalNotepadPhotos   = parsedAttachments.reduce(0) { $0 + $1.filter { $0.type == Attachment.typePhoto }.count }
+        let totalNotepadScans    = parsedAttachments.reduce(0) { $0 + $1.filter { $0.type == Attachment.typeScan  }.count }
+        let totalNotepadVoice    = parsedAttachments.reduce(0) { $0 + $1.filter { $0.type == Attachment.typeVoice }.count }
+        let totalNotepadContacts = latestNotepad.reduce(0) { acc, entry in
+            acc + entry.contacts.parseContacts().count
+        }
+        let totalNotepadLocations = latestNotepad.reduce(0) { acc, entry in
+            acc + entry.locations.parseLocations().count
+        }
+        let openNotepadTodos = latestNotepad.reduce(0) { acc, entry in
+            acc + entry.todos.parseTodos().filter { !$0.done }.count
+        }
+
+        // Aggregate capture counts for the Home-tab trees-saved hero
+        // by summing notebook-side + notepad-side contributions for
+        // each mode. Notebook page count stands in as "notes" until
+        // the captures-table migration lands with per-page breakdowns
+        // of photos / scans / voice / contacts / locations.
+        let captureCounts = CaptureCountsByMode(
+            notes:     latestShelves.reduce(0) { $0 + $1.pageCount } + latestNotepad.count,
+            photos:    totalNotepadPhotos,
+            scans:     totalNotepadScans,
+            voice:     totalNotepadVoice,
+            contacts:  totalNotepadContacts,
+            locations: totalNotepadLocations
+        )
+
         state = HomeDashboardState(
             isLoading: false,
             totalNotebooks: total,
@@ -165,8 +214,15 @@ public final class HomeDashboardViewModel: ObservableObject {
             archivedNotebooks: 0,
             totalNotepadEntries: latestNotepad.count,
             todayNotepadCount: todayCount,
+            totalNotepadPhotos: totalNotepadPhotos,
+            totalNotepadScans: totalNotepadScans,
+            totalNotepadVoice: totalNotepadVoice,
+            totalNotepadContacts: totalNotepadContacts,
+            totalNotepadLocations: totalNotepadLocations,
+            openNotepadTodos: openNotepadTodos,
             recentNotebooks: Array(recentNotebooks),
-            recentNotepadEntries: Array(recentEntries)
+            recentNotepadEntries: Array(recentEntries),
+            captureCounts: captureCounts
         )
     }
 

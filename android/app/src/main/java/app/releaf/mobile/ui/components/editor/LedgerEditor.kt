@@ -48,7 +48,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -62,6 +61,7 @@ import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 import java.util.Locale
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 /** How much of the row width the label column consumes. 2/3 matches
  *  `NotesBackground.RuledMarginFraction` exactly — so the vertical
@@ -111,7 +111,9 @@ private fun normalizeAmountInput(raw: String): Pair<String, Double?> {
 @Composable
 fun LedgerEditor(
     entries: List<LedgerEntry>,
+    title: String,
     onEntriesChange: (List<LedgerEntry>) -> Unit,
+    onTitleChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // A stable id for the synthetic "blank" trailing row. Promoted to
@@ -140,6 +142,7 @@ fun LedgerEditor(
             // aligns with the ruled background's vertical margin line.
             .padding(top = TopPadding),
     ) {
+        TitleRow(title = title, onTitleChange = onTitleChange)
         HeaderRow()
 
         Box(
@@ -193,6 +196,57 @@ fun LedgerEditor(
         }
 
         TotalRow(total = total)
+    }
+}
+
+/** Title row at the very top of the ledger. Spans both columns and
+ *  occupies one ruled row so its baseline lands on the first ruled
+ *  line. Renders a muted placeholder until the user types — keeps
+ *  the page readable when the title hasn't been set yet. */
+@Composable
+private fun TitleRow(
+    title: String,
+    onTitleChange: (String) -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(RowHeight)
+            .padding(horizontal = AppSpacing.s3),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (title.isEmpty()) {
+            Text(
+                text  = "Title",
+                style = AppTypography.SectionTitle.copy(
+                    fontSize   = 18.sp,
+                    lineHeight = 24.sp,
+                    lineHeightStyle = LineHeightStyle(
+                        alignment = LineHeightStyle.Alignment.Center,
+                        trim      = LineHeightStyle.Trim.None,
+                    ),
+                    platformStyle = PlatformTextStyle(includeFontPadding = false),
+                ),
+                color = AppColors.TextTertiary,
+            )
+        }
+        BasicTextField(
+            value = title,
+            onValueChange = onTitleChange,
+            singleLine = true,
+            textStyle = AppTypography.SectionTitle.copy(
+                color      = AppColors.TextPrimary,
+                fontSize   = 18.sp,
+                lineHeight = 24.sp,
+                lineHeightStyle = LineHeightStyle(
+                    alignment = LineHeightStyle.Alignment.Center,
+                    trim      = LineHeightStyle.Trim.None,
+                ),
+                platformStyle = PlatformTextStyle(includeFontPadding = false),
+            ),
+            cursorBrush = SolidColor(AppAccent.primary),
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -322,7 +376,7 @@ private fun SignToggle(isExpense: Boolean, onToggle: () -> Unit) {
     Text(
         text = if (isExpense) "−" else "+",
         style = rowTextStyle().copy(
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = LocalFontWeight.current,
             textAlign  = TextAlign.Center,
         ),
         color = if (isExpense) AppColors.Danger else AppColors.Success,
@@ -384,7 +438,7 @@ private fun TotalRow(total: Double) {
 @Composable
 private fun rowTextStyle(): TextStyle =
     AppTypography.Body.copy(
-        fontWeight = FontWeight.Normal,
+        fontWeight = LocalFontWeight.current,
         lineHeight = 24.sp,
         lineHeightStyle = LineHeightStyle(
             alignment = LineHeightStyle.Alignment.Center,

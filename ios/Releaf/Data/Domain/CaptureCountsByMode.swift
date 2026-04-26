@@ -18,23 +18,26 @@ public struct CaptureCountsByMode: Equatable, Sendable {
     public let scans: Int
     public let voice: Int
     public let contacts: Int
+    public let locations: Int
 
     public init(
         notes: Int = 0,
         photos: Int = 0,
         scans: Int = 0,
         voice: Int = 0,
-        contacts: Int = 0
+        contacts: Int = 0,
+        locations: Int = 0
     ) {
         self.notes = notes
         self.photos = photos
         self.scans = scans
         self.voice = voice
         self.contacts = contacts
+        self.locations = locations
     }
 
     public static let empty = CaptureCountsByMode()
 
-    /// Flat sum across all five capture modes.
-    public var total: Int { notes + photos + scans + voice + contacts }
+    /// Flat sum across all six capture modes.
+    public var total: Int { notes + photos + scans + voice + contacts + locations }
 }

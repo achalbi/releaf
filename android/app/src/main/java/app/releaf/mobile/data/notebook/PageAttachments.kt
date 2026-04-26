@@ -332,6 +332,12 @@ data class SubPage(
      * Plain → Ruled without losing their rows.
      */
     val ledgerEntries: List<LedgerEntry> = emptyList(),
+    /**
+     * Free-form title shown above the ledger rows when [background]
+     * is [BG_RULED]. Empty by default; preserved across background
+     * swaps so flipping Ruled → Plain → Ruled keeps the title intact.
+     */
+    val ledgerTitle: String = "",
 ) {
     companion object {
         const val BG_PLAIN = "plain"
@@ -349,6 +355,29 @@ data class SubPage(
 @JvmName("subPagesToJsonString")
 fun List<SubPage>.toJsonString(): String = jsonCodec.encodeToString(this)
 fun String.parseSubPages(): List<SubPage> = parseList(this)
+
+// -------------------------- StoredPageNote (typed page-note row) --------------------------
+
+/**
+ * Persistence-shape `Note` row stored in `pages.page_notes_json`.
+ * Mirrors the Drive-facing `data.domain.Note` (id + body + createdAt)
+ * so each Note keeps its identity through the round-trip — the
+ * legacy `pages.notes` markdown column lost both ids and timestamps
+ * when multiple notes were joined together.
+ *
+ * `createdAt` is ISO-8601 UTC text; the mapper parses it back into
+ * a `java.time.Instant` for the domain shape.
+ */
+@Serializable
+data class StoredPageNote(
+    val id: String,
+    val body: String,
+    val createdAt: String,
+)
+
+@JvmName("pageNotesToJsonString")
+fun List<StoredPageNote>.toJsonString(): String = jsonCodec.encodeToString(this)
+fun String.parsePageNotes(): List<StoredPageNote> = parseList(this)
 
 // -------------------------- Shared parse helper --------------------------
 

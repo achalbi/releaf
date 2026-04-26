@@ -27,6 +27,10 @@ public struct ChapterEntity: Codable, FetchableRecord, PersistableRecord,
     public var updatedAt: String
     public var dirty: Bool
     public var deletedAt: String?
+    /// Soft-archive timestamp (separate from `deletedAt`). Added in
+    /// v6 — non-nil means the chapter lives in the archive bin and
+    /// is filtered out of the active chapter list.
+    public var archivedAt: String?
 
     public enum CodingKeys: String, CodingKey {
         case id
@@ -38,6 +42,7 @@ public struct ChapterEntity: Codable, FetchableRecord, PersistableRecord,
         case updatedAt    = "updated_at"
         case dirty
         case deletedAt    = "deleted_at"
+        case archivedAt   = "archived_at"
     }
 
     public init(
@@ -49,7 +54,8 @@ public struct ChapterEntity: Codable, FetchableRecord, PersistableRecord,
         createdAt: String,
         updatedAt: String,
         dirty: Bool = true,
-        deletedAt: String? = nil
+        deletedAt: String? = nil,
+        archivedAt: String? = nil
     ) {
         self.id = id
         self.notebookId = notebookId
@@ -60,5 +66,6 @@ public struct ChapterEntity: Codable, FetchableRecord, PersistableRecord,
         self.updatedAt = updatedAt
         self.dirty = dirty
         self.deletedAt = deletedAt
+        self.archivedAt = archivedAt
     }
 }

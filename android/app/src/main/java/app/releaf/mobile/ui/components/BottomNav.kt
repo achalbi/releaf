@@ -6,7 +6,7 @@
  * canvas with a lifted coral leaf in the center.
  *
  * Layout:
- *   [ Home ] [ Shelf ] [ 🌿 Leaf ] [ Notepad ] [ Settings ]
+ *   [ Home ] [ Library ] [ 🌿 Leaf ] [ Notepad ] [ Settings ]
  *
  * Surface:
  *   - Shape  : rounded card @ AppRadius.nav (16dp).
@@ -43,11 +43,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Spa
-import androidx.compose.material.icons.filled.ViewColumn
-import androidx.compose.material.icons.automirrored.filled.EventNote
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.automirrored.outlined.EventNote
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -70,6 +69,7 @@ import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 // ---------- Item model ----------
 
@@ -84,13 +84,20 @@ data class BottomNavItem(
     companion object {
         /** Default Releaf IA. */
         val defaults = listOf(
-            BottomNavItem("home",     "Home",     Icons.Filled.Home),
+            // Outlined icons across the four regular tabs so the bar
+            // reads as a uniform line-icon set — Material Filled glyphs
+            // looked heavier than the prototype and the door cutout in
+            // Filled.Home read as a notch rather than a clean outline.
+            BottomNavItem("home",     "Home",     Icons.Outlined.Home),
             // Tab id stays "notebook" so existing nav routing keeps
-            // working; label + icon reflect the Shelf rename.
-            BottomNavItem("notebook", "Shelf",    Icons.Filled.ViewColumn),
+            // working; label + icon reflect the Library rename. Custom
+            // LibraryShelf glyph (3 upright spines + 1 tilted) matches
+            // the Variant D prototype — Material's stock LibraryBooks
+            // reads as stacked documents, which doesn't fit "library".
+            BottomNavItem("notebook", "Library",  LibraryShelf),
             BottomNavItem("leaf",     "",         Icons.Filled.Spa, BottomNavKind.Brand),
-            BottomNavItem("notepad",  "Notepad",  Icons.AutoMirrored.Filled.EventNote),
-            BottomNavItem("settings", "Settings", Icons.Filled.Settings),
+            BottomNavItem("notepad",  "Notepad",  Icons.AutoMirrored.Outlined.EventNote),
+            BottomNavItem("settings", "Settings", Icons.Outlined.Settings),
         )
     }
 }
@@ -219,11 +226,11 @@ private fun RegularTab(
                 text  = item.title,
                 style = if (isSelected) {
                     AppTypography.Tag.copy(
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        fontWeight = app.releaf.mobile.ui.theme.LocalFontWeight.current,
                     )
                 } else {
                     AppTypography.Tag.copy(
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
+                        fontWeight = app.releaf.mobile.ui.theme.LocalFontWeight.current,
                     )
                 },
                 color = tint,

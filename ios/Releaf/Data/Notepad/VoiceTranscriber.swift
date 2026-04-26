@@ -64,7 +64,10 @@ public enum VoiceTranscriber {
         // transcripts in small cards, not paragraph-length prose, and
         // trailing commas that Apple's model sometimes hallucinates
         // read as typos. Only bite into the fancier model on iOS 17+.
-        if #available(iOS 16, *) {
+        // `addsPunctuation` shipped in iOS 16 / macOS 13; the
+        // availability gate below names both so a macOS preview build
+        // (deployment target 12) doesn't error.
+        if #available(iOS 16, macOS 13, *) {
             request.addsPunctuation = true
         }
         // Prefer on-device when the model is downloaded for this locale.

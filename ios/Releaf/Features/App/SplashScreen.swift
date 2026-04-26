@@ -43,14 +43,14 @@ public struct SplashScreen: View {
                 Spacer().frame(height: AppSpacing.s8)
 
                 Text("Releaf")
-                    .font(.system(size: 48, weight: .medium))
+                    .font(.system(size: 48))
                     .tracking(-1.2)
                     .foregroundStyle(AppColors.onAccent)
 
                 Spacer().frame(height: AppSpacing.s3)
 
                 Text("The notebook that grows back.")
-                    .font(.system(size: 18, weight: .regular))
+                    .font(.system(size: 18))
                     .foregroundStyle(AppColors.onAccent.opacity(0.9))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, AppSpacing.s6)

@@ -43,7 +43,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathNode
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -51,6 +50,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Canvas
 import app.releaf.mobile.ui.theme.AppAccent
 import java.util.Calendar
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 private val IllustrationHeight = 140.dp
 
@@ -334,7 +334,7 @@ internal fun TodoIllustration() = IllustrationFrame {
             ) {
                 Text(
                     "Task",
-                    style = OnboardTokens.ScanPill.copy(fontWeight = FontWeight.SemiBold),
+                    style = OnboardTokens.ScanPill.copy(fontWeight = LocalFontWeight.current),
                     color = AppAccent.deep,
                 )
             }
@@ -367,7 +367,7 @@ private fun TodoRow(
             contentAlignment = Alignment.Center,
         ) {
             if (checked) {
-                Text("✓", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                Text("✓", fontSize = 10.sp, color = Color.White, fontWeight = LocalFontWeight.current)
             }
         }
         Text(
@@ -494,7 +494,7 @@ internal fun MigrateIllustration() = IllustrationFrame {
         Text(
             "→",
             fontSize = 26.sp,
-            fontWeight = FontWeight.Bold,
+            fontWeight = LocalFontWeight.current,
             color = AppAccent.primary,
         )
         Box(
@@ -521,7 +521,7 @@ internal fun BackupIllustration() = IllustrationFrame {
         Text(
             "→",
             fontSize = 26.sp,
-            fontWeight = FontWeight.Bold,
+            fontWeight = LocalFontWeight.current,
             color = AppAccent.primary,
         )
         Box(

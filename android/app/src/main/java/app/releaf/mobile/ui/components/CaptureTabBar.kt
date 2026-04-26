@@ -29,6 +29,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,8 +65,16 @@ import app.releaf.mobile.ui.theme.AppSpacing
 // rightmost segment.
 private val SegmentGutter = 4.dp
 
-// Height of the indicator strip. Sizes the whole segmented bar.
-private val SegmentHeight = 36.dp
+// Height of the outer pill. The active indicator inside ends up
+// SegmentHeight − 2·SegmentGutter tall (48 − 8 = 40dp here), large
+// enough to read as a confident button without dominating the bar.
+// Was 36 initially; the active tile felt undersized at the first /
+// last tab.
+private val SegmentHeight = 48.dp
+
+// Icon glyph size — bumped from 18dp to 20dp to match the larger
+// active tile.
+private val SegmentIconSize = 20.dp
 
 @Composable
 fun CaptureTabBar(
@@ -73,6 +82,11 @@ fun CaptureTabBar(
     onSelect: (CaptureMode) -> Unit,
     modifier: Modifier = Modifier,
     modes: List<CaptureMode> = CaptureMode.entries,
+    /** Optional override for the active-tile fill color. When null,
+     *  the bar falls back to the global accent palette. Used by
+     *  PageDetail to thread the parent notebook's color into the
+     *  switcher so the surface reads as one family. */
+    accentOverride: androidx.compose.ui.graphics.Color? = null,
 ) {
     // Defensive: an empty `modes` list would break the divide later.
     // Not expected in production — CaptureMode.entries is never empty —
@@ -105,8 +119,9 @@ fun CaptureTabBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(SegmentHeight)
-                .clip(RoundedCornerShape(AppRadius.md))
-                .background(AppColors.Muted)
+                .clip(RoundedCornerShape(AppRadius.lg))
+                .background(AppColors.CardSolid.copy(alpha = 0.55f))
+                .border(1.dp, AppColors.BorderDefault, RoundedCornerShape(AppRadius.lg))
                 .padding(SegmentGutter),
         ) {
             // `maxWidth` is the inner (padded) width of the container, so
@@ -117,13 +132,20 @@ fun CaptureTabBar(
             // Sliding indicator layer. Renders first so the icon layer
             // above it shows through with its tint flipped on the
             // currently-selected cell.
+            //
+            // Radius is `AppRadius.md` (12dp) — chosen so the indicator
+            // sits concentrically inside the outer pill (`AppRadius.lg` =
+            // 16dp) with the 4dp gutter accounting for the 4dp difference.
+            // At `sm` (6dp) the indicator's corners read as too sharp
+            // against the softer outer pill, most visibly when the
+            // indicator parks at the first or last tab.
             Box(
                 modifier = Modifier
                     .offset(x = segmentWidth * animatedIndex)
                     .width(segmentWidth)
                     .fillMaxHeight()
-                    .clip(RoundedCornerShape(AppRadius.sm))
-                    .background(AppAccent.primary),
+                    .clip(RoundedCornerShape(AppRadius.md))
+                    .background(accentOverride ?: AppAccent.primary),
             )
 
             // Tap-targets + icons. Each segment claims equal weight so
@@ -166,7 +188,7 @@ private fun CaptureSegment(
             imageVector        = mode.icon,
             contentDescription = mode.title,
             tint               = tint,
-            modifier           = Modifier.size(18.dp),
+            modifier           = Modifier.size(SegmentIconSize),
         )
     }
 }

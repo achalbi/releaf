@@ -22,7 +22,7 @@ public struct OnboardingQuickGuideCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 3) {
                     Text("✦")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: 12))
                         .foregroundStyle(accent.primary)
                     Text("QUICK GUIDE")
                         .font(OnboardTokens.badge)
@@ -30,7 +30,7 @@ public struct OnboardingQuickGuideCard: View {
                         .foregroundStyle(accent.primary)
                 }
                 Text("New to Releaf? See how it works.")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.system(size: 15))
                     .foregroundStyle(OnboardTokens.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text("A 60-second walkthrough experience.")

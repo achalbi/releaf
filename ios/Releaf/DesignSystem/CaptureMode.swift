@@ -49,7 +49,12 @@ public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
 
     public var systemIcon: String {
         switch self {
-        case .overview: return "square.grid.2x2"
+        // Overview is the page's "everything at a glance" tab; the
+        // leaf is Releaf's brand glyph (see BRAND_BRIEF.md), so the
+        // overview tab carries it. Active state fills the leaf onto
+        // the accent-palette square; inactive state shows the same
+        // glyph in the default text color.
+        case .overview: return "leaf.fill"
         case .photos:   return "camera"
         case .voice:    return "mic"
         case .todo:     return "checklist"

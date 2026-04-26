@@ -18,9 +18,10 @@ data class CaptureCountsByMode(
     val scans: Int = 0,
     val voice: Int = 0,
     val contacts: Int = 0,
+    val locations: Int = 0,
 ) {
-    /** Flat sum across all five capture modes. */
-    val total: Int get() = notes + photos + scans + voice + contacts
+    /** Flat sum across all six capture modes. */
+    val total: Int get() = notes + photos + scans + voice + contacts + locations
 
     companion object {
         val EMPTY = CaptureCountsByMode()

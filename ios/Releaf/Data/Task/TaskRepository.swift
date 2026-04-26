@@ -73,8 +73,10 @@ public final class TaskRepository: @unchecked Sendable {
     ) async throws -> TaskRecord {
         let now = IsoClock.nowIso()
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanDescription = description?.trimmingCharacters(in: .whitespacesAndNewlines)
-            .flatMap { $0.isEmpty ? nil : $0 }
+        let cleanDescription: String? = description.flatMap {
+            let trimmed = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
         let record = TaskRecord(
             id:          Uuidv7.generate(),
             userId:      userId,
@@ -98,8 +100,11 @@ public final class TaskRepository: @unchecked Sendable {
         row.title = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
         row.updatedAt = IsoClock.nowIso()
         row.dirty = true
+        // Snapshot to a `let` before the @Sendable write closure —
+        // Swift 6 rejects capture-by-reference of mutable locals.
+        let snapshot = row
         try await dbQueue.write { db in
-            try row.update(db)
+            try snapshot.update(db)
         }
     }
 

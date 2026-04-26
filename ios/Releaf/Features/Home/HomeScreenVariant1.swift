@@ -54,7 +54,7 @@ public struct HomeScreenVariant1: View {
                     Divider().background(AppColors.borderDefault)
 
                     if loaded.shelves.isEmpty {
-                        Text("No shelves yet. Tap \u{201C}+ New notebook\u{201D} to get started.")
+                        Text("No shelves yet. Tap \u{201C}+ New book\u{201D} to get started.")
                             .font(AppText.body)
                             .foregroundStyle(AppColors.textSecondary)
                             .padding(.vertical, AppSpacing.s6)
@@ -106,29 +106,20 @@ public struct HomeScreenVariant1: View {
     }
 
     private func header(totals: HomeVariantMetrics) -> some View {
+        // Match the typography rhythm used elsewhere in the app —
+        // small uppercase eyebrow + serif editorial title in the
+        // standard 26pt size — so the Library tab reads at the same
+        // scale as the other top-level surfaces. Sign-out lives in
+        // Settings, not the library header.
         VStack(alignment: .leading, spacing: AppSpacing.s2) {
-            HStack(alignment: .top) {
-                Text("RELEAF · VOL \(String(format: "%02d", totals.notebooks))")
-                    .font(AppText.eyebrow)
-                    .tracking(AppLetterSpacing.eyebrow)
-                    .foregroundStyle(AppColors.themeGreenDeep)
-                Spacer()
-                Button {
-                    Task { await authStore.signOut() }
-                } label: {
-                    Text("Sign out")
-                        .font(AppText.button)
-                        .foregroundStyle(AppColors.coral)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Sign out")
-            }
+            Text("LIBRARY")
+                .font(AppText.eyebrow)
+                .tracking(AppLetterSpacing.eyebrow)
+                .foregroundStyle(AppColors.textTertiary)
             Text("Your shelves")
-                .font(.system(size: 44, weight: .bold, design: .serif))
+                .font(.system(size: 26, design: .serif))
                 .foregroundStyle(AppColors.textPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text("\(totals.notebooks) notebooks · \(totals.chapters) chapters · \(totals.pages) pages")
+            Text("\(totals.notebooks) book\(totals.notebooks == 1 ? "" : "s") · \(totals.chapters) chapter\(totals.chapters == 1 ? "" : "s") · \(totals.pages) page\(totals.pages == 1 ? "" : "s")")
                 .font(AppText.meta)
                 .foregroundStyle(AppColors.textSecondary)
         }
@@ -152,11 +143,12 @@ private struct HomeVariantMetrics {
         // here doesn't change — only `CaptureRepository` populates
         // the new fields.
         self.impact = TreesSavedMetrics(
-            notes:    captureCounts.notes,
-            photos:   captureCounts.photos,
-            scans:    captureCounts.scans,
-            voice:    captureCounts.voice,
-            contacts: captureCounts.contacts
+            notes:     captureCounts.notes,
+            photos:    captureCounts.photos,
+            scans:     captureCounts.scans,
+            voice:     captureCounts.voice,
+            contacts:  captureCounts.contacts,
+            locations: captureCounts.locations
         )
     }
 }
@@ -272,11 +264,11 @@ private struct ShelfCard: View {
                         .foregroundStyle(palette.onBackground)
                     Spacer()
                     Image(systemName: ShelfTheme.iconSystemName(for: notebook.iconKey))
-                        .font(.system(size: 22, weight: .regular))
+                        .font(.system(size: 22))
                         .foregroundStyle(palette.onBackground)
                 }
                 Text(notebook.title)
-                    .font(.system(size: 36, weight: .bold, design: .serif))
+                    .font(.system(size: 36, design: .serif))
                     .foregroundStyle(palette.onBackground)
                     .lineLimit(2)
                     .minimumScaleFactor(0.7)
@@ -393,7 +385,7 @@ private struct ShelvesActionBar: View {
 
             Button(action: onSearch) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 16))
                     .foregroundStyle(AppColors.textPrimary)
                     .frame(width: 48, height: 48)
                     .background(Circle().fill(AppColors.cardSolid))

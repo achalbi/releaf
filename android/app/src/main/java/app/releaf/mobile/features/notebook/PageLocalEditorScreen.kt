@@ -18,9 +18,28 @@
 
 package app.releaf.mobile.features.notebook
 
-import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Icon
+import app.releaf.mobile.ui.theme.AppRadius
+import app.releaf.mobile.ui.components.AppToastHost
+import app.releaf.mobile.ui.components.rememberToastState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -103,6 +122,14 @@ fun PageLocalEditorScreen(
      * sheet lands the new page already scrolled to that section.
      */
     initialCaptureMode: CaptureMode? = null,
+    /**
+     * When true, render the colored "hero card" header from the
+     * Variant1 viewer instead of the default breadcrumb top bar.
+     * Body + behavior are unchanged — only the chrome at the top
+     * swaps. Wired from MainActivity off the user's
+     * `NotebookListVariant` preference.
+     */
+    useHeroHeader: Boolean = false,
     viewModel: PageLocalEditorViewModel = viewModel(factory = PageLocalEditorViewModel.Factory),
 ) {
     val state by viewModel.state.collectAsState()
@@ -154,17 +181,20 @@ fun PageLocalEditorScreen(
     val currentRts = currentSubPage?.let { richTextStates[it.id] }
 
     val context = LocalContext.current
+    val toastScope = androidx.compose.runtime.rememberCoroutineScope()
+    val toastState = rememberToastState(toastScope)
     // "Add to notes" on a voice-note card — always append to the *last*
     // sub-page. Same rationale as NotepadEditorScreen: that's where
     // the user is usually writing, older sub-pages stay untouched.
     val addVoiceTranscriptToNotes: (String) -> Unit = addVoice@{ text ->
         // Skip ruled (ledger) sub-pages when picking the target — they
         // have no text body, so an append would be dropped on the
-        // floor. Fall back to the latest non-ruled sub-page; Toast if
-        // there isn't one so the user knows why the action no-op'd.
+        // floor. Fall back to the latest non-ruled sub-page; surface a
+        // toast if there isn't one so the user knows why the action
+        // no-op'd.
         val target = state.subPages.lastOrNull { it.background != app.releaf.mobile.data.notebook.SubPage.BG_RULED }
         if (target == null) {
-            Toast.makeText(context, "Add a notes page first", Toast.LENGTH_SHORT).show()
+            toastState.show("Add a notes page first")
             return@addVoice
         }
         val rts = richTextStates[target.id] ?: return@addVoice
@@ -172,7 +202,7 @@ fun PageLocalEditorScreen(
         val separator = if (existing.isBlank()) "" else "\n\n"
         rts.setMarkdown(existing + separator + text.trim())
         viewModel.updateSubPageNotes(target.id, rts.toMarkdown())
-        Toast.makeText(context, "Added to notes", Toast.LENGTH_SHORT).show()
+        toastState.show("Added to notes")
     }
 
     // Capture the latest state for dispose-time flush. DisposableEffect
@@ -249,13 +279,27 @@ fun PageLocalEditorScreen(
             add(BreadcrumbSegment(label = pageTitleLabel))
         }
 
-        TopBar(
-            segments = crumbs,
-            showDelete = state.exists,
-            editorMode = editorMode,
-            onChangeMode = { newMode -> editorMode = newMode },
-            onDelete = { showDeleteDialog = true },
-        )
+        if (useHeroHeader) {
+            // Variant1 (hero card) chrome — colored band carries the
+            // back arrow + chapter / page eyebrow + page counter, with
+            // the same edit-mode toggle and overflow menu the classic
+            // top bar exposes so the action surface stays equivalent.
+            HeroTopBar(
+                state        = state,
+                editorMode   = editorMode,
+                onChangeMode = { newMode -> editorMode = newMode },
+                onBack       = popBack,
+                onDelete     = { showDeleteDialog = true },
+            )
+        } else {
+            TopBar(
+                segments = crumbs,
+                showDelete = state.exists,
+                editorMode = editorMode,
+                onChangeMode = { newMode -> editorMode = newMode },
+                onDelete = { showDeleteDialog = true },
+            )
+        }
 
         // Title sits at screen level directly under the top bar so it
         // stays sticky above the mode content (both Edit scroll and
@@ -360,6 +404,7 @@ fun PageLocalEditorScreen(
                         onSubPageStrokesChange    = viewModel::updateSubPageStrokes,
                         onSubPageTextBoxesChange  = viewModel::updateSubPageTextBoxes,
                         onSubPageLedgerChange     = viewModel::updateSubPageLedger,
+                        onSubPageLedgerTitleChange = viewModel::updateSubPageLedgerTitle,
                         onAddSubPage              = viewModel::addSubPage,
                         onRemoveSubPage           = viewModel::removeSubPage,
                         onSubPageBackgroundChange = viewModel::updateSubPageBackground,
@@ -431,6 +476,18 @@ fun PageLocalEditorScreen(
             }
         }
         } // end inner Column (content layer)
+        // Floating in-app toast — token-styled cream pill that
+        // replaces the platform Toast. Same usage as the notepad
+        // editor.
+        AppToastHost(
+            state   = toastState,
+            padding = androidx.compose.foundation.layout.PaddingValues(
+                start  = AppSpacing.s4,
+                end    = AppSpacing.s4,
+                bottom = AppSpacing.s10,
+                top    = AppSpacing.s4,
+            ),
+        )
     } // end outer Box (dot-grid canvas)
 
     // Destructive-action guard — same pattern as the notepad editor.
@@ -469,6 +526,12 @@ private fun TopBar(
     onChangeMode: (EditorMode) -> Unit,
     onDelete: () -> Unit,
 ) {
+    // Mirror of NotepadEditorScreen's TopBar: a More-icon → Popup
+    // dropdown that hosts the destructive Delete action. Token-styled
+    // (cream surface, hairline border, md radius) so the menu reads
+    // as part of the app instead of a Material overlay.
+    var menuOpen by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -483,13 +546,181 @@ private fun TopBar(
         Breadcrumbs(segments = segments, modifier = Modifier.weight(1f))
         EditorModeIconToggle(mode = editorMode, onChange = onChangeMode)
         if (showDelete) {
-            Spacer(Modifier.size(AppSpacing.s3))
-            Text(
-                "Delete",
-                style = AppTypography.Button,
-                color = AppColors.Danger,
-                modifier = Modifier.clickable { onDelete() },
-            )
+            Spacer(Modifier.size(AppSpacing.s2))
+            Box {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .clickable { menuOpen = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector        = Icons.Filled.MoreVert,
+                        contentDescription = "More actions",
+                        tint               = AppColors.TextSecondary,
+                        modifier           = Modifier.size(22.dp),
+                    )
+                }
+                if (menuOpen) {
+                    Popup(
+                        alignment = Alignment.TopEnd,
+                        offset = IntOffset(0, with(LocalDensity.current) {
+                            (40.dp + AppSpacing.s1).roundToPx()
+                        }),
+                        onDismissRequest = { menuOpen = false },
+                        properties = PopupProperties(focusable = true),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .width(260.dp)
+                                .shadow(8.dp, RoundedCornerShape(AppRadius.md))
+                                .clip(RoundedCornerShape(AppRadius.md))
+                                .background(AppColors.CardSolid)
+                                .border(
+                                    width = 1.dp,
+                                    color = AppColors.BorderDefault,
+                                    shape = RoundedCornerShape(AppRadius.md),
+                                )
+                                .padding(vertical = AppSpacing.s2),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        menuOpen = false
+                                        onDelete()
+                                    }
+                                    .padding(horizontal = AppSpacing.s4, vertical = AppSpacing.s3),
+                            ) {
+                                Text(
+                                    text  = "Delete page",
+                                    style = AppTypography.Body,
+                                    color = AppColors.Danger,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Variant1 hero header — colored band lifted from
+ * `PageDetailScreenVariant1.Header`, repurposed for the Room-backed
+ * editor. Carries the back arrow on the leading edge, an eyebrow
+ * (notebook → chapter) in the middle, and the editor mode toggle +
+ * overflow menu on the trailing edge so the same actions reachable
+ * from the classic [TopBar] stay reachable here.
+ *
+ * Palette is keyed off the notebook's `colorHex` if we eventually
+ * map hex → token; today it falls back to "green" so the header has
+ * a stable look until that mapping lands.
+ */
+@Composable
+private fun HeroTopBar(
+    state: PageLocalEditorUiState,
+    editorMode: EditorMode,
+    onChangeMode: (EditorMode) -> Unit,
+    onBack: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val palette = app.releaf.mobile.ui.components.ShelfTheme.palette("green")
+    val notebookLabel = state.notebook?.title?.ifBlank { null } ?: "Notebook"
+    val chapterLabel  = state.chapter?.title?.ifBlank  { null } ?: ""
+    val eyebrow = if (chapterLabel.isNotBlank()) {
+        "${notebookLabel.uppercase()} / ${chapterLabel.uppercase()}"
+    } else {
+        notebookLabel.uppercase()
+    }
+
+    var menuOpen by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(palette.background)
+            .padding(horizontal = AppSpacing.s5, vertical = AppSpacing.s4),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = "Back",
+            tint = palette.onBackground,
+            modifier = Modifier
+                .size(20.dp)
+                .clickable { onBack() },
+        )
+        Spacer(Modifier.size(AppSpacing.s2))
+        Text(
+            eyebrow,
+            style = AppTypography.Eyebrow,
+            color = palette.onBackground,
+            modifier = Modifier.weight(1f),
+        )
+        // Inline mode toggle + overflow — both painted in onBackground
+        // so they read against the colored band.
+        EditorModeIconToggle(mode = editorMode, onChange = onChangeMode)
+        if (state.exists) {
+            Spacer(Modifier.size(AppSpacing.s2))
+            Box {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .clickable { menuOpen = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector        = Icons.Filled.MoreVert,
+                        contentDescription = "More actions",
+                        tint               = palette.onBackground,
+                        modifier           = Modifier.size(22.dp),
+                    )
+                }
+                if (menuOpen) {
+                    Popup(
+                        alignment = Alignment.TopEnd,
+                        offset = IntOffset(0, with(LocalDensity.current) {
+                            (40.dp + AppSpacing.s1).roundToPx()
+                        }),
+                        onDismissRequest = { menuOpen = false },
+                        properties = PopupProperties(focusable = true),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .width(260.dp)
+                                .shadow(8.dp, RoundedCornerShape(AppRadius.md))
+                                .clip(RoundedCornerShape(AppRadius.md))
+                                .background(AppColors.CardSolid)
+                                .border(
+                                    width = 1.dp,
+                                    color = AppColors.BorderDefault,
+                                    shape = RoundedCornerShape(AppRadius.md),
+                                )
+                                .padding(vertical = AppSpacing.s2),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        menuOpen = false
+                                        onDelete()
+                                    }
+                                    .padding(horizontal = AppSpacing.s4, vertical = AppSpacing.s3),
+                            ) {
+                                Text(
+                                    text  = "Delete page",
+                                    style = AppTypography.Body,
+                                    color = AppColors.Danger,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -524,6 +755,7 @@ private fun EditorBody(
             onStrokesChange    = viewModel::updateSubPageStrokes,
             onTextBoxesChange  = viewModel::updateSubPageTextBoxes,
             onLedgerChange     = viewModel::updateSubPageLedger,
+            onLedgerTitleChange = viewModel::updateSubPageLedgerTitle,
             onAddSubPage       = viewModel::addSubPage,
             onRemoveSubPage    = viewModel::removeSubPage,
             onBackgroundChange = viewModel::updateSubPageBackground,

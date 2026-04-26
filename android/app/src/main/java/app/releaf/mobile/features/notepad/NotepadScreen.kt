@@ -1,765 +1,717 @@
 /*
  * NotepadScreen.kt
  *
- * Top-level Notepad tab. Mirrors the notebook/chapter/page surfaces visually
- * — eyebrow + serif title header, then date-grouped
- * [CollapsibleCard]s whose bodies hold entry rows (green Releaf leaf
- * mark, title + relative timestamp top-right, and attribute pills that
- * surface which media the entry carries).
+ * Top-level Notepad tab — redesigned around a Day / Recents segmented
+ * control:
  *
- * Search mode collapses the date grouping into a single "Results" card so
- * FTS rank order wins over calendar ordering.
+ *   • Day      → calendar bloom of trees over the current month, a
+ *                today card with eyebrow + title + body + capture
+ *                chips, and a quick-capture pill row (note / photo /
+ *                scan / voice) above the bottom nav.
+ *   • Recents  → today's plot rendered as a full-width hero tile in
+ *                deep canopy + coral border, then a 2-column ragged
+ *                masonry of older days (mint / leaf / deep canopy
+ *                tinted by capture density, hollow tiles for empty
+ *                days).
+ *
+ * Backed by [NotepadScreenViewModel] which observes
+ * [NotepadRepository.observeActive] and derives today + per-day counts
+ * for the calendar and masonry. Tapping today opens or creates today's
+ * entry; tapping a past day opens that entry; tapping a quick-capture
+ * pill jumps the user into a new entry.
  */
 
 package app.releaf.mobile.features.notepad
 
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import kotlin.math.absoluteValue
+import kotlinx.coroutines.launch
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.releaf.mobile.data.notebook.Attachment
-import app.releaf.mobile.data.notebook.parseAttachments
-import app.releaf.mobile.data.notebook.parseContacts
-import app.releaf.mobile.data.notebook.parseLocations
-import app.releaf.mobile.data.notebook.parseTodos
-import app.releaf.mobile.data.notepad.NotepadEntry
-import app.releaf.mobile.ui.components.CollapsibleCard
-import app.releaf.mobile.ui.components.DeleteConfirmationDialog
-import app.releaf.mobile.ui.components.HairlineDivider
-import app.releaf.mobile.ui.components.MetaPill
-import app.releaf.mobile.ui.components.ReleafLogo
-import app.releaf.mobile.ui.components.RoundIconButton
-import app.releaf.mobile.ui.components.relativeTimeAgo
+import app.releaf.mobile.auth.GoogleAuthSession
 import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
-import kotlinx.coroutines.launch
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.util.Locale
+
+/** UI-local toggle state for the Day / Recents segmented switch. */
+private enum class NotepadView { Day, Recents }
 
 @Composable
 fun NotepadScreen(
+    session: GoogleAuthSession,
     onOpenEntry: (String) -> Unit,
     onComposeNew: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
-    viewModel: NotepadListViewModel = viewModel(factory = NotepadListViewModel.Factory),
+    viewModel: NotepadScreenViewModel = viewModel(
+        factory = NotepadScreenViewModel.factory(session)
+    ),
 ) {
     val state by viewModel.state.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    // Pending delete — holds the entry the user swiped until they confirm
-    // via the guard dialog.
-    var pendingDelete by remember { mutableStateOf<NotepadEntry?>(null) }
+    val scroll = rememberScrollState()
+    var view by rememberSaveable { mutableStateOf(NotepadView.Day) }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = onComposeNew,
-                containerColor = AppAccent.primary,
-                contentColor   = AppColors.OnAccent,
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = "New entry")
+    // The day whose card renders below the calendar — defaults to today,
+    // updates when the user taps any day in the calendar grid.
+    val today = LocalDate.now()
+    var selectedDate by rememberSaveable { mutableStateOf(today.toString()) }
+    val selectedLocalDate = remember(selectedDate) { LocalDate.parse(selectedDate) }
+    val selectedDay = remember(selectedLocalDate, state.byDate) {
+        daysForMonth(YearMonth.from(selectedLocalDate), state.byDate)
+            .firstOrNull { it.date == selectedLocalDate }
+            ?: DayCount(selectedLocalDate, null, 0, 0)
+    }
+
+    // System photo picker (multi-select). Each picked URI becomes a new
+    // Notepad entry filed under the currently-selected day, with the
+    // photo as a single attachment. Originals stay in the device gallery
+    // — we just take a persistable grant on the content:// URI so it
+    // resolves after app restart, matching EditorSections.kt's pattern.
+    val context = LocalContext.current
+    val pickPhotos = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris: List<Uri> ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        for (uri in uris) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
             }
-        },
-        containerColor = Color.Transparent,
-        // Outer SignedInShell Scaffold already consumes the system-bar
-        // insets; swallow them here so the header aligns with the
-        // editor surfaces (which are plain Column, no nested Scaffold).
-        contentWindowInsets = WindowInsets(0),
-    ) { innerPadding ->
+        }
+        viewModel.importPhotosAsNewEntries(
+            date = selectedLocalDate,
+            uris = uris.map { it.toString() },
+        )
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .verticalScroll(scroll)
+                .padding(AppSpacing.s4),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s4),
         ) {
-            NotepadHeader(
-                onOpenSettings = onOpenSettings,
-                onSignOut = onSignOut,
-            )
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = AppSpacing.s4),
-                verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
-            ) {
-                SearchField(
-                    query = state.query,
-                    onQueryChange = viewModel::updateQuery,
-                    onClearQuery = viewModel::clearQuery,
-                )
-            }
-            Spacer(Modifier.height(AppSpacing.s3))
-            when {
-                state.entries.isNotEmpty() ->
-                    EntryBody(
-                        entries = state.entries,
-                        grouped = !state.isSearching,
-                        onOpenEntry = onOpenEntry,
-                        onDeleteRequest = { entry -> pendingDelete = entry },
-                        modifier = Modifier.weight(1f, fill = true),
-                    )
-
-                state.isSearching ->
-                    EmptySearchState(query = state.query, modifier = Modifier.weight(1f))
-
-                else ->
-                    EmptyState(modifier = Modifier.weight(1f))
-            }
-        }
-    }
-
-    pendingDelete?.let { entry ->
-        val title = displayTitle(entry)
-        DeleteConfirmationDialog(
-            title = "Delete entry?",
-            message = "\u201C$title\u201D will be deleted. " +
-                "You can undo this immediately after.",
-            onDismiss = { pendingDelete = null },
-            onConfirm = {
-                val id = entry.id
-                pendingDelete = null
-                viewModel.softDelete(id)
-                scope.launch {
-                    val result = snackbarHostState.showSnackbar(
-                        message     = "Entry deleted",
-                        actionLabel = "Undo",
-                        duration    = SnackbarDuration.Short,
-                    )
-                    if (result == SnackbarResult.ActionPerformed) {
-                        viewModel.undoDelete(id)
-                    }
-                }
-            },
-        )
-    }
-}
-
-/* ---------- header ---------- */
-
-// Notepad screen uses its own header instead of the shared `ScreenHeader` so
-// the title sits flush with the top of the content area and the settings menu
-// stays local to this surface.
-@Composable
-private fun NotepadHeader(
-    onOpenSettings: () -> Unit,
-    onSignOut: () -> Unit,
-) {
-    var menuOpen by remember { mutableStateOf(false) }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(
-                start = AppSpacing.s4,
-                end = AppSpacing.s4,
-                top = AppSpacing.s3,
-                bottom = AppSpacing.s3,
-            ),
-        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
+            // Header
             Text(
-                text = "NOTEPAD",
+                text  = "NOTEPAD",
                 style = AppTypography.Eyebrow,
-                color = AppColors.TextTertiary,
+                color = AppColors.ThemeGreenDeep,
             )
             Text(
-                text = "Daily",
+                text  = when (view) {
+                    NotepadView.Day     -> "A grove of days"
+                    NotepadView.Recents -> "Recent garden"
+                },
                 style = AppTypography.EditorialTitle,
                 color = AppColors.TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
-        }
-        Box {
-            RoundIconButton(
-                icon = Icons.Filled.MoreVert,
-                contentDescription = "More options",
-                onClick = { menuOpen = true },
+
+            // Segmented switch — centered, fixed-max-width so the active
+            // pill slides between Day and Recents in a stable lane
+            // rather than expanding to fill every screen edge.
+            DayRecentsSwitch(
+                selected   = view,
+                onSelected = { view = it },
+                modifier   = Modifier.align(Alignment.CenterHorizontally),
             )
-            DropdownMenu(
-                expanded = menuOpen,
-                onDismissRequest = { menuOpen = false },
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Settings") },
-                    leadingIcon = {
-                        Icon(Icons.Filled.Settings, contentDescription = null)
-                    },
-                    onClick = {
-                        menuOpen = false
-                        onOpenSettings()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Sign out") },
-                    leadingIcon = {
-                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null)
-                    },
-                    onClick = {
-                        menuOpen = false
-                        onSignOut()
-                    },
-                )
+
+            // Content
+            when {
+                state.isLoading -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = AppSpacing.s8),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(color = AppAccent.primary)
+                    }
+                }
+                view == NotepadView.Day -> {
+                    DayView(
+                        state          = state,
+                        today          = today,
+                        selectedDay    = selectedDay,
+                        onDayTap       = { day -> selectedDate = day.date.toString() },
+                        onResetToToday = { selectedDate = today.toString() },
+                        onSelectedTap  = {
+                            tapSelected(selectedDay, today, viewModel, onOpenEntry)
+                        },
+                        onQuickCapture = {
+                            tapQuickCapture(selectedDay, viewModel, onOpenEntry)
+                        },
+                        onImportPhotos = {
+                            pickPhotos.launch(
+                                PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                ),
+                            )
+                        },
+                    )
+                }
+                else -> {
+                    RecentsView(
+                        state        = state,
+                        onTodayTap   = { tapToday(state, viewModel, onOpenEntry) },
+                        onDayTap     = { day -> day.entry?.let { onOpenEntry(it.id) } },
+                    )
+                }
             }
+
+            Spacer(Modifier.height(AppSpacing.s10))
         }
     }
 }
 
-/* ---------- search ---------- */
+// ---- helpers ----
+
+private fun tapToday(
+    state: NotepadScreenUiState,
+    viewModel: NotepadScreenViewModel,
+    onOpenEntry: (String) -> Unit,
+) {
+    val today = state.today
+    if (today != null) {
+        onOpenEntry(today.id)
+    } else {
+        viewModel.createForToday(onOpenEntry)
+    }
+}
+
+/** Selected-day card tap: open the entry's editor if one exists; if
+ *  the user is on today and there's no entry yet, create + open. For
+ *  past days without entries, the tap is a no-op (we don't create
+ *  back-dated entries from the calendar). */
+private fun tapSelected(
+    selectedDay: DayCount,
+    today: java.time.LocalDate,
+    viewModel: NotepadScreenViewModel,
+    onOpenEntry: (String) -> Unit,
+) {
+    val entry = selectedDay.entry
+    when {
+        entry != null            -> onOpenEntry(entry.id)
+        selectedDay.date == today -> viewModel.createForToday(onOpenEntry)
+        else                     -> Unit
+    }
+}
+
+/** Quick-capture pill tap: ensure an entry exists for the currently-
+ *  selected day, then open its editor. Reuses an existing entry on
+ *  that date if one's already there; otherwise creates a fresh one. */
+private fun tapQuickCapture(
+    selectedDay: DayCount,
+    viewModel: NotepadScreenViewModel,
+    onOpenEntry: (String) -> Unit,
+) {
+    viewModel.openOrCreateForDate(selectedDay.date, onOpenEntry)
+}
+
+// ---- Switch ----
 
 @Composable
-private fun SearchField(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    onClearQuery: () -> Unit,
+private fun DayRecentsSwitch(
+    selected: NotepadView,
+    onSelected: (NotepadView) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
+            .widthIn(max = 280.dp)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(AppRadius.pill))
-            .background(AppColors.CardSolid)
+            .clip(RoundedCornerShape(50))
+            .background(AppColors.Canvas)
             .border(
                 width = 1.dp,
                 color = AppColors.BorderDefault,
-                shape = RoundedCornerShape(AppRadius.pill),
+                shape = RoundedCornerShape(50),
             )
-            .padding(horizontal = AppSpacing.s4, vertical = AppSpacing.s3),
+            .padding(2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            Icons.Filled.Search,
-            contentDescription = null,
-            tint = AppColors.TextTertiary,
-            modifier = Modifier.size(18.dp),
+        SwitchSegment(
+            label    = "Day",
+            isActive = selected == NotepadView.Day,
+            onClick  = { onSelected(NotepadView.Day) },
+            modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.size(AppSpacing.s2))
-        Box(Modifier.weight(1f, fill = true)) {
-            if (query.isEmpty()) {
-                Text(
-                    "Search notes\u2026",
-                    style = AppTypography.Body,
-                    color = AppColors.TextTertiary,
-                )
-            }
-            BasicTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                singleLine = true,
-                textStyle = AppTypography.Body.copy(color = AppColors.TextPrimary),
-                cursorBrush = SolidColor(AppAccent.primary),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        if (query.isNotEmpty()) {
-            Spacer(Modifier.size(AppSpacing.s2))
-            Icon(
-                Icons.Filled.Close,
-                contentDescription = "Clear search",
-                tint = AppColors.TextTertiary,
-                modifier = Modifier
-                    .size(18.dp)
-                    .clickable { onClearQuery() },
-            )
-        }
-    }
-}
-
-/* ---------- empty states ---------- */
-
-@Composable
-private fun EmptyState(modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(AppSpacing.s6),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            "Nothing here yet",
-            style = AppTypography.SectionTitle,
-            color = AppColors.TextSecondary,
-            textAlign = TextAlign.Center,
-        )
-        Text(
-            "Tap the + button to jot something down.",
-            style = AppTypography.Body,
-            color = AppColors.TextTertiary,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = AppSpacing.s2),
+        SwitchSegment(
+            label    = "Recents",
+            isActive = selected == NotepadView.Recents,
+            onClick  = { onSelected(NotepadView.Recents) },
+            modifier = Modifier.weight(1f),
         )
     }
 }
 
 @Composable
-private fun EmptySearchState(query: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(AppSpacing.s6),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            "No matches",
-            style = AppTypography.SectionTitle,
-            color = AppColors.TextSecondary,
-            textAlign = TextAlign.Center,
-        )
-        Text(
-            "Nothing in your notepad matches \u201C$query\u201D.",
-            style = AppTypography.Body,
-            color = AppColors.TextTertiary,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = AppSpacing.s2),
-        )
-    }
-}
-
-/* ---------- list body ---------- */
-
-@Composable
-private fun EntryBody(
-    entries: List<NotepadEntry>,
-    grouped: Boolean,
-    onOpenEntry: (String) -> Unit,
-    onDeleteRequest: (NotepadEntry) -> Unit,
+private fun SwitchSegment(
+    label: String,
+    isActive: Boolean,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val groups: List<Pair<String, List<NotepadEntry>>> = remember(entries, grouped) {
-        if (grouped) {
-            entries.groupBy { it.entryDate }
-                .toList()
-                .sortedByDescending { it.first }
-        } else {
-            // Search: one "Results" group keyed on the null-ish marker so
-            // rank order wins over calendar ordering.
-            listOf("" to entries)
-        }
-    }
-
-    // Which groups are expanded. Default to just the first (most recent)
-    // date so users see their latest work; older stays collapsed for
-    // scan-ability on long histories.
-    var expanded by rememberSaveable(stateSaver = StringSetSaver) {
-        mutableStateOf(groups.firstOrNull()?.first?.let { setOf(it) } ?: emptySet())
-    }
-
-    LazyColumn(
-        modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(
-            start  = AppSpacing.s4,
-            end    = AppSpacing.s4,
-            top    = AppSpacing.s0,
-            bottom = AppSpacing.s10,
-        ),
-        verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+    val bg = if (isActive) AppColors.ThemeGreenDeep else Color.Transparent
+    val fg = if (isActive) AppColors.OnAccent else AppColors.TextSecondary
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(bg)
+            .clickable(onClick = onClick)
+            .padding(vertical = AppSpacing.s2),
+        contentAlignment = Alignment.Center,
     ) {
-        items(items = groups, key = { it.first.ifEmpty { "__results__" } }) { (dateKey, group) ->
-            val isExpanded = dateKey in expanded
-            EntryGroupCard(
-                title = if (grouped) formatDateHeader(dateKey) else "Results",
-                subtitle = if (grouped) null else "Matches ranked by relevance",
-                entries = group,
-                expanded = isExpanded,
-                onToggle = {
-                    expanded = if (dateKey in expanded) expanded - dateKey else expanded + dateKey
+        Text(
+            text  = label,
+            style = AppTypography.Button,
+            color = fg,
+        )
+    }
+}
+
+// ---- Day view ----
+
+@Composable
+private fun DayView(
+    state: NotepadScreenUiState,
+    today: LocalDate,
+    selectedDay: DayCount,
+    onDayTap: (DayCount) -> Unit,
+    onResetToToday: () -> Unit,
+    onSelectedTap: () -> Unit,
+    onQuickCapture: () -> Unit,
+    onImportPhotos: () -> Unit,
+) {
+    // Pager state hoisted up here (rather than scoped inside
+    // [CalendarCarousel]) so the legend's "today" badge can snap the
+    // carousel back to today's month from outside the carousel.
+    val pagerState = rememberPagerState(
+        initialPage = PAGER_CENTER,
+        pageCount   = { PAGER_TOTAL },
+    )
+    val coroutineScope = rememberCoroutineScope()
+
+    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s4)) {
+        // Calendar + legend grouped tightly — the legend reads as a
+        // footnote of the calendar so it sits close (s1 gap) to the
+        // grid above, while the SelectedDayCard / quick-capture rows
+        // keep their normal s4 breathing room.
+        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s1)) {
+            // Swipeable calendar carousel — HorizontalPager with horizontal
+            // contentPadding so prev/next months peek into view at the
+            // edges and adjacent pages snap into place when swiped.
+            CalendarCarousel(
+                anchorMonth  = state.month,
+                byDate       = state.byDate,
+                today        = today,
+                selectedDate = selectedDay.date,
+                onDayTap     = onDayTap,
+                pagerState   = pagerState,
+            )
+
+            // Density legend — rendered once below the carousel since
+            // it describes the same color ramp for every month. The
+            // "today" badge is wired as a tap target: clicking it
+            // snaps the carousel back to today's month and reselects
+            // today.
+            NotepadCalendarLegend(
+                modifier = Modifier.fillMaxWidth(),
+                onTodayTap = {
+                    onResetToToday()
+                    coroutineScope.launch {
+                        pagerState.animateScrollToPage(PAGER_CENTER)
+                    }
                 },
-                onOpenEntry = onOpenEntry,
-                onDeleteRequest = onDeleteRequest,
             )
         }
-        item { Spacer(Modifier.height(AppSpacing.s6)) }
+
+        // Selected-day card — populates from whichever day the user
+        // last tapped in the calendar. Defaults to today on first
+        // open; tapping a past day swaps in that day's content.
+        SelectedDayCard(
+            day        = selectedDay,
+            today      = today,
+            breakdown  = if (selectedDay.date == today) state.todayBreakdown else null,
+            onTap      = onSelectedTap,
+        )
+
+        // Quick capture: each pill opens or creates the capture entry
+        // for the currently-selected day, so the user can land their
+        // photo / scan / voice on a chosen date instead of always today.
+        // The "import" pill is different — it bypasses the editor and
+        // creates a fresh entry per picked photo (one note per photo).
+        QuickCapturePills(
+            onCapture = { _ -> onQuickCapture() },
+            onImport  = onImportPhotos,
+        )
     }
 }
 
 @Composable
-private fun EntryGroupCard(
-    title: String,
-    subtitle: String?,
-    entries: List<NotepadEntry>,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    onOpenEntry: (String) -> Unit,
-    onDeleteRequest: (NotepadEntry) -> Unit,
+private fun MonthPagerStrip(
+    month: YearMonth,
+    modifier: Modifier = Modifier,
 ) {
-    val countLabel = if (entries.size == 1) "1 entry" else "${entries.size} entries"
-    CollapsibleCard(
-        title = title,
-        subtitle = subtitle,
-        expanded = expanded,
-        onToggle = onToggle,
-        trailing = {
-            MetaPill(text = countLabel, accent = true)
-        },
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            entries.forEachIndexed { index, entry ->
-                if (index > 0) HairlineDivider()
-                SwipeableEntryRow(
-                    entry = entry,
-                    onOpen = { onOpenEntry(entry.id) },
-                    onDelete = { onDeleteRequest(entry) },
-                )
-            }
-        }
-    }
-}
-
-/* ---------- entry row ---------- */
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SwipeableEntryRow(
-    entry: NotepadEntry,
-    onOpen: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            // Hand off to the screen's guard dialog. Returning false snaps
-            // the row back while the dialog is open.
-            if (value == SwipeToDismissBoxValue.EndToStart) {
-                onDelete()
-                false
-            } else {
-                false
-            }
-        },
-    )
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromStartToEnd = false,
-        enableDismissFromEndToStart = true,
-        backgroundContent = { SwipeDeleteBackground() },
-    ) {
-        EntryRow(entry = entry, onClick = onOpen)
-    }
-}
-
-@Composable
-private fun EntryRow(entry: NotepadEntry, onClick: () -> Unit) {
-    val attachments = remember(entry.attachments) { entry.attachments.parseAttachments() }
-    val locations = remember(entry.locations) { entry.locations.parseLocations() }
-    val contacts = remember(entry.contacts) { entry.contacts.parseContacts() }
-    val todos = remember(entry.todos) { entry.todos.parseTodos() }
-    val photoCount = attachments.count { it.type == Attachment.TYPE_PHOTO }
-    val voiceCount = attachments.count { it.type == Attachment.TYPE_VOICE }
-    val scanCount = attachments.count { it.type == Attachment.TYPE_SCAN }
-    val titleText = displayTitle(entry)
-
-    // Derived "what's in this entry" chips. Kept to real attributes of the
-    // stored row so the list reads as a preview of the entry's shape — not
-    // as user-defined tags (which the data model doesn't carry yet).
-    val pills = buildList {
-        if (photoCount > 0) add("$photoCount Photo${if (photoCount == 1) "" else "s"}")
-        if (voiceCount > 0) add("$voiceCount Voice")
-        if (scanCount > 0)  add("$scanCount Scan${if (scanCount == 1) "" else "s"}")
-        if (locations.isNotEmpty()) add("Location")
-        if (contacts.isNotEmpty()) {
-            add("${contacts.size} Contact${if (contacts.size == 1) "" else "s"}")
-        }
-        if (todos.isNotEmpty()) {
-            add("${todos.size} To-do${if (todos.size == 1) "" else "s"}")
-        }
-    }
-
-    // Opaque fill is required: SwipeToDismissBox lays the delete background
-    // *behind* the foreground row, so a transparent row would leak the red
-    // strip through at rest.
+    val prev = month.minusMonths(1)
+    val next = month.plusMonths(1)
+    val short = DateTimeFormatter.ofPattern("MMM")
+    val long  = DateTimeFormatter.ofPattern("MMMM")
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(AppColors.CardSolid)
-            .clickable(onClick = onClick)
-            .padding(AppSpacing.s4),
-        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
-        verticalAlignment = Alignment.Top,
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        LeafChip()
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
-        ) {
+        Text(
+            text  = "‹  ${short.format(prev).uppercase()}  ·  ",
+            style = AppTypography.Tag,
+            color = AppColors.TextSecondary,
+        )
+        Text(
+            text  = long.format(month).uppercase(),
+            style = AppTypography.Eyebrow,
+            color = AppColors.ThemeGreenDeep,
+        )
+        Text(
+            text  = "  ·  ${short.format(next).uppercase()}  ›",
+            style = AppTypography.Tag,
+            color = AppColors.TextSecondary,
+        )
+    }
+}
+
+private const val PAGER_CENTER = 24
+private const val PAGER_TOTAL  = PAGER_CENTER * 2 + 1
+
+@Composable
+private fun CalendarCarousel(
+    anchorMonth: YearMonth,
+    byDate: Map<String, app.releaf.mobile.data.notepad.NotepadEntry>,
+    today: LocalDate,
+    selectedDate: LocalDate,
+    onDayTap: (DayCount) -> Unit,
+    pagerState: PagerState,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        // Pager strip reflects the currently-centered page so the user
+        // can see which month they've swiped into.
+        val centeredMonth = remember(pagerState.currentPage) {
+            anchorMonth.plusMonths((pagerState.currentPage - PAGER_CENTER).toLong())
+        }
+        MonthPagerStrip(month = centeredMonth)
+
+        Spacer(Modifier.height(AppSpacing.s3))
+
+        // Weekday strip rendered ONCE above the pager. If we left it
+        // inside `NotepadCalendarBloom` instead, the prev / next pages'
+        // own strips would bleed into the centered page's edges and
+        // turn the 7-letter row into an 11-letter mash-up.
+        NotepadCalendarWeekdayStrip(
+            modifier = Modifier.padding(horizontal = 24.dp),
+        )
+
+        Spacer(Modifier.height(AppSpacing.s2))
+
+        Box {
+            HorizontalPager(
+                state            = pagerState,
+                modifier         = Modifier.fillMaxWidth(),
+                // Side padding leaves room for prev/next pages to peek
+                // in at ~22dp on each edge once page-spacing is subtracted.
+                contentPadding   = PaddingValues(horizontal = 24.dp),
+                pageSpacing      = 4.dp,
+            ) { page ->
+                val pageMonth = anchorMonth.plusMonths((page - PAGER_CENTER).toLong())
+                val pageDays  = remember(pageMonth, byDate) { daysForMonth(pageMonth, byDate) }
+                val isCurrent = page == pagerState.currentPage
+                // Pages flanking the centered one fade as they slide off
+                // the focal area — visual reinforcement of "you swiped
+                // away from the active month."
+                val pageOffset = (page - pagerState.currentPage) - pagerState.currentPageOffsetFraction
+                val alpha = (1f - pageOffset.absoluteValue * 0.7f).coerceIn(0.3f, 1f)
+
+                NotepadCalendarBloom(
+                    month            = pageMonth,
+                    days             = pageDays,
+                    today            = today,
+                    onDayTap         = if (isCurrent) onDayTap else { _ -> },
+                    modifier         = Modifier.alpha(alpha),
+                    showLegend       = false,
+                    showWeekdayStrip = false,
+                    // Only the centered page gets the green ring — side
+                    // peeks shouldn't compete for the user's attention
+                    // since their days aren't tappable.
+                    selectedDate     = if (isCurrent) selectedDate else null,
+                )
+            }
+
+            // Subtle chevron hints sitting in the contentPadding gutter
+            // so they signal swipeability without overlapping any tree
+            // cell. Coral so they tie into the today pin's accent.
+            Text(
+                text     = "‹",
+                style    = AppTypography.EditorialTitle,
+                color    = AppAccent.primary.copy(alpha = 0.55f),
+                fontSize = 22.sp,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 4.dp),
+            )
+            Text(
+                text     = "›",
+                style    = AppTypography.EditorialTitle,
+                color    = AppAccent.primary.copy(alpha = 0.55f),
+                fontSize = 22.sp,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SelectedDayCard(
+    day: DayCount,
+    today: LocalDate,
+    breakdown: TodayBreakdown?,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isToday    = day.date == today
+    val isFuture   = day.date.isAfter(today)
+    val entry      = day.entry
+    val eyebrowTag = if (isToday) "TODAY" else if (isFuture) "UPCOMING" else "SELECTED"
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppRadius.lg))
+            .background(AppColors.CardSolid)
+            .border(
+                width = 1.2.dp,
+                color = AppAccent.primary.copy(alpha = if (isToday) 0.55f else 0.30f),
+                shape = RoundedCornerShape(AppRadius.lg),
+            )
+            .clickable(onClick = onTap)
+            .padding(AppSpacing.s5),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+    ) {
+        Text(
+            text  = "$eyebrowTag · ${dayHeader(day.date)}",
+            style = AppTypography.Eyebrow,
+            color = AppAccent.primary,
+        )
+        Text(
+            text  = entry?.title?.takeIf { it.isNotBlank() }
+                ?: if (isToday) "Today's entry" else "Untitled",
+            color = AppColors.TextPrimary,
+            fontFamily = FontFamily.Serif,
+            fontSize = 18.sp,
+        )
+
+        val notesPreview = entry?.notes
+            ?.lineSequence()
+            ?.firstOrNull { it.isNotBlank() }
+            ?.take(140)
+        if (!notesPreview.isNullOrBlank()) {
+            Text(
+                text  = notesPreview,
+                color = AppColors.TextSecondary,
+                fontFamily = FontFamily.Serif,
+                fontSize = 13.sp,
+                maxLines = 2,
+            )
+        } else {
+            Text(
+                text = when {
+                    isToday  -> "Nothing captured yet — tap to start today's note."
+                    isFuture -> "No entry — yet."
+                    else     -> "No entry on this day."
+                },
+                color = AppColors.TextTertiary,
+                fontFamily = FontFamily.Serif,
+                fontSize = 13.sp,
+            )
+        }
+
+        // Capture / todo chip row — only shown for today (where we have
+        // the full per-mode breakdown). Past/future days collapse to
+        // a compact "X captures · Y todos" line below.
+        if (breakdown != null && (breakdown.captureCount > 0 || breakdown.openTodoCount > 0)) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
-                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = titleText,
-                    // Softer weight than SectionTitle to match the reference
-                    // screenshot — a ~17sp semibold reads as "important" next
-                    // to the pill rail without feeling like a section header.
-                    style = AppTypography.SectionTitle.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 17.sp,
-                    ),
-                    color = AppColors.TextPrimary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = relativeTimeAgo(entry.updatedAt),
-                    style = AppTypography.Meta,
-                    color = AppColors.TextTertiary,
-                    maxLines = 1,
-                )
+                if (breakdown.photoCount > 0) ChipPill("photo · ${breakdown.photoCount}", Color(0xFFFCEAE0), Color(0xFF993C1D))
+                if (breakdown.scanCount  > 0) ChipPill("scan · ${breakdown.scanCount}",  Color(0xFFD9EDE2), Color(0xFF1E5943))
+                if (breakdown.voiceCount > 0) ChipPill("voice · ${breakdown.voiceCount}", Color(0xFFFAEEDA), Color(0xFF854F0B))
+                if (breakdown.openTodoCount > 0) {
+                    Text(
+                        text  = "+ ${breakdown.openTodoCount} todos",
+                        style = AppTypography.Tag,
+                        color = AppAccent.deep,
+                    )
+                }
             }
-            val summary = remember(entry.notes, entry.title) { summarizeNotes(entry) }
-            if (summary.isNotEmpty()) {
-                Text(
-                    text = summary,
-                    style = AppTypography.Meta,
-                    color = AppColors.TextSecondary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (pills.isNotEmpty()) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
-                    verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
-                ) {
-                    pills.forEach { label ->
-                        MetaPill(text = label)
-                    }
+        } else if (day.captureCount > 0 || day.openTodoCount > 0) {
+            Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+                if (day.captureCount > 0) {
+                    Text(
+                        text  = "${day.captureCount} captures",
+                        style = AppTypography.Tag,
+                        color = AppColors.ThemeGreenDeep,
+                    )
+                }
+                if (day.captureCount > 0 && day.openTodoCount > 0) {
+                    Text("·", style = AppTypography.Tag, color = AppColors.TextSecondary)
+                }
+                if (day.openTodoCount > 0) {
+                    Text(
+                        text  = "${day.openTodoCount} todos",
+                        style = AppTypography.Tag,
+                        color = AppAccent.deep,
+                    )
                 }
             }
         }
     }
 }
 
-// Green-tinted Releaf leaf mark used as the row's visual anchor. Sits in a
-// circular soft-green chip so it reads as a badge next to the title rather
-// than floating loose on the cream card fill.
 @Composable
-private fun LeafChip() {
+private fun ChipPill(label: String, bg: Color, fg: Color) {
     Box(
         modifier = Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(AppColors.ThemeGreenBgSoft),
+            .clip(RoundedCornerShape(50))
+            .background(bg)
+            .padding(horizontal = AppSpacing.s3, vertical = 4.dp),
+    ) {
+        Text(label, style = AppTypography.Tag, color = fg)
+    }
+}
+
+@Composable
+private fun QuickCapturePills(
+    onCapture: (String) -> Unit,
+    onImport: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+    ) {
+        Text(
+            text  = "QUICK CAPTURE",
+            style = AppTypography.Eyebrow,
+            color = AppColors.TextSecondary,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
+        // Five pills with weight(1f) each — labels stay short ("import"
+        // is 6 chars, same band as "voice"/"photo") so the row still
+        // fits comfortably on a 360dp-wide screen.
+        Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+            CapturePill("note",   modifier = Modifier.weight(1f)) { onCapture("note") }
+            CapturePill("photo",  modifier = Modifier.weight(1f)) { onCapture("photo") }
+            CapturePill("scan",   modifier = Modifier.weight(1f)) { onCapture("scan") }
+            CapturePill("voice",  modifier = Modifier.weight(1f)) { onCapture("voice") }
+            CapturePill("import", modifier = Modifier.weight(1f)) { onImport() }
+        }
+    }
+}
+
+@Composable
+private fun CapturePill(
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(AppColors.CardSolid)
+            .border(0.6.dp, AppColors.BorderDefault, RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
-        ReleafLogo(
-            size = 26.dp,
-            filled = true,
-            outlineColor = AppColors.ThemeGreenDeep,
-            fillGradientStart = AppColors.ThemeGreenPrimary,
-            fillGradientEnd = AppColors.ThemeGreenDeep,
-            strokeWidth = 0.8.dp,
+        Text(
+            text  = label,
+            style = AppTypography.Button,
+            color = AppColors.ThemeGreenDeep,
         )
     }
 }
+
+// ---- Recents view ----
 
 @Composable
-private fun SwipeDeleteBackground() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(AppColors.Danger)
-            .padding(horizontal = AppSpacing.s4),
-        contentAlignment = Alignment.CenterEnd,
-    ) {
-        Icon(
-            Icons.Filled.Delete,
-            contentDescription = null,
-            tint = AppColors.OnAccent,
-            modifier = Modifier.size(20.dp),
-        )
-    }
+private fun RecentsView(
+    state: NotepadScreenUiState,
+    onTodayTap: () -> Unit,
+    onDayTap: (DayCount) -> Unit,
+) {
+    val today = state.recentDays.firstOrNull { it.date == LocalDate.now() }
+        ?: DayCount(LocalDate.now(), state.today, state.todayBreakdown.captureCount, state.todayBreakdown.openTodoCount)
+    val earlier = state.recentDays.filter { it.date != LocalDate.now() }
+
+    NotepadGardenTiles(
+        today      = today,
+        earlier    = earlier,
+        onTodayTap = onTodayTap,
+        onDayTap   = onDayTap,
+    )
 }
 
-/* ---------- helpers ---------- */
+// ---- formatting ----
 
-/** Saves the Set<String> of expanded date keys through config changes. */
-private val StringSetSaver: Saver<Set<String>, List<String>> = Saver(
-    save    = { it.toList() },
-    restore = { it.toSet() },
-)
-
-/** Title if set, otherwise the first non-empty line of the body. */
-private fun displayTitle(entry: NotepadEntry): String {
-    entry.title?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
-    val firstLine = entry.notes
-        .lineSequence()
-        .map { it.trim() }
-        .firstOrNull { it.isNotEmpty() }
-    return firstLine?.takeIf { it.isNotEmpty() } ?: "Untitled"
+private fun dayHeader(date: LocalDate): String {
+    val fmt = java.time.format.DateTimeFormatter.ofPattern("EEEE · MMM d", java.util.Locale.getDefault())
+    return fmt.format(date).uppercase()
 }
-
-/**
- * Plain-text summary shown as the 2-line description under the title.
- * Strips CommonMark syntax so headings, list bullets, emphasis, links,
- * and code fences don't leak into the preview as raw `#` / `*` / `[...]`
- * noise, and collapses whitespace so multi-paragraph notes flatten to a
- * scannable run. Strips the first line when it's already the title so
- * we don't echo the same string twice in the row.
- *
- * Intentionally deterministic and synchronous — this is the baseline
- * preview that renders immediately when the list loads. An ML Kit GenAI
- * Summarization pass can be layered on top later to compress longer
- * notes, writing its output to a cache column and falling back to this
- * helper whenever the cache is empty or stale.
- */
-private fun summarizeNotes(entry: NotepadEntry): String {
-    val raw = entry.notes.trim()
-    if (raw.isEmpty()) return ""
-    val titleIsFromNotes = entry.title.isNullOrBlank()
-    val body = if (titleIsFromNotes) {
-        raw.lineSequence().drop(1).joinToString("\n")
-    } else {
-        raw
-    }
-    return stripMarkdown(body)
-}
-
-/**
- * Lightweight CommonMark + HTML → plain-text stripper tuned for preview
- * copy. Not a full parser — we only need to kill the syntax characters
- * that would read as noise in a 2-line description. Covers both markdown
- * (because that's our canonical storage format) and raw HTML (because
- * `richeditor-compose` emits tags like `<br>` for hard line breaks and
- * raw-HTML blocks for constructs CommonMark can't express). The order
- * of substitutions matters: HTML first so its tags don't get caught by
- * the link-bracket regex, then fenced code + links, then inline
- * emphasis + line markers.
- */
-private fun stripMarkdown(src: String): String {
-    if (src.isBlank()) return ""
-    var s = src
-    // HTML tags — collapse to a single space so `<br>` between two
-    // words doesn't smash them into "wordone wordtwo" without a break.
-    // Covers `<br>`, `<br/>`, `<br />`, `<p>...</p>`, `<strong>…`, etc.
-    s = Regex("<[^>]+>").replace(s, " ")
-    // Most-common HTML entities richeditor-compose emits. Full entity
-    // decoding would pull in another regex pass for `&#nnn;` / `&#xhh;`
-    // — not worth it for preview copy.
-    s = s.replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&#39;", "'")
-    // Fenced code blocks — drop the fence and keep the inner text.
-    s = Regex("```[a-zA-Z0-9]*\\n?").replace(s, "")
-    // Inline code — keep the code text, drop the backticks.
-    s = Regex("`([^`]*)`").replace(s) { it.groupValues[1] }
-    // Images: ![alt](url) — keep only the alt text.
-    s = Regex("!\\[([^\\]]*)]\\([^)]*\\)").replace(s) { it.groupValues[1] }
-    // Links: [text](url) — keep only the link text.
-    s = Regex("\\[([^\\]]+)]\\([^)]*\\)").replace(s) { it.groupValues[1] }
-    // Bold / italic markers — strip the surrounding *, _, ~ while
-    // keeping the wrapped text.
-    s = Regex("(\\*\\*|__)(.*?)\\1").replace(s) { it.groupValues[2] }
-    s = Regex("(\\*|_)(.*?)\\1").replace(s) { it.groupValues[2] }
-    s = Regex("~~(.*?)~~").replace(s) { it.groupValues[1] }
-    // Leading line markers: headings (#…), blockquotes (>), unordered
-    // list bullets (- / * / +) and ordered list markers (1. / 2.).
-    s = s.lineSequence()
-        .map { line ->
-            line
-                .replace(Regex("^\\s{0,3}#{1,6}\\s*"), "")
-                .replace(Regex("^\\s{0,3}>\\s?"), "")
-                .replace(Regex("^\\s{0,3}[-*+]\\s+"), "")
-                .replace(Regex("^\\s{0,3}\\d+\\.\\s+"), "")
-                .trim()
-        }
-        .filter { it.isNotEmpty() }
-        .joinToString(" ")
-    // Collapse stray runs of whitespace into single spaces so the
-    // preview reads as flowing prose instead of awkwardly-spaced
-    // fragments.
-    return s.replace(Regex("\\s+"), " ").trim()
-}
-
-/**
- * Format an ISO date (YYYY-MM-DD) for a section header:
- *   - today / yesterday get friendly names
- *   - other dates fall back to "April 21, 2026"
- */
-private fun formatDateHeader(iso: String): String {
-    val date = runCatching { LocalDate.parse(iso) }.getOrNull() ?: return iso
-    val today = LocalDate.now()
-    return when (date) {
-        today               -> "Today"
-        today.minusDays(1)  -> "Yesterday"
-        else                -> date.format(LONG_DATE_FMT)
-    }
-}
-
-private val LONG_DATE_FMT: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("MMMM d, yyyy", Locale.getDefault())

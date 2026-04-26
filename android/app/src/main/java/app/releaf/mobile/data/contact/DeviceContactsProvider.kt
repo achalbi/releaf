@@ -64,14 +64,16 @@ class DeviceContactsProvider(
                 while (c.moveToNext()) {
                     val id = c.getLong(idCol).toString()
                     val name = c.getString(nameCol)?.takeIf { it.isNotBlank() } ?: continue
-                    // One cheap follow-up query for the primary phone number.
-                    // We keep the projection tiny — no emails, no org —
-                    // because the search result row only shows name + phone.
-                    val phone = firstPhone(id)
+                    // Pull every phone number linked to this contact
+                    // (mobile, home, work, etc.). The search result
+                    // row still surfaces only the first, but a
+                    // multi-number contact now opens a picker when
+                    // tapped.
+                    val phones = allPhones(id)
                     out += DirectoryContact(
                         id     = "device-$id",
                         name   = name,
-                        phone  = phone,
+                        phones = phones,
                         email  = null,
                         source = DirectoryContactSource.Device,
                     )
@@ -80,18 +82,27 @@ class DeviceContactsProvider(
             out
         }
 
-    /** First phone number stored for a contact, or null. */
-    private fun firstPhone(contactId: String): String? {
+    /** Every phone number stored for a contact, de-duplicated. */
+    private fun allPhones(contactId: String): List<String> {
         val uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI
         val projection = arrayOf(
             ContactsContract.CommonDataKinds.Phone.NUMBER,
         )
         val selection = "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?"
         val args = arrayOf(contactId)
+        val out = mutableListOf<String>()
         context.contentResolver.query(uri, projection, selection, args, null)?.use { c ->
             val numberCol = c.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
-            if (c.moveToFirst()) return c.getString(numberCol)?.takeIf { it.isNotBlank() }
+            while (c.moveToNext()) {
+                val number = c.getString(numberCol)?.trim().orEmpty()
+                if (number.isEmpty()) continue
+                out += number
+            }
         }
-        return null
+        // Collapse entries that differ only by a country-code prefix
+        // (e.g. "+91 98765 43210" vs "98765 43210") — the last-10
+        // digits key groups them and the representation with more
+        // digits wins.
+        return dedupePhones(out)
     }
 }

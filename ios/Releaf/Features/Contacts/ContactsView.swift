@@ -13,15 +13,89 @@ import ReleafDesignSystem
 public struct ContactsView: View {
     @StateObject private var viewModel: ContactsViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @State private var selectedContact: DirectoryContact?
+    @State private var phonePicker: DirectoryContact?
+    @FocusState private var searchFocused: Bool
+
+    private let userId: String
+    private let callHistory = CallHistoryRepository()
 
     public init(userId: String) {
+        self.userId = userId
         _viewModel = StateObject(wrappedValue: ContactsViewModel(userId: userId))
+    }
+
+    /// Row-tap policy:
+    ///   - 0 phones → open the detail sheet.
+    ///   - 1 phone  → dial it directly.
+    ///   - 2+ phones → show a confirmation dialog so the user
+    ///     picks which number to call.
+    private func handleTap(_ contact: DirectoryContact) {
+        // Drop keyboard focus so the IME animates out before the
+        // dialer / detail sheet appears.
+        searchFocused = false
+        switch contact.phones.count {
+        case 0:
+            selectedContact = contact
+        case 1:
+            dialPhone(phone: contact.phones[0], fallbackContact: contact)
+        default:
+            phonePicker = contact
+        }
+    }
+
+    private func dialPhone(phone: String, fallbackContact: DirectoryContact) {
+        let cleaned = telSanitized(phone)
+        guard !cleaned.isEmpty, let url = URL(string: "tel:\(cleaned)") else {
+            selectedContact = fallbackContact
+            return
+        }
+        // Write the history row first, then attach CXCallObserver
+        // before opening the URL so the OS's "outgoing call"
+        // CXCall change is captured against this id. `openURL`
+        // immediately hands off to the Phone app — we don't wait
+        // on the insert before launching.
+        let name = fallbackContact.name
+        let historySource: CallHistorySource =
+            fallbackContact.source == .app ? .app : .device
+        let repository = callHistory
+        let userId = self.userId
+        Task {
+            if let id = try? await repository.recordStarted(
+                userId: userId,
+                contactName: name,
+                phoneNumber: cleaned,
+                source: historySource
+            ) {
+                // `MainActor.run` returns the closure's value (here
+                // the Bool from `attach(callId:)`); discard explicitly.
+                _ = await MainActor.run {
+                    CallObserver.shared.attach(callId: id)
+                }
+            }
+        }
+        openURL(url) { accepted in
+            // `tel:` is unavailable on simulators and on iPads without
+            // a phone pairing — fall back to the detail sheet so the
+            // user isn't left without any affordance.
+            if !accepted {
+                selectedContact = fallbackContact
+            }
+        }
     }
 
     public var body: some View {
         ZStack {
-            AppColors.canvas.ignoresSafeArea()
+            // Tap-to-dismiss layer behind everything. Any tap that
+            // hits the canvas (rather than a Button / TextField /
+            // ContactRow button) drops keyboard focus. `contentShape`
+            // makes the empty canvas hit-testable even where it's
+            // visually empty.
+            AppColors.canvas
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { searchFocused = false }
             VStack(spacing: 0) {
                 header
                 searchField
@@ -41,6 +115,25 @@ public struct ContactsView: View {
             )
             .presentationDetents([.medium])
         }
+        .confirmationDialog(
+            phonePicker.map { "Pick a number to call — \($0.name)" } ?? "",
+            isPresented: Binding(
+                get: { phonePicker != nil },
+                set: { if !$0 { phonePicker = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let picker = phonePicker {
+                ForEach(picker.phones, id: \.self) { phone in
+                    Button(phone) {
+                        let c = picker
+                        phonePicker = nil
+                        dialPhone(phone: phone, fallbackContact: c)
+                    }
+                }
+                Button("Cancel", role: .cancel) { phonePicker = nil }
+            }
+        }
     }
 
     // MARK: - Header
@@ -52,12 +145,23 @@ public struct ContactsView: View {
                     dismiss()
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 16))
                         .foregroundStyle(AppColors.textPrimary)
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
                 Spacer()
+                // Push the call-history screen onto the enclosing
+                // NavigationStack. The destination is registered in
+                // MainShell for `CallHistoryRoute`, so the link just
+                // needs the route value — no separate binding wiring.
+                NavigationLink(value: CallHistoryRoute()) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 16))
+                        .foregroundStyle(AppColors.textPrimary)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
             }
             Text("CONTACTS")
                 .font(AppText.eyebrow)
@@ -93,11 +197,14 @@ public struct ContactsView: View {
             .textInputAutocapitalization(.sentences)
             .autocorrectionDisabled(true)
             .submitLabel(.search)
+            .focused($searchFocused)
+            .onSubmit { searchFocused = false }
             .foregroundStyle(AppColors.textPrimary)
             .tint(AppColors.coral)
             if !viewModel.state.query.isEmpty {
                 Button {
                     viewModel.clearQuery()
+                    searchFocused = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(AppColors.textSecondary)
@@ -128,6 +235,9 @@ public struct ContactsView: View {
             .padding(.horizontal, AppSpacing.s4)
             .padding(.top, AppSpacing.s2)
         }
+        // Starting a drag inside the scroll view also drops focus —
+        // matches the standard iOS "swipe to dismiss keyboard" pattern.
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private var appSection: some View {
@@ -150,7 +260,7 @@ public struct ContactsView: View {
                 )
             } else {
                 ForEach(viewModel.state.filteredAppContacts) { contact in
-                    Button { selectedContact = contact } label: {
+                    Button { handleTap(contact) } label: {
                         ContactRow(contact: contact)
                     }
                     .buttonStyle(.plain)
@@ -184,7 +294,7 @@ public struct ContactsView: View {
                 EmptyView()
             } else {
                 ForEach(viewModel.state.deviceContacts) { contact in
-                    Button { selectedContact = contact } label: {
+                    Button { handleTap(contact) } label: {
                         ContactRow(contact: contact)
                     }
                     .buttonStyle(.plain)
@@ -252,9 +362,17 @@ private struct ContactRow: View {
                         .font(AppText.meta)
                         .foregroundStyle(AppColors.textSecondary)
                 }
-                let meta = [contact.phone, contact.email].compactMap { $0 }.joined(separator: " · ")
-                if !meta.isEmpty {
-                    Text(meta)
+                // One line per phone number so multi-number
+                // contacts surface every reachable digit in the
+                // list itself — the picker on tap still lets the
+                // user pick which one to dial.
+                ForEach(contact.phones, id: \.self) { phone in
+                    Text(phone)
+                        .font(AppText.meta)
+                        .foregroundStyle(AppColors.textSecondary)
+                }
+                if let email = contact.email {
+                    Text(email)
                         .font(AppText.meta)
                         .foregroundStyle(AppColors.textSecondary)
                 }
@@ -344,6 +462,24 @@ private struct PermissionCta: View {
     }
 }
 
+// MARK: - Phone sanitizer
+
+/// Strip everything except digits and the leading `+` so the
+/// resulting `tel:` URL is always valid. Phone strings captured
+/// in-app often contain spaces, dashes, parentheses, or unicode
+/// formatting that `URL(string:)` rejects.
+internal func telSanitized(_ raw: String?) -> String {
+    guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+        return ""
+    }
+    var out = ""
+    let hasLeadingPlus = raw.first == "+"
+    for ch in raw {
+        if ch.isNumber { out.append(ch) }
+    }
+    return hasLeadingPlus ? "+" + out : out
+}
+
 // MARK: - Empty state
 
 private struct EmptyCard: View {
@@ -386,9 +522,28 @@ private struct ContactDetailSheet: View {
                     if let org = contact.organization {
                         DetailField(label: "Organization", value: org)
                     }
-                    if let phone = contact.phone {
-                        DetailField(label: "Phone", value: phone)
+
+                    // One tappable row per phone. Each row dials
+                    // that specific number — the user never has to
+                    // guess which of a multi-number contact's phones
+                    // they'd reach.
+                    if !contact.phones.isEmpty {
+                        VStack(alignment: .leading, spacing: AppSpacing.s2) {
+                            Text(contact.phones.count == 1 ? "PHONE" : "PHONES")
+                                .font(AppText.eyebrow)
+                                .tracking(AppLetterSpacing.eyebrow)
+                                .foregroundStyle(AppColors.textSecondary)
+                            ForEach(contact.phones, id: \.self) { phone in
+                                PhoneActionRow(label: phone) {
+                                    let cleaned = telSanitized(phone)
+                                    if !cleaned.isEmpty, let url = URL(string: "tel:\(cleaned)") {
+                                        openURL(url)
+                                    }
+                                }
+                            }
+                        }
                     }
+
                     if let email = contact.email {
                         DetailField(label: "Email", value: email)
                     }
@@ -401,7 +556,9 @@ private struct ContactDetailSheet: View {
                         .foregroundStyle(AppColors.textTertiary)
                     }
 
-                    actionRow
+                    if contact.email != nil {
+                        actionRow
+                    }
                 }
                 .padding(AppSpacing.s5)
             }
@@ -443,13 +600,6 @@ private struct ContactDetailSheet: View {
     @ViewBuilder
     private var actionRow: some View {
         HStack(spacing: AppSpacing.s3) {
-            if let phone = contact.phone {
-                actionButton(label: "Call", icon: "phone.fill") {
-                    if let url = URL(string: "tel:\(phone.replacingOccurrences(of: " ", with: ""))") {
-                        openURL(url)
-                    }
-                }
-            }
             if let email = contact.email {
                 actionButton(label: "Email", icon: "envelope.fill") {
                     if let url = URL(string: "mailto:\(email)") {
@@ -494,5 +644,38 @@ private struct DetailField: View {
                 .font(AppText.body)
                 .foregroundStyle(AppColors.textPrimary)
         }
+    }
+}
+
+/// Tappable phone row used by the detail sheet. Mirrors the
+/// Android `PhoneActionRow` — the number on the left, a small
+/// "Call" chip on the right so the affordance is explicit.
+private struct PhoneActionRow: View {
+    let label: String
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack {
+                Text(label)
+                    .font(AppText.body)
+                    .foregroundStyle(AppColors.textPrimary)
+                Spacer()
+                Text("Call")
+                    .font(AppText.tag)
+                    .foregroundStyle(AppColors.coral)
+                    .padding(.horizontal, AppSpacing.s3)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(AppColors.coralSoft))
+            }
+            .padding(AppSpacing.s3)
+            .background(AppColors.cardSolid)
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    .stroke(AppColors.borderDefault, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }

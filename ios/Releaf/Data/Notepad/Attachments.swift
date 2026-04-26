@@ -51,11 +51,29 @@ public struct NotepadContact: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let name: String
     public let role: String?
+    /// Phone number captured alongside the contact. Kept optional so
+    /// legacy JSON written before this field existed still decodes.
+    public let phone: String?
+    /// Email address. Same back-compat story as `phone`.
+    public let email: String?
+    /// Optional org/company label, shown under the name in the
+    /// Contacts directory detail view.
+    public let organization: String?
 
-    public init(id: String, name: String, role: String? = nil) {
+    public init(
+        id: String,
+        name: String,
+        role: String? = nil,
+        phone: String? = nil,
+        email: String? = nil,
+        organization: String? = nil
+    ) {
         self.id = id
         self.name = name
         self.role = role
+        self.phone = phone
+        self.email = email
+        self.organization = organization
     }
 }
 
@@ -181,4 +199,34 @@ public extension Array where Element == Attachment {
 
 public extension String {
     func parseAttachments() -> [Attachment] { decodeList(self) }
+}
+
+// MARK: - StoredPageNote (typed page-note row)
+
+/// Persistence-shape `Note` row stored in `pages.page_notes_json`.
+/// Mirrors the Drive-facing `Note` (id + body + createdAt) so each
+/// note keeps its identity through the round-trip — the legacy
+/// `pages.notes` markdown column lost both ids and timestamps when
+/// multiple notes were joined together.
+///
+/// `createdAt` is ISO-8601 UTC text; the mapper parses it back into
+/// a `Date` for the domain shape.
+public struct StoredPageNote: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let body: String
+    public let createdAt: String
+
+    public init(id: String, body: String, createdAt: String) {
+        self.id = id
+        self.body = body
+        self.createdAt = createdAt
+    }
+}
+
+public extension Array where Element == StoredPageNote {
+    func toJsonString() -> String { encodeList(self) }
+}
+
+public extension String {
+    func parsePageNotes() -> [StoredPageNote] { decodeList(self) }
 }

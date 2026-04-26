@@ -27,7 +27,10 @@ import app.releaf.mobile.data.drive.DriveClient
 import app.releaf.mobile.data.drive.DriveRepository
 import app.releaf.mobile.data.drive.FakeDriveRepository
 import app.releaf.mobile.data.drive.InMemoryDriveClient
+import app.releaf.mobile.data.drive.LocalDriveRepository
 import app.releaf.mobile.data.drive.OkHttpDriveClient
+import app.releaf.mobile.data.callhistory.CallHistoryRepository
+import app.releaf.mobile.data.callhistory.CallObserver
 import app.releaf.mobile.data.contact.ContactDirectoryRepository
 import app.releaf.mobile.data.contact.DeviceContactsProvider
 import app.releaf.mobile.data.notebook.ChapterRepository
@@ -86,6 +89,12 @@ class ReleafApp : Application() {
     lateinit var deviceContactsProvider: DeviceContactsProvider
         private set
 
+    lateinit var callHistoryRepository: CallHistoryRepository
+        private set
+
+    lateinit var callObserver: CallObserver
+        private set
+
     lateinit var taskRepository: TaskRepository
         private set
 
@@ -93,6 +102,24 @@ class ReleafApp : Application() {
         private set
 
     lateinit var reminderRepository: ReminderRepository
+        private set
+
+    /**
+     * Phase-1 activity feed. Reads `updated_at` from existing tables;
+     * no schema, no decorators. Phase 2 will swap the source for an
+     * `audit_events` table without breaking call sites.
+     */
+    lateinit var recentActivityRepository: app.releaf.mobile.data.activity.RecentActivityRepository
+        private set
+
+    /**
+     * Phase-3.5 sub-event capture. Editor VMs (notepad / page) call
+     * this directly when the user adds a single piece of content
+     * (photo, voice note, todo, contact, etc.) so the timeline can
+     * render granular rows instead of rolling everything up into an
+     * entity-level "Updated".
+     */
+    lateinit var auditLogger: app.releaf.mobile.data.activity.AuditLogger
         private set
 
     /**
@@ -116,26 +143,49 @@ class ReleafApp : Application() {
     override fun onCreate() {
         super.onCreate()
         authStore = AuthStore.get(this)
-        driveRepository = FakeDriveRepository()
+        // Database has to be ready before LocalDriveRepository can
+        // open its DAOs — flip the init order so the repo lands on
+        // a live instance.
         database = ReleafDatabase.get(this)
-        notepadRepository = NotepadRepository(database.notepadDao())
+        driveRepository = LocalDriveRepository(database)
+        // Audit logger is constructed BEFORE the four repos that
+        // consume it so we can pass it directly into their
+        // constructors. Phase-2 of the activity tracker — every
+        // mutation through the consuming repos appends one row.
+        // Exposed publicly so editor VMs can also log the
+        // sub-event captures (phase 3.5).
+        auditLogger = app.releaf.mobile.data.activity.AuditLogger(
+            dao       = database.auditDao(),
+            authStore = authStore,
+        )
+        notepadRepository = NotepadRepository(
+            dao          = database.notepadDao(),
+            auditLogger  = auditLogger,
+        )
         notebookRepository = NotebookRepository(
             notebookDao   = database.notebookDao(),
             chapterDao    = database.chapterDao(),
             pageDao       = database.pageDao(),
             bookSeriesDao = database.bookSeriesDao(),
+            auditLogger   = auditLogger,
         )
         chapterRepository = ChapterRepository(
-            chapterDao = database.chapterDao(),
-            pageDao    = database.pageDao(),
+            chapterDao  = database.chapterDao(),
+            pageDao     = database.pageDao(),
+            auditLogger = auditLogger,
         )
-        pageRepository = PageRepository(database.pageDao())
+        pageRepository = PageRepository(
+            pageDao     = database.pageDao(),
+            auditLogger = auditLogger,
+        )
         shelfRepository = ShelfRepository(database.shelfDao())
         contactDirectoryRepository = ContactDirectoryRepository(
             notepadDao = database.notepadDao(),
             pageDao    = database.pageDao(),
         )
         deviceContactsProvider = DeviceContactsProvider(context = this)
+        callHistoryRepository = CallHistoryRepository(dao = database.callHistoryDao())
+        callObserver = CallObserver(context = this, repository = callHistoryRepository)
         appScope.launch {
             // Fresh installs land here before the migration seed has
             // anything to backfill; ensure the General shelf always
@@ -144,6 +194,13 @@ class ReleafApp : Application() {
         }
         taskRepository = TaskRepository(database.taskDao())
         perspectiveRepository = PerspectiveRepository(database.perspectiveDao())
+        recentActivityRepository = app.releaf.mobile.data.activity.RecentActivityRepository(
+            auditDao    = database.auditDao(),
+            notepadDao  = database.notepadDao(),
+            pageDao     = database.pageDao(),
+            chapterDao  = database.chapterDao(),
+            notebookDao = database.notebookDao(),
+        )
         reminderRepository = ReminderRepository(
             context = this,
             dao     = database.reminderDao(),
@@ -220,8 +277,25 @@ class ReleafApp : Application() {
             }
             .onEach { state ->
                 when (state) {
-                    is AuthState.SignedIn -> SyncScheduler.schedulePeriodic(this)
-                    else                  -> SyncScheduler.cancelAll(this)
+                    is AuthState.SignedIn -> {
+                        SyncScheduler.schedulePeriodic(this)
+                        // Phase-3 daily prune — honors the user's
+                        // `ActivityRetention` setting, skipped when
+                        // it's Forever.
+                        app.releaf.mobile.data.activity.AuditScheduler
+                            .schedulePeriodic(this)
+                        // Phase-2 audit log seeds itself once per
+                        // user — idempotent, so re-runs across
+                        // process restarts are no-ops once the log
+                        // has any rows.
+                        appScope.launch {
+                            recentActivityRepository.backfillIfEmpty(state.session.userId)
+                        }
+                    }
+                    else -> {
+                        SyncScheduler.cancelAll(this)
+                        app.releaf.mobile.data.activity.AuditScheduler.cancelAll(this)
+                    }
                 }
             }
             .launchIn(appScope)

@@ -27,10 +27,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.releaf.mobile.ui.theme.AppAccent
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 @Composable
 fun OnboardingQuickGuideCard(onShowIntro: () -> Unit) {
@@ -49,7 +49,7 @@ fun OnboardingQuickGuideCard(onShowIntro: () -> Unit) {
                     "✦",
                     fontSize = 12.sp,
                     color = AppAccent.primary,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = LocalFontWeight.current,
                 )
                 Spacer(Modifier.padding(horizontal = 3.dp))
                 Text(
@@ -62,7 +62,7 @@ fun OnboardingQuickGuideCard(onShowIntro: () -> Unit) {
             Text(
                 "New to Releaf? See how it works.",
                 style = OnboardTokens.CtaLabel.copy(
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = LocalFontWeight.current,
                     fontSize = 15.sp,
                     lineHeight = 20.sp,
                 ),

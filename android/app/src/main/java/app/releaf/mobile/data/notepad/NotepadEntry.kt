@@ -50,6 +50,15 @@ data class NotepadEntry(
     @ColumnInfo(name = "title")
     val title: String? = null,
 
+    /**
+     * Optional free-text subtitle — short summary the editor header
+     * shows under [title], same role the column plays on `notebooks`.
+     * Null = "no description yet" (the v15→v16 migration adds the
+     * column without a default so existing rows round-trip cleanly).
+     */
+    @ColumnInfo(name = "description")
+    val description: String? = null,
+
     /** Canonical CommonMark. Empty string is valid. */
     @ColumnInfo(name = "notes", defaultValue = "''")
     val notes: String = "",

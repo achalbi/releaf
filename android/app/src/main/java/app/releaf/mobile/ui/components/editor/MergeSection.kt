@@ -48,7 +48,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.releaf.mobile.data.notepad.NotepadEntry
@@ -57,6 +56,7 @@ import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -125,7 +125,7 @@ fun MergeSection(
             ) {
                 Text(
                     "Merge this page with another notepad page",
-                    style = AppTypography.Body.copy(fontWeight = FontWeight.SemiBold),
+                    style = AppTypography.Body.copy(fontWeight = LocalFontWeight.current),
                     color = AppColors.TextPrimary,
                 )
                 Text(
@@ -138,7 +138,7 @@ fun MergeSection(
 
                 Text(
                     "Other page",
-                    style = AppTypography.Body.copy(fontWeight = FontWeight.SemiBold),
+                    style = AppTypography.Body.copy(fontWeight = LocalFontWeight.current),
                     color = AppColors.TextPrimary,
                 )
 
@@ -167,7 +167,7 @@ fun MergeSection(
 
                 Text(
                     "Primary page",
-                    style = AppTypography.Body.copy(fontWeight = FontWeight.SemiBold),
+                    style = AppTypography.Body.copy(fontWeight = LocalFontWeight.current),
                     color = AppColors.TextPrimary,
                 )
 
@@ -322,7 +322,7 @@ private fun PickerRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 rowLabel(entry),
-                style = AppTypography.Body.copy(fontWeight = FontWeight.SemiBold),
+                style = AppTypography.Body.copy(fontWeight = LocalFontWeight.current),
                 color = AppColors.TextPrimary,
             )
             Text(
@@ -335,7 +335,7 @@ private fun PickerRow(
             Text(
                 "✓",
                 color = AppAccent.primary,
-                fontWeight = FontWeight.Bold,
+                fontWeight = LocalFontWeight.current,
                 fontSize = 16.sp,
             )
         }

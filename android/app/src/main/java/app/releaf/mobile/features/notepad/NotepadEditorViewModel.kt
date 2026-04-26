@@ -54,6 +54,7 @@ import app.releaf.mobile.data.notebook.parseStrokes
 import app.releaf.mobile.data.notebook.parseSubPages
 import app.releaf.mobile.data.notebook.parseTodos
 import app.releaf.mobile.data.notebook.toJsonString
+import app.releaf.mobile.data.notepad.AyurvedicCatalog
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.notepad.NotepadRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -74,6 +75,13 @@ data class NotepadEditorUiState(
     /** Null until the VM has loaded (or created) the backing row. */
     val entry: NotepadEntry? = null,
     val title: String = "",
+    /**
+     * Optional free-text subtitle shown directly below [title] in the
+     * editor. Auto-seeded on create from the day's Ayurvedic plant in
+     * `(commonName) epithet` form (e.g. `(cinnamon) the sweet bark`);
+     * the user can edit or clear it freely. Mirrors `entry.description`.
+     */
+    val description: String = "",
     /**
      * Local-calendar date (YYYY-MM-DD) the entry is filed under. Defaults
      * to today for fresh drafts; mirrors `entry.entry_date` once loaded.
@@ -113,7 +121,43 @@ class NotepadEditorViewModel(
     private val notebookRepository: NotebookRepository,
     private val chapterRepository: ChapterRepository,
     private val pageRepository: PageRepository,
+    /** Phase-3.5 granular event capture. Nullable so tests + the
+     *  rare caller without DI can still build the VM. */
+    private val auditLogger: app.releaf.mobile.data.activity.AuditLogger? = null,
 ) : AndroidViewModel(application) {
+
+    /** Breadcrumb for sub-event captures: notepad entries don't have
+     *  a notebook/chapter parent, so the crumb is just the entry's
+     *  title (or its date when untitled). Computed at log-time so
+     *  it snapshots the live state. */
+    private fun captureContext(): String {
+        val s = _state.value
+        return s.title.takeIf { it.isNotBlank() }
+            ?: s.entry?.title?.takeIf { it.isNotBlank() }
+            ?: s.entryDate.takeIf { it.isNotBlank() }
+            ?: "Notepad"
+    }
+
+    /** Fire-and-forget granular audit. Tagged with the captured
+     *  item's label and the parent breadcrumb so the timeline can
+     *  render "Photo · Today's notepad". The parent entityId is
+     *  the notepad row id when one exists; for a brand-new draft
+     *  we drop the event (the row doesn't exist yet, the audit
+     *  would orphan). */
+    private fun logCapture(entityType: String, label: String?) {
+        val parentId = _state.value.entry?.id ?: return
+        val logger = auditLogger ?: return
+        viewModelScope.launch {
+            logger.log(
+                action     = app.releaf.mobile.data.activity.AuditAction.Created,
+                entityType = entityType,
+                entityId   = parentId,
+                title      = label,
+                userId     = userId,
+                context    = captureContext(),
+            )
+        }
+    }
 
     private val _state = MutableStateFlow(NotepadEditorUiState())
     val state: StateFlow<NotepadEditorUiState> = _state.asStateFlow()
@@ -161,11 +205,18 @@ class NotepadEditorViewModel(
                 // Don't create the row until the user types something — the
                 // list shouldn't show a blank entry if they back out. Seed
                 // with one empty sub-page so the editor body always has
-                // something to render.
+                // something to render. Title + description prepopulate
+                // from today's plant so the user always sees something
+                // meaningful in the header — repository.create() will
+                // skip its own seeding because we now hand it non-blank
+                // values, so the same plant ends up in the row.
+                val (seedTitle, seedDescription) = seedTitleAndDescription("", "")
                 _state.value = NotepadEditorUiState(
-                    isLoading = false,
-                    entryDate = IsoClock.todayLocalDate(),
-                    subPages  = listOf(SubPage(id = Uuidv7.generate())),
+                    isLoading   = false,
+                    title       = seedTitle,
+                    description = seedDescription,
+                    entryDate   = IsoClock.todayLocalDate(),
+                    subPages    = listOf(SubPage(id = Uuidv7.generate())),
                 )
             } else {
                 val loaded = repository.findById(entryId)
@@ -183,10 +234,21 @@ class NotepadEditorViewModel(
                         )
                     )
                 }
+                // Backfill: when both fields load blank (older rows
+                // created before the auto-seed landed, or rows the
+                // user explicitly emptied), present today's plant as
+                // the starting values. Lazy — we don't write them
+                // back to the row until the user makes any other
+                // edit that triggers save().
+                val (seedTitle, seedDescription) = seedTitleAndDescription(
+                    loaded?.title.orEmpty(),
+                    loaded?.description.orEmpty(),
+                )
                 _state.value = NotepadEditorUiState(
                     isLoading   = false,
                     entry       = loaded,
-                    title       = loaded?.title.orEmpty(),
+                    title       = seedTitle,
+                    description = seedDescription,
                     entryDate   = loaded?.entryDate ?: IsoClock.todayLocalDate(),
                     subPages    = effectiveSubPages,
                     contacts    = loaded?.contacts?.parseContacts().orEmpty(),
@@ -198,8 +260,34 @@ class NotepadEditorViewModel(
         }
     }
 
+    /**
+     * Title + description prepopulation rule, applied at bootstrap on
+     * both the new-draft and load paths.
+     *
+     * If BOTH fields arrive blank, fall back to the day's Ayurvedic
+     * plant: title gets the Sanskrit/Hindi `name`, description gets
+     * `(commonName) epithet · usedFor`. If either field carries
+     * authored text we keep both verbatim — partial backfill would
+     * mismatch the pair (e.g., a user-typed title alongside an
+     * unrelated plant description).
+     */
+    private fun seedTitleAndDescription(
+        loadedTitle: String,
+        loadedDescription: String,
+    ): Pair<String, String> {
+        if (loadedTitle.isNotBlank() || loadedDescription.isNotBlank()) {
+            return loadedTitle to loadedDescription
+        }
+        val plant = AyurvedicCatalog.forNewEntry()
+        return plant.name to AyurvedicCatalog.formatDescription(plant)
+    }
+
     fun updateTitle(value: String) {
         _state.value = _state.value.copy(title = value)
+    }
+
+    fun updateDescription(value: String) {
+        _state.value = _state.value.copy(description = value)
     }
 
     /** Local YYYY-MM-DD; callers get the string back via the date picker. */
@@ -268,6 +356,15 @@ class NotepadEditorViewModel(
         )
     }
 
+    /** Update the free-form title shown above the ledger rows. */
+    fun updateSubPageLedgerTitle(id: String, title: String) {
+        _state.value = _state.value.copy(
+            subPages = _state.value.subPages.map {
+                if (it.id == id) it.copy(ledgerTitle = title) else it
+            },
+        )
+    }
+
     /** Append a fresh empty sub-page. Returns the new id so the UI can flip to it. */
     fun addSubPage(): String {
         val new = SubPage(id = Uuidv7.generate())
@@ -323,6 +420,7 @@ class NotepadEditorViewModel(
             website      = website?.trim()?.ifEmpty { null },
         )
         _state.value = _state.value.copy(contacts = _state.value.contacts + contact)
+        logCapture(app.releaf.mobile.data.activity.AuditEntity.Contact, contact.name)
     }
 
     /**
@@ -373,6 +471,7 @@ class NotepadEditorViewModel(
         if (trimmed.isEmpty()) return
         val todo = TodoItem(id = Uuidv7.generate(), text = trimmed, done = false)
         _state.value = _state.value.copy(todos = _state.value.todos + todo)
+        logCapture(app.releaf.mobile.data.activity.AuditEntity.Todo, trimmed)
     }
 
     fun toggleTodo(id: String) {
@@ -421,6 +520,10 @@ class NotepadEditorViewModel(
             capturedAt = IsoClock.nowIso(),
         )
         _state.value = _state.value.copy(locations = _state.value.locations + loc)
+        logCapture(
+            app.releaf.mobile.data.activity.AuditEntity.Location,
+            address ?: "%.4f, %.4f".format(lat, lng),
+        )
         return loc.id
     }
 
@@ -456,6 +559,16 @@ class NotepadEditorViewModel(
             capturedAt = IsoClock.nowIso(),
         )
         _state.value = _state.value.copy(attachments = _state.value.attachments + att)
+        // Map the attachment type → audit entity bucket so the
+        // timeline shows "Photo" / "Scan" / "Voice" rather than a
+        // generic "Attachment".
+        val entityType = when (type) {
+            Attachment.TYPE_PHOTO -> app.releaf.mobile.data.activity.AuditEntity.Photo
+            Attachment.TYPE_SCAN  -> app.releaf.mobile.data.activity.AuditEntity.Scan
+            Attachment.TYPE_VOICE -> app.releaf.mobile.data.activity.AuditEntity.Voice
+            else                  -> null
+        } ?: return
+        logCapture(entityType, label = null)
     }
 
     /**
@@ -491,6 +604,7 @@ class NotepadEditorViewModel(
             capturedAt = IsoClock.nowIso(),
         )
         _state.value = _state.value.copy(attachments = _state.value.attachments + att)
+        logCapture(app.releaf.mobile.data.activity.AuditEntity.Scan, label = null)
         if (pageUrisForOcr.isEmpty()) return
 
         viewModelScope.launch {
@@ -526,6 +640,11 @@ class NotepadEditorViewModel(
             durationMs = durationMs,
         )
         _state.value = _state.value.copy(attachments = _state.value.attachments + att)
+        // Tag with the clip duration so the timeline can render
+        // "Voice note · 1:24" as the title.
+        val seconds = (durationMs / 1000).toInt()
+        val label = "%d:%02d".format(seconds / 60, seconds % 60)
+        logCapture(app.releaf.mobile.data.activity.AuditEntity.Voice, label)
     }
 
     /**
@@ -637,6 +756,7 @@ class NotepadEditorViewModel(
                     title         = snapshot.title,
                     notes         = joinedNotes,
                     entryDate     = snapshot.entryDate.ifBlank { IsoClock.todayLocalDate() },
+                    description   = snapshot.description,
                     contacts      = contactsJson,
                     locations     = locationsJson,
                     todos         = todosJson,
@@ -652,6 +772,7 @@ class NotepadEditorViewModel(
         }
 
         val titleChanged       = (existing.title.orEmpty()) != snapshot.title
+        val descriptionChanged = (existing.description.orEmpty()) != snapshot.description
         val notesChanged       = existing.notes != joinedNotes
         val entryDateChanged   = snapshot.entryDate.isNotBlank() &&
             existing.entryDate != snapshot.entryDate
@@ -661,7 +782,7 @@ class NotepadEditorViewModel(
         val attachmentsChanged = existing.attachments != attachmentsJson
         val strokesChanged     = existing.sketchStrokes != firstStrokesJson
         val subPagesChanged    = existing.subPages != subPagesJson
-        if (!titleChanged && !notesChanged && !entryDateChanged &&
+        if (!titleChanged && !descriptionChanged && !notesChanged && !entryDateChanged &&
             !contactsChanged && !todosChanged &&
             !locationsChanged && !attachmentsChanged &&
             !strokesChanged && !subPagesChanged
@@ -669,6 +790,7 @@ class NotepadEditorViewModel(
 
         val updated = existing.copy(
             title         = snapshot.title.ifBlank { null },
+            description   = snapshot.description.ifBlank { null },
             notes         = joinedNotes,
             entryDate     = snapshot.entryDate.ifBlank { existing.entryDate },
             contacts      = contactsJson,
@@ -801,6 +923,7 @@ class NotepadEditorViewModel(
                     notebookRepository = app.notebookRepository,
                     chapterRepository  = app.chapterRepository,
                     pageRepository     = app.pageRepository,
+                    auditLogger        = app.auditLogger,
                 )
             }
         }

@@ -102,6 +102,9 @@ fun SubPageEditorPager(
      *  `BG_RULED` sub-page. No-op default so existing callers that
      *  never use ledger mode don't have to plumb it. */
     onLedgerChange: (id: String, entries: List<LedgerEntry>) -> Unit = { _, _ -> },
+    /** Fired when the user edits the ledger's title field on a
+     *  `BG_RULED` sub-page. */
+    onLedgerTitleChange: (id: String, title: String) -> Unit = { _, _ -> },
     onAddSubPage: () -> String,
     onRemoveSubPage: (id: String) -> Unit,
     onBackgroundChange: (id: String, background: String) -> Unit = { _, _ -> },
@@ -304,7 +307,9 @@ fun SubPageEditorPager(
                     )
                     LedgerEditor(
                         entries         = sp.ledgerEntries,
+                        title           = sp.ledgerTitle,
                         onEntriesChange = { next -> onLedgerChange(sp.id, next) },
+                        onTitleChange   = { next -> onLedgerTitleChange(sp.id, next) },
                         modifier        = Modifier.matchParentSize(),
                     )
                 } else if (bgImage != null) {
@@ -367,8 +372,9 @@ fun SubPageEditorPager(
                     //      that masks line-height changes. Turning it off
                     //      lets the 36sp value reach the rendered glyphs.
                     val textPrimary = AppColors.TextPrimary
-                    val editorTextStyle = remember(textPrimary) {
-                        AppTypography.Body.copy(
+                    val bodyStyle   = AppTypography.Body
+                    val editorTextStyle = remember(textPrimary, bodyStyle) {
+                        bodyStyle.copy(
                             color = textPrimary,
                             // 24sp locks the text rhythm to the 24dp grid /
                             // ruled / dotted background spacing defined in

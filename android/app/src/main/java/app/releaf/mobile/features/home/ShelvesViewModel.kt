@@ -19,6 +19,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.releaf.mobile.ReleafApp
+import app.releaf.mobile.auth.GoogleAuthSession
 import app.releaf.mobile.data.domain.CaptureCountsByMode
 import app.releaf.mobile.data.domain.Notebook
 import app.releaf.mobile.data.domain.NotebookStatus
@@ -28,6 +29,11 @@ import app.releaf.mobile.data.notebook.NotebookCountRow
 import app.releaf.mobile.data.notebook.NotebookEntity
 import app.releaf.mobile.data.notebook.NotebookRepository
 import app.releaf.mobile.data.notebook.PageRepository
+import app.releaf.mobile.data.notebook.parseAttachments
+import app.releaf.mobile.data.notebook.parseContacts
+import app.releaf.mobile.data.notebook.parseLocations
+import app.releaf.mobile.data.notebook.parseTodos
+import app.releaf.mobile.data.notepad.NotepadRepository
 import app.releaf.mobile.data.shelf.ShelfEntity
 import app.releaf.mobile.data.shelf.ShelfRepository
 import java.time.Instant
@@ -39,12 +45,30 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+/**
+ * One open page-todo flattened out of a single page's `todos` JSON
+ * column, enriched with the context labels the library-header modal
+ * needs to render a navigable row. `updatedAt` is the *page*'s last
+ * edit — TodoItem itself has no per-row timestamp.
+ */
+data class OpenTodoRow(
+    val id: String,
+    val body: String,
+    val priority: Int,
+    val pageId: String,
+    val pageTitle: String,
+    val notebookTitle: String,
+    val chapterTitle: String,
+    val updatedAt: Instant,
+)
+
 sealed interface ShelvesUiState {
     data object Loading : ShelvesUiState
     data class Loaded(
         val notebooks: List<Notebook>,
         val shelves: List<Shelf>,
         val captureCounts: CaptureCountsByMode,
+        val openTodos: List<OpenTodoRow>,
     ) : ShelvesUiState
 }
 
@@ -53,6 +77,8 @@ class ShelvesViewModel(
     chapterRepository: ChapterRepository,
     pageRepository: PageRepository,
     private val shelfRepository: ShelfRepository,
+    notepadRepository: NotepadRepository,
+    session: GoogleAuthSession,
 ) : ViewModel() {
 
     /**
@@ -121,12 +147,37 @@ class ShelvesViewModel(
         }
     }
 
-    val state: StateFlow<ShelvesUiState> = combine(
+    // Bundle the five notebook-side flows into one composite so that the
+    // outer combine stays at five-arg arity (typed lambda, no array-cast
+    // ceremony). The notepad flow joins as the second leg.
+    private data class NotebookSnapshot(
+        val notebooks: List<NotebookEntity>,
+        val chapterCounts: Map<String, Int>,
+        val pageCounts: Map<String, Int>,
+        val shelves: List<ShelfEntity>,
+        val pagesWithTodos: List<app.releaf.mobile.data.notebook.PageTodosRow>,
+    )
+
+    private val notebookSnapshot: Flow<NotebookSnapshot> = combine(
         notebookRepository.observeActive(),
         chapterRepository.observeChapterCounts().mapToCountMap(),
         pageRepository.observePageCountsByNotebook().mapToCountMap(),
         shelfRepository.observeActive(),
-    ) { notebooks, chapterCounts, pageCounts, shelves ->
+        pageRepository.observePagesWithTodos(),
+    ) { notebooks, chapterCounts, pageCounts, shelves, pagesWithTodos ->
+        NotebookSnapshot(notebooks, chapterCounts, pageCounts, shelves, pagesWithTodos)
+    }
+
+    val state: StateFlow<ShelvesUiState> = combine(
+        notebookSnapshot,
+        notepadRepository.observeActive(session.userId),
+    ) { snapshot, notepad ->
+        val notebooks      = snapshot.notebooks
+        val chapterCounts  = snapshot.chapterCounts
+        val pageCounts     = snapshot.pageCounts
+        val shelves        = snapshot.shelves
+        val pagesWithTodos = snapshot.pagesWithTodos
+
         val shelfNameById = shelves.associateBy({ it.id }, { it.name })
         val mapped = notebooks.mapIndexed { index, entity ->
             entity.toNotebook(
@@ -137,16 +188,60 @@ class ShelvesViewModel(
             )
         }
         val mappedShelves = shelves.map { it.toDomain() }
-        // Derive aggregate capture counts from the same page-count
-        // map we just consumed. Photos/scans/voice/contacts stay at
-        // zero until the captures-table migration lands.
+
+        // Aggregate capture counts span notebook AND notepad surfaces
+        // so the trees-saved hero reflects everything the user has
+        // committed digitally — not just notebook page count. Notepad
+        // contributions break down into photos/scans/voice (parsed out
+        // of the entry attachments JSON) plus contacts/locations from
+        // their own JSON columns; entries themselves count as "notes"
+        // alongside notebook pages.
+        val parsedAttachments = notepad.map { entry ->
+            runCatching { entry.attachments.parseAttachments() }.getOrDefault(emptyList())
+        }
+        val totalNotepadPhotos    = parsedAttachments.sumOf { list -> list.count { it.type == "photo" } }
+        val totalNotepadScans     = parsedAttachments.sumOf { list -> list.count { it.type == "scan"  } }
+        val totalNotepadVoice     = parsedAttachments.sumOf { list -> list.count { it.type == "voice" } }
+        val totalNotepadContacts  = notepad.sumOf { entry ->
+            runCatching { entry.contacts.parseContacts() }.getOrDefault(emptyList()).size
+        }
+        val totalNotepadLocations = notepad.sumOf { entry ->
+            runCatching { entry.locations.parseLocations() }.getOrDefault(emptyList()).size
+        }
         val captureCounts = CaptureCountsByMode(
-            notes = pageCounts.values.sum(),
+            notes     = pageCounts.values.sum() + notepad.size,
+            photos    = totalNotepadPhotos,
+            scans     = totalNotepadScans,
+            voice     = totalNotepadVoice,
+            contacts  = totalNotepadContacts,
+            locations = totalNotepadLocations,
         )
+        // pagesWithTodos is already ordered newest-edit-first by the
+        // DAO, so a flatMap preserves that across pages; within a
+        // page we keep the author's ordering (position).
+        val openTodos = pagesWithTodos.flatMap { row ->
+            val parsed = runCatching { row.todos.parseTodos() }.getOrElse { emptyList() }
+            parsed.asSequence()
+                .filter { !it.done }
+                .map { todo ->
+                    OpenTodoRow(
+                        id            = todo.id,
+                        body          = todo.text,
+                        priority      = todo.priority,
+                        pageId        = row.id,
+                        pageTitle     = row.title?.trim()?.ifEmpty { null } ?: "Untitled page",
+                        notebookTitle = row.notebookTitle,
+                        chapterTitle  = row.chapterTitle,
+                        updatedAt     = parseIsoOrEpoch(row.updatedAt),
+                    )
+                }
+                .toList()
+        }
         ShelvesUiState.Loaded(
             notebooks     = mapped,
             shelves       = mappedShelves,
             captureCounts = captureCounts,
+            openTodos     = openTodos,
         ) as ShelvesUiState
     }.stateIn(
         scope        = viewModelScope,
@@ -155,7 +250,10 @@ class ShelvesViewModel(
     )
 
     companion object {
-        val Factory: ViewModelProvider.Factory = viewModelFactory {
+        /** Session-aware factory — required so the view model can pull
+         *  the signed-in user's notepad entries into the trees-saved
+         *  totals. */
+        fun factory(session: GoogleAuthSession): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as ReleafApp
                 ShelvesViewModel(
@@ -163,6 +261,8 @@ class ShelvesViewModel(
                     chapterRepository  = app.chapterRepository,
                     pageRepository     = app.pageRepository,
                     shelfRepository    = app.shelfRepository,
+                    notepadRepository  = app.notepadRepository,
+                    session            = session,
                 )
             }
         }

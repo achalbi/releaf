@@ -134,7 +134,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -165,6 +164,7 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.time.temporal.ChronoUnit
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 // ---------------------------------------------------------------- Filters & views
 
@@ -742,7 +742,7 @@ private fun StatPill(count: Int, label: String, fg: Color, bg: Color) {
     ) {
         Text(
             text = count.toString(),
-            style = AppTypography.Tag.copy(fontWeight = FontWeight.Bold),
+            style = AppTypography.Tag.copy(fontWeight = LocalFontWeight.current),
             color = fg,
         )
         Spacer(Modifier.size(3.dp))
@@ -796,7 +796,7 @@ private fun ProgressRing(
         }
         Text(
             text  = donePct,
-            style = AppTypography.Button.copy(fontWeight = FontWeight.Bold, fontSize = 13.sp),
+            style = AppTypography.Button.copy(fontWeight = LocalFontWeight.current, fontSize = 13.sp),
             color = AppColors.TextPrimary,
         )
     }
@@ -860,7 +860,7 @@ private fun FilterTabs(
                     Text(
                         text  = opt.label,
                         style = AppTypography.Button.copy(
-                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.SemiBold,
+                            fontWeight = if (isSel) LocalFontWeight.current else LocalFontWeight.current,
                         ),
                         color = fg,
                     )
@@ -1102,7 +1102,7 @@ private fun QuickDatePill(label: String, onTap: () -> Unit) {
     ) {
         Text(
             text  = label,
-            style = AppTypography.Meta.copy(fontWeight = FontWeight.SemiBold),
+            style = AppTypography.Meta.copy(fontWeight = LocalFontWeight.current),
             color = AppColors.TextSecondary,
         )
     }
@@ -1138,7 +1138,7 @@ private fun PriorityFlagChip(priority: Int, onClick: () -> Unit) {
         Spacer(Modifier.size(4.dp))
         Text(
             text  = chipLabel,
-            style = AppTypography.Meta.copy(fontWeight = FontWeight.SemiBold),
+            style = AppTypography.Meta.copy(fontWeight = LocalFontWeight.current),
             color = fg,
         )
     }
@@ -1217,7 +1217,7 @@ private fun DueDateChip(
         Spacer(Modifier.size(4.dp))
         Text(
             text  = label,
-            style = AppTypography.Meta.copy(fontWeight = FontWeight.SemiBold),
+            style = AppTypography.Meta.copy(fontWeight = LocalFontWeight.current),
             color = fg,
         )
         if (parsed != null) {
@@ -1338,7 +1338,7 @@ private fun TaskRow(
             Text(
                 text = task.title,
                 style = AppTypography.Body.copy(
-                    fontWeight = if (task.completed) FontWeight.Normal else FontWeight.SemiBold,
+                    fontWeight = if (task.completed) LocalFontWeight.current else LocalFontWeight.current,
                 ),
                 color = if (task.completed) AppColors.TextSecondary else AppColors.TextPrimary,
                 textDecoration = if (task.completed) TextDecoration.LineThrough else null,
@@ -1535,7 +1535,7 @@ private fun EditTaskSheet(
                     value = title,
                     onValueChange = { title = it },
                     singleLine = true,
-                    textStyle = AppTypography.Body.copy(color = AppColors.TextPrimary, fontWeight = FontWeight.SemiBold),
+                    textStyle = AppTypography.Body.copy(color = AppColors.TextPrimary, fontWeight = LocalFontWeight.current),
                     cursorBrush = SolidColor(AppAccent.primary),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1857,7 +1857,7 @@ private fun ReminderChip(
         Spacer(Modifier.size(4.dp))
         Text(
             text  = label,
-            style = AppTypography.Meta.copy(fontWeight = FontWeight.SemiBold),
+            style = AppTypography.Meta.copy(fontWeight = LocalFontWeight.current),
             color = fg,
         )
         if (reminder != null) {
@@ -2049,7 +2049,7 @@ private fun SectionHeader(
         ) {
             Text(
                 text  = count.toString(),
-                style = AppTypography.Tag.copy(fontWeight = FontWeight.Bold),
+                style = AppTypography.Tag.copy(fontWeight = LocalFontWeight.current),
                 color = tint,
             )
         }

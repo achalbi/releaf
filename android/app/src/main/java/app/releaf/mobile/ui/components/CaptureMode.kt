@@ -15,7 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.DocumentScanner
-import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Eco
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PersonOutline
@@ -26,7 +26,12 @@ enum class CaptureMode(
     val subtitle: String,
     val icon: ImageVector,
 ) {
-    Overview("Overview",       "All sections at a glance", Icons.Filled.GridView),
+    // Overview is the page's "everything at a glance" tab; the leaf
+    // is Releaf's brand glyph (see BRAND_BRIEF.md), so the overview
+    // tab carries it. Active state fills the leaf onto the
+    // accent-palette square; inactive state shows the same glyph in
+    // the default text color.
+    Overview("Overview",       "All sections at a glance", Icons.Filled.Eco),
     Photos  ("Photos",         "Camera or upload",         Icons.Filled.CameraAlt),
     Voice   ("Voice note",     "Record audio",             Icons.Filled.Mic),
     Todo    ("To-do",          "Quick checklist item",     Icons.Filled.Checklist),

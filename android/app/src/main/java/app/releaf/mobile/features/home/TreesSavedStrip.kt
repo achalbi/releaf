@@ -44,13 +44,13 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
+import app.releaf.mobile.ui.theme.LocalFontWeight
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -68,14 +68,16 @@ data class TreesSavedMetrics(
     val scans: Int = 0,
     val voice: Int = 0,
     val contacts: Int = 0,
+    val locations: Int = 0,
 ) {
-    val total: Int get() = notes + photos + scans + voice + contacts
+    val total: Int get() = notes + photos + scans + voice + contacts + locations
     val trees: Double get() = total.toDouble() / CAPTURES_PER_TREE
     val progressToNextTree: Double
         get() = (total % CAPTURES_PER_TREE.toInt()).toDouble() / CAPTURES_PER_TREE
 
     companion object {
-        const val CAPTURES_PER_TREE: Double = 8000.0
+        /** ~8,333 sheets ≈ 1 tree (Conservatree heuristic). */
+        const val CAPTURES_PER_TREE: Double = 8333.0
     }
 }
 
@@ -120,10 +122,10 @@ fun TreesSavedStrip(
                 verticalAlignment = Alignment.Bottom,
             ) {
                 androidx.compose.material3.Text(
-                    text = "%.1f".format(displayed),
+                    text = formatTrees(displayed),
                     color = AppColors.ThemeGreenDeep,
                     fontSize = 30.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = LocalFontWeight.current,
                 )
                 androidx.compose.material3.Text(
                     text = "trees saved",
@@ -131,8 +133,12 @@ fun TreesSavedStrip(
                     color = AppColors.TextSecondary,
                 )
             }
+            // The total spans both notebook pages AND notepad entries
+            // (plus their attachments + contacts + locations) — the
+            // "kept digital" copy framing captures the user impact: each
+            // count is a paper page that didn't get printed.
             androidx.compose.material3.Text(
-                text = "${formatCount(metrics.total)} captures · notes, photos, scans, voice, contacts",
+                text = "${formatCount(metrics.total)} captures kept digital",
                 style = AppTypography.Tag,
                 color = AppColors.TextTertiary,
                 maxLines = 1,
@@ -242,3 +248,8 @@ private fun formatCount(value: Int): String {
     }
     return out.toString()
 }
+
+/** Trees number formatter — up to 3 decimal places, trailing zeros
+ *  dropped (so "3.2", "3.25", "3.251" but never "3.200"). */
+private fun formatTrees(value: Float): String =
+    "%.3f".format(value).trimEnd('0').trimEnd('.')

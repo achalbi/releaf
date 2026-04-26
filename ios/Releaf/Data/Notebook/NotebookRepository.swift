@@ -290,7 +290,11 @@ public final class NotebookRepository: @unchecked Sendable {
         row.title = entity.title.trimmingCharacters(in: .whitespacesAndNewlines)
         row.updatedAt = IsoClock.nowIso()
         row.dirty = true
-        try await dbQueue.write { db in try row.update(db) }
+        // Capture an immutable snapshot before crossing the actor
+        // boundary — `var` capture in @Sendable closures is a Swift 6
+        // concurrency error.
+        let snapshot = row
+        try await dbQueue.write { db in try snapshot.update(db) }
     }
 
     // MARK: - Soft delete (cascade)

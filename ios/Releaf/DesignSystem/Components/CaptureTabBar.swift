@@ -1,64 +1,110 @@
 /*
  * CaptureTabBar.swift
  *
- * Row of 7 icon buttons inside page detail:
+ * Segmented-picker pill for the page editor tabs:
  *   Overview · Photos · Voice · To-do · Scans · Contacts · Location
  *
- * - Active tab: filled coral rounded rectangle, white icon.
- * - Inactive : transparent, dark-brown icon, no label on mobile.
- * - 1pt canvas-tinted bottom border separates the bar from content.
- * - Spacing is tuned so all 7 tabs fit on the narrowest phone widths
- *   we support (iPhone SE at 375pt). The horizontal ScrollView
- *   wrapper stays as a safety net for locale/dynamic-type edge
- *   cases, but in practice nothing scrolls on production devices.
+ * Visual: a rounded-rect Card-toned pill with seven equal-weight icon
+ * segments. A single rounded-rect indicator sits behind the icons and
+ * SLIDES between segments via a spring animation when the selection
+ * changes — mirrors the Android `CaptureTabBar` pattern. The
+ * indicator's fill is the user's active accent palette
+ * (`@Environment(\.accentPalette).primary`) so a green-themed notebook
+ * gets a green active tab without each notebook overriding the bar.
  *
- * Ported from Inkcreate mobile DS.
+ * No horizontal scroll — at 360pt width seven equal-weight segments
+ * fit cleanly inside the pill with 4pt gutters.
  */
 
 import SwiftUI
 
+// Inner height of the segmented row. The active indicator inside
+// matches this height. Was 36 originally; the tile felt undersized at
+// the first/last tab so it was bumped to 42.
+private let segmentInnerHeight: CGFloat = 42
+
 public struct CaptureTabBar: View {
     private let modes: [CaptureMode]
     @Binding private var selected: CaptureMode
+    /// Optional override for the active-tile fill color. When nil,
+    /// the bar falls back to the global accent palette set on the
+    /// environment. Used by PageDetail to thread the parent
+    /// notebook's color into the switcher so the whole surface
+    /// reads as one family.
+    private let accentOverride: Color?
+
+    @Environment(\.accentPalette) private var accent
 
     public init(
         modes: [CaptureMode] = CaptureMode.allCases,
-        selected: Binding<CaptureMode>
+        selected: Binding<CaptureMode>,
+        accentOverride: Color? = nil
     ) {
         self.modes = modes
         self._selected = selected
+        self.accentOverride = accentOverride
     }
 
     public var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            // Tight layout so all 7 tabs fit on a 375pt-wide screen
-            // without scrolling: 7 × 44 (buttons) + 6 × 4 (gaps) +
-            // 2 × 12 (side padding) = 356, leaves 19pt of buffer.
-            HStack(spacing: AppSpacing.s1) {
-                ForEach(modes) { mode in
-                    CaptureTabButton(
-                        mode: mode,
-                        isSelected: selected == mode,
-                        onTap: {
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                                selected = mode
-                            }
+        // Defensive: an empty `modes` list would break the divide
+        // below. Not expected in production — `CaptureMode.allCases`
+        // is never empty — but cheap to guard.
+        guard !modes.isEmpty else { return AnyView(EmptyView()) }
+
+        let selectedIndex = max(modes.firstIndex(of: selected) ?? 0, 0)
+
+        // GeometryReader gives us the inner padded width of the pill
+        // so the indicator and the segment cells measure against the
+        // same canvas — offsets line up to the pixel.
+        return AnyView(
+            GeometryReader { geo in
+                let segmentWidth = geo.size.width / CGFloat(modes.count)
+                ZStack(alignment: .topLeading) {
+                    // Sliding indicator. Renders behind the icon row
+                    // so the icon's tint flips on the
+                    // currently-selected cell. `.animation` watches
+                    // `selected` so any selection change springs the
+                    // offset to the new segment.
+                    //
+                    // Radius is `AppRadius.md` (12pt) — chosen so the
+                    // indicator sits concentrically inside the outer
+                    // pill (`AppRadius.lg` = 16pt) with the 4pt
+                    // gutter accounting for the 4pt difference. At
+                    // `sm` the corners read as too sharp against the
+                    // softer outer pill, most visibly when the
+                    // indicator parks at the first or last tab.
+                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        .fill(accentOverride ?? accent.primary)
+                        .frame(width: segmentWidth, height: geo.size.height)
+                        .offset(x: segmentWidth * CGFloat(selectedIndex))
+                        .animation(
+                            .spring(response: 0.32, dampingFraction: 1.0),
+                            value: selected
+                        )
+
+                    // Tap-targets + icons. Each segment claims equal
+                    // weight so the indicator's geometry
+                    // (segmentWidth) matches the segment's own bounds.
+                    HStack(spacing: 0) {
+                        ForEach(modes) { mode in
+                            CaptureTabButton(
+                                mode: mode,
+                                isSelected: selected == mode,
+                                onTap: { selected = mode }
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
-                    )
+                    }
                 }
             }
-            .padding(.horizontal, AppSpacing.s3)
-            .padding(.vertical, AppSpacing.s2)
-        }
-        .background(
-            Rectangle()
-                .fill(AppColors.canvas)
-                .overlay(
-                    Rectangle()
-                        .frame(height: 1)
-                        .foregroundColor(AppColors.borderDefault),
-                    alignment: .bottom
-                )
+            .frame(height: segmentInnerHeight)
+            .padding(AppSpacing.s1)
+            .background(AppColors.cardSolid.opacity(0.55))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                    .stroke(AppColors.borderDefault, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
         )
     }
 }
@@ -71,15 +117,15 @@ private struct CaptureTabButton: View {
     let onTap: () -> Void
 
     var body: some View {
+        // Icon-only tap target. The active fill lives on the sliding
+        // indicator behind this layer — the button itself stays
+        // transparent so the indicator shows through with the
+        // selected tint flipped via `foregroundColor`.
         Button(action: onTap) {
             Image(systemName: mode.systemIcon)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 18, weight: isSelected ? .semibold : .regular))
                 .foregroundColor(isSelected ? AppColors.textOnAccent : AppColors.textPrimary)
-                .frame(width: 44, height: 36)
-                .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                        .fill(isSelected ? AppColors.coral : Color.clear)
-                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -92,20 +138,30 @@ private struct CaptureTabButton: View {
 struct CaptureTabBar_Previews: PreviewProvider {
     struct Host: View {
         @State private var mode: CaptureMode = .overview
+        let palette: AccentPalette
         var body: some View {
             VStack(spacing: AppSpacing.s4) {
                 CaptureTabBar(selected: $mode)
+                    .accentPalette(palette)
                 Text("Selected: \(mode.title)")
                     .font(AppText.meta)
                     .foregroundColor(AppColors.textSecondary)
                 Spacer()
             }
+            .padding()
             .background(AppColors.canvas)
         }
     }
 
     static var previews: some View {
-        Host().frame(width: 390, height: 200)
+        Group {
+            Host(palette: AccentPalettes.green)
+                .frame(width: 360, height: 200)
+                .previewDisplayName("Green palette (notebook themed)")
+            Host(palette: AccentPalettes.coral)
+                .frame(width: 360, height: 200)
+                .previewDisplayName("Coral palette (default)")
+        }
     }
 }
 #endif

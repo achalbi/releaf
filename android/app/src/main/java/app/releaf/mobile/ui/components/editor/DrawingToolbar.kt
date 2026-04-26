@@ -49,13 +49,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.data.notebook.Stroke
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 // ---- Design tokens for the drawing surface --------------------------------
 //
@@ -379,7 +379,7 @@ private fun TextModeButton(
     ) {
         Text(
             text  = "T",
-            style = AppTypography.Button.copy(fontWeight = FontWeight.Bold),
+            style = AppTypography.Button.copy(fontWeight = LocalFontWeight.current),
             color = tint,
         )
     }
@@ -458,7 +458,7 @@ private fun ShadeChip(
     ) {
         Text(
             text  = "${(shade * 100).toInt()}",
-            style = AppTypography.Meta.copy(fontWeight = FontWeight.SemiBold),
+            style = AppTypography.Meta.copy(fontWeight = LocalFontWeight.current),
             color = if (shade > 0.45f) Color.White else AppColors.TextPrimary,
         )
     }

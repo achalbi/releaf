@@ -80,22 +80,29 @@ class ContactDirectoryRepository(
         updated: Instant?,
         bucket: MutableMap<String, DirectoryBuilder>,
     ) {
+        // A single Android Contact can carry both a mobile phone and
+        // a landline. Treat them as distinct entries in the phones
+        // list so both show up in the picker.
+        val contactPhones = listOfNotNull(
+            c.phone?.trim()?.ifEmpty { null },
+            c.landline?.trim()?.ifEmpty { null },
+        )
         val signature = identitySignature(
             name  = c.name,
-            phone = c.phone,
+            phone = contactPhones.firstOrNull(),
             email = c.email,
         )
         val builder = bucket.getOrPut(signature) {
             DirectoryBuilder(
                 signature    = signature,
                 name         = c.name.trim(),
-                phone        = c.phone?.trim()?.ifEmpty { null },
                 email        = c.email?.trim()?.ifEmpty { null },
                 organization = c.organization?.trim()?.ifEmpty { null },
-                notes        = null, // iOS NotepadContact has no notes; Android Contact doesn't either
+                notes        = null,
             )
         }
         builder.occurrences += 1
+        for (phone in contactPhones) builder.addPhone(phone)
         if (updated != null && (builder.updatedAt == null || updated > builder.updatedAt!!)) {
             builder.updatedAt = updated
         }
@@ -104,18 +111,26 @@ class ContactDirectoryRepository(
     private class DirectoryBuilder(
         val signature: String,
         val name: String,
-        val phone: String?,
         val email: String?,
         val organization: String?,
         val notes: String?,
     ) {
         var occurrences: Int = 0
         var updatedAt: Instant? = null
+        private val phones: MutableList<String> = mutableListOf()
+
+        fun addPhone(raw: String) {
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty()) return
+            phones += trimmed
+        }
 
         fun build(): DirectoryContact = DirectoryContact(
             id             = signature,
             name           = name.ifBlank { "Unnamed" },
-            phone          = phone,
+            // Final pass dedupes numbers that differ only by a
+            // country-code prefix (e.g. "+91 …" vs "…").
+            phones         = dedupePhones(phones),
             email          = email,
             organization   = organization,
             notes          = notes,

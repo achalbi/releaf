@@ -28,7 +28,12 @@ data class DirectoryContact(
      */
     val id: String,
     val name: String,
-    val phone: String? = null,
+    /**
+     * All phone numbers stored for this contact, de-duplicated and
+     * in capture order. Empty when there's no phone at all. Callers
+     * that only want the "primary" number use [phone] below.
+     */
+    val phones: List<String> = emptyList(),
     val email: String? = null,
     val organization: String? = null,
     val notes: String? = null,
@@ -37,7 +42,11 @@ data class DirectoryContact(
     val appOccurrences: Int = 0,
     /** Most recent update timestamp across the surfaces this contact appears in. */
     val updatedAt: Instant? = null,
-)
+) {
+    /** First phone number, if any — kept as a convenience for the
+     *  row-meta line and other single-phone displays. */
+    val phone: String? get() = phones.firstOrNull()
+}
 
 /** Signature used to collapse duplicate app contacts into one row. */
 internal fun identitySignature(
@@ -50,4 +59,32 @@ internal fun identitySignature(
     append(phone?.trim()?.lowercase().orEmpty())
     append('|')
     append(email?.trim()?.lowercase().orEmpty())
+}
+
+/**
+ * Collapse phone numbers that differ only by a country-code prefix
+ * (e.g. "+91 98765 43210" vs "98765 43210"). The last ten digits are
+ * the subscriber number for every major numbering plan we care about,
+ * so we group by that suffix and keep the richer representation
+ * (more digits → likely carries the country code).
+ *
+ * Preserves first-seen order for visually stable lists.
+ */
+internal fun dedupePhones(raw: List<String>): List<String> {
+    val winners = linkedMapOf<String, String>()
+    for (phone in raw) {
+        val trimmed = phone.trim()
+        if (trimmed.isEmpty()) continue
+        val digits = trimmed.filter { it.isDigit() }
+        if (digits.isEmpty()) continue
+        val key = if (digits.length >= 10) digits.takeLast(10) else digits
+        val existing = winners[key]
+        if (existing == null) {
+            winners[key] = trimmed
+        } else {
+            val existingDigits = existing.count { it.isDigit() }
+            if (digits.length > existingDigits) winners[key] = trimmed
+        }
+    }
+    return winners.values.toList()
 }

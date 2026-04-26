@@ -6,7 +6,7 @@
  * canvas with a lifted coral leaf in the center.
  *
  * Layout:
- *   [ Home ] [ Notebook ] [ 🌿 Leaf ] [ Notepad ] [ Settings ]
+ *   [ Home ] [ Library ] [ 🌿 Leaf ] [ Notepad ] [ Settings ]
  *
  * Surface:
  *   - Shape  : rounded card @ AppRadius.nav (16pt).
@@ -45,8 +45,11 @@ public struct BottomNavItem: Identifiable, Equatable {
     public static let defaults: [BottomNavItem] = [
         BottomNavItem(id: "home",     title: "Home",     systemIcon: "house"),
         // Tab id stays "notebook" so existing navigation keeps
-        // working; label + icon reflect the Shelf rename.
-        BottomNavItem(id: "notebook", title: "Shelf",    systemIcon: "rectangle.split.3x1.fill"),
+        // working; label + icon reflect the Library rename — the
+        // bookshelf-row glyph (`books.vertical`) reads as a row of
+        // book spines, the same metaphor as the prior Shelf icon
+        // but tied to the new Library label.
+        BottomNavItem(id: "notebook", title: "Library", systemIcon: "books.vertical"),
         BottomNavItem(id: "leaf",     title: "",         systemIcon: "leaf.fill", kind: .brand),
         BottomNavItem(id: "notepad",  title: "Notepad",  systemIcon: "note.text"),
         BottomNavItem(id: "settings", title: "Settings", systemIcon: "gearshape"),
@@ -94,15 +97,18 @@ public struct BottomNav: View {
                 }
             }
         }
-        .padding(.horizontal, AppSpacing.s1)
+        // Inner horizontal tightened s1 → s0 so each cell gets the full
+        // bar width to lay out its icon + label without crowding.
+        .padding(.horizontal, AppSpacing.s0)
         .padding(.vertical, AppSpacing.s1)
         .background(cardBackground)
         .overlay(hairlineBorder)
         // NOTE: no clipShape here — that would clip the lifted center leaf
         // button, which intentionally renders above the pill's top edge.
-        // Horizontal s8 keeps the bar visibly narrower than the screen;
-        // bottom s6 lifts it clear of the system nav handle.
-        .padding(.horizontal, AppSpacing.s6)
+        // Outer horizontal widened s6 → s4 so the bar fits 5 cells with
+        // text labels without crowding; bottom s6 still lifts it clear
+        // of the system nav handle.
+        .padding(.horizontal, AppSpacing.s4)
         .padding(.bottom, AppSpacing.s6)
     }
 
@@ -131,21 +137,31 @@ private struct RegularTab: View {
     let onTap: () -> Void
 
     var body: some View {
+        // Vertical icon-over-label cell — matches Android's BottomNav.kt
+        // RegularTab. When selected, both the icon and label sit inside a
+        // coralSoft rounded-rectangle pill so the tab reads as a single
+        // highlighted chip. Inactive tabs render flat — same icon + label,
+        // no background, primary-text colour.
+        let tint = isSelected ? AppColors.coral : AppColors.textPrimary
+        let bg   = isSelected ? AppColors.coralSoft : Color.clear
+
         Button(action: onTap) {
-            // Icon-only cell. Whole cell is the tap target (maxWidth: .infinity);
-            // the visible chip wraps the icon and paints a coralSoft rounded rect
-            // when selected. Title survives for VoiceOver only.
-            Image(systemName: item.systemIcon)
-                .font(.system(size: 24, weight: .regular))
-                .foregroundColor(isSelected ? AppColors.coral : AppColors.textPrimary)
-                .padding(.horizontal, AppSpacing.s2)
-                .padding(.vertical, AppSpacing.s2)
-                .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                        .fill(isSelected ? AppColors.coralSoft : Color.clear)
-                )
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
+            VStack(spacing: 2) {
+                Image(systemName: item.systemIcon)
+                    .font(.system(size: 20))
+                    .foregroundColor(tint)
+                Text(item.title)
+                    .font(AppText.tag)
+                    .foregroundColor(tint)
+            }
+            .padding(.horizontal, AppSpacing.s2)
+            .padding(.vertical, AppSpacing.s2)
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    .fill(bg)
+            )
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(item.title))
@@ -179,7 +195,7 @@ private struct BrandTab: View {
                     .fill(coralGradient)
                     .frame(width: diameter, height: diameter)
                 Image(systemName: item.systemIcon)
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 22))
                     .foregroundColor(AppColors.textOnAccent)
             }
             .appShadow(.fab)

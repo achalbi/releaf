@@ -26,8 +26,11 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -51,7 +54,9 @@ import app.releaf.mobile.auth.AuthStore
 import app.releaf.mobile.auth.GoogleAuthSession
 import app.releaf.mobile.auth.rememberGoogleSignInAction
 import app.releaf.mobile.features.auth.SignInScreen
+import app.releaf.mobile.features.callhistory.CallHistoryScreen
 import app.releaf.mobile.features.contacts.ContactsScreen
+import app.releaf.mobile.features.home.HomeDrawerContent
 import app.releaf.mobile.features.home.HomeScreen
 import app.releaf.mobile.features.home.HomeScreenVariant1
 import app.releaf.mobile.features.splash.SplashScreen
@@ -87,7 +92,9 @@ import app.releaf.mobile.ui.theme.NotebookListVariant
 import app.releaf.mobile.ui.theme.ReleafCanvas
 import app.releaf.mobile.ui.theme.ReleafTheme
 import app.releaf.mobile.ui.theme.UiPreferences
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 class MainActivity : ComponentActivity() {
 
@@ -137,6 +144,10 @@ private object Routes {
     const val TASKS                 = "tasks"
     const val REMINDERS             = "reminders"
     const val CONTACTS              = "contacts"
+    /** Phase-1 activity feed — full-screen list reachable from the
+     *  Home timeline card's "See full timeline" link. */
+    const val ACTIVITY              = "activity"
+    const val CALL_HISTORY          = "call-history"
     const val REMINDER_EDIT         = "reminders/edit/{reminderId}"
 
     fun notebookDetail(id: String)      = "notebook/$id"
@@ -217,39 +228,137 @@ private fun SignedInShell(session: GoogleAuthSession, onSignOut: () -> Unit) {
     val completedAt by onboardingPrefs.completedAt.collectAsState()
     var showOnboarding by remember { mutableStateOf(completedAt == 0L) }
 
-    Scaffold(
-        // Transparent so the canvas painted by ReleafCanvas shows through.
-        containerColor = Color.Transparent,
-        bottomBar = {
-            if (showBottomBar) {
-                BottomNav(
-                    items = BottomNavItem.defaults,
-                    selectedId = Routes.selectedTabForRoute(currentRoute),
-                    onSelect = { tabId ->
-                        Routes.routeForTab(tabId)?.let { route ->
-                            if (route != currentRoute) {
-                                nav.navigate(route) {
-                                    popUpTo(Routes.HOME) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
+    // Shared drawer state — hoisted here (above Scaffold) so the
+    // drawer can slide over the bottom nav, covering the full screen
+    // from status bar to home indicator.
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+
+    // Drawer metrics — live counts from each feature's repository so
+    // the drawer's metadata lines reflect real data instead of the
+    // earlier placeholder strings.
+    val notebookCount by releafApp.notebookRepository.observeActive()
+        .map { it.size }
+        .collectAsState(initial = 0)
+    val shelfCount by releafApp.shelfRepository.observeActive()
+        .map { it.size }
+        .collectAsState(initial = 0)
+    val notepadEntries by releafApp.notepadRepository
+        .observeActive(session.userId)
+        .collectAsState(initial = emptyList())
+    val openTaskCount by releafApp.taskRepository
+        .observeOpenCount(session.userId)
+        .collectAsState(initial = 0)
+    val reminderCount by releafApp.reminderRepository
+        .observeActive(session.userId)
+        .map { it.size }
+        .collectAsState(initial = 0)
+    val contactCount by releafApp.contactDirectoryRepository
+        .observeAll(session.userId)
+        .map { it.size }
+        .collectAsState(initial = 0)
+
+    val today               = LocalDate.now().toString()
+    val todayNotepadCount   = notepadEntries.count { it.entryDate == today }
+    val librarySubtitle     = "$notebookCount books · $shelfCount shelves"
+    val notepadEntryLabel   = if (notepadEntries.size == 1) "entry" else "entries"
+    val notepadSubtitle     = "${notepadEntries.size} $notepadEntryLabel · $todayNotepadCount today"
+    val tasksSubtitle       = "$openTaskCount open"
+    val reminderLabel       = if (reminderCount == 1) "reminder" else "reminders"
+    val remindersSubtitle   = "$reminderCount $reminderLabel"
+    val contactsSubtitle    = "$contactCount in your circle"
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            // Helper closure: every drawer link should close the
+            // drawer first and then navigate. Pulled out so each
+            // wire-up is a one-line `closeAndGo { … }` instead of
+            // duplicating the boilerplate.
+            val closeAndGo: (() -> Unit) -> () -> Unit = { dest ->
+                {
+                    scope.launch { drawerState.close() }
+                    dest()
+                }
+            }
+            HomeDrawerContent(
+                session           = session,
+                librarySubtitle   = librarySubtitle,
+                notepadSubtitle   = notepadSubtitle,
+                tasksSubtitle     = tasksSubtitle,
+                remindersSubtitle = remindersSubtitle,
+                contactsSubtitle  = contactsSubtitle,
+                onClose           = { scope.launch { drawerState.close() } },
+                onOpenTimeline    = closeAndGo { nav.navigate(Routes.ACTIVITY) },
+                // Tab destinations use the same popUpTo-HOME / restoreState
+                // dance the bottom nav uses so back-stack state is preserved.
+                onOpenLibrary     = closeAndGo {
+                    nav.navigate(Routes.NOTEBOOKS) {
+                        popUpTo(Routes.HOME) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                onOpenNotepad     = closeAndGo {
+                    nav.navigate(Routes.NOTEPAD) {
+                        popUpTo(Routes.HOME) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                onOpenSettings    = closeAndGo {
+                    nav.navigate(Routes.SETTINGS) {
+                        popUpTo(Routes.HOME) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                // Drill-in destinations — plain navigate is fine; back
+                // arrow on the destination pops them off.
+                onOpenTasks       = closeAndGo { nav.navigate(Routes.TASKS) },
+                onOpenReminders   = closeAndGo { nav.navigate(Routes.REMINDERS) },
+                onOpenContacts    = closeAndGo { nav.navigate(Routes.CONTACTS) },
+                onSignOut = {
+                    scope.launch { drawerState.close() }
+                    onSignOut()
+                },
+            )
+        },
+    ) {
+        Scaffold(
+            // Transparent so the canvas painted by ReleafCanvas shows through.
+            containerColor = Color.Transparent,
+            bottomBar = {
+                if (showBottomBar) {
+                    BottomNav(
+                        items = BottomNavItem.defaults,
+                        selectedId = Routes.selectedTabForRoute(currentRoute),
+                        onSelect = { tabId ->
+                            Routes.routeForTab(tabId)?.let { route ->
+                                if (route != currentRoute) {
+                                    nav.navigate(route) {
+                                        popUpTo(Routes.HOME) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
                                 }
                             }
-                        }
-                    },
-                    onBrandTap = { showCapture = true },
-                )
-            }
-        },
-    ) { innerPadding ->
-        SignedInNavHost(
-            nav = nav,
-            session = session,
-            onSignOut = onSignOut,
-            onShowOnboarding = { showOnboarding = true },
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-        )
+                        },
+                        onBrandTap = { showCapture = true },
+                    )
+                }
+            },
+        ) { innerPadding ->
+            SignedInNavHost(
+                nav = nav,
+                session = session,
+                onSignOut = onSignOut,
+                onShowOnboarding = { showOnboarding = true },
+                onOpenDrawer = { scope.launch { drawerState.open() } },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+            )
+        }
     }
 
     if (showOnboarding) {
@@ -301,6 +410,7 @@ private fun SignedInNavHost(
     session: GoogleAuthSession,
     onSignOut: () -> Unit,
     onShowOnboarding: () -> Unit,
+    onOpenDrawer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -329,11 +439,13 @@ private fun SignedInNavHost(
                     }
                 },
                 onOpenNotepadEntry = { id -> nav.navigate(Routes.notepadEdit(id)) },
-                onOpenTasks     = { nav.navigate(Routes.TASKS) },
-                onOpenReminders = { nav.navigate(Routes.REMINDERS) },
-                onOpenContacts  = { nav.navigate(Routes.CONTACTS) },
-                onSignOut       = onSignOut,
+                onOpenTasks      = { nav.navigate(Routes.TASKS) },
+                onOpenReminders  = { nav.navigate(Routes.REMINDERS) },
+                onOpenContacts   = { nav.navigate(Routes.CONTACTS) },
+                onOpenActivityLog = { nav.navigate(Routes.ACTIVITY) },
+                onSignOut        = onSignOut,
                 onShowOnboarding = onShowOnboarding,
+                onOpenDrawer     = onOpenDrawer,
             )
         }
         composable(Routes.NOTEBOOKS) {
@@ -349,7 +461,17 @@ private fun SignedInNavHost(
                 // drive-fake routes that match the seeded volumes.
                 NotebookListVariant.Variant1 -> HomeScreenVariant1(
                     session        = session,
-                    onOpenNotebook = { id -> nav.navigate(Routes.notebookDetail(id)) },
+                    // Route to Room-backed surfaces — `ShelvesViewModel`
+                    // (which feeds HomeScreenVariant1) emits ids from
+                    // the Room `notebookRepository`, so previously
+                    // routing through `Routes.notebookDetail(id)`
+                    // (Drive-fake) handed those ids to a screen that
+                    // had no matching row, leaving the page editor
+                    // at the bottom of this flow unreachable.
+                    onOpenNotebook = { id -> nav.navigate(Routes.notebookLocalDetail(id)) },
+                    onOpenPageTodo = { id ->
+                        nav.navigate(Routes.pageLocal(id, CaptureMode.Todo))
+                    },
                     onSignOut      = onSignOut,
                 )
             }
@@ -388,16 +510,9 @@ private fun SignedInNavHost(
         }
         composable(Routes.NOTEPAD) {
             NotepadScreen(
+                session      = session,
                 onOpenEntry  = { id -> nav.navigate(Routes.notepadEdit(id)) },
                 onComposeNew = { nav.navigate(Routes.notepadEdit(NotepadEditorViewModel.NEW_ENTRY_ID)) },
-                onOpenSettings = {
-                    nav.navigate(Routes.SETTINGS) {
-                        popUpTo(Routes.HOME) { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
-                },
-                onSignOut = onSignOut,
             )
         }
         composable(Routes.SETTINGS) {
@@ -411,10 +526,29 @@ private fun SignedInNavHost(
             TasksScreen(onBack = { nav.popBackStack() })
         }
 
+        // Activity log — drill-in from the Home timeline card's
+        // "See full timeline" link. Bottom nav stays hidden via the
+        // route's absence from `topLevel`.
+        composable(Routes.ACTIVITY) {
+            app.releaf.mobile.features.activity.ActivityScreen(
+                onBack = { nav.popBackStack() },
+            )
+        }
+
         // Contacts — drill-in surface from the Home Contacts card.
         // No bottom-nav slot; back arrow returns to Home.
         composable(Routes.CONTACTS) {
-            ContactsScreen(onBack = { nav.popBackStack() })
+            ContactsScreen(
+                onBack        = { nav.popBackStack() },
+                onOpenHistory = { nav.navigate(Routes.CALL_HISTORY) },
+            )
+        }
+
+        // Call history — list of outbound calls placed from the
+        // app, with duration captured via TelephonyCallback. Entry
+        // is the phone icon on the Contacts screen header.
+        composable(Routes.CALL_HISTORY) {
+            CallHistoryScreen(onBack = { nav.popBackStack() })
         }
 
         // Reminders — same shape as Tasks. List view + per-reminder
@@ -522,6 +656,12 @@ private fun SignedInNavHost(
             val initialMode = modeName?.let {
                 runCatching { CaptureMode.valueOf(it) }.getOrNull()
             }
+            // Hero card chrome on the page editor follows the same
+            // NotebookListVariant preference the rest of the notebook
+            // surfaces use — Variant1 swaps the breadcrumb top bar
+            // for a coloured band; Classic keeps the breadcrumb.
+            val pagePrefs = UiPreferences.get(LocalContext.current)
+            val pageUiState by pagePrefs.state.collectAsState()
             PageLocalEditorScreen(
                 onBack = { nav.popBackStack() },
                 onHome = navigateHome,
@@ -533,6 +673,7 @@ private fun SignedInNavHost(
                     }
                 },
                 initialCaptureMode = initialMode,
+                useHeroHeader = pageUiState.notebookVariant == NotebookListVariant.Variant1,
             )
         }
     }

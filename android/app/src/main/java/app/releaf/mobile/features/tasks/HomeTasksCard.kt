@@ -50,7 +50,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.releaf.mobile.ReleafApp
 import app.releaf.mobile.auth.AuthState
@@ -62,6 +61,7 @@ import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 import kotlinx.coroutines.flow.flowOf
 import java.time.LocalDate
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 @Composable
 fun HomeTasksCard(onOpenTasks: () -> Unit) {
@@ -131,13 +131,13 @@ fun HomeTasksCard(onOpenTasks: () -> Unit) {
                 Spacer(Modifier.weight(1f))
                 Text(
                     text  = "${(progress * 100).toInt()}%",
-                    style = AppTypography.Tag.copy(fontWeight = FontWeight.Normal),
+                    style = AppTypography.Tag.copy(fontWeight = LocalFontWeight.current),
                     color = AppColors.TextSecondary,
                 )
             }
             Text(
                 text  = headline(open = open, done = done),
-                style = AppTypography.SectionTitle.copy(fontWeight = FontWeight.Medium),
+                style = AppTypography.SectionTitle.copy(fontWeight = LocalFontWeight.current),
                 color = AppColors.TextPrimary,
             )
             Spacer(Modifier.height(4.dp))
@@ -168,13 +168,13 @@ private fun StatInline(value: Int, label: String, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             text  = value.toString(),
-            style = AppTypography.Meta.copy(fontWeight = FontWeight.Medium),
+            style = AppTypography.Meta.copy(fontWeight = LocalFontWeight.current),
             color = color,
         )
         Spacer(Modifier.width(3.dp))
         Text(
             text  = label,
-            style = AppTypography.Tag.copy(fontWeight = FontWeight.Normal),
+            style = AppTypography.Tag.copy(fontWeight = LocalFontWeight.current),
             color = color,
         )
     }

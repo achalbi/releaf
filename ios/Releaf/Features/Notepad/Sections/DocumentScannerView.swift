@@ -14,6 +14,12 @@
  */
 
 import SwiftUI
+
+// VisionKit's `VNDocumentCameraViewController` is iOS-only. macOS
+// preview/test builds get a placeholder view at the bottom of this
+// file with the same public initializer so the rest of the Notepad
+// feature compiles.
+#if os(iOS)
 import UIKit
 import VisionKit
 
@@ -115,3 +121,27 @@ struct DocumentScannerView: UIViewControllerRepresentable {
         }
     }
 }
+
+#else
+
+// MARK: - macOS stub
+
+// macOS preview build — the real document scanner depends on
+// VisionKit which is iOS-only. Render a placeholder so the consuming
+// view hierarchy still compiles; an actual scan obviously can't run
+// here.
+struct DocumentScannerView: View {
+    let onComplete: (_ pdfURL: URL, _ previewURL: URL?) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Document scanner is iOS-only")
+                .font(.headline)
+            Button("Cancel", action: onCancel)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+#endif

@@ -29,7 +29,7 @@ public struct HomeTasksCard: View {
                         .fill(accent.soft)
                         .frame(width: 44, height: 44)
                     Text("✓")
-                        .font(.system(size: 22, weight: .bold))
+                        .font(.system(size: 22))
                         .foregroundStyle(accent.primary)
                 }
 
@@ -48,7 +48,7 @@ public struct HomeTasksCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Text("→")
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.system(size: 20))
                     .foregroundStyle(accent.primary)
             }
             .padding(AppSpacing.s4)

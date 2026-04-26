@@ -209,7 +209,7 @@ private struct QuickAddRow: View {
     private var priorityChip: some View {
         Button { priority = (priority + 1) % 4 } label: {
             Text(priorityLabel(priority))
-                .font(AppText.meta.weight(.semibold))
+                .font(AppText.meta.weight(.light))
                 .foregroundStyle(priority == 0 ? AppColors.textSecondary : accent.primary)
                 .padding(.horizontal, AppSpacing.s3)
                 .padding(.vertical, 6)
@@ -226,10 +226,10 @@ private struct QuickAddRow: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11))
                     .foregroundStyle(dueDate == nil ? AppColors.textSecondary : accent.primary)
                 Text(dueDate.map { formatShortDate($0) } ?? "Due date")
-                    .font(AppText.meta.weight(.semibold))
+                    .font(AppText.meta.weight(.light))
                     .foregroundStyle(dueDate == nil ? AppColors.textSecondary : accent.primary)
             }
             .padding(.horizontal, AppSpacing.s3)
@@ -246,7 +246,7 @@ private struct QuickAddRow: View {
         return Button(action: commit) {
             HStack(spacing: 4) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 12))
                     .foregroundStyle(canAdd ? .white : AppColors.textSecondary)
                 Text("Add")
                     .font(AppText.button)
@@ -292,7 +292,7 @@ private struct TaskRow: View {
                     if task.completed {
                         Circle().fill(accent.primary).frame(width: 22, height: 22)
                         Text("✓")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 12))
                             .foregroundStyle(.white)
                     }
                 }

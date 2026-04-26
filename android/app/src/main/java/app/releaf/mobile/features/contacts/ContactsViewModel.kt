@@ -82,8 +82,16 @@ class ContactsViewModel(
         _permissionGranted,
     ) { q, appContacts, deviceHits, granted ->
         val trimmed = q.trim()
-        val filtered = if (trimmed.isEmpty()) appContacts
-        else appContacts.filter { it.matches(trimmed) }
+        val filtered = if (trimmed.isEmpty()) {
+            appContacts
+        } else {
+            // Rank contacts whose *name* starts with the query
+            // above contacts that merely contain it elsewhere. The
+            // secondary key keeps each rank bucket alphabetical.
+            appContacts
+                .filter { it.matches(trimmed) }
+                .sortedByMatchRank(trimmed)
+        }
         ContactsUiState(
             query                    = q,
             isLoading                = false,
@@ -128,7 +136,11 @@ class ContactsViewModel(
         }
         deviceSearchJob = viewModelScope.launch {
             kotlinx.coroutines.delay(150)
-            _deviceContacts.value = deviceContactsProvider.search(q)
+            // Device search returns a LIKE-style hit list; reorder
+            // so names starting with the query appear before
+            // mid-string matches, mirroring the app-contact
+            // behaviour above.
+            _deviceContacts.value = deviceContactsProvider.search(q).sortedByMatchRank(q)
         }
     }
 
@@ -149,7 +161,22 @@ class ContactsViewModel(
 
 private fun DirectoryContact.matches(query: String): Boolean {
     return name.contains(query, ignoreCase = true) ||
-        phone?.contains(query, ignoreCase = true) == true ||
+        phones.any { it.contains(query, ignoreCase = true) } ||
         email?.contains(query, ignoreCase = true) == true ||
         organization?.contains(query, ignoreCase = true) == true
+}
+
+/**
+ * Rank matching contacts so that names starting with the query
+ * surface before names that only contain the query mid-string.
+ * Each rank bucket is sorted alphabetically on the name.
+ */
+internal fun List<DirectoryContact>.sortedByMatchRank(
+    query: String,
+): List<DirectoryContact> {
+    val lc = query.lowercase()
+    return sortedWith(
+        compareBy<DirectoryContact> { !it.name.lowercase().startsWith(lc) }
+            .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name }
+    )
 }

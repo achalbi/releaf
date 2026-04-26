@@ -186,13 +186,17 @@ public final class SyncRepository: @unchecked Sendable {
             )
         } catch {
             failed += 1
+            // Snapshot to a local `let` before the @Sendable closure —
+            // capturing `failed` (a mutable local) is a Swift 6
+            // concurrency error.
+            let pending = failed
             // On manifest-upload failure, still record what we did locally;
             // next pass will try again.
             await MainActor.run {
                 stateStore.recordSuccess(
                     lastFullSyncAt: nowIso,
                     manifestChecksum: "",
-                    pendingCount: failed
+                    pendingCount: pending
                 )
             }
             return SyncResult(
@@ -203,11 +207,13 @@ public final class SyncRepository: @unchecked Sendable {
 
         // 8. update local state store
         let manifestHash = sha256Hex(manifestBytes)
+        // Same `let` snapshot pattern as the catch branch above.
+        let pending = failed
         await MainActor.run {
             stateStore.recordSuccess(
                 lastFullSyncAt: nowIso,
                 manifestChecksum: manifestHash,
-                pendingCount: failed
+                pendingCount: pending
             )
         }
 

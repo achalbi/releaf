@@ -51,7 +51,6 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.releaf.mobile.data.common.Uuidv7
@@ -59,6 +58,7 @@ import app.releaf.mobile.data.notebook.TextBox
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppSpacing
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 /** Max horizontal size a single text box grows to before wrapping. */
 private val MaxBoxWidth = 240.dp
@@ -193,7 +193,7 @@ private fun TextBoxItem(
     val textStyle = TextStyle(
         color      = textColor,
         fontSize   = box.fontSp.sp,
-        fontWeight = FontWeight.Normal,
+        fontWeight = LocalFontWeight.current,
     )
 
     // No card-chrome around the text — we want the typed characters

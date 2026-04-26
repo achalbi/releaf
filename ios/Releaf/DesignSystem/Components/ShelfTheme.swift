@@ -66,6 +66,22 @@ public enum ShelfTheme {
         }
     }
 
+    /// Inverse of the token-to-hex conversion in
+    /// `NotebookTabViewModel.themeHex(forToken:)` — maps the four
+    /// leaf-theme primary hexes back to their token name. Anything
+    /// that doesn't match returns nil so the caller can fall through
+    /// to the default chrome.
+    public static func token(forHex hex: String?) -> String? {
+        let normalized = hex?.uppercased().replacingOccurrences(of: "#", with: "")
+        switch normalized {
+        case "7AA874": return "green"
+        case "E07856": return "coral"
+        case "F4C430": return "yellow"
+        case "B8956A": return "dry"
+        default:       return nil
+        }
+    }
+
     /// Pick an SF Symbol-ish glyph for the hero icon. We lean on SF
     /// Symbols that broadly match the Figma pictograms.
     public static func iconSystemName(for iconKey: String?) -> String {

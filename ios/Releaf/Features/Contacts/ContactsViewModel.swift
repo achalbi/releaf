@@ -103,13 +103,17 @@ public final class ContactsViewModel: ObservableObject {
             return
         }
         let lc = trimmed.lowercased()
-        state.filteredAppContacts = state.allAppContacts.filter { c in
+        let matches = state.allAppContacts.filter { c in
             if c.name.lowercased().contains(lc) { return true }
-            if let phone = c.phone, phone.lowercased().contains(lc) { return true }
+            if c.phones.contains(where: { $0.lowercased().contains(lc) }) { return true }
             if let email = c.email, email.lowercased().contains(lc) { return true }
             if let org = c.organization, org.lowercased().contains(lc) { return true }
             return false
         }
+        // Names that *start* with the query rank above names that
+        // only contain it mid-string. Within each bucket the list
+        // stays alphabetical.
+        state.filteredAppContacts = matches.sortedByMatchRank(query: lc)
     }
 
     private func scheduleDeviceSearch() {
@@ -123,9 +127,26 @@ public final class ContactsViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 150_000_000)
             if Task.isCancelled { return }
             let hits = await device.search(rawQuery: q)
+            let ranked = hits.sortedByMatchRank(query: q.lowercased())
             await MainActor.run {
-                self?.state.deviceContacts = hits
+                self?.state.deviceContacts = ranked
             }
+        }
+    }
+}
+
+// MARK: - Rank helper
+
+internal extension Array where Element == DirectoryContact {
+    /// Rank matching contacts so names that *start* with [query]
+    /// surface before names that only contain it mid-string.
+    /// Each rank bucket is sorted alphabetically on the name.
+    func sortedByMatchRank(query lc: String) -> [DirectoryContact] {
+        sorted { lhs, rhs in
+            let lStarts = lhs.name.lowercased().hasPrefix(lc)
+            let rStarts = rhs.name.lowercased().hasPrefix(lc)
+            if lStarts != rStarts { return lStarts }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
     }
 }

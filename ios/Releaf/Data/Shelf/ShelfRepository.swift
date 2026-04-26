@@ -69,7 +69,10 @@ public final class ShelfRepository: @unchecked Sendable {
         current.colorHex = colorHex ?? current.colorHex
         current.updatedAt = IsoClock.nowIso()
         current.dirty = true
-        try await dbQueue.write { db in try current.update(db) }
+        // Snapshot to a `let` before the @Sendable write closure —
+        // Swift 6 rejects capture-by-reference of mutable locals.
+        let snapshot = current
+        try await dbQueue.write { db in try snapshot.update(db) }
     }
 
     public func softDelete(id: String) async throws {

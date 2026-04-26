@@ -71,14 +71,14 @@ struct AddAffordance: View {
         Button(action: action) {
             HStack(spacing: AppSpacing.s3) {
                 Image(systemName: systemIcon)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 18))
                     .foregroundStyle(AppColors.coral)
                 Text(label)
                     .font(AppText.body)
                     .foregroundStyle(AppColors.textPrimary)
                 Spacer()
                 Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 16))
                     .foregroundStyle(AppColors.coral)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -94,7 +94,7 @@ struct DeleteButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 11))
                 .foregroundStyle(AppColors.textTertiary)
                 .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
@@ -373,7 +373,7 @@ private struct TodoRow: View {
         HStack(spacing: AppSpacing.s3) {
             Button(action: onToggle) {
                 Image(systemName: todo.done ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 22, weight: .regular))
+                    .font(.system(size: 22))
                     .foregroundStyle(AppColors.coral)
             }
             .buttonStyle(.plain)
@@ -705,7 +705,7 @@ private struct VoiceSectionHeader: View {
     var body: some View {
         HStack(spacing: AppSpacing.s1) {
             Image(systemName: "mic.fill")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 11))
                 .foregroundStyle(AppColors.coral)
             Text(count > 0 ? "VOICE NOTES · \(count)" : "VOICE NOTES")
                 .font(AppText.eyebrow)
@@ -732,7 +732,7 @@ private struct HeaderChevronButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13))
                 .foregroundStyle(isExpanded ? AppColors.coral : AppColors.textSecondary)
                 .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 .animation(.easeInOut(duration: 0.2), value: isExpanded)
@@ -760,7 +760,7 @@ private struct RecordPill: View {
         Button(action: action) {
             HStack(spacing: AppSpacing.s1) {
                 Image(systemName: isRecording ? "stop.fill" : "mic.fill")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12))
                 Text(isRecording ? "Stop" : "Record")
                     .font(AppText.button)
             }
@@ -860,7 +860,7 @@ private struct VoiceNoteCard: View {
                     player.toggle(uri: attachment.uri)
                 } label: {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.system(size: 20))
                         .foregroundStyle(AppColors.textOnAccent)
                         .frame(width: 48, height: 48)
                         .background(Circle().fill(AppColors.coral))
@@ -937,7 +937,7 @@ private struct VoiceNoteDetails: View {
         VStack(alignment: .leading, spacing: AppSpacing.s2) {
             HStack(spacing: AppSpacing.s2) {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 14))
                     .foregroundStyle(AppColors.coral)
                     .frame(width: 32, height: 32)
                     .background(
@@ -951,7 +951,7 @@ private struct VoiceNoteDetails: View {
 
             HStack(spacing: AppSpacing.s1) {
                 Image(systemName: "waveform")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11))
                     .foregroundStyle(AppColors.textTertiary)
                 Text(formatDurationMs(durationMs))
                     .font(AppText.meta)
@@ -960,7 +960,7 @@ private struct VoiceNoteDetails: View {
                 if let fileSizeLabel {
                     Spacer().frame(width: AppSpacing.s3 - AppSpacing.s1)
                     Image(systemName: "internaldrive")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 11))
                         .foregroundStyle(AppColors.textTertiary)
                     Text(fileSizeLabel)
                         .font(AppText.meta)
@@ -1052,7 +1052,7 @@ private struct TranscribeButton: View {
         Button(action: action) {
             HStack(spacing: AppSpacing.s1) {
                 Image(systemName: "captions.bubble")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12))
                 Text(label)
                     .font(AppText.button)
             }
@@ -1082,7 +1082,7 @@ private struct DownloadButton: View {
             if let url = shareURL {
                 ShareLink(item: url) {
                     Image(systemName: "square.and.arrow.down")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 14))
                         .foregroundStyle(AppColors.textSecondary)
                         .frame(width: 32, height: 32)
                         .background(
@@ -1097,7 +1097,7 @@ private struct DownloadButton: View {
                 // affordance rather than skipping the slot so the card
                 // layout stays consistent.
                 Image(systemName: "square.and.arrow.down")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 14))
                     .foregroundStyle(AppColors.textTertiary)
                     .frame(width: 32, height: 32)
                     .background(
@@ -1120,7 +1120,7 @@ private struct CardIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemIcon)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 14))
                 .foregroundStyle(AppColors.textSecondary)
                 .frame(width: 32, height: 32)
                 .background(
@@ -1227,7 +1227,11 @@ private final class VoiceRecorder: ObservableObject {
             try session.setCategory(
                 .playAndRecord,
                 mode: .default,
-                options: [.defaultToSpeaker, .allowBluetooth]
+                // HFP = Hands-Free Profile, the Bluetooth category
+                // AVAudioSession actually negotiates for record. The
+                // older bare-name option was deprecated in iOS 8
+                // (SDK only just started flagging it).
+                options: [.defaultToSpeaker, .allowBluetoothHFP]
             )
             try session.setActive(true)
 
@@ -1562,14 +1566,14 @@ private struct AddAffordanceLabel: View {
     var body: some View {
         HStack(spacing: AppSpacing.s3) {
             Image(systemName: systemIcon)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 18))
                 .foregroundStyle(AppColors.coral)
             Text(label)
                 .font(AppText.body)
                 .foregroundStyle(AppColors.textPrimary)
             Spacer()
             Image(systemName: "plus")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 16))
                 .foregroundStyle(AppColors.coral)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1722,7 +1726,7 @@ private struct AttachmentTile: View {
 
             Button(action: onRemove) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 10))
                     .foregroundStyle(.white)
                     .frame(width: 22, height: 22)
                     .background(

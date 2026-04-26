@@ -28,8 +28,10 @@ import app.releaf.mobile.data.notebook.PageEntity
 import app.releaf.mobile.data.notebook.PageRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -124,6 +126,43 @@ class ChapterLocalDetailViewModel(
 
     fun undoDeletePage(id: String) {
         viewModelScope.launch { pageRepository.undoSoftDeletePage(id) }
+    }
+
+    /* ---------- chapter archive flow ---------- */
+
+    private val _confirmingArchive = MutableStateFlow(false)
+    val confirmingArchive: StateFlow<Boolean> = _confirmingArchive.asStateFlow()
+
+    private val _archiveToast = MutableStateFlow<String?>(null)
+    val archiveToast: StateFlow<String?> = _archiveToast.asStateFlow()
+
+    /** Step 1 — surface a confirm dialog. The screen binds an
+     *  AlertDialog to [confirmingArchive]. */
+    fun archiveChapter() {
+        if (state.value.chapter == null) return
+        _confirmingArchive.value = true
+    }
+
+    fun cancelArchive() {
+        _confirmingArchive.value = false
+    }
+
+    /** Step 2 — actually archive. Reuses the existing local
+     *  `softDeleteChapter` since archive is a soft delete in this
+     *  schema; downstream flows pick up the change via Room
+     *  observations. */
+    fun confirmArchiveChapter(onArchived: () -> Unit) {
+        val id = state.value.chapter?.id ?: return
+        _confirmingArchive.value = false
+        viewModelScope.launch {
+            chapterRepository.softDeleteChapter(id)
+            _archiveToast.value = "Chapter archived"
+            onArchived()
+        }
+    }
+
+    fun consumeArchiveToast() {
+        _archiveToast.value = null
     }
 
     companion object {

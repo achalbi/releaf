@@ -44,6 +44,10 @@ public struct NotebookEntity: Codable, FetchableRecord, PersistableRecord,
     public var dirty: Bool
     /// ISO-8601 UTC when soft-deleted; nil = active.
     public var deletedAt: String?
+    /// Soft-archive timestamp (separate from `deletedAt`). Added in
+    /// v6 — non-nil means the notebook lives in the archive bin and
+    /// is filtered out of the active notebook list.
+    public var archivedAt: String?
 
     public enum CodingKeys: String, CodingKey {
         case id
@@ -59,6 +63,7 @@ public struct NotebookEntity: Codable, FetchableRecord, PersistableRecord,
         case updatedAt    = "updated_at"
         case dirty
         case deletedAt    = "deleted_at"
+        case archivedAt   = "archived_at"
     }
 
     public init(
@@ -74,7 +79,8 @@ public struct NotebookEntity: Codable, FetchableRecord, PersistableRecord,
         createdAt: String,
         updatedAt: String,
         dirty: Bool = true,
-        deletedAt: String? = nil
+        deletedAt: String? = nil,
+        archivedAt: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -89,5 +95,6 @@ public struct NotebookEntity: Codable, FetchableRecord, PersistableRecord,
         self.updatedAt = updatedAt
         self.dirty = dirty
         self.deletedAt = deletedAt
+        self.archivedAt = archivedAt
     }
 }

@@ -87,7 +87,7 @@ public struct PagePreviewRow: View {
             RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
                 .fill(AppColors.coralSoft)
             Image(systemName: systemIcon)
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 16))
                 .foregroundColor(AppColors.coralDeep)
         }
         .frame(width: 36, height: 36)

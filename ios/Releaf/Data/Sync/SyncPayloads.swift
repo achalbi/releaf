@@ -23,7 +23,14 @@ import Foundation
 /// Pass-through Codable wrapper for an embedded JSON value (array,
 /// object, string, number, bool, null). Used for payload fields that
 /// carry the on-disk JSON string verbatim.
-public struct JSONAny: Codable, Equatable, Sendable {
+///
+/// Conforms to `Sendable` via `@unchecked` because the underlying
+/// storage is `Any` (Foundation JSON's untyped output) but every
+/// constructed value is one of: `NSNull`, `Bool`, `Int64`, `Double`,
+/// `String`, `[Any]`, `[String: Any]` — all immutable value types
+/// or NSNull. We never mutate `value` after init, so concurrent
+/// reads are safe.
+public struct JSONAny: Codable, Equatable, @unchecked Sendable {
     public let value: Any
 
     public init(_ value: Any) { self.value = value }
@@ -443,6 +450,11 @@ public struct NotepadEntryPayloadV2: Codable, Equatable, Sendable {
     public let entryDate: String
     public let projectId: String?
     public let title: String?
+    /// Optional free-text subtitle. Decodes as nil when older payloads
+    /// (predating the v2_notepad_description migration) omit the field
+    /// — Swift Codable's auto-synth treats absent keys as nil for
+    /// Optional types. Additive change, no manifest bump.
+    public let description: String?
     public let notes: String
     public let contacts: JSONAny
     public let locations: JSONAny
@@ -459,7 +471,9 @@ public struct NotepadEntryPayloadV2: Codable, Equatable, Sendable {
         case userId            = "user_id"
         case entryDate         = "entry_date"
         case projectId         = "project_id"
-        case title, notes, contacts, locations, todos, attachments
+        case title
+        case description
+        case notes, contacts, locations, todos, attachments
         case sketchStrokes     = "sketch_strokes"
         case subPages          = "sub_pages"
         case allowBlankContent = "allow_blank_content"
@@ -476,6 +490,7 @@ public extension NotepadEntry {
             entryDate: entryDate,
             projectId: projectId,
             title: title,
+            description: description,
             notes: notes,
             contacts: JSONAny.parseOrEmptyArray(contacts),
             locations: JSONAny.parseOrEmptyArray(locations),
@@ -498,6 +513,7 @@ public extension NotepadEntryPayloadV2 {
             entryDate: entryDate,
             projectId: projectId,
             title: title,
+            description: description,
             notes: notes,
             contacts: contacts.toCompactString(),
             locations: locations.toCompactString(),

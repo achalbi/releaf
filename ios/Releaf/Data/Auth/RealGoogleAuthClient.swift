@@ -31,6 +31,12 @@
  */
 
 import Foundation
+
+// The real Google Sign-In flow is UIKit-bound (it needs a presenting
+// `UIViewController`), so the production class is iOS-only. macOS
+// preview/test builds get a stub at the bottom of this file that
+// satisfies the `GoogleAuthClient` protocol but throws on every call.
+#if os(iOS)
 import UIKit
 import GoogleSignIn
 
@@ -55,35 +61,27 @@ public final class RealGoogleAuthClient: GoogleAuthClient, @unchecked Sendable {
             throw GoogleAuthError.underlying("Google Sign-In not configured")
         }
         let presenter = try await Self.resolvePresenter()
-        let result = try await MainActor.run {
-            // SDK API is MainActor-only on iOS 16+; hop over.
-            GIDSignIn.sharedInstance
+        // GoogleSignIn-iOS 7.x ships a native `async throws` overload
+        // of `signIn(withPresenting:hint:additionalScopes:)` — use it
+        // directly instead of bridging the callback variant through
+        // `withCheckedThrowingContinuation`. The async overload is
+        // already MainActor-isolated, so awaiting it from this method
+        // does the actor hop for us.
+        do {
+            let gidResult = try await GIDSignIn.sharedInstance.signIn(
+                withPresenting: presenter,
+                hint: nil,
+                additionalScopes: [Self.driveFileScope]
+            )
+            return try mapToSession(user: gidResult.user)
+        } catch let err as NSError where err.domain == kGIDSignInErrorDomain
+            && err.code == GIDSignInError.canceled.rawValue {
+            throw GoogleAuthError.cancelled
+        } catch let err as GoogleAuthError {
+            throw err
+        } catch {
+            throw GoogleAuthError.underlying((error as NSError).localizedDescription)
         }
-
-        let gidResult: GIDSignInResult = try await withCheckedThrowingContinuation { cont in
-            Task { @MainActor in
-                GIDSignIn.sharedInstance.signIn(
-                    withPresenting: presenter,
-                    hint: nil,
-                    additionalScopes: [Self.driveFileScope]
-                ) { r, err in
-                    if let err = err as NSError? {
-                        if err.code == GIDSignInError.canceled.rawValue {
-                            cont.resume(throwing: GoogleAuthError.cancelled)
-                        } else {
-                            cont.resume(throwing: GoogleAuthError.underlying(err.localizedDescription))
-                        }
-                        return
-                    }
-                    guard let r = r else {
-                        cont.resume(throwing: GoogleAuthError.underlying("Empty sign-in result"))
-                        return
-                    }
-                    cont.resume(returning: r)
-                }
-            }
-        }
-        return try mapToSession(user: gidResult.user)
     }
 
     public func refresh(_ session: GoogleAuthSession) async throws -> GoogleAuthSession {
@@ -166,3 +164,27 @@ public final class RealGoogleAuthClient: GoogleAuthClient, @unchecked Sendable {
         return vc
     }
 }
+
+#else
+
+// macOS stub. Lets `ReleafData` build on Mac for SwiftUI previews +
+// the SwiftPM test target. Real authentication runs only on iOS.
+public final class RealGoogleAuthClient: GoogleAuthClient, @unchecked Sendable {
+    public init(iosClientId: String? = nil) {}
+
+    public func signIn() async throws -> GoogleAuthSession {
+        throw GoogleAuthError.underlying("Google Sign-In is iOS-only")
+    }
+
+    public func refresh(_ session: GoogleAuthSession) async throws -> GoogleAuthSession {
+        throw GoogleAuthError.underlying("Google Sign-In is iOS-only")
+    }
+
+    public func signOut() async {}
+
+    public func restorePreviousSignIn() async throws -> GoogleAuthSession {
+        throw GoogleAuthError.underlying("Google Sign-In is iOS-only")
+    }
+}
+
+#endif

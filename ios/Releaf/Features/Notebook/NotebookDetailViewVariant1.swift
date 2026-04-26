@@ -156,7 +156,7 @@ public struct NotebookDetailViewVariant1: View {
                     .foregroundStyle(palette.onBackground)
 
                 Text(notebook.title)
-                    .font(.system(size: 42, weight: .bold, design: .serif))
+                    .font(.system(size: 42, design: .serif))
                     .foregroundStyle(palette.onBackground)
                     .lineLimit(2)
                     .minimumScaleFactor(0.7)
@@ -197,7 +197,7 @@ public struct NotebookDetailViewVariant1: View {
                 .tracking(AppLetterSpacing.eyebrow)
                 .foregroundStyle(palette.onBackgroundMuted)
             Text(value)
-                .font(.system(size: 22, weight: .semibold, design: .serif))
+                .font(.system(size: 22, design: .serif))
                 .foregroundStyle(palette.onBackground)
         }
     }
@@ -261,7 +261,7 @@ private struct ChapterRow: View {
     private var rowContent: some View {
         HStack(alignment: .top, spacing: AppSpacing.s4) {
                 Text(String(format: "%02d", chapter.position))
-                    .font(.system(size: 38, weight: .bold, design: .serif))
+                    .font(.system(size: 38, design: .serif))
                     .foregroundStyle(isCurrent ? AppColors.textPrimary : palette.background.opacity(0.55))
                     .frame(width: 64, alignment: .leading)
 

@@ -152,6 +152,13 @@ public struct Chapter: Identifiable, Equatable, Sendable {
     public var position: Int
     public var updatedAt: Date
     public var pages: [PageSummary]
+    /// Soft-delete timestamp. Non-nil means the chapter is in
+    /// archive — the list filters it out by default; the archive
+    /// view surfaces it with a Restore affordance.
+    public var archivedAt: Date?
+
+    /// `archivedAt != nil` shorthand.
+    public var isArchived: Bool { archivedAt != nil }
 
     public init(
         id: String,
@@ -159,7 +166,8 @@ public struct Chapter: Identifiable, Equatable, Sendable {
         title: String,
         position: Int = 0,
         updatedAt: Date = Date(),
-        pages: [PageSummary] = []
+        pages: [PageSummary] = [],
+        archivedAt: Date? = nil
     ) {
         self.id = id
         self.notebookId = notebookId
@@ -167,6 +175,7 @@ public struct Chapter: Identifiable, Equatable, Sendable {
         self.position = position
         self.updatedAt = updatedAt
         self.pages = pages
+        self.archivedAt = archivedAt
     }
 }
 
@@ -241,6 +250,13 @@ public struct Page: Identifiable, Equatable, Sendable {
     public var locations: [LocationPin]
     /// Free-form tags shown as pills on variant-1 page views.
     public var tags: [String]
+    /// Soft-delete timestamp. Non-nil means the page is in archive
+    /// — it still renders, but the page detail surfaces an
+    /// ArchivedBanner with a Restore action and the chrome dims.
+    public var archivedAt: Date?
+
+    /// `archivedAt != nil` shorthand. Read-only convenience.
+    public var isArchived: Bool { archivedAt != nil }
 
     public init(
         id: String,
@@ -256,7 +272,8 @@ public struct Page: Identifiable, Equatable, Sendable {
         scannedDocuments: [ScannedDocument] = [],
         contacts: [Contact] = [],
         locations: [LocationPin] = [],
-        tags: [String] = []
+        tags: [String] = [],
+        archivedAt: Date? = nil
     ) {
         self.id = id
         self.notebookId = notebookId
@@ -272,6 +289,7 @@ public struct Page: Identifiable, Equatable, Sendable {
         self.contacts = contacts
         self.locations = locations
         self.tags = tags
+        self.archivedAt = archivedAt
     }
 
     public var counts: PageCounts {
@@ -419,5 +437,57 @@ public struct LocationPin: Identifiable, Equatable, Sendable {
         self.longitude = longitude
         self.capturedAt = capturedAt
         self.notes = notes
+    }
+}
+
+// MARK: - PageTemplate
+
+/// A reusable page seed. Carries a small block of content that
+/// `applyTemplate(toPageId:templateId:)` writes onto an existing
+/// page. Templates are user-curated *and* app-seeded; the seed set
+/// in `FakeDriveRepository` covers the most common shapes
+/// (daily walk, recipe, meeting notes, field journal, morning pages).
+///
+/// `pre*` fields are content that the apply step prepends/concats
+/// to whatever the page already contains. Empty arrays mean
+/// "leave that section alone" — applying a template never deletes
+/// existing captures.
+public struct PageTemplate: Identifiable, Equatable, Sendable {
+    public let id: String
+    public var title: String
+    public var description: String
+    /// Lookup key into `ShelfTheme.iconSystemName` so the picker
+    /// row can render a small SF Symbol matching the template's
+    /// shape. Same registry the variant-1 shelves use.
+    public var iconKey: String?
+    /// Pre-filled note bodies — each becomes one Note when applied.
+    public var preNotes: [String]
+    /// Pre-filled todo bodies — each becomes one TodoItem when applied.
+    public var preTodos: [String]
+
+    /// Lightweight summary of what the template touches. Computed
+    /// for picker rows so users see "+ 3 todos · 1 note" before
+    /// committing.
+    public var summary: String {
+        var parts: [String] = []
+        if !preNotes.isEmpty { parts.append("\(preNotes.count) note\(preNotes.count == 1 ? "" : "s")") }
+        if !preTodos.isEmpty { parts.append("\(preTodos.count) to-do\(preTodos.count == 1 ? "" : "s")") }
+        return parts.isEmpty ? "blank scaffold" : parts.joined(separator: " · ")
+    }
+
+    public init(
+        id: String,
+        title: String,
+        description: String,
+        iconKey: String? = nil,
+        preNotes: [String] = [],
+        preTodos: [String] = []
+    ) {
+        self.id = id
+        self.title = title
+        self.description = description
+        self.iconKey = iconKey
+        self.preNotes = preNotes
+        self.preTodos = preTodos
     }
 }

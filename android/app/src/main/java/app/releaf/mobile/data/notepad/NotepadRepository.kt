@@ -25,6 +25,13 @@ import kotlinx.coroutines.flow.mapLatest
 
 class NotepadRepository(
     private val dao: NotepadDao,
+    /**
+     * Optional audit logger — supplied by ReleafApp wiring, nullable
+     * so unit tests + callers without the audit feature can still
+     * construct the repo. Every successful mutation logs one event;
+     * read paths skip the logger entirely.
+     */
+    private val auditLogger: app.releaf.mobile.data.activity.AuditLogger? = null,
 ) {
     fun observeActive(userId: String): Flow<List<NotepadEntry>> =
         dao.observeActive(userId)
@@ -74,6 +81,7 @@ class NotepadRepository(
         title: String?,
         notes: String,
         entryDate: String = IsoClock.todayLocalDate(),
+        description: String? = null,
         contacts: String = "[]",
         locations: String = "[]",
         todos: String = "[]",
@@ -82,11 +90,34 @@ class NotepadRepository(
         subPages: String = "[]",
     ): NotepadEntry {
         val now = IsoClock.nowIso()
+        val newId = Uuidv7.generate()
+
+        // Auto-seed title + description as a *pair* from the day's
+        // Ayurvedic plant — title gets the Sanskrit/Hindi name, the
+        // description gets "(commonName) epithet". We only seed when
+        // BOTH fields were left blank: mixing an authored title with
+        // an unrelated auto-description (or vice-versa) would produce
+        // internally mismatched rows. The "used for" detail lives in
+        // the editor's leaf-icon modal — not in body text.
+        val cleanedTitle       = title?.trim()?.ifEmpty { null }
+        val cleanedDescription = description?.trim()?.ifEmpty { null }
+        val seededTitle: String?
+        val seededDescription: String?
+        if (cleanedTitle == null && cleanedDescription == null) {
+            val plant = AyurvedicCatalog.forNewEntry()
+            seededTitle       = plant.name
+            seededDescription = AyurvedicCatalog.formatDescription(plant)
+        } else {
+            seededTitle       = cleanedTitle
+            seededDescription = cleanedDescription
+        }
+
         val entry = NotepadEntry(
-            id            = Uuidv7.generate(),
+            id            = newId,
             userId        = userId,
             entryDate     = entryDate,
-            title         = title?.trim()?.ifEmpty { null },
+            title         = seededTitle,
+            description   = seededDescription,
             notes         = notes,
             contacts      = contacts,
             locations     = locations,
@@ -99,6 +130,13 @@ class NotepadRepository(
             dirty         = true,
         )
         dao.upsert(entry)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Created,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.NotepadEntry,
+            entityId   = entry.id,
+            title      = entry.title ?: entry.entryDate,
+            userId     = entry.userId,
+        )
         return entry
     }
 
@@ -107,17 +145,34 @@ class NotepadRepository(
      * sync worker is the only thing allowed to clear dirty.
      */
     suspend fun save(entry: NotepadEntry) {
-        dao.upsert(
-            entry.copy(
-                title     = entry.title?.trim()?.ifEmpty { null },
-                updatedAt = IsoClock.nowIso(),
-                dirty     = true,
-            )
+        val updated = entry.copy(
+            title       = entry.title?.trim()?.ifEmpty { null },
+            description = entry.description?.trim()?.ifEmpty { null },
+            updatedAt   = IsoClock.nowIso(),
+            dirty       = true,
+        )
+        dao.upsert(updated)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Updated,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.NotepadEntry,
+            entityId   = updated.id,
+            title      = updated.title ?: updated.entryDate,
+            userId     = updated.userId,
         )
     }
 
     suspend fun softDelete(id: String) {
+        // Snapshot the title before the row is gone so the audit
+        // event keeps a useful label after the source is tombstoned.
+        val snapshot = dao.findById(id)
         dao.softDelete(id = id, nowIso = IsoClock.nowIso())
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Deleted,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.NotepadEntry,
+            entityId   = id,
+            title      = snapshot?.title ?: snapshot?.entryDate,
+            userId     = snapshot?.userId,
+        )
     }
 
     /**
@@ -152,8 +207,15 @@ class NotepadRepository(
         val firstStrokesJson = mergedSubPages.firstOrNull()
             ?.strokes.orEmpty().toJsonString()
 
+        // Description: prefer primary's; fall back to secondary's only
+        // when primary has none, so a merge never silently overwrites
+        // text the user authored on the surviving row.
+        val mergedDescription = primary.description?.trim()?.ifEmpty { null }
+            ?: secondary.description?.trim()?.ifEmpty { null }
+
         val now = IsoClock.nowIso()
         val merged = primary.copy(
+            description   = mergedDescription,
             notes         = mergedNotes,
             contacts      = mergedContacts.toJsonString(),
             locations     = mergedLocations.toJsonString(),
@@ -166,6 +228,20 @@ class NotepadRepository(
         )
         dao.upsert(merged)
         dao.softDelete(id = secondaryId, nowIso = now)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Merged,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.NotepadEntry,
+            entityId   = primary.id,
+            title      = primary.title ?: primary.entryDate,
+            userId     = primary.userId,
+        )
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Deleted,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.NotepadEntry,
+            entityId   = secondaryId,
+            title      = secondary.title ?: secondary.entryDate,
+            userId     = secondary.userId,
+        )
         return true
     }
 
@@ -175,5 +251,13 @@ class NotepadRepository(
      */
     suspend fun undoSoftDelete(id: String) {
         dao.restore(id = id, nowIso = IsoClock.nowIso())
+        val snapshot = dao.findById(id)
+        auditLogger?.log(
+            action     = app.releaf.mobile.data.activity.AuditAction.Restored,
+            entityType = app.releaf.mobile.data.activity.AuditEntity.NotepadEntry,
+            entityId   = id,
+            title      = snapshot?.title ?: snapshot?.entryDate,
+            userId     = snapshot?.userId,
+        )
     }
 }

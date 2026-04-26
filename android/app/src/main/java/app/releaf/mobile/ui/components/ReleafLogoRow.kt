@@ -17,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -25,6 +24,7 @@ import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
+import app.releaf.mobile.ui.theme.LocalFontWeight
 
 enum class ReleafLogoSize(
     val leaf: Dp,
@@ -62,7 +62,7 @@ fun ReleafLogoRow(
             text = "Releaf",
             style = TextStyle(
                 fontFamily = AppTypography.EditorialTitle.fontFamily ?: FontFamily.Serif,
-                fontWeight = FontWeight.Medium,
+                fontWeight = LocalFontWeight.current,
                 fontSize = size.wordmark,
             ),
             color = wordmarkColor,

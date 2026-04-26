@@ -35,6 +35,17 @@ public struct PageEntity: Codable, FetchableRecord, PersistableRecord,
     public var todos: String
     /// JSON array of `Attachment` (photo/scan manifests). Never nil.
     public var attachments: String
+    /// JSON array of free-form tag strings. Added in v6; never nil
+    /// once the migration runs (`"[]"` default).
+    public var tags: String
+    /// JSON array of `{id, body, createdAt}` rows — the typed
+    /// `Note` collection on the Drive-facing `Page` model. Added
+    /// in v7 so each note round-trips with its own id + timestamp
+    /// instead of being collapsed into a single markdown blob in
+    /// `notes`. The `notes` column still carries the joined
+    /// markdown for FTS indexing; this column is the source of
+    /// truth for note identity.
+    public var pageNotesJson: String
     public var position: Int64
     /// JSON `{local_notes, remote_notes, remote_updated_at}` or nil.
     public var conflictStub: String?
@@ -43,6 +54,10 @@ public struct PageEntity: Codable, FetchableRecord, PersistableRecord,
     public var updatedAt: String
     public var dirty: Bool
     public var deletedAt: String?
+    /// Soft-archive timestamp (separate from `deletedAt`). Added in
+    /// v6 — non-nil means the page lives in the archive bin, where
+    /// it still renders but is filtered out of active list views.
+    public var archivedAt: String?
 
     public enum CodingKeys: String, CodingKey {
         case id
@@ -55,6 +70,8 @@ public struct PageEntity: Codable, FetchableRecord, PersistableRecord,
         case locations
         case todos
         case attachments
+        case tags
+        case pageNotesJson = "page_notes_json"
         case position
         case conflictStub = "conflict_stub"
         case driveFileId  = "drive_file_id"
@@ -62,6 +79,7 @@ public struct PageEntity: Codable, FetchableRecord, PersistableRecord,
         case updatedAt    = "updated_at"
         case dirty
         case deletedAt    = "deleted_at"
+        case archivedAt   = "archived_at"
     }
 
     public init(
@@ -75,13 +93,16 @@ public struct PageEntity: Codable, FetchableRecord, PersistableRecord,
         locations: String = "[]",
         todos: String = "[]",
         attachments: String = "[]",
+        tags: String = "[]",
+        pageNotesJson: String = "[]",
         position: Int64 = 1024,
         conflictStub: String? = nil,
         driveFileId: String? = nil,
         createdAt: String,
         updatedAt: String,
         dirty: Bool = true,
-        deletedAt: String? = nil
+        deletedAt: String? = nil,
+        archivedAt: String? = nil
     ) {
         self.id = id
         self.chapterId = chapterId
@@ -93,6 +114,8 @@ public struct PageEntity: Codable, FetchableRecord, PersistableRecord,
         self.locations = locations
         self.todos = todos
         self.attachments = attachments
+        self.tags = tags
+        self.pageNotesJson = pageNotesJson
         self.position = position
         self.conflictStub = conflictStub
         self.driveFileId = driveFileId
@@ -100,5 +123,6 @@ public struct PageEntity: Codable, FetchableRecord, PersistableRecord,
         self.updatedAt = updatedAt
         self.dirty = dirty
         self.deletedAt = deletedAt
+        self.archivedAt = archivedAt
     }
 }

@@ -77,7 +77,7 @@ public struct ReleafLogoRow: View {
                 lineWidth: size.stroke
             )
             Text("Releaf")
-                .font(.system(size: size.wordmarkSize, weight: .medium, design: .serif))
+                .font(.system(size: size.wordmarkSize, design: .serif))
                 .foregroundStyle(wordmarkColor)
         }
     }

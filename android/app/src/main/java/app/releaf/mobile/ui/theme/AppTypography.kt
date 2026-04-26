@@ -1,98 +1,106 @@
 /*
  * AppTypography.kt
- * Type roles matching design-tokens.json.
+ * Type roles matching design-tokens.json. Every weight reads from
+ * `LocalFontWeight.current`, so the user's font-weight setting in
+ * Settings hot-swaps every styled `Text` on next recomposition.
  */
 
 package app.releaf.mobile.ui.theme
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
 object AppTypography {
-    val Eyebrow = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 10.sp,
-        letterSpacing = 0.08.em,
-    )
+    val Eyebrow: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize = 10.sp,
+            letterSpacing = 0.08.em,
+        )
 
-    val Body = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize = 15.sp,
-    )
+    val Body: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize = 15.sp,
+        )
 
-    val Meta = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize = 13.sp,
-    )
+    val Meta: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize = 13.sp,
+        )
 
-    val Button = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 13.sp,
-    )
+    val Button: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize = 13.sp,
+        )
 
-    val SectionTitle = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
-        fontSize = 20.sp,
-    )
+    val SectionTitle: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize = 20.sp,
+        )
 
-    val StatNumber = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
-        fontSize = 32.sp,
-    )
+    val StatNumber: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize = 32.sp,
+        )
 
-    val EditorialTitle = TextStyle(
-        fontFamily = FontFamily.Serif,
-        fontWeight = FontWeight.Medium,
-        fontSize = 26.sp,
-    )
+    val EditorialTitle: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.Serif,
+            fontWeight = LocalFontWeight.current,
+            fontSize = 26.sp,
+        )
 
-    val PageTitle = TextStyle(
-        fontFamily = FontFamily.Serif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 24.sp,
-    )
+    val PageTitle: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.Serif,
+            fontWeight = LocalFontWeight.current,
+            fontSize = 24.sp,
+        )
 
-    val Tag = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 11.sp,
-    )
+    val Tag: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = TextStyle(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = LocalFontWeight.current,
+            fontSize = 11.sp,
+        )
 
-    // ---------------------------------------------------------------
-    // "Light" variants — same family + size as the heavy roles, but
-    // dropped a step in weight. Used by the notebook tab and its
-    // drill-in surfaces (chapters / pages / page editor) to give that
-    // half of the app a calmer, more list-driven typographic colour.
-    // Other surfaces (notepad, settings, etc.) keep the heavy roles.
-    // ---------------------------------------------------------------
+    // Held over from the era when notebook surfaces wanted a calmer
+    // typographic colour than the rest of the app. Now identical to
+    // their non-Light counterparts since the global weight collapsed
+    // the per-role weight ladder. Kept to avoid breaking call sites.
+    val SectionTitleLight: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = SectionTitle
 
-    /** Bold → Medium. Use for list-row headlines and grouping cards. */
-    val SectionTitleLight = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Medium,
-        fontSize = 20.sp,
-    )
+    val EditorialTitleLight: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = EditorialTitle
 
-    /** Medium → Normal. Use for tab-level page headings. */
-    val EditorialTitleLight = TextStyle(
-        fontFamily = FontFamily.Serif,
-        fontWeight = FontWeight.Normal,
-        fontSize = 26.sp,
-    )
-
-    /** SemiBold → Medium. Use for in-page editor titles. */
-    val PageTitleLight = TextStyle(
-        fontFamily = FontFamily.Serif,
-        fontWeight = FontWeight.Medium,
-        fontSize = 24.sp,
-    )
+    val PageTitleLight: TextStyle
+        @Composable @ReadOnlyComposable
+        get() = PageTitle
 }

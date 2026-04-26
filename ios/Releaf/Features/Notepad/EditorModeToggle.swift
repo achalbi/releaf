@@ -49,7 +49,7 @@ private struct ModeIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 15))
                 .foregroundStyle(isActive ? AppColors.onAccent : AppColors.coral)
                 .frame(width: 32, height: 32)
                 .background(

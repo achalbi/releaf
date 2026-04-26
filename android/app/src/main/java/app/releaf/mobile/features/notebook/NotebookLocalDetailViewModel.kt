@@ -116,6 +116,14 @@ class NotebookLocalDetailViewModel(
         }
     }
 
+    /** Restore a previously archived notebook. Surfaces from the
+     *  ArchivedBanner shown at the top of an already-archived
+     *  notebook. */
+    fun restoreNotebook() {
+        val id = state.value.notebook?.id ?: return
+        viewModelScope.launch { notebookRepository.undoSoftDeleteNotebook(id) }
+    }
+
     /* ---------- chapter actions ---------- */
 
     fun createChapter(title: String, description: String? = null, onCreated: (String) -> Unit = {}) {

@@ -204,7 +204,7 @@ private struct NotesPreviewCard: View {
                         .foregroundStyle(AppColors.textSecondary)
                     Spacer()
                     Image(systemName: "pencil")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 14))
                         .foregroundStyle(AppColors.coral)
                 }
 

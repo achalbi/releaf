@@ -371,6 +371,79 @@ public final class ReleafDatabase: @unchecked Sendable {
             try db.execute(sql: "CREATE INDEX idx_notebooks_series_id ON notebooks(series_id) WHERE series_id IS NOT NULL")
         }
 
+        // v4 — adds the `call_history` table. Local log of outbound
+        // calls placed from inside the app. Rows are written on dial
+        // and updated in-place by CXCallObserver as the call
+        // connects / ends. Mirrors Android's v12→v13 migration.
+        migrator.registerMigration("v4_call_history") { db in
+            try db.execute(sql: """
+                CREATE TABLE call_history (
+                    id                TEXT PRIMARY KEY NOT NULL,
+                    user_id           TEXT NOT NULL,
+                    contact_name      TEXT NOT NULL,
+                    phone_number      TEXT NOT NULL,
+                    source            TEXT NOT NULL,
+                    started_at        TEXT NOT NULL,
+                    connected_at      TEXT,
+                    ended_at          TEXT,
+                    duration_seconds  INTEGER
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_call_history_user_id    ON call_history(user_id)")
+            try db.execute(sql: "CREATE INDEX idx_call_history_started_at ON call_history(started_at)")
+        }
+
+        // v5 — adds the `description` column on `notepad_entries`.
+        // Optional free-text subtitle — same role the column plays on
+        // `notebooks`. Nullable, no default; existing rows round-trip
+        // as NULL (the UI treats that as "no description yet").
+        // Mirrors Android's v15→v16 migration and the shared
+        // design-system/migrations/v2_notepad_description.sql.
+        migrator.registerMigration("v5_notepad_description") { db in
+            try db.execute(sql: "ALTER TABLE notepad_entries ADD COLUMN description TEXT")
+        }
+
+        // v6 — backfills the columns the `DriveRepository` protocol
+        // depends on but the original v1 schema never carried:
+        //
+        //   - pages.tags            JSON array, default `[]`. Stores
+        //                           free-form tag strings shown as
+        //                           pills on the page detail surface.
+        //   - pages.archived_at     ISO timestamp, nullable. The
+        //                           archive bin shows pages where
+        //                           this is non-NULL; deleted_at
+        //                           stays separate (deleted = real
+        //                           soft-delete).
+        //   - chapters.archived_at  Same shape as pages.archived_at.
+        //   - notebooks.archived_at Same shape; splits "archive" from
+        //                           "soft-delete" so the archive bin
+        //                           can hold recoverable notebooks
+        //                           without confusion.
+        //
+        // Aligns with Android's archive_at semantics on
+        // NotebookEntity (already present there from Migration3To4).
+        migrator.registerMigration("v6_archive_and_tags") { db in
+            try db.execute(sql: "ALTER TABLE pages ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
+            try db.execute(sql: "ALTER TABLE pages ADD COLUMN archived_at TEXT")
+            try db.execute(sql: "ALTER TABLE chapters ADD COLUMN archived_at TEXT")
+            try db.execute(sql: "ALTER TABLE notebooks ADD COLUMN archived_at TEXT")
+            try db.execute(sql: "CREATE INDEX idx_pages_archived_at ON pages (archived_at) WHERE archived_at IS NOT NULL")
+            try db.execute(sql: "CREATE INDEX idx_chapters_archived_at ON chapters (archived_at) WHERE archived_at IS NOT NULL")
+            try db.execute(sql: "CREATE INDEX idx_notebooks_archived_at ON notebooks (archived_at) WHERE archived_at IS NOT NULL")
+        }
+
+        // v7 — adds `pages.page_notes_json`. Stores the typed Note
+        // array (id + body + createdAt per element) so each Note
+        // keeps its identity through the persistence round-trip;
+        // the legacy `pages.notes` markdown column lost ids and
+        // timestamps when multiple notes were joined together.
+        // The markdown column stays so FTS keeps working — the
+        // mapper joins all note bodies into it on every write.
+        // Mirrors Android's Migration17To18.
+        migrator.registerMigration("v7_page_notes_json") { db in
+            try db.execute(sql: "ALTER TABLE pages ADD COLUMN page_notes_json TEXT NOT NULL DEFAULT '[]'")
+        }
+
         return migrator
     }
 }

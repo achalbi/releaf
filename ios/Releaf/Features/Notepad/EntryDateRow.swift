@@ -22,7 +22,7 @@ struct EntryDateRow: View {
         Button(action: { showPicker = true }) {
             HStack(spacing: AppSpacing.s2) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 14))
                     .foregroundStyle(AppColors.coral)
                 Text(formattedLabel)
                     .font(AppText.meta)
