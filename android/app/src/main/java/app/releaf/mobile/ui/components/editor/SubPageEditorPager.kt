@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -132,6 +134,12 @@ fun SubPageEditorPager(
     // and clears the flag. Screen-local — no point persisting.
     var saveRequestedFor by remember { mutableStateOf<String?>(null) }
 
+    // Which image-backed sub-page (if any) is currently expanded into
+    // the fullscreen draw-on-image canvas. Null = closed. Tracked by
+    // id rather than index so a swipe + delete race can't land the
+    // dialog on a different page than the user tapped.
+    var fullscreenForId by remember { mutableStateOf<String?>(null) }
+
     // Track the count we last scrolled to. When `subPages.size` grows
     // past this, a new sub-page was appended — scroll to it so the
     // user lands on the blank page they just asked for.
@@ -192,21 +200,54 @@ fun SubPageEditorPager(
             },
             canDelete    = subPages.size > 1,
             canAdd       = true,
+            // Fullscreen affordance is only shown when the current
+            // sub-page is image-backed (the dialog has nothing useful
+            // to render otherwise — the inline pattern editor already
+            // gives plain / grid / ruled pages a full-width surface).
+            onOpenFullscreen = currentSp
+                ?.takeIf { it.backgroundImageUri != null }
+                ?.let { sp -> { fullscreenForId = sp.id } },
         )
+
+        // Image-backed pages get sized to their natural aspect so the
+        // full imported page fits at editor width — the parent
+        // `verticalScroll` (EditorBody) handles overflow on tall
+        // scans. We resolve the painter for the *current* page only
+        // and read its intrinsic size; Coil de-dupes via its in-memory
+        // cache, so the per-page painter created later inside the
+        // pager lambda is essentially free. Until the image loads
+        // intrinsicSize is `Size.Unspecified` and we fall back to the
+        // caller's `pageHeight`.
+        val currentImageAspect: Float? = run {
+            val uri = currentSp?.backgroundImageUri ?: return@run null
+            val parsed = remember(uri) {
+                runCatching { android.net.Uri.parse(uri) }.getOrNull()
+            } ?: return@run null
+            val sizingPainter = coil.compose.rememberAsyncImagePainter(model = parsed)
+            val sz = sizingPainter.intrinsicSize
+            if (sz != androidx.compose.ui.geometry.Size.Unspecified
+                && sz.width > 0f && sz.height > 0f
+            ) sz.width / sz.height else null
+        }
 
         // Pager size. Fill-height mode uses `weight(1f)` so the editor
         // takes all the vertical room under the indicator row; fixed
         // mode sets an explicit height so the pager plays nicely inside
         // a verticalScroll (where Constraints.Infinity would collapse
-        // a weighted child).
+        // a weighted child). Image-backed pages override the fixed
+        // height with `aspectRatio` so the imported page is shown in
+        // full and the parent scroll reveals the rest.
         val pagerSize: @Composable ColumnScope.(Modifier) -> Modifier = { base ->
-            if (pageHeight == null) base.weight(1f).fillMaxWidth()
-            else                    base.height(pageHeight).fillMaxWidth()
+            when {
+                pageHeight == null         -> base.weight(1f).fillMaxWidth()
+                currentImageAspect != null -> base.fillMaxWidth().aspectRatio(currentImageAspect)
+                else                       -> base.height(pageHeight).fillMaxWidth()
+            }
         }
-        val pageBoxSize: Modifier = if (pageHeight == null) {
-            Modifier.fillMaxSize()
-        } else {
-            Modifier.fillMaxWidth().height(pageHeight)
+        val pageBoxSize: Modifier = when {
+            pageHeight == null         -> Modifier.fillMaxSize()
+            currentImageAspect != null -> Modifier.fillMaxSize()
+            else                       -> Modifier.fillMaxWidth().height(pageHeight)
         }
 
         HorizontalPager(
@@ -316,19 +357,14 @@ fun SubPageEditorPager(
                     val parsed = runCatching { android.net.Uri.parse(bgImage) }.getOrNull()
                     if (parsed != null) {
                         val painter = coil.compose.rememberAsyncImagePainter(model = parsed)
-                        // ContentScale.FillWidth pins the painter's
-                        // rendered size to the Box's WIDTH — width
-                        // never changes when the keyboard opens, so
-                        // the PDF stays at a fixed pixel size through
-                        // an IME show / hide cycle. The alternative
-                        // `Fit` re-scales on every layout change of
-                        // the Box height (`.imePadding()` shrinks the
-                        // parent Column, which shrinks this Box), and
-                        // users see the PDF "jump" as the keyboard
-                        // animates in. With FillWidth, content beyond
-                        // the now-shorter Box is simply clipped by the
-                        // outer `.clip(RoundedCornerShape)` — which is
-                        // the paper-like behaviour we want.
+                        // ContentScale.FillWidth pins the painter to
+                        // the editor width so the imported page never
+                        // shifts off-center. The card's height is
+                        // sized from the image's intrinsic aspect
+                        // ratio (see `imageAspectAt` + `pagerSize`
+                        // above) so the full page fits without
+                        // cropping — the parent `verticalScroll`
+                        // handles overflow on tall scans.
                         androidx.compose.foundation.Image(
                             painter            = painter,
                             contentDescription = null,
@@ -444,6 +480,27 @@ fun SubPageEditorPager(
         }
     }
 
+    // Fullscreen draw-on-image surface for the imported page. Opens
+    // when the user taps the expand icon in the indicator above an
+    // image-backed sub-page. Strokes saved here go through the same
+    // `onStrokesChange` callback the inline overlay uses, so closing
+    // the dialog leaves the user's annotations intact on the page.
+    fullscreenForId?.let { id ->
+        val sp = subPages.firstOrNull { it.id == id }
+        if (sp == null || sp.backgroundImageUri == null) {
+            // Page was deleted (or its image cleared) while the
+            // dialog was open — drop the request silently rather
+            // than opening an empty canvas.
+            fullscreenForId = null
+        } else {
+            ImageNoteCanvasDialog(
+                subPage         = sp,
+                onStrokesChange = { newStrokes -> onStrokesChange(sp.id, newStrokes) },
+                onDismiss       = { fullscreenForId = null },
+            )
+        }
+    }
+
     // Destructive-action guard. Mirrors the pattern used on the page /
     // entry delete dialog so the UX is consistent — one tap shows the
     // dialog, the actual remove only fires on "Delete".
@@ -490,6 +547,11 @@ private fun SubPageIndicator(
     onDelete: () -> Unit,
     canDelete: Boolean,
     canAdd: Boolean,
+    /** When non-null, shows a fullscreen-expand icon next to the
+     *  background picker. Wired by `SubPageEditorPager` only when
+     *  the current sub-page is image-backed — for pattern pages the
+     *  inline view is already as expansive as it can usefully be. */
+    onOpenFullscreen: (() -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
@@ -506,6 +568,20 @@ private fun SubPageIndicator(
                 verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.End,
             ) {
+                if (onOpenFullscreen != null) {
+                    // Image-backed pages: expand into the fullscreen
+                    // canvas where the imported page sits flush with
+                    // the device's top edge. Sits to the LEFT of the
+                    // background picker so the icon order reads as a
+                    // natural "view → tweak" pairing.
+                    CircleIconBtn(
+                        icon    = Icons.Filled.OpenInFull,
+                        label   = "Open fullscreen",
+                        tint    = AppColors.TextSecondary,
+                        onClick = onOpenFullscreen,
+                    )
+                    Spacer(Modifier.size(AppSpacing.s2))
+                }
                 Box {
                     // Icon-only anchor — the popover content labels
                     // itself, so the pager indicator doesn't need to

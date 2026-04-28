@@ -158,6 +158,14 @@ fun OverviewPane(
      *  rendered out of the PDF viewer, appends a new sub-page with it
      *  as the drawable background. */
     onImportPageToNotes: (pageImageUri: String) -> Unit,
+    /** "Import to notes" affordance inside the fullscreen photo
+     *  viewer. Receives a `file://` URI to a fresh local copy of the
+     *  tapped photo — the screen routes it to
+     *  `viewModel.addSubPageFromImage(uri)` so the photo lands as a
+     *  new sub-page ("note") in the same entry. Null leaves the
+     *  affordance off (used by surfaces that don't expose this flow,
+     *  e.g. the notebook page editor). */
+    onImportPhotoToNotes: ((pageImageUri: String) -> Unit)? = null,
     onEditScan: (id: String, title: String?, categoryId: String?) -> Unit,
     /**
      * Initial tab to land on. Non-null when the user arrived via Quick
@@ -166,6 +174,11 @@ fun OverviewPane(
      * switching tabs afterward is purely local.
      */
     initialCaptureMode: CaptureMode? = null,
+    /** Optional right-aligned slot rendered on the same row as the
+     *  "AT A GLANCE" eyebrow. Lets callers (the notepad editor) drop
+     *  context-specific affordances (e.g. the category chip) into the
+     *  Overview tab without OverviewPane having to know about them. */
+    glanceTrailing: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // All seven modes render; Voice got its own section once
@@ -225,20 +238,22 @@ fun OverviewPane(
             ) {
                 when (mode) {
                     CaptureMode.Overview -> OverviewTab(
-                        richTextState = richTextState,
-                        contacts      = contacts,
-                        todos         = todos,
-                        locations     = locations,
-                        attachments   = attachments,
-                        subPageCount  = subPages.size,
-                        onEditNotes   = { notesSheetOpen = true },
-                        onJumpToTab   = jumpToTab,
+                        richTextState  = richTextState,
+                        contacts       = contacts,
+                        todos          = todos,
+                        locations      = locations,
+                        attachments    = attachments,
+                        subPageCount   = subPages.size,
+                        onEditNotes    = { notesSheetOpen = true },
+                        onJumpToTab    = jumpToTab,
+                        glanceTrailing = glanceTrailing,
                     )
                     CaptureMode.Photos -> PhotosSection(
-                        photos         = attachments.filter { it.type == Attachment.TYPE_PHOTO },
-                        onAdd          = onAddPhoto,
-                        onRemove       = onRemoveAttachment,
-                        onCombineToPdf = onCombinePhotosToPdf,
+                        photos          = attachments.filter { it.type == Attachment.TYPE_PHOTO },
+                        onAdd           = onAddPhoto,
+                        onRemove        = onRemoveAttachment,
+                        onCombineToPdf  = onCombinePhotosToPdf,
+                        onImportToNotes = onImportPhotoToNotes,
                     )
                     CaptureMode.Scans -> ScansSection(
                         scans    = attachments.filter { it.type == Attachment.TYPE_SCAN },
@@ -325,6 +340,7 @@ private fun OverviewTab(
      *  route to the right destination without this composable knowing
      *  about `PagerState`. */
     onJumpToTab: (CaptureMode) -> Unit,
+    glanceTrailing: (@Composable () -> Unit)? = null,
 ) {
     val photos = attachments.count { it.type == Attachment.TYPE_PHOTO }
     val scans  = attachments.count { it.type == Attachment.TYPE_SCAN }
@@ -335,11 +351,20 @@ private fun OverviewTab(
     // and duplicating it at the top added noise without new info.
     val voice  = attachments.count { it.type == Attachment.TYPE_VOICE }
 
-    Text(
-        "AT A GLANCE",
-        style = AppTypography.Eyebrow,
-        color = AppColors.TextSecondary,
-    )
+    Row(
+        modifier              = Modifier.fillMaxWidth(),
+        verticalAlignment     = Alignment.CenterVertically,
+    ) {
+        Text(
+            "AT A GLANCE",
+            style = AppTypography.Eyebrow,
+            color = AppColors.TextSecondary,
+        )
+        if (glanceTrailing != null) {
+            Spacer(Modifier.weight(1f))
+            glanceTrailing()
+        }
+    }
 
     StatGrid(items = listOf(
         StatItem(

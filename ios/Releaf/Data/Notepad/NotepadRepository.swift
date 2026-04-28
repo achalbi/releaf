@@ -112,6 +112,7 @@ public final class NotepadRepository: @unchecked Sendable {
         notes: String,
         entryDate: String? = nil,
         description: String? = nil,
+        category: String? = nil,
         contacts: String = "[]",
         locations: String = "[]",
         todos: String = "[]",
@@ -145,6 +146,7 @@ public final class NotepadRepository: @unchecked Sendable {
             entryDate:   entryDate ?? IsoClock.todayLocalDate(),
             title:       seededTitle,
             description: seededDescription,
+            category:    category?.cleanedTitle,
             notes:       notes,
             contacts:    contacts,
             locations:   locations,
@@ -169,6 +171,7 @@ public final class NotepadRepository: @unchecked Sendable {
         var row = entry
         row.title = entry.title?.cleanedTitle
         row.description = entry.description?.cleanedTitle
+        row.category = entry.category?.cleanedTitle
         row.updatedAt = IsoClock.nowIso()
         row.dirty = true
         // Snapshot to a `let` before the @Sendable write closure —
@@ -233,9 +236,18 @@ public final class NotepadRepository: @unchecked Sendable {
             let mergedDescription = primary.description?.cleanedTitle
                 ?? secondary.description?.cleanedTitle
 
+            // Category: same prefer-primary rule. Categories are
+            // user-meaningful labels, so if the primary already has
+            // one we keep it; otherwise inherit from the secondary so
+            // the merge doesn't silently un-categorise a row that was
+            // categorised pre-merge.
+            let mergedCategory = primary.category?.cleanedTitle
+                ?? secondary.category?.cleanedTitle
+
             let now = IsoClock.nowIso()
             var updated = primary
             updated.description = mergedDescription
+            updated.category    = mergedCategory
             updated.notes       = mergedNotes
             updated.contacts    = mergedContacts.toJsonString()
             updated.todos       = mergedTodos.toJsonString()
@@ -251,6 +263,66 @@ public final class NotepadRepository: @unchecked Sendable {
                 WHERE id = ?
                 """, arguments: [now, now, secondaryId])
             return true
+        }
+    }
+
+    /// Bulk rename the category label across every active entry for
+    /// `userId` currently filed under `oldName` (case-insensitive).
+    /// Returns the row count updated so callers can show a "renamed
+    /// N entries" toast. No-op (returns 0) when the trimmed names
+    /// are empty or identical.
+    ///
+    /// Predefined names (Home / Work / …) are accepted on either
+    /// side — the canonical-cased form is what gets persisted, so
+    /// renaming "garden" → "Home" lands every matching row under
+    /// the predefined "Home" and the chip row deduplicates
+    /// naturally.
+    @discardableResult
+    public func renameCategory(
+        userId: String,
+        oldName: String,
+        newName: String
+    ) async throws -> Int {
+        let cleanedOld = oldName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedNew = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanedOld.isEmpty, !cleanedNew.isEmpty else { return 0 }
+        guard cleanedOld.caseInsensitiveCompare(cleanedNew) != .orderedSame else { return 0 }
+        let canonical = NotepadCategory.displayName(cleanedNew) ?? cleanedNew
+        let now = IsoClock.nowIso()
+        return try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE notepad_entries
+                SET category = ?, updated_at = ?, dirty = 1
+                WHERE user_id = ?
+                  AND deleted_at IS NULL
+                  AND category IS NOT NULL
+                  AND TRIM(category) <> ''
+                  AND LOWER(TRIM(category)) = LOWER(TRIM(?))
+                """, arguments: [canonical, now, userId, cleanedOld])
+            return db.changesCount
+        }
+    }
+
+    /// Bulk drop the category label from every active entry for
+    /// `userId` currently filed under `name` (case-insensitive).
+    /// The entries themselves stay live — they're just uncategorised
+    /// after this. Returns the row count updated.
+    @discardableResult
+    public func deleteCategory(userId: String, name: String) async throws -> Int {
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return 0 }
+        let now = IsoClock.nowIso()
+        return try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE notepad_entries
+                SET category = NULL, updated_at = ?, dirty = 1
+                WHERE user_id = ?
+                  AND deleted_at IS NULL
+                  AND category IS NOT NULL
+                  AND TRIM(category) <> ''
+                  AND LOWER(TRIM(category)) = LOWER(TRIM(?))
+                """, arguments: [now, userId, cleaned])
+            return db.changesCount
         }
     }
 

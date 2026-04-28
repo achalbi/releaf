@@ -131,6 +131,11 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(AppSpacing.s6))
 
+        // ── Notepad categories — rename / delete custom labels ────
+        CategoryManagementSection()
+
+        Spacer(Modifier.height(AppSpacing.s6))
+
         // ── Home timeline style ────────────────────────────────────
         // Two renderers for the same activity-feed data: the classic
         // dot-on-rail card or the editorial bramble vine variant.

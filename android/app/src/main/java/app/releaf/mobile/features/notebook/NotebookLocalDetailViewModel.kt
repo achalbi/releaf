@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+enum class ChapterMoveDirection { Up, Down }
+
 data class NotebookLocalDetailUiState(
     val isLoading: Boolean = true,
     val notebook: NotebookEntity? = null,
@@ -124,6 +126,19 @@ class NotebookLocalDetailViewModel(
         viewModelScope.launch { notebookRepository.undoSoftDeleteNotebook(id) }
     }
 
+    /**
+     * Delete the notebook this screen is viewing. The screen confirms via
+     * its guard dialog before calling, then routes back on completion so
+     * the user lands on the Notebooks tab where the row tombstone applies.
+     */
+    fun softDeleteNotebook(onDeleted: () -> Unit = {}) {
+        val id = state.value.notebook?.id ?: return
+        viewModelScope.launch {
+            notebookRepository.softDeleteNotebook(id)
+            onDeleted()
+        }
+    }
+
     /* ---------- chapter actions ---------- */
 
     fun createChapter(title: String, description: String? = null, onCreated: (String) -> Unit = {}) {
@@ -137,6 +152,29 @@ class NotebookLocalDetailViewModel(
 
     fun softDeleteChapter(id: String) {
         viewModelScope.launch { chapterRepository.softDeleteChapter(id) }
+    }
+
+    /**
+     * Reorder a chapter up or down by swapping its `position` value with
+     * the immediate neighbor in the requested direction. No-ops at the
+     * list edges. The chapter list is already sorted by position in the
+     * UI, so swapping positions reflects instantly via the live Flow.
+     */
+    fun moveChapter(id: String, direction: ChapterMoveDirection) {
+        val chapters = state.value.chapters
+        val index    = chapters.indexOfFirst { it.id == id }
+        if (index < 0) return
+        val neighborIndex = when (direction) {
+            ChapterMoveDirection.Up   -> index - 1
+            ChapterMoveDirection.Down -> index + 1
+        }
+        if (neighborIndex !in chapters.indices) return
+        val current  = chapters[index]
+        val neighbor = chapters[neighborIndex]
+        viewModelScope.launch {
+            chapterRepository.saveChapter(current.copy(position = neighbor.position))
+            chapterRepository.saveChapter(neighbor.copy(position = current.position))
+        }
     }
 
     /**

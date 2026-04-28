@@ -82,6 +82,7 @@ class NotepadRepository(
         notes: String,
         entryDate: String = IsoClock.todayLocalDate(),
         description: String? = null,
+        category: String? = null,
         contacts: String = "[]",
         locations: String = "[]",
         todos: String = "[]",
@@ -92,19 +93,23 @@ class NotepadRepository(
         val now = IsoClock.nowIso()
         val newId = Uuidv7.generate()
 
-        // Auto-seed title + description as a *pair* from the day's
-        // Ayurvedic plant — title gets the Sanskrit/Hindi name, the
-        // description gets "(commonName) epithet". We only seed when
-        // BOTH fields were left blank: mixing an authored title with
-        // an unrelated auto-description (or vice-versa) would produce
-        // internally mismatched rows. The "used for" detail lives in
-        // the editor's leaf-icon modal — not in body text.
+        // Auto-seed title + description as a *pair* from an Ayurvedic
+        // plant picked deterministically by entry id (UUIDv7) — title
+        // gets the Sanskrit/Hindi name, the description gets
+        // "(commonName) epithet · usedFor". We only seed when BOTH
+        // fields were left blank: mixing an authored title with an
+        // unrelated auto-description (or vice-versa) would produce
+        // internally mismatched rows. Per-id selection means two
+        // entries created on the same day land on different plants
+        // (UUIDv7 random tail differs), which is the intended
+        // behaviour now that the notepad allows multiple pages per
+        // day.
         val cleanedTitle       = title?.trim()?.ifEmpty { null }
         val cleanedDescription = description?.trim()?.ifEmpty { null }
         val seededTitle: String?
         val seededDescription: String?
         if (cleanedTitle == null && cleanedDescription == null) {
-            val plant = AyurvedicCatalog.forNewEntry()
+            val plant = AyurvedicCatalog.forNewEntry(entryId = newId)
             seededTitle       = plant.name
             seededDescription = AyurvedicCatalog.formatDescription(plant)
         } else {
@@ -118,6 +123,7 @@ class NotepadRepository(
             entryDate     = entryDate,
             title         = seededTitle,
             description   = seededDescription,
+            category      = category?.trim()?.ifEmpty { null },
             notes         = notes,
             contacts      = contacts,
             locations     = locations,
@@ -148,6 +154,7 @@ class NotepadRepository(
         val updated = entry.copy(
             title       = entry.title?.trim()?.ifEmpty { null },
             description = entry.description?.trim()?.ifEmpty { null },
+            category    = entry.category?.trim()?.ifEmpty { null },
             updatedAt   = IsoClock.nowIso(),
             dirty       = true,
         )
@@ -158,6 +165,55 @@ class NotepadRepository(
             entityId   = updated.id,
             title      = updated.title ?: updated.entryDate,
             userId     = updated.userId,
+        )
+    }
+
+    /**
+     * Bulk rename the category label across every active entry for
+     * [userId] currently filed under [oldName] (case-insensitive).
+     * Returns the row count updated so callers can show a "renamed
+     * N entries" toast. No-op (returns 0) when the trimmed names are
+     * empty or identical.
+     *
+     * Predefined names (Home / Work / …) are accepted on either side
+     * — the canonical-cased form is what gets persisted, so renaming
+     * "garden" → "Home" lands every matching row under the predefined
+     * "Home" and the chip row deduplicates naturally.
+     */
+    suspend fun renameCategory(userId: String, oldName: String, newName: String): Int {
+        val cleanedOld = oldName.trim()
+        val cleanedNew = newName.trim()
+        if (cleanedOld.isEmpty() || cleanedNew.isEmpty()) return 0
+        if (cleanedOld.equals(cleanedNew, ignoreCase = true)) return 0
+        // Normalise to the canonical display form so a user typing
+        // "home" lands rows under the predefined "Home" rather than
+        // forking "Home" + "home" chips.
+        val canonical = NotepadCategory.displayName(cleanedNew) ?: cleanedNew
+        return dao.renameCategory(
+            userId  = userId,
+            oldName = cleanedOld,
+            newName = canonical,
+            nowIso  = IsoClock.nowIso(),
+        )
+    }
+
+    /**
+     * Bulk drop the category label from every active entry for
+     * [userId] currently filed under [name] (case-insensitive). The
+     * entries themselves stay live — they're just uncategorised
+     * after this. Returns the row count updated.
+     *
+     * Predefined names also accepted: "deleting" Home means the
+     * Home chip stops surfacing in the picker / filter row until
+     * the user types Home onto a new entry.
+     */
+    suspend fun deleteCategory(userId: String, name: String): Int {
+        val cleaned = name.trim()
+        if (cleaned.isEmpty()) return 0
+        return dao.deleteCategory(
+            userId = userId,
+            name   = cleaned,
+            nowIso = IsoClock.nowIso(),
         )
     }
 
@@ -213,9 +269,18 @@ class NotepadRepository(
         val mergedDescription = primary.description?.trim()?.ifEmpty { null }
             ?: secondary.description?.trim()?.ifEmpty { null }
 
+        // Category: same prefer-primary rule. Categories are
+        // user-meaningful labels, so if the primary already has one
+        // we keep it; otherwise inherit from the secondary so the
+        // merge doesn't silently un-categorise a row that was
+        // categorised pre-merge.
+        val mergedCategory = primary.category?.trim()?.ifEmpty { null }
+            ?: secondary.category?.trim()?.ifEmpty { null }
+
         val now = IsoClock.nowIso()
         val merged = primary.copy(
             description   = mergedDescription,
+            category      = mergedCategory,
             notes         = mergedNotes,
             contacts      = mergedContacts.toJsonString(),
             locations     = mergedLocations.toJsonString(),

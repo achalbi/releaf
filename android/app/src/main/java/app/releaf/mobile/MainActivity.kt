@@ -140,7 +140,7 @@ private object Routes {
      */
     const val PAGE_LOCAL            = "page/local/{pageId}?mode={mode}"
     const val ARG_CAPTURE_MODE      = "mode"
-    const val NOTEPAD_EDIT          = "notepad/edit/{entryId}"
+    const val NOTEPAD_EDIT          = "notepad/edit/{entryId}?mode={mode}"
     const val TASKS                 = "tasks"
     const val REMINDERS             = "reminders"
     const val CONTACTS              = "contacts"
@@ -160,7 +160,14 @@ private object Routes {
         return if (mode != null) "$base?mode=${mode.name}" else base
     }
     /** Pass `NotepadEditorViewModel.NEW_ENTRY_ID` to compose a fresh entry. */
-    fun notepadEdit(id: String)         = "notepad/edit/$id"
+    fun notepadEdit(id: String): String = "notepad/edit/$id"
+    /** Same target with a [CaptureMode] hint so the editor opens
+     *  scrolled to the matching feature section. Used by the Recents
+     *  new-entry picker. */
+    fun notepadEditWithMode(
+        id: String,
+        mode: app.releaf.mobile.ui.components.CaptureMode,
+    ): String = "notepad/edit/$id?mode=${mode.name}"
     /** Pass `ReminderEditorViewModel.NEW_REMINDER_ID` to compose a fresh reminder. */
     fun reminderEdit(id: String)        = "reminders/edit/$id"
 
@@ -513,6 +520,12 @@ private fun SignedInNavHost(
                 session      = session,
                 onOpenEntry  = { id -> nav.navigate(Routes.notepadEdit(id)) },
                 onComposeNew = { nav.navigate(Routes.notepadEdit(NotepadEditorViewModel.NEW_ENTRY_ID)) },
+                // Recents new-entry picker → editor scrolled to the
+                // matching feature section. The query-string variant
+                // of the route carries the mode through.
+                onOpenEntryWithMode = { id, mode ->
+                    nav.navigate(Routes.notepadEditWithMode(id, mode))
+                },
             )
         }
         composable(Routes.SETTINGS) {
@@ -606,11 +619,30 @@ private fun SignedInNavHost(
         }
         composable(
             route = Routes.NOTEPAD_EDIT,
-            arguments = listOf(navArgument(NotepadEditorViewModel.ARG_ENTRY_ID) {
-                type = NavType.StringType
-            }),
-        ) {
-            NotepadEditorScreen(onBack = { nav.popBackStack() })
+            arguments = listOf(
+                navArgument(NotepadEditorViewModel.ARG_ENTRY_ID) {
+                    type = NavType.StringType
+                },
+                // Optional `mode` query param — drives the deep-link
+                // from the Recents new-entry picker so the editor
+                // opens scrolled to the matching feature section.
+                navArgument("mode") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) { backStackEntry ->
+            val modeName = backStackEntry.arguments?.getString("mode")
+            val initialMode = modeName?.let { name ->
+                runCatching {
+                    app.releaf.mobile.ui.components.CaptureMode.valueOf(name)
+                }.getOrNull()
+            }
+            NotepadEditorScreen(
+                onBack = { nav.popBackStack() },
+                initialMode = initialMode,
+            )
         }
 
         // Room-backed notebook surfaces (Notebooks tab).

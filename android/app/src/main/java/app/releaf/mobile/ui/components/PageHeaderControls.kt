@@ -23,6 +23,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -180,12 +181,101 @@ fun PageOverflowButton(
                 modifier           = Modifier.size(15.dp),
             )
         }
+        // Branded surface — rounded panel with an explicit hairline
+        // border on the app's CardSolid fill, lifted slightly so it
+        // reads as part of the in-app chrome rather than the system
+        // overlay menu Material 3 ships by default.
+        //
+        // `offset.y = (-4).dp` pulls the panel up by 4dp so its top
+        // sits closer to the kebab anchor — visually shrinks half of
+        // the 8dp internal top padding M3 hard-codes. The bottom
+        // 8dp stays (M3 doesn't expose it as a parameter); switching
+        // to a raw Popup would remove it entirely if the small
+        // remaining gap reads off.
         DropdownMenu(
             expanded         = expanded,
             onDismissRequest = { expanded = false },
+            offset           = androidx.compose.ui.unit.DpOffset(0.dp, (-4).dp),
+            shape            = RoundedCornerShape(AppRadius.md),
+            containerColor   = AppColors.CardSolid,
+            border           = androidx.compose.foundation.BorderStroke(
+                width = 1.dp,
+                color = AppColors.BorderDefault,
+            ),
+            tonalElevation   = 0.dp,
+            shadowElevation  = 8.dp,
             content          = content,
         )
     }
+}
+
+/**
+ * Branded dropdown row — built as a custom Row (not Material 3's
+ * [DropdownMenuItem]) so the per-item height isn't pinned to the
+ * 48dp minimum the M3 component enforces. Uses the app's typography
+ * (Body, TextPrimary) and an optional accent-colored leading icon.
+ * Pass [destructive] = true to render the label in [AppColors.Danger]
+ * for delete/remove rows.
+ */
+@Composable
+fun LeafDropdownItem(
+    label: String,
+    onClick: () -> Unit,
+    leadingIcon: ImageVector? = null,
+    selected: Boolean = false,
+    destructive: Boolean = false,
+) {
+    val labelColor = when {
+        destructive -> AppColors.Danger
+        selected    -> AppAccent.primary
+        else        -> AppColors.TextPrimary
+    }
+    val iconTint = when {
+        destructive -> AppColors.Danger
+        else        -> AppAccent.deep
+    }
+    Row(
+        modifier              = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = AppSpacing.s4, vertical = 10.dp),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+    ) {
+        if (leadingIcon != null) {
+            Icon(
+                imageVector        = leadingIcon,
+                contentDescription = null,
+                tint               = iconTint,
+                modifier           = Modifier.size(16.dp),
+            )
+        }
+        Text(
+            text     = (if (selected) "✓ " else "") + label,
+            style    = AppTypography.Body,
+            color    = labelColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * Inset hairline divider tuned for dropdown menus — sits with
+ * horizontal breathing room on each side instead of running edge-to-
+ * edge. Use between [LeafDropdownItem]s (or raw [DropdownMenuItem]s)
+ * to break the menu into discrete rows without touching the panel
+ * border.
+ */
+@Composable
+fun LeafDropdownDivider() {
+    androidx.compose.foundation.layout.Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = AppSpacing.s3)
+            .height(1.dp)
+            .background(AppColors.BorderDefault),
+    )
 }
 
 // ---------- Preview ----------
@@ -206,10 +296,12 @@ private fun PageHeaderControlsPreview() {
                 text = { Text("Move to notebook") },
                 onClick = {},
             )
+            LeafDropdownDivider()
             androidx.compose.material3.DropdownMenuItem(
                 text = { Text("Apply template") },
                 onClick = {},
             )
+            LeafDropdownDivider()
             androidx.compose.material3.DropdownMenuItem(
                 text = { Text("Archive page") },
                 onClick = {},

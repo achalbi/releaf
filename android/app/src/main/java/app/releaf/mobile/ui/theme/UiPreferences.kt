@@ -92,6 +92,15 @@ data class UiPreferencesState(
     val timelineStyle: TimelineStyle = TimelineStyle.Classic,
     val pageViewMode: PageDetailViewMode = PageDetailViewMode.Grid,
     val notebookSort: NotebookSortPreference = NotebookSortPreference.Recent,
+    /** User-controlled display order for notepad categories — lists
+     *  every name (predefined + custom) in the order the user wants
+     *  them surfaced in the filter chip row + editor picker. Empty
+     *  list = no preference, fall back to the built-in default
+     *  (predefined in their declared order, customs alphabetically).
+     *  Resolved end-to-end via `NotepadCategory.applyOrder(...)`,
+     *  which deals with newly-appeared customs / dropped names
+     *  gracefully so the order survives data churn. */
+    val notepadCategoryOrder: List<String> = emptyList(),
     /** Has the first-launch onboarding been seen and dismissed?
      *  Defaults to `false`; flips to `true` when the onboarding
      *  view's CTA fires. */
@@ -131,18 +140,28 @@ class UiPreferences(private val prefs: SharedPreferences) {
         val notebookSort = prefs.getString(KEY_NOTEBOOK_SORT, null)
             ?.let { runCatching { NotebookSortPreference.valueOf(it) }.getOrNull() }
             ?: NotebookSortPreference.Recent
+        // Newline-separated so commas / periods inside category names
+        // (e.g. "Errands, weekly") survive a round-trip. Blank lines
+        // are filtered out so a stray trailing newline doesn't fork
+        // an empty entry.
+        val categoryOrder = prefs.getString(KEY_NOTEPAD_CATEGORY_ORDER, null)
+            ?.split('\n')
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?: emptyList()
         val hasSeenOnboarding = prefs.getBoolean(KEY_HAS_SEEN_ONBOARDING, false)
         return UiPreferencesState(
-            themeMode         = mode,
-            paletteId         = palette,
-            defaultTaskView   = taskView,
-            notebookVariant   = variant,
-            fontWeight        = weight,
-            activityRetention = retention,
-            timelineStyle     = timelineStyle,
-            pageViewMode      = pageViewMode,
-            notebookSort      = notebookSort,
-            hasSeenOnboarding = hasSeenOnboarding,
+            themeMode             = mode,
+            paletteId             = palette,
+            defaultTaskView       = taskView,
+            notebookVariant       = variant,
+            fontWeight            = weight,
+            activityRetention     = retention,
+            timelineStyle         = timelineStyle,
+            pageViewMode          = pageViewMode,
+            notebookSort          = notebookSort,
+            notepadCategoryOrder  = categoryOrder,
+            hasSeenOnboarding     = hasSeenOnboarding,
         )
     }
 
@@ -191,6 +210,18 @@ class UiPreferences(private val prefs: SharedPreferences) {
         _state.value = _state.value.copy(notebookSort = sort)
     }
 
+    /** Persist the user's preferred display order for notepad
+     *  categories. Trims + drops blanks so the round-trip is stable
+     *  even if the caller hands us a list with stray whitespace. */
+    fun setNotepadCategoryOrder(order: List<String>) {
+        val cleaned = order.map { it.trim() }.filter { it.isNotEmpty() }
+        prefs.edit().putString(
+            KEY_NOTEPAD_CATEGORY_ORDER,
+            cleaned.joinToString("\n"),
+        ).apply()
+        _state.value = _state.value.copy(notepadCategoryOrder = cleaned)
+    }
+
     /** Mark first-launch onboarding as seen. Idempotent — repeated
      *  calls are safe; flips the flag for good. */
     fun markOnboardingSeen() {
@@ -208,8 +239,9 @@ class UiPreferences(private val prefs: SharedPreferences) {
         private const val KEY_ACTIVITY_RETENTION  = "activity_retention"
         private const val KEY_TIMELINE_STYLE      = "timeline_style"
         private const val KEY_PAGE_VIEW_MODE      = "page_view_mode"
-        private const val KEY_NOTEBOOK_SORT       = "notebook_sort"
-        private const val KEY_HAS_SEEN_ONBOARDING = "has_seen_onboarding"
+        private const val KEY_NOTEBOOK_SORT          = "notebook_sort"
+        private const val KEY_NOTEPAD_CATEGORY_ORDER = "notepad_category_order"
+        private const val KEY_HAS_SEEN_ONBOARDING    = "has_seen_onboarding"
 
         @Volatile private var instance: UiPreferences? = null
 

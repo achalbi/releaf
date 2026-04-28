@@ -37,6 +37,13 @@ public final class NotepadEditorViewModel: ObservableObject {
     @Published public var title: String = ""
     @Published public var notes: String = ""
 
+    /// Category label for grouping / filtering. Nil = uncategorised.
+    /// Holds either one of the predefined names (Home / Work /
+    /// Personal / Health / Travel / Ideas — see
+    /// `NotepadCategory.predefined`) or a free-form user string.
+    /// Mirrors `entry.category`.
+    @Published public var category: String? = nil
+
     /// Local-calendar date (YYYY-MM-DD) the entry is filed under. Defaults
     /// to today for fresh drafts; mirrors `entry.entryDate` once loaded.
     /// Editable via the date chip in the editor UI.
@@ -92,6 +99,7 @@ public final class NotepadEditorViewModel: ObservableObject {
             self.entry = loaded
             self.title = loaded?.title ?? ""
             self.notes = loaded?.notes ?? ""
+            self.category    = loaded?.category
             self.entryDate   = loaded?.entryDate ?? IsoClock.todayLocalDate()
             self.contacts    = loaded?.contacts.parseContacts()       ?? []
             self.todos       = loaded?.todos.parseTodos()             ?? []
@@ -244,6 +252,8 @@ public final class NotepadEditorViewModel: ObservableObject {
         let titleSnapshot = title
         let notesSnapshot = notes
         let entryDateSnapshot = entryDate
+        let categorySnapshot  = category?
+            .trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         let contactsJson    = contacts.toJsonString()
         let todosJson       = todos.toJsonString()
         let locationsJson   = locations.toJsonString()
@@ -259,6 +269,7 @@ public final class NotepadEditorViewModel: ObservableObject {
                     title:       titleSnapshot,
                     notes:       notesSnapshot,
                     entryDate:   entryDateSnapshot.isEmpty ? IsoClock.todayLocalDate() : entryDateSnapshot,
+                    category:    categorySnapshot,
                     contacts:    contactsJson,
                     locations:   locationsJson,
                     todos:       todosJson,
@@ -278,19 +289,22 @@ public final class NotepadEditorViewModel: ObservableObject {
 
         guard var row = existing else { return }
         let titleChanged       = (row.title ?? "") != titleSnapshot
+        let categoryChanged    = (row.category?
+            .trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty) != categorySnapshot
         let notesChanged       = row.notes != notesSnapshot
         let entryDateChanged   = !entryDateSnapshot.isEmpty && row.entryDate != entryDateSnapshot
         let contactsChanged    = row.contacts    != contactsJson
         let todosChanged       = row.todos       != todosJson
         let locationsChanged   = row.locations   != locationsJson
         let attachmentsChanged = row.attachments != attachmentsJson
-        guard titleChanged || notesChanged || entryDateChanged ||
+        guard titleChanged || categoryChanged || notesChanged || entryDateChanged ||
               contactsChanged || todosChanged ||
               locationsChanged || attachmentsChanged else {
             return
         }
 
         row.title = titleSnapshot.isEmpty ? nil : titleSnapshot
+        row.category = categorySnapshot
         row.notes = notesSnapshot
         if !entryDateSnapshot.isEmpty {
             row.entryDate = entryDateSnapshot

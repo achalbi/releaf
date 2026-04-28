@@ -26,9 +26,19 @@ public struct NotepadView: View {
     @EnvironmentObject private var authStore: AuthStore
 
     private let onOpenEntry: (String) -> Void
+    /// Variant of `onOpenEntry` that also carries a [CaptureMode] hint
+    /// — fires when the Recents new-entry picker is tapped so the host
+    /// can deep-link the editor to the matching feature section
+    /// (Photos / Scans / Voice / Todo / Contacts). Defaults to
+    /// dropping the mode and falling back to `onOpenEntry`.
+    private let onOpenEntryWithMode: (String, CaptureMode) -> Void
 
-    public init(onOpenEntry: @escaping (String) -> Void = { _ in }) {
+    public init(
+        onOpenEntry: @escaping (String) -> Void = { _ in },
+        onOpenEntryWithMode: ((String, CaptureMode) -> Void)? = nil
+    ) {
         self.onOpenEntry = onOpenEntry
+        self.onOpenEntryWithMode = onOpenEntryWithMode ?? { id, _ in onOpenEntry(id) }
     }
 
     public var body: some View {
@@ -36,7 +46,8 @@ public struct NotepadView: View {
             if let session = authStore.session {
                 NotepadDayRecentsContent(
                     userId: session.userId,
-                    onOpenEntry: onOpenEntry
+                    onOpenEntry: onOpenEntry,
+                    onOpenEntryWithMode: onOpenEntryWithMode
                 )
             } else {
                 Text("Sign in to see your notepad.")
@@ -72,6 +83,16 @@ private struct NotepadDayRecentsContent: View {
     /// -1 = previous month, +1 = next, etc.).
     @State private var monthPageOffset: Int = 0
 
+    /// Currently-selected page within the selected day's carousel.
+    /// Drives where quick-capture taps land — a scan / photo / voice
+    /// goes onto the page the user is *looking at* rather than always
+    /// at the day's first entry. Nil when the user is on the trailing
+    /// "+ new page" card (no live entry to target — quick-capture
+    /// creates one). Reset when the day changes; clamped when the
+    /// active entry vanishes (e.g. it was filtered out by a category
+    /// change).
+    @State private var selectedPageEntryId: String? = nil
+
     /// PhotosPicker selection — the "import" quick-capture pill is a
     /// PhotosPicker; when the user finishes picking, this state changes
     /// and `.onChange` loads each item's bytes and asks the VM to
@@ -79,10 +100,16 @@ private struct NotepadDayRecentsContent: View {
     @State private var importItems: [PhotosPickerItem] = []
 
     private let onOpenEntry: (String) -> Void
+    private let onOpenEntryWithMode: (String, CaptureMode) -> Void
 
-    init(userId: String, onOpenEntry: @escaping (String) -> Void) {
+    init(
+        userId: String,
+        onOpenEntry: @escaping (String) -> Void,
+        onOpenEntryWithMode: @escaping (String, CaptureMode) -> Void
+    ) {
         _vm = StateObject(wrappedValue: NotepadScreenViewModel(userId: userId))
         self.onOpenEntry = onOpenEntry
+        self.onOpenEntryWithMode = onOpenEntryWithMode
     }
 
     var body: some View {
@@ -97,6 +124,17 @@ private struct NotepadDayRecentsContent: View {
                     .frame(maxWidth: 280)
                     .frame(maxWidth: .infinity, alignment: .center)
 
+                // Category filter row — predefined categories plus any
+                // customs the user has typed. Tapping a chip narrows
+                // every downstream surface (calendar density, day card,
+                // recents masonry) to that category; tapping the active
+                // chip again clears the filter back to "All".
+                CategoryFilterRow(
+                    selected: vm.state.selectedCategory,
+                    customs:  vm.state.customCategories,
+                    onPick:   { vm.setCategoryFilter($0) }
+                )
+
                 if vm.state.isLoading {
                     ProgressView()
                         .tint(AppColors.coral)
@@ -105,7 +143,30 @@ private struct NotepadDayRecentsContent: View {
                 } else {
                     switch tab {
                     case .day:     dayView
-                    case .recents: recentsView
+                    // New Recents implementation lives at
+                    // Features/Notepad/Recents/. We adapt the live VM
+                    // state into a RecentsDayStats snapshot here so the
+                    // screen stays a pure view of data instead of
+                    // reaching into the repository itself. Legacy
+                    // `recentsView` computed property is preserved for
+                    // rollback — change `RecentsScreen(...)` back to
+                    // `recentsView` to revert.
+                    case .recents:
+                        RecentsScreen(
+                            stats: RecentsAdapter.fromState(vm.state, today: Date()),
+                            onOpenPage: { page in onOpenEntry(page.id) },
+                            // Picker cells (Photo / Scan / Voice / Todo /
+                            // Contact) and the new-entry footer CTA all
+                            // funnel through onPickMode. We forward the
+                            // mode through `onOpenEntryWithMode` so the
+                            // editor opens scrolled to the matching
+                            // feature section.
+                            onPickMode: { mode in
+                                vm.createNewPageOn(Date()) { newId in
+                                    onOpenEntryWithMode(newId, mode)
+                                }
+                            }
+                        )
                     }
                 }
 
@@ -119,11 +180,14 @@ private struct NotepadDayRecentsContent: View {
     }
 
     private var header: some View {
+        // Use the shared `LeafEyebrow` component (leaf glyph + label
+        // in an HStack) so the eyebrow has the exact same shape and
+        // vertical position as the Library tab's "releaf · shelves"
+        // eyebrow. Plain `Text("NOTEPAD")` here would sit at a
+        // slightly different y because it lacks the glyph + HStack
+        // wrapping that LeafEyebrow brings.
         VStack(alignment: .leading, spacing: AppSpacing.s2) {
-            Text("NOTEPAD")
-                .font(AppText.eyebrow)
-                .tracking(AppLetterSpacing.eyebrow)
-                .foregroundStyle(AppColors.themeGreenDeep)
+            LeafEyebrow("releaf · notepad")
 
             Text(tab == .day ? "A grove of days" : "Recent garden")
                 .font(AppText.editorialTitle)
@@ -165,37 +229,71 @@ private struct NotepadDayRecentsContent: View {
                 })
             }
 
-            // Selected-day card — populates from whichever day the
-            // user last tapped. Defaults to today on first open.
-            SelectedDayCard(
+            // Selected-day pager — N entry cards (one per notepad
+            // entry filed under this day) plus a trailing "+ new
+            // page" card. Selection is reported back via
+            // [selectedPageEntryId] so the quick-capture pills can
+            // target the page the user is currently viewing instead
+            // of always landing on the day's first entry.
+            MultiEntryDayCarousel(
                 day: selectedDay,
                 today: today,
-                breakdown: Calendar.current.isDate(selectedDate, inSameDayAs: today)
-                    ? vm.state.todayBreakdown
-                    : nil,
-                onTap: { tapSelected(selectedDay, today: today) }
+                selectedPageEntryId: $selectedPageEntryId,
+                onTapEntry: { id in onOpenEntry(id) },
+                onAddPage:  {
+                    vm.createNewPageOn(selectedDate) { newId in
+                        selectedPageEntryId = newId
+                        onOpenEntry(newId)
+                    }
+                }
             )
+            // Reset the page selection when the user navigates to a
+            // different day. Without this, `selectedPageEntryId`
+            // would dangle pointing at an entry that's no longer in
+            // the current day's list.
+            .onChange(of: selectedDate) { _ in
+                selectedPageEntryId = nil
+            }
+            // Clamp when a previously-selected entry vanishes (filter
+            // change, soft delete, etc.). Re-evaluating the entries
+            // list on every observation tick keeps this in sync
+            // without leaking stale ids into quick-capture targets.
+            .onChange(of: selectedDay.entries) { entries in
+                if let current = selectedPageEntryId,
+                   !entries.contains(where: { $0.id == current }) {
+                    selectedPageEntryId = nil
+                }
+            }
 
-            // Quick capture pills — including a PhotosPicker-backed
-            // "import" pill that creates one new entry per picked photo.
+            // Quick capture pills — fire on the page the carousel
+            // above is currently pointing at; fall back to
+            // openOrCreate when the day is empty.
+            let effectiveEntryId = selectedPageEntryId
+                ?? selectedDay.entries.first?.id
             QuickCapturePills(onCapture: { _ in
-                vm.openOrCreateForDate(selectedDate, onResult: onOpenEntry)
+                if let id = effectiveEntryId {
+                    vm.openEntry(id: id, onResult: onOpenEntry)
+                } else {
+                    vm.openOrCreateForDate(selectedDate, onResult: onOpenEntry)
+                }
             })
         }
     }
 
     /// Resolve a [DayCount] for the currently-selected date by reading
-    /// the VM's byDate index. Falls back to an empty placeholder so the
-    /// UI keeps rendering before the first observe-fire.
+    /// the VM's entriesByDate index. Falls back to an empty placeholder
+    /// so the UI keeps rendering before the first observe-fire.
     private func resolveSelectedDay(today: Date) -> DayCount {
         let key = Self.isoDateString(selectedDate)
-        let entry = vm.state.byDate[key]
+        let entries = vm.state.entriesByDate[key] ?? vm.state.byDate[key].map { [$0] } ?? []
+        let captures = entries.reduce(0) { $0 + entryCaptureCount($1) }
+        let openTodos = entries.reduce(0) { $0 + entryOpenTodoCount($1) }
         return DayCount(
             date: selectedDate,
             dateString: key,
-            entry: entry,
-            captureCount: entry.map { entryCaptureCount($0) } ?? 0,
-            openTodoCount: entry.map { entryOpenTodoCount($0) } ?? 0
+            entries: entries,
+            captureCount: captures,
+            openTodoCount: openTodos
         )
     }
 
@@ -236,7 +334,7 @@ private struct NotepadDayRecentsContent: View {
             ?? DayCount(
                 date: Date(),
                 dateString: ISO8601DateFormatter.localDate(Date()),
-                entry: vm.state.today,
+                entries: vm.state.todayEntries,
                 captureCount: vm.state.todayBreakdown.captureCount,
                 openTodoCount: vm.state.todayBreakdown.openTodoCount
             )
@@ -289,8 +387,14 @@ private struct DayRecentsSwitch: View {
         }
         .padding(2)
         .background(
+            // Track color matches the recents stats strip
+            // (`Color.bgSurfaceMuted` = #EFE7CD) so the inactive
+            // segment — which is `Color.clear` on top of the track —
+            // picks up the same muted-cream tone as the strip
+            // directly below the row, keeping the header area in
+            // one color family.
             Capsule()
-                .fill(AppColors.canvas)
+                .fill(Color.bgSurfaceMuted)
         )
         .overlay(
             Capsule()
@@ -442,7 +546,7 @@ private struct SelectedDayCard: View {
     }
 }
 
-// MARK: - Quick capture pills
+// MARK: - Quick capture buttons
 
 private struct QuickCapturePills: View {
     let onCapture: (String) -> Void
@@ -454,31 +558,40 @@ private struct QuickCapturePills: View {
                 .foregroundStyle(AppColors.textSecondary)
                 .padding(.horizontal, 2)
 
+            // Icon-only action buttons replace the previous text
+            // pills. Each button is a soft rounded-square in the
+            // recents leaf palette (#DDEACD bg + deep-green icon)
+            // — matches the hero pip row, EarlierGrid pips, and the
+            // new-entry slot picker cells, so every "capture this
+            // kind" affordance across the notepad reads as one
+            // family.
             HStack(spacing: AppSpacing.s2) {
-                pill("note") { onCapture("note") }
-                pill("photo") { onCapture("photo") }
-                pill("scan") { onCapture("scan") }
-                pill("voice") { onCapture("voice") }
+                button(icon: "note.text",                     label: "Note")     { onCapture("note") }
+                button(icon: CaptureMode.photos.systemIcon,   label: "Photo")    { onCapture("photo") }
+                button(icon: CaptureMode.scans.systemIcon,    label: "Scan")     { onCapture("scan") }
+                button(icon: CaptureMode.voice.systemIcon,    label: "Voice")    { onCapture("voice") }
+                button(icon: CaptureMode.todo.systemIcon,     label: "Todos")    { onCapture("todos") }
+                button(icon: CaptureMode.contacts.systemIcon, label: "Contacts") { onCapture("contacts") }
+                button(icon: CaptureMode.location.systemIcon, label: "Location") { onCapture("location") }
             }
         }
     }
 
-    private func pill(_ label: String, action: @escaping () -> Void) -> some View {
+    private func button(icon systemName: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(label)
-                .font(AppText.button)
-                .foregroundStyle(AppColors.themeGreenDeep)
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundColor(AppColors.themeGreenDeep)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+                .frame(height: 48)
                 .background(
-                    Capsule().fill(AppColors.cardSolid)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color(red: 0xDD/255, green: 0xEA/255, blue: 0xCD/255))
                 )
-                .overlay(
-                    Capsule().stroke(AppColors.borderDefault, lineWidth: 0.6)
-                )
-                .contentShape(Capsule())
+                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 }
 
@@ -603,6 +716,373 @@ private struct SwipeableCalendarCarousel: View {
     }
 }
 
+// MARK: - Multi-entry day carousel (Phase 4-5)
+
+/// Horizontal pager of uniform-size page cards for the selected day.
+/// **Each card represents a separate notepad entry filed under this
+/// day** — i.e. the user's "pages of the day" — not sub-pages of a
+/// single entry. The trailing "+ new page" card creates a fresh
+/// entry on this day (omitted for future days, where back-filling
+/// forward entries isn't allowed).
+///
+/// Selection: as the user swipes, the bound `selectedPageEntryId`
+/// updates to the entry id under the centered card (or nil when the
+/// user is on the trailing "+ new page" card). The screen's
+/// quick-capture pills use this id to route their captures onto the
+/// page the user is actively viewing.
+private struct MultiEntryDayCarousel: View {
+    let day: DayCount
+    let today: Date
+    @Binding var selectedPageEntryId: String?
+    let onTapEntry: (String) -> Void
+    let onAddPage: () -> Void
+
+    @State private var pagerSelection: Int = 0
+
+    var body: some View {
+        let cal       = Calendar.current
+        let isToday   = cal.isDate(day.date, inSameDayAs: today)
+        let isFuture  = day.date > today
+        let entries   = day.entries
+        let showNew   = !isFuture
+        // Card slot ids — `entries.count` real entry slots followed
+        // by the +1 "new" slot when applicable. For empty days, slot
+        // 0 is the placeholder.
+        let slotCount = entries.isEmpty
+            ? 1                               // placeholder card
+            : entries.count + (showNew ? 1 : 0)
+
+        VStack(alignment: .leading, spacing: AppSpacing.s2) {
+            // Centered date header above the carousel.
+            Text("\(headerEyebrow(isToday: isToday, isFuture: isFuture)) · \(Self.dayHeader(day.date))")
+                .font(AppText.eyebrow)
+                .foregroundStyle(AppColors.coral)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            TabView(selection: $pagerSelection) {
+                ForEach(0..<slotCount, id: \.self) { idx in
+                    cardForSlot(
+                        index: idx,
+                        entries: entries,
+                        isToday: isToday,
+                        isFuture: isFuture
+                    )
+                    .padding(.horizontal, AppSpacing.s4)
+                    .tag(idx)
+                }
+            }
+            #if os(iOS)
+            .tabViewStyle(.page(indexDisplayMode: .always))
+            .indexViewStyle(.page(backgroundDisplayMode: .always))
+            #endif
+            // Fixed-height carousel so the surrounding ScrollView
+            // doesn't fight the TabView for vertical space.
+            .frame(height: 220)
+            .onChange(of: pagerSelection) { newIndex in
+                let pickedId = entries.indices.contains(newIndex) ? entries[newIndex].id : nil
+                if pickedId != selectedPageEntryId {
+                    selectedPageEntryId = pickedId
+                }
+            }
+            .onAppear {
+                // Initial alignment: snap to whichever entry was
+                // already selected at the screen level (e.g. the
+                // user just created a new page and we want to land
+                // on it). Falls back to slot 0 when no match.
+                let idx = entries.firstIndex(where: { $0.id == selectedPageEntryId }) ?? 0
+                if idx != pagerSelection { pagerSelection = idx }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func cardForSlot(
+        index: Int,
+        entries: [NotepadEntry],
+        isToday: Bool,
+        isFuture: Bool
+    ) -> some View {
+        if entries.isEmpty {
+            // Placeholder for empty days — also doubles as the
+            // "+ new page" affordance on today / past days.
+            placeholderCard(isToday: isToday, isFuture: isFuture)
+        } else if index < entries.count {
+            entryCard(
+                entry: entries[index],
+                isFirstAndToday: isToday && index == 0,
+                pageNumber: index + 1,
+                totalEntries: entries.count
+            )
+        } else {
+            newPageCard()
+        }
+    }
+
+    private func entryCard(
+        entry: NotepadEntry,
+        isFirstAndToday: Bool,
+        pageNumber: Int,
+        totalEntries: Int
+    ) -> some View {
+        let title = entry.title?.nonEmpty ?? "Untitled"
+        let preview = (entry.description?.nonEmpty)
+            ?? entry.notes
+                .split(whereSeparator: \.isNewline)
+                .map { String($0).trimmingCharacters(in: .whitespaces) }
+                .first(where: { !$0.isEmpty })
+                .map { String($0.prefix(140)) }
+        return PageCardChrome(
+            eyebrow:       "PAGE \(pageNumber)",
+            indicator:     "\(pageNumber) / \(totalEntries)",
+            title:         title,
+            copy:          preview ?? "",
+            emptyHint:     "Empty page — tap to write.",
+            accentAlpha:   isFirstAndToday ? 0.55 : 0.30,
+            background:    AppColors.cardSolid,
+            titleColor:    AppColors.textPrimary,
+            chips: AnyView(EntryCountsRow(entry: entry)),
+            category:      entry.category?.trimmingCharacters(in: .whitespaces).nonEmpty?.uppercased(),
+            onTap: { onTapEntry(entry.id) }
+        )
+    }
+
+    private func newPageCard() -> some View {
+        PageCardChrome(
+            eyebrow:     "NEW",
+            indicator:   nil,
+            title:       "+ new page",
+            copy:        "Tap to add a fresh page to this day.",
+            emptyHint:   "",
+            accentAlpha: 0.45,
+            background:  AppColors.canvas,
+            titleColor:  AppColors.coralDeep,
+            chips:       nil,
+            category:    nil,
+            onTap:       onAddPage
+        )
+    }
+
+    private func placeholderCard(isToday: Bool, isFuture: Bool) -> some View {
+        let (title, copy) = isFuture
+            ? ("Untitled", "No entry — yet.")
+            : (isToday ? "+ new page" : "+ new page",
+               isToday ? "Tap to start today's note." : "Tap to add a page on this day.")
+        return PageCardChrome(
+            eyebrow:     isFuture ? "UPCOMING" : "NEW",
+            indicator:   nil,
+            title:       title,
+            copy:        copy,
+            emptyHint:   "",
+            accentAlpha: isToday ? 0.55 : 0.30,
+            background:  isFuture ? AppColors.cardSolid : AppColors.canvas,
+            titleColor:  isFuture ? AppColors.textPrimary : AppColors.coralDeep,
+            chips:       nil,
+            category:    nil,
+            onTap:       isFuture ? {} : onAddPage
+        )
+    }
+
+    private func headerEyebrow(isToday: Bool, isFuture: Bool) -> String {
+        if isToday { return "TODAY" }
+        if isFuture { return "UPCOMING" }
+        return "SELECTED"
+    }
+
+    private static func dayHeader(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "EEEE · MMM d"
+        return fmt.string(from: date).uppercased()
+    }
+}
+
+/// Single uniform card chrome reused by both real entries and the
+/// trailing "+ new page" affordance. Mirrors the `PageCard` helper
+/// on the Android side so the two surfaces feel identical.
+private struct PageCardChrome: View {
+    let eyebrow: String
+    let indicator: String?
+    let title: String
+    /// Renamed from `body` — collided with SwiftUI's required
+    /// `var body: some View` on the View conformance.
+    let copy: String
+    let emptyHint: String
+    let accentAlpha: Double
+    let background: Color
+    let titleColor: Color
+    let chips: AnyView?
+    /// Page category — rendered as a small uppercase label in the
+    /// card's top-right corner so users can identify the page's
+    /// category at a glance. `nil` (the placeholder + new-page
+    /// affordances) drops the label entirely.
+    let category: String?
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            ZStack(alignment: .topTrailing) {
+                VStack(alignment: .leading, spacing: AppSpacing.s2) {
+                    Text(eyebrow)
+                        .font(AppText.eyebrow)
+                        .foregroundStyle(AppColors.coral)
+                    Text(title)
+                        .font(.system(size: 18, weight: .medium, design: .serif))
+                        .foregroundStyle(titleColor)
+                    let displayBody = copy.isEmpty ? emptyHint : copy
+                    Text(displayBody)
+                        .font(.system(size: 13, design: .serif))
+                        .foregroundStyle(copy.isEmpty
+                            ? AppColors.textTertiary
+                            : AppColors.textSecondary)
+                        .lineLimit(2)
+                    if let chips { chips }
+                    Spacer(minLength: 0)
+                }
+                .padding(AppSpacing.s5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                // Top-right corner: category on top (when present),
+                // page-position indicator below it. Plain uppercase
+                // text — no pill — keeps the corner light and pairs
+                // visually with the eyebrow at the opposite corner.
+                if category != nil || indicator != nil {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        if let category {
+                            Text(category)
+                                .font(AppText.tag)
+                                .foregroundStyle(AppColors.themeGreenDeep)
+                                .lineLimit(1)
+                        }
+                        if let indicator {
+                            Text(indicator)
+                                .font(AppText.tag)
+                                .foregroundStyle(AppColors.textSecondary)
+                        }
+                    }
+                    .padding(AppSpacing.s4)
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.lg)
+                    .fill(background)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.lg)
+                    .stroke(AppColors.coral.opacity(accentAlpha), lineWidth: 1.2)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Per-entry counts row — drives the chip strip on each entry card
+/// in the day carousel.
+private struct EntryCountsRow: View {
+    let entry: NotepadEntry
+
+    var body: some View {
+        let captures = NotepadScreenViewModel.totalCaptures(for: entry)
+        let openTodos = NotepadScreenViewModel.openTodoCount(for: entry)
+        if captures == 0 && openTodos == 0 {
+            EmptyView()
+        } else {
+            HStack(spacing: AppSpacing.s2) {
+                if captures > 0 {
+                    Text("\(captures) captures")
+                        .font(AppText.tag)
+                        .foregroundStyle(AppColors.themeGreenDeep)
+                }
+                if captures > 0 && openTodos > 0 {
+                    Text("·")
+                        .font(AppText.tag)
+                        .foregroundStyle(AppColors.textSecondary)
+                }
+                if openTodos > 0 {
+                    Text("\(openTodos) todos")
+                        .font(AppText.tag)
+                        .foregroundStyle(AppColors.coralDeep)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Category filter row (Phase 6)
+
+/// Horizontally-scrollable row of category filter chips. The first
+/// chip is "All" (clears the filter); after that come the predefined
+/// + custom categories merged into a single ordered list, with the
+/// user's preferred display order applied (Settings → Categories).
+/// Tapping a chip narrows every downstream surface to that category;
+/// tapping the active chip — or "All" — clears back to the
+/// unfiltered view.
+private struct CategoryFilterRow: View {
+    @EnvironmentObject private var uiPrefs: UiPreferences
+
+    let selected: String?
+    let customs: [String]
+    let onPick: (String?) -> Void
+
+    var body: some View {
+        let ordered = NotepadCategory.applyOrder(
+            userOrder: uiPrefs.state.notepadCategoryOrder,
+            customs:   customs
+        )
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: AppSpacing.s2) {
+                FilterChip(
+                    label:    "All",
+                    isActive: selected == nil,
+                    onTap:    { onPick(nil) }
+                )
+                ForEach(ordered, id: \.self) { name in
+                    let active = selected.map { $0.caseInsensitiveCompare(name) == .orderedSame } ?? false
+                    FilterChip(
+                        label:    name,
+                        isActive: active,
+                        // Tap on already-active = clear (toggle-off
+                        // pattern, matches the Pen / Eraser toggle in
+                        // the drawing toolbar so all chip-style
+                        // affordances behave the same way).
+                        onTap:    { onPick(active ? nil : name) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+private struct FilterChip: View {
+    let label: String
+    let isActive: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        // Custom and predefined chips share the same idle styling —
+        // the user wanted the chip row to read as one homogeneous
+        // list rather than two visually-distinct groups. The idle
+        // background uses the recents palette's leaf-green chip
+        // token (`Color.bgChip` = #DDEACD), the same shade used by
+        // the stats strip, week pulse cells, and tall featured
+        // earlier card, so the filter row sits in the same color
+        // family as everything stacked beneath it.
+        let bg: Color = isActive ? AppColors.themeGreenDeep : Color.bgChip
+        let fg: Color = isActive ? Color.white               : AppColors.themeGreenDeep
+        Button(action: onTap) {
+            Text(label)
+                .font(AppText.meta)
+                .foregroundStyle(fg)
+                .padding(.horizontal, AppSpacing.s3)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: AppSpacing.s3, style: .continuous)
+                        .fill(bg)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Helpers
 
 private extension String {
@@ -620,64 +1100,4 @@ private extension ISO8601DateFormatter {
         fmt.dateFormat = "yyyy-MM-dd"
         return fmt.string(from: date)
     }
-}
-}
-
-    }
-}
-}
-}
-Locale(identifier: "en_US_POSIX")
-        fmt.dateFormat = "yyyy-MM-dd"
-        return fmt.string(from: date)
-    }
-}
-}
-
-    }
-}
-}
-}
-t.string(from: date)
-    }
-}
-}
-
-    }
-}
-}
-}
- }
-}
-}
-}
-}
-}
-}
-}
-Locale(identifier: "en_US_POSIX")
-        fmt.dateFormat = "yyyy-MM-dd"
-        return fmt.string(from: date)
-    }
-}
-}
-
-    }
-}
-}
-}
-t.string(from: date)
-    }
-}
-}
-
-    }
-}
-}
-}
- }
-}
-}
-}
-}
 }

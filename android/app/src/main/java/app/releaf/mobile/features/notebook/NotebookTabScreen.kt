@@ -14,22 +14,32 @@
 
 package app.releaf.mobile.features.notebook
 
+import androidx.compose.animation.core.exponentialDecay
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DraggableAnchors
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.anchoredDraggable
+import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,23 +52,19 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Unarchive
-import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -70,6 +76,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -80,7 +88,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.releaf.mobile.data.notebook.NotebookEntity
 import app.releaf.mobile.data.notebook.PageSearchHit
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
@@ -88,10 +95,11 @@ import app.releaf.mobile.ui.components.CollapsibleCard
 import app.releaf.mobile.ui.components.DeleteConfirmationDialog
 import app.releaf.mobile.ui.components.HairlineDivider
 import app.releaf.mobile.ui.components.LeafColorPicker
+import app.releaf.mobile.ui.components.LeafDropdownDivider
+import app.releaf.mobile.ui.components.LeafDropdownItem
 import app.releaf.mobile.ui.components.LeafEyebrow
 import app.releaf.mobile.ui.components.MetaPill
 import app.releaf.mobile.ui.components.PageOverflowButton
-import app.releaf.mobile.ui.components.RoundIconButton
 import app.releaf.mobile.ui.components.ScreenHeader
 import app.releaf.mobile.ui.components.StatGrid
 import app.releaf.mobile.ui.components.StatItem
@@ -131,99 +139,49 @@ fun NotebookTabScreen(
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var showCreateShelfDialog by rememberSaveable { mutableStateOf(false) }
     var showArchivedSheet by rememberSaveable { mutableStateOf(false) }
+    // Bottom-sheet prototype for the top-of-screen overflow. Replaces
+    // the kebab DropdownMenu with a ModalBottomSheet so create + sort
+    // + archived actions sit inside a thumb-reachable surface.
+    var showActionsSheet by rememberSaveable { mutableStateOf(false) }
     var newShelfName by rememberSaveable { mutableStateOf("") }
     var newShelfColorToken by rememberSaveable { mutableStateOf("coral") }
     var listExpanded by rememberSaveable { mutableStateOf(true) }
     var pagesExpanded by rememberSaveable { mutableStateOf(true) }
     var hiddenNotebookIds by rememberSaveable(state.tab) { mutableStateOf(setOf<String>()) }
-    // Pending delete — user swiped a notebook; holding the row here until
-    // they confirm (or dismiss) the guard dialog.
+    // Pending delete / archive — user tapped an action tile on a
+    // swiped row; holding the notebook here until they confirm (or
+    // dismiss) the guard dialog so destructive / state-changing
+    // actions never fire on a single tap.
     var pendingDelete by remember { mutableStateOf<NotebookEntity?>(null) }
+    var pendingArchive by remember { mutableStateOf<NotebookEntity?>(null) }
+    // Pending shelf delete — captures the shelf's id (the entity
+    // metadata isn't needed beyond the title we read off `state.shelves`).
+    var pendingShelfDelete by remember { mutableStateOf<String?>(null) }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        floatingActionButton = {
-            // Only exposed on the Current tab — Archive is a read-only
-            // destination for already-created notebooks.
-            if (state.tab == NotebookListTab.Current) {
-                FloatingActionButton(
-                    onClick        = { showCreateDialog = true },
-                    containerColor = AppAccent.primary,
-                    contentColor   = AppColors.OnAccent,
-                ) {
-                    Icon(Icons.Filled.Add, contentDescription = "New notebook")
-                }
-            }
-        },
-        containerColor = Color.Transparent,
-        // Outer SignedInShell Scaffold already consumes the system-bar
-        // insets; swallow them here so the header docks flush to the
-        // top instead of doubling the status-bar padding. Same trick
-        // the Notepad screen uses.
-        contentWindowInsets = WindowInsets(0),
-    ) { innerPadding ->
+    // Outer Column with `.padding(AppSpacing.s4)` — exact structural
+    // twin of the notepad tab's outer Column. LeafEyebrow is the
+    // first direct child of this Column, so its top edge sits at
+    // Box.top + 16dp (s4) — the same coordinate the notepad eyebrow
+    // sits at.
+    Box(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(AppSpacing.s4),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
         ) {
-            // Composed top zone — leaf eyebrow on the left, overflow
-            // menu on the right, big serif title below. No view
-            // toggle here: this screen IS the shelves list and there's
-            // no second layout to toggle to.
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(
-                        start = AppSpacing.s4, end = AppSpacing.s4,
-                        top = AppSpacing.s3, bottom = AppSpacing.s3,
-                    ),
-                verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+            LeafEyebrow(label = "releaf · library")
+
+            // Title row — big serif "your shelves" + overflow menu
+            // on the right. The overflow button is taller than the
+            // title, but the eyebrow above is anchored at its own
+            // natural top, so this row's bulk doesn't push the
+            // eyebrow.
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+                modifier              = Modifier.fillMaxWidth(),
             ) {
-                Row(
-                    verticalAlignment     = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
-                    modifier              = Modifier.fillMaxWidth(),
-                ) {
-                    LeafEyebrow(
-                        label    = "releaf · shelves",
-                        modifier = Modifier.weight(1f),
-                    )
-                    PageOverflowButton {
-                        DropdownMenuItem(
-                            text = { Text("New shelf") },
-                            onClick = {
-                                newShelfName = ""
-                                showCreateShelfDialog = true
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("New notebook") },
-                            onClick = { showCreateDialog = true },
-                        )
-                        // Sort sub-section — single tap rotates through
-                        // the three modes; the active mode is marked.
-                        // A nested DropdownMenu would have been the
-                        // ideal UX but Material3 doesn't ship a
-                        // nested-menu primitive yet, so we surface
-                        // each mode as its own row.
-                        NotebookSortMode.entries.forEach { mode ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = if (sortMode == mode) "✓ ${mode.label}" else mode.label,
-                                    )
-                                },
-                                onClick = { viewModel.setSortMode(mode) },
-                            )
-                        }
-                        DropdownMenuItem(
-                            text = { Text("Archived pages") },
-                            onClick = { showArchivedSheet = true },
-                        )
-                    }
-                }
                 Text(
                     text     = "your shelves",
                     style    = TextStyle(
@@ -233,28 +191,41 @@ fun NotebookTabScreen(
                     color    = AppColors.TextPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
+                // Kebab → opens the bottom-sheet action menu below.
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(AppColors.CardSolid.copy(alpha = 0.6f))
+                        .border(1.dp, AppColors.BorderDefault, CircleShape)
+                        .clickable { showActionsSheet = true }
+                        .size(28.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector        = Icons.Filled.MoreVert,
+                        contentDescription = "More",
+                        tint               = AppColors.TextPrimary,
+                        modifier           = Modifier.size(15.dp),
+                    )
+                }
             }
 
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = AppSpacing.s4),
-                verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
-            ) {
-                TabSwitcher(
-                    tab = state.tab,
-                    onSelect = viewModel::setTab,
-                )
-                SearchField(
-                    query = state.query,
-                    onQueryChange = viewModel::updateQuery,
-                    onClearQuery = viewModel::clearQuery,
-                )
-                NotebookOverview(state = state)
-            }
-
-            Spacer(Modifier.height(AppSpacing.s3))
+            // Tab switcher / search / overview no longer need their
+            // own horizontal padding — the outer Column's `.padding
+            // (AppSpacing.s4)` already insets all children by 16dp.
+            TabSwitcher(
+                tab = state.tab,
+                onSelect = viewModel::setTab,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            )
+            SearchField(
+                query = state.query,
+                onQueryChange = viewModel::updateQuery,
+                onClearQuery = viewModel::clearQuery,
+            )
+            NotebookOverview(state = state)
 
             Lists(
                 modifier = Modifier.weight(1f, fill = true),
@@ -265,25 +236,39 @@ fun NotebookTabScreen(
                 onTogglePages = { pagesExpanded = !pagesExpanded },
                 onOpenNotebook = onOpenNotebook,
                 onOpenPage = onOpenPage,
-                onArchive = { notebook ->
-                    hiddenNotebookIds = hiddenNotebookIds + notebook.id
-                    if (state.tab == NotebookListTab.Archive) {
-                        viewModel.unarchive(notebook.id) { success ->
-                            if (!success) {
-                                hiddenNotebookIds = hiddenNotebookIds - notebook.id
-                            }
-                        }
-                    } else {
-                        viewModel.archive(notebook.id) { success ->
-                            if (!success) {
-                                hiddenNotebookIds = hiddenNotebookIds - notebook.id
-                            }
-                        }
-                    }
-                },
+                onArchive = { notebook -> pendingArchive = notebook },
                 onDeleteRequest = { notebook -> pendingDelete = notebook },
+                onDeleteShelf = { id -> pendingShelfDelete = id },
                 hiddenNotebookIds = hiddenNotebookIds,
             )
+        }
+
+        // Snackbar host overlay — anchored bottom-center so it
+        // peeks above the BottomNav (which the outer SignedInShell
+        // Scaffold already accounts for in its content-area inset).
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+
+        // FAB overlay — only exposed on the Current tab; Archive is
+        // a read-only destination for already-created notebooks.
+        // Bottom-end alignment matches Material's default FAB
+        // placement; the 16dp margin matches Scaffold's default FAB
+        // padding. Shelf creation lives in the overflow menu, not as
+        // a second FAB, so the bottom-right stays a single primary
+        // affordance.
+        if (state.tab == NotebookListTab.Current) {
+            FloatingActionButton(
+                onClick        = { showCreateDialog = true },
+                containerColor = AppAccent.primary,
+                contentColor   = AppColors.OnAccent,
+                modifier       = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(AppSpacing.s4),
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "New notebook")
+            }
         }
     }
 
@@ -308,6 +293,146 @@ fun NotebookTabScreen(
                         viewModel.undoDelete(id)
                     }
                 }
+            },
+        )
+    }
+
+    pendingArchive?.let { notebook ->
+        val title       = notebook.title.ifBlank { "Untitled" }
+        val unarchiving = state.tab == NotebookListTab.Archive
+        // State-changing (not destructive) — uses the accent color
+        // for the confirm button instead of routing through
+        // DeleteConfirmationDialog (which paints the confirm in
+        // AppColors.Danger). Mirrors the delete dialog's structure
+        // so both action paths read as one family.
+        AlertDialog(
+            onDismissRequest = { pendingArchive = null },
+            title = {
+                Text(
+                    text  = if (unarchiving) "Unarchive notebook?" else "Archive notebook?",
+                    style = AppTypography.SectionTitle,
+                    color = AppColors.TextPrimary,
+                )
+            },
+            text = {
+                Text(
+                    text = if (unarchiving)
+                        "“$title” will move back to your active notebooks."
+                    else
+                        "“$title” will move to the archive. You can restore it from the Archive tab.",
+                    style = AppTypography.Body,
+                    color = AppColors.TextSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val id = notebook.id
+                    pendingArchive = null
+                    hiddenNotebookIds = hiddenNotebookIds + id
+                    if (unarchiving) {
+                        viewModel.unarchive(id) { success ->
+                            if (!success) hiddenNotebookIds = hiddenNotebookIds - id
+                        }
+                    } else {
+                        viewModel.archive(id) { success ->
+                            if (!success) hiddenNotebookIds = hiddenNotebookIds - id
+                        }
+                    }
+                }) {
+                    Text(
+                        text  = if (unarchiving) "Unarchive" else "Archive",
+                        color = AppAccent.primary,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingArchive = null }) {
+                    Text("Cancel", color = AppColors.TextSecondary)
+                }
+            },
+            containerColor = AppColors.CardSolid,
+        )
+    }
+
+    pendingShelfDelete?.let { id ->
+        val shelf     = state.shelves.firstOrNull { it.id == id }
+        val name      = shelf?.name?.ifBlank { "Untitled shelf" } ?: "this shelf"
+        val bookCount = state.notebooks.count { it.entity.shelfId == id }
+        if (bookCount > 0) {
+            // Shelves are only deletable when empty — books otherwise
+            // get orphaned. Show a single-button info dialog instead
+            // of the destructive confirm so there's no path to delete
+            // by accident.
+            AlertDialog(
+                onDismissRequest = { pendingShelfDelete = null },
+                title = {
+                    Text(
+                        text  = "Can’t delete shelf",
+                        style = AppTypography.SectionTitle,
+                        color = AppColors.TextPrimary,
+                    )
+                },
+                text = {
+                    Text(
+                        text = "“$name” still holds $bookCount " +
+                            "${if (bookCount == 1) "book" else "books"}. " +
+                            "Move or delete the " +
+                            "${if (bookCount == 1) "book" else "books"} first, " +
+                            "then try again.",
+                        style = AppTypography.Body,
+                        color = AppColors.TextSecondary,
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { pendingShelfDelete = null }) {
+                        Text("Got it", color = AppAccent.primary)
+                    }
+                },
+                containerColor = AppColors.CardSolid,
+            )
+        } else {
+            DeleteConfirmationDialog(
+                title = "Delete shelf?",
+                message = "“$name” will be deleted. You can undo this immediately after.",
+                onDismiss = { pendingShelfDelete = null },
+                onConfirm = {
+                    pendingShelfDelete = null
+                    viewModel.softDeleteShelf(id)
+                    scope.launch {
+                        val result = snackbarHostState.showSnackbar(
+                            message     = "Shelf deleted",
+                            actionLabel = "Undo",
+                            duration    = SnackbarDuration.Short,
+                        )
+                        if (result == SnackbarResult.ActionPerformed) {
+                            viewModel.undoDeleteShelf(id)
+                        }
+                    }
+                },
+            )
+        }
+    }
+
+    if (showActionsSheet) {
+        LibraryActionsSheet(
+            sortMode      = sortMode,
+            onDismiss     = { showActionsSheet = false },
+            onNewShelf    = {
+                showActionsSheet = false
+                newShelfName = ""
+                showCreateShelfDialog = true
+            },
+            onNewNotebook = {
+                showActionsSheet = false
+                showCreateDialog = true
+            },
+            onPickSort    = { mode ->
+                viewModel.setSortMode(mode)
+                showActionsSheet = false
+            },
+            onArchived    = {
+                showActionsSheet = false
+                showArchivedSheet = true
             },
         )
     }
@@ -401,60 +526,74 @@ fun NotebookTabScreen(
 
 /* ---------- tabs + search ---------- */
 
+/**
+ * Active / Archived switch — visually the same "classic mode" switch
+ * the notepad tab uses for Day / Recents. Two text-labeled segments
+ * inside a rounded capsule with a muted-cream track; selected
+ * segment fills with the deep theme green and white text. Wider and
+ * more readable than the previous icon-pair pill, and consistent
+ * with the rest of the app's segmented controls.
+ */
 @Composable
 private fun TabSwitcher(
     tab: NotebookListTab,
     onSelect: (NotebookListTab) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    // Segmented control — two icons in one connected pill. Outer
-    // hairline border + inner divider replace the previous gap-and-
-    // separate-chips layout; selected segment fills with accent.soft
-    // so the active tab reads at a glance.
     Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(AppRadius.md))
-            .background(AppColors.CardSolid)
-            .border(1.dp, AppColors.BorderDefault, RoundedCornerShape(AppRadius.md)),
+        modifier = modifier
+            .widthIn(max = 280.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(50))
+            // Track color matches the muted-cream tone used on the
+            // notepad tab's switch — keeps every segmented control
+            // across the app in one visual family.
+            .background(Color(0xFFEFE7CD))
+            .border(
+                width = 1.dp,
+                color = AppColors.BorderDefault,
+                shape = RoundedCornerShape(50),
+            )
+            .padding(2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TabSegment(
-            icon = Icons.AutoMirrored.Filled.MenuBook,
-            contentDescription = "Current notebooks",
-            selected = tab == NotebookListTab.Current,
+            label = "Active",
+            isActive = tab == NotebookListTab.Current,
             onClick = { onSelect(NotebookListTab.Current) },
-        )
-        Box(
-            modifier = Modifier
-                .size(width = 1.dp, height = 24.dp)
-                .background(AppColors.BorderDefault),
+            modifier = Modifier.weight(1f),
         )
         TabSegment(
-            icon = Icons.Filled.Archive,
-            contentDescription = "Archive",
-            selected = tab == NotebookListTab.Archive,
+            label = "Archived",
+            isActive = tab == NotebookListTab.Archive,
             onClick = { onSelect(NotebookListTab.Archive) },
+            modifier = Modifier.weight(1f),
         )
     }
 }
 
 @Composable
 private fun TabSegment(
-    icon: ImageVector,
-    contentDescription: String,
-    selected: Boolean,
+    label: String,
+    isActive: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val bg = if (selected) AppAccent.soft else Color.Transparent
-    val tint = if (selected) AppAccent.deep else AppColors.TextSecondary
+    val bg = if (isActive) AppColors.ThemeGreenDeep else Color.Transparent
+    val fg = if (isActive) AppColors.OnAccent else AppColors.TextSecondary
     Box(
-        modifier = Modifier
-            .size(width = 56.dp, height = 40.dp)
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
             .background(bg)
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .padding(vertical = AppSpacing.s2),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = contentDescription, tint = tint,
-             modifier = Modifier.size(18.dp))
+        Text(
+            text  = label,
+            style = AppTypography.Button,
+            color = fg,
+        )
     }
 }
 
@@ -559,6 +698,7 @@ private fun Lists(
     onOpenPage: (String) -> Unit,
     onArchive: (NotebookEntity) -> Unit,
     onDeleteRequest: (NotebookEntity) -> Unit,
+    onDeleteShelf: (String) -> Unit,
     hiddenNotebookIds: Set<String>,
     modifier: Modifier = Modifier,
 ) {
@@ -578,9 +718,12 @@ private fun Lists(
 
     LazyColumn(
         modifier = modifier.fillMaxWidth(),
+        // No horizontal contentPadding — the outer Column in
+        // NotebookTabScreen already insets every child by 16dp
+        // (.padding(AppSpacing.s4)). Adding more here double-pads
+        // the cards relative to the header, tab switcher, search
+        // field, and overview that share the same parent.
         contentPadding = PaddingValues(
-            start  = AppSpacing.s4,
-            end    = AppSpacing.s4,
             top    = AppSpacing.s0,
             bottom = AppSpacing.s10,
         ),
@@ -593,12 +736,14 @@ private fun Lists(
                         state = state,
                         visibleBooks = visibleNotebooks,
                         shelfName = null,
+                        shelfId = null,
                         archive = archive,
                         expanded = listExpanded,
                         onToggle = onToggleList,
                         onOpenNotebook = onOpenNotebook,
                         onArchive = onArchive,
                         onDeleteRequest = onDeleteRequest,
+                        onDeleteShelf = onDeleteShelf,
                     )
                 }
             } else {
@@ -609,12 +754,14 @@ private fun Lists(
                             state = state,
                             visibleBooks = books,
                             shelfName = shelf.name,
+                            shelfId = shelf.id,
                             archive = archive,
                             expanded = listExpanded,
                             onToggle = onToggleList,
                             onOpenNotebook = onOpenNotebook,
                             onArchive = onArchive,
                             onDeleteRequest = onDeleteRequest,
+                            onDeleteShelf = onDeleteShelf,
                         )
                     }
                 }
@@ -627,12 +774,14 @@ private fun Lists(
                             state = state,
                             visibleBooks = emptyList(),
                             shelfName = shelf.name,
+                            shelfId = shelf.id,
                             archive = archive,
                             expanded = listExpanded,
                             onToggle = onToggleList,
                             onOpenNotebook = onOpenNotebook,
                             onArchive = onArchive,
                             onDeleteRequest = onDeleteRequest,
+                            onDeleteShelf = onDeleteShelf,
                         )
                     }
                 }
@@ -642,12 +791,14 @@ private fun Lists(
                             state = state,
                             visibleBooks = orphanBooks,
                             shelfName = "Unshelved",
+                            shelfId = null,
                             archive = archive,
                             expanded = listExpanded,
                             onToggle = onToggleList,
                             onOpenNotebook = onOpenNotebook,
                             onArchive = onArchive,
                             onDeleteRequest = onDeleteRequest,
+                            onDeleteShelf = onDeleteShelf,
                         )
                     }
                 }
@@ -658,12 +809,14 @@ private fun Lists(
                     state = state,
                     visibleBooks = visibleNotebooks,
                     shelfName = null, // archive tab keeps the tab-level title
+                    shelfId = null,
                     archive = archive,
                     expanded = listExpanded,
                     onToggle = onToggleList,
                     onOpenNotebook = onOpenNotebook,
                     onArchive = onArchive,
                     onDeleteRequest = onDeleteRequest,
+                    onDeleteShelf = onDeleteShelf,
                 )
             }
         }
@@ -686,12 +839,14 @@ private fun NotebookCard(
     state: NotebookTabUiState,
     visibleBooks: List<NotebookSummary>,
     shelfName: String?,
+    shelfId: String?,
     archive: Boolean,
     expanded: Boolean,
     onToggle: () -> Unit,
     onOpenNotebook: (String) -> Unit,
     onArchive: (NotebookEntity) -> Unit,
     onDeleteRequest: (NotebookEntity) -> Unit,
+    onDeleteShelf: (String) -> Unit,
 ) {
     val title = when {
         archive         -> "Archive"
@@ -706,6 +861,12 @@ private fun NotebookCard(
         count == 1            -> "1 book"
         else                  -> "$count books"
     }
+    // Shelf overflow only makes sense for real, non-default shelves.
+    // The synthetic groups ("Current notebooks", "Archive",
+    // "Unshelved") have no shelfId, and the seeded General shelf
+    // must always exist as the fallback parent for new notebooks.
+    val canDeleteShelf = shelfId != null &&
+        shelfId != app.releaf.mobile.data.shelf.ShelfEntity.DEFAULT_GENERAL_ID
 
     CollapsibleCard(
         title = title,
@@ -713,21 +874,29 @@ private fun NotebookCard(
         onToggle = onToggle,
         // Lighter weight than the default heavy SectionTitle —
         // matches the tab-label feel of the screen header above.
-        titleStyle = AppTypography.SectionTitleLight,
+        // 16sp keeps the shelf/section header readable but visually
+        // quieter than the 32sp serif "your shelves" title and the
+        // notebook-row titles in the body below.
+        titleStyle = AppTypography.SectionTitleLight.copy(fontSize = 16.sp),
+        // Shelves stay open by design — the screen-level "your shelves"
+        // header is the surface-wide affordance for collapsing.
+        showCollapseToggle = false,
         trailing = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
             ) {
                 MetaPill(text = countLabel, accent = !archive)
-                // Layout toggle is a visual affordance for now — no grid
-                // mode shipped yet. Left in the design so callers can
-                // wire it up when the grid layout lands.
-                RoundIconButton(
-                    icon = Icons.Filled.ViewAgenda,
-                    contentDescription = "Layout",
-                    onClick = { /* TODO(layout-toggle) */ },
-                )
+                if (canDeleteShelf) {
+                    PageOverflowButton {
+                        LeafDropdownItem(
+                            label       = "Delete shelf",
+                            leadingIcon = Icons.Filled.Delete,
+                            destructive = true,
+                            onClick     = { onDeleteShelf(shelfId!!) },
+                        )
+                    }
+                }
             }
         },
     ) {
@@ -787,7 +956,26 @@ private fun EmptyListBody(state: NotebookTabUiState, shelfName: String? = null) 
 
 /* ---------- notebook row ---------- */
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Stop-and-select swipe pattern (iOS Mail style). The row docks at one
+ * of two anchors:
+ *
+ *   • Closed — full width, no actions visible.
+ *   • Open   — offset left by [actionsWidth], revealing a stacked pair
+ *               of trailing action buttons (Archive/Unarchive +
+ *               Delete) the user can tap to confirm.
+ *
+ * Tapping the row body when it's open snaps it shut. A swipe back also
+ * closes it. Both action buttons close the row after firing so the
+ * caller's snackbar / confirmation dialog sees a tidy resting state.
+ *
+ * The row is held in the open anchor regardless of how far the user
+ * dragged — they don't need to commit to a full-width swipe to reach
+ * either action, which keeps the gesture forgiving.
+ */
+private enum class RowSwipeAnchor { Closed, Open }
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SwipeableNotebookListItem(
     summary: NotebookSummary,
@@ -797,31 +985,123 @@ private fun SwipeableNotebookListItem(
     onArchive: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            when (value) {
-                // Don't auto-dismiss on delete — bubble the request up to the
-                // screen which pops a confirmation dialog. Returning false
-                // snaps the row back while the dialog is open.
-                SwipeToDismissBoxValue.EndToStart -> { onDelete(); false }
-                SwipeToDismissBoxValue.StartToEnd -> { onArchive(); true }
-                else -> false
-            }
-        },
-    )
+    val density       = LocalDensity.current
+    val actionWidth   = 88.dp
+    val actionsWidth  = actionWidth * 2
+    val actionsWidthPx = with(density) { actionsWidth.toPx() }
 
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromEndToStart = true,
-        enableDismissFromStartToEnd = true,
-        backgroundContent = {
-            SwipeBackground(
-                direction = dismissState.dismissDirection,
-                archiveMode = archive,
+    // The 6-arg AnchoredDraggableState factory is marked @Deprecated
+    // in Compose Foundation 1.7+, with the documented migration path
+    // pointing at anchoredDraggableFlingBehavior(...). That function
+    // is currently `internal` in this Compose-BOM version, so the
+    // deprecated factory is still the only way to thread thresholds
+    // and animation specs through. Suppression revisits when the
+    // public replacement ships.
+    @Suppress("DEPRECATION")
+    val state = remember(actionsWidthPx) {
+        AnchoredDraggableState(
+            initialValue        = RowSwipeAnchor.Closed,
+            positionalThreshold = { distance: Float -> distance * 0.5f },
+            velocityThreshold   = { with(density) { 125.dp.toPx() } },
+            snapAnimationSpec   = spring(),
+            decayAnimationSpec  = exponentialDecay(),
+        ).apply {
+            updateAnchors(
+                DraggableAnchors {
+                    RowSwipeAnchor.Closed at 0f
+                    RowSwipeAnchor.Open   at -actionsWidthPx
+                },
             )
-        },
+        }
+    }
+    val scope = rememberCoroutineScope()
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        // Background actions — matchParentSize so this layer takes the
+        // foreground row's natural height; horizontalArrangement = End
+        // tucks the two action tiles against the trailing edge.
+        Row(
+            modifier              = Modifier.matchParentSize(),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End,
+        ) {
+            NotebookActionTile(
+                icon         = if (archive) Icons.Filled.Unarchive else Icons.Filled.Archive,
+                label        = if (archive) "Unarchive" else "Archive",
+                fill         = AppAccent.soft,
+                contentColor = AppAccent.deep,
+                width        = actionWidth,
+                onClick      = {
+                    onArchive()
+                    scope.launch { state.animateTo(RowSwipeAnchor.Closed) }
+                },
+            )
+            NotebookActionTile(
+                icon         = Icons.Filled.Delete,
+                label        = "Delete",
+                fill         = AppColors.Danger,
+                contentColor = AppColors.OnAccent,
+                width        = actionWidth,
+                onClick      = {
+                    onDelete()
+                    scope.launch { state.animateTo(RowSwipeAnchor.Closed) }
+                },
+            )
+        }
+        // Foreground row — slides over the action tiles. Tapping a
+        // closed row opens the notebook; tapping an open row snaps
+        // it shut so the body acts as a "cancel" affordance.
+        NotebookListItem(
+            summary = summary,
+            palette = palette,
+            onClick = {
+                if (state.currentValue == RowSwipeAnchor.Open) {
+                    scope.launch { state.animateTo(RowSwipeAnchor.Closed) }
+                } else {
+                    onOpen()
+                }
+            },
+            modifier = Modifier
+                .offset { IntOffset(state.requireOffset().toInt(), 0) }
+                .anchoredDraggable(
+                    state       = state,
+                    orientation = Orientation.Horizontal,
+                ),
+        )
+    }
+}
+
+@Composable
+private fun NotebookActionTile(
+    icon: ImageVector,
+    label: String,
+    fill: Color,
+    contentColor: Color,
+    width: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .width(width)
+            .fillMaxHeight()
+            .background(fill)
+            .clickable(onClick = onClick)
+            .padding(horizontal = AppSpacing.s2, vertical = AppSpacing.s3),
+        horizontalAlignment   = Alignment.CenterHorizontally,
+        verticalArrangement   = Arrangement.Center,
     ) {
-        NotebookListItem(summary = summary, palette = palette, onClick = onOpen)
+        Icon(
+            imageVector        = icon,
+            contentDescription = label,
+            tint               = contentColor,
+            modifier           = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.height(AppSpacing.s1))
+        Text(
+            text  = label,
+            style = AppTypography.Meta,
+            color = contentColor,
+        )
     }
 }
 
@@ -830,13 +1110,14 @@ private fun NotebookListItem(
     summary: NotebookSummary,
     palette: app.releaf.mobile.ui.components.ShelfPalette?,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val notebook = summary.entity
-    // Opaque fill is required: SwipeToDismissBox lays the delete / archive
-    // backgrounds *behind* the foreground row, so a transparent row would
-    // leak those strips through at rest.
+    // Opaque fill is required: the action tiles are laid out *behind*
+    // the foreground row, so a transparent row would leak the buttons
+    // through at rest.
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .background(AppColors.CardSolid)
             .clickable(onClick = onClick)
@@ -853,25 +1134,16 @@ private fun NotebookListItem(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.s1),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
-            ) {
-                Text(
-                    text = notebook.title.ifBlank { "Untitled" },
-                    // Lighter than the default bold SectionTitle —
-                    // reads as a list row rather than a section head,
-                    // which is what this row actually is.
-                    style = AppTypography.SectionTitleLight,
-                    color = AppColors.TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                Spacer(Modifier.weight(1f))
-                if (notebook.archivedAt == null) MetaPill("Active", accent = true)
-                else MetaPill("Archived")
-            }
+            Text(
+                text = notebook.title.ifBlank { "Untitled" },
+                // Lighter than the default bold SectionTitle — reads
+                // as a list row rather than a section head. 16sp
+                // drops the visual weight of dense lists.
+                style = AppTypography.SectionTitleLight.copy(fontSize = 16.sp),
+                color = AppColors.TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             if (!notebook.description.isNullOrBlank()) {
                 Text(
                     text = notebook.description,
@@ -891,6 +1163,12 @@ private fun NotebookListItem(
                 color = AppColors.TextTertiary,
             )
         }
+        // Active / Archived pill rides the trailing edge of the
+        // outer row, top-aligned with the icon and title — pulls
+        // the status off the title row and into a dedicated lane on
+        // the right so it's easier to spot at a glance.
+        if (notebook.archivedAt == null) MetaPill("Active", accent = true)
+        else MetaPill("Archived")
     }
 }
 
@@ -996,6 +1274,14 @@ private fun PageHitsCard(
         subtitle = "Content matches across your notebooks",
         expanded = expanded,
         onToggle = onToggle,
+        // Match the 16sp section/card headers used by the shelf
+        // cards above so the search-results card reads as part of
+        // the same visual rhythm.
+        titleStyle = AppTypography.SectionTitle.copy(fontSize = 16.sp),
+        // No chevron — keeps parity with the shelf cards on this
+        // tab. The card only renders during an active search so
+        // hiding the body would leave a dead header strip.
+        showCollapseToggle = false,
         trailing = {
             MetaPill(text = "${pages.size} result${if (pages.size == 1) "" else "s"}", accent = true)
         },
@@ -1026,7 +1312,10 @@ private fun PageHitRow(page: PageSearchHit, onClick: () -> Unit) {
         ) {
             Text(
                 displayPageTitle(page),
-                style = AppTypography.SectionTitleLight,
+                // Match the 16sp notebook-row title above so search
+                // hits sit at the same visual weight as the rest of
+                // the list rows.
+                style = AppTypography.SectionTitleLight.copy(fontSize = 16.sp),
                 color = AppColors.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1053,56 +1342,6 @@ private fun PageHitRow(page: PageSearchHit, onClick: () -> Unit) {
                 color = AppColors.TextTertiary,
             )
         }
-    }
-}
-
-/* ---------- swipe backgrounds ---------- */
-
-@Composable
-private fun SwipeBackground(
-    direction: SwipeToDismissBoxValue,
-    archiveMode: Boolean,
-) {
-    when (direction) {
-        SwipeToDismissBoxValue.EndToStart -> DeleteBackground()
-        SwipeToDismissBoxValue.StartToEnd -> ArchiveBackground(archiveMode)
-        else -> Box(Modifier.fillMaxSize())
-    }
-}
-
-@Composable
-private fun DeleteBackground() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(AppColors.Danger)
-            .padding(horizontal = AppSpacing.s4),
-        contentAlignment = Alignment.CenterEnd,
-    ) {
-        Icon(
-            Icons.Filled.Delete,
-            contentDescription = null,
-            tint = AppColors.OnAccent,
-            modifier = Modifier.size(20.dp),
-        )
-    }
-}
-
-@Composable
-private fun ArchiveBackground(archiveMode: Boolean) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(AppAccent.soft)
-            .padding(horizontal = AppSpacing.s4),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Icon(
-            imageVector = if (archiveMode) Icons.Filled.Unarchive else Icons.Filled.Archive,
-            contentDescription = null,
-            tint = AppAccent.deep,
-            modifier = Modifier.size(20.dp),
-        )
     }
 }
 
@@ -1391,6 +1630,132 @@ private fun displayNotebookTitle(title: String): String =
 
 private fun displayChapterTitle(title: String): String =
     title.trim().ifEmpty { "Untitled chapter" }
+
+/**
+ * Bottom-sheet replacement for the screen-level kebab dropdown.
+ * Rolls up create / sort / archived actions into a single thumb-
+ * reachable surface — drag to dismiss, tap a row to fire its
+ * action and auto-close. Sections (Create / Sort by / More) get
+ * an eyebrow label + hairlines so the panel reads as grouped
+ * actions rather than a flat list.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun LibraryActionsSheet(
+    sortMode: NotebookSortMode,
+    onDismiss: () -> Unit,
+    onNewShelf: () -> Unit,
+    onNewNotebook: () -> Unit,
+    onPickSort: (NotebookSortMode) -> Unit,
+    onArchived: () -> Unit,
+) {
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+    )
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = AppColors.CardSolid,
+        contentColor     = AppColors.TextPrimary,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = AppSpacing.s5),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+        ) {
+            ActionSheetEyebrow("CREATE")
+            ActionSheetRow(
+                icon    = Icons.Filled.Add,
+                label   = "New shelf",
+                onClick = onNewShelf,
+            )
+            HairlineDivider()
+            ActionSheetRow(
+                icon    = Icons.Filled.Book,
+                label   = "New notebook",
+                onClick = onNewNotebook,
+            )
+
+            ActionSheetEyebrow("SORT BY", topPadding = AppSpacing.s4)
+            NotebookSortMode.entries.forEachIndexed { index, mode ->
+                ActionSheetRow(
+                    icon     = null,
+                    label    = mode.label,
+                    selected = sortMode == mode,
+                    onClick  = { onPickSort(mode) },
+                )
+                if (index < NotebookSortMode.entries.lastIndex) HairlineDivider()
+            }
+
+            ActionSheetEyebrow("MORE", topPadding = AppSpacing.s4)
+            ActionSheetRow(
+                icon    = Icons.Filled.Archive,
+                label   = "Archived pages",
+                onClick = onArchived,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActionSheetEyebrow(
+    text: String,
+    topPadding: androidx.compose.ui.unit.Dp = AppSpacing.s2,
+) {
+    Text(
+        text     = text,
+        style    = AppTypography.Eyebrow,
+        color    = AppColors.TextSecondary,
+        modifier = Modifier.padding(
+            start  = AppSpacing.s5,
+            end    = AppSpacing.s5,
+            top    = topPadding,
+            bottom = AppSpacing.s1,
+        ),
+    )
+}
+
+@Composable
+private fun ActionSheetRow(
+    icon: ImageVector?,
+    label: String,
+    onClick: () -> Unit,
+    selected: Boolean = false,
+) {
+    Row(
+        modifier              = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = AppSpacing.s5, vertical = AppSpacing.s3),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector        = icon,
+                contentDescription = null,
+                tint               = AppAccent.deep,
+                modifier           = Modifier.size(20.dp),
+            )
+        } else {
+            Spacer(Modifier.size(20.dp))
+        }
+        Text(
+            text     = label,
+            style    = AppTypography.Body,
+            color    = if (selected) AppAccent.primary else AppColors.TextPrimary,
+            modifier = Modifier.weight(1f),
+        )
+        if (selected) {
+            Text(
+                text  = "✓",
+                style = AppTypography.Body,
+                color = AppAccent.primary,
+            )
+        }
+    }
+}
 
 /**
  * Cross-notebook archive picker. Mirrors the iOS

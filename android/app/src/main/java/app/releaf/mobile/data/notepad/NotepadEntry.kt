@@ -59,6 +59,18 @@ data class NotepadEntry(
     @ColumnInfo(name = "description")
     val description: String? = null,
 
+    /**
+     * Category label for grouping / filtering. NULL = uncategorised.
+     * Holds either one of the predefined names exposed by
+     * `NotepadCategory` (Home / Work / Personal / Health / Travel /
+     * Ideas) or any free-form user string — the picker turns
+     * unrecognised strings into custom-category chips. The v19→v20
+     * migration adds the column without a default so existing rows
+     * round-trip cleanly.
+     */
+    @ColumnInfo(name = "category")
+    val category: String? = null,
+
     /** Canonical CommonMark. Empty string is valid. */
     @ColumnInfo(name = "notes", defaultValue = "''")
     val notes: String = "",

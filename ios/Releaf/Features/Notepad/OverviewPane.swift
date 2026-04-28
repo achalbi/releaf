@@ -40,9 +40,59 @@ struct OverviewPane: View {
     let onAddVoiceNote: (String, Int) -> Void
     let onTranscribeVoiceNote: (String, String?) -> Void
     let onRemoveAttachment: (String) -> Void
+    /// Optional preselected CaptureTabBar tab. When non-nil, the pane
+    /// opens with this tab active instead of the default `.overview`.
+    /// Used by the Recents new-entry picker so tapping "Photo" lands
+    /// the user on the Photos tab of the grid layout.
+    var initialSelected: CaptureMode? = nil
 
-    @State private var selected: CaptureMode = .overview
+    @State private var selected: CaptureMode
     @State private var notesSheetOpen: Bool = false
+
+    init(
+        notes: Binding<String>,
+        richTextController: RichTextEditorController,
+        contacts: [NotepadContact],
+        todos: [NotepadTodo],
+        locations: [GeoLocation],
+        attachments: [Attachment],
+        onAddContact: @escaping (String) -> Void,
+        onRemoveContact: @escaping (String) -> Void,
+        onAddTodo: @escaping (String) -> Void,
+        onToggleTodo: @escaping (String) -> Void,
+        onRemoveTodo: @escaping (String) -> Void,
+        onAddLocation: @escaping (Double, Double, String?) -> Void,
+        onRemoveLocation: @escaping (String) -> Void,
+        onAddPhoto: @escaping (String) -> Void,
+        onAddScan: @escaping (String, String?) -> Void,
+        onAddVoiceNote: @escaping (String, Int) -> Void,
+        onTranscribeVoiceNote: @escaping (String, String?) -> Void,
+        onRemoveAttachment: @escaping (String) -> Void,
+        initialSelected: CaptureMode? = nil
+    ) {
+        self._notes = notes
+        self.richTextController = richTextController
+        self.contacts = contacts
+        self.todos = todos
+        self.locations = locations
+        self.attachments = attachments
+        self.onAddContact = onAddContact
+        self.onRemoveContact = onRemoveContact
+        self.onAddTodo = onAddTodo
+        self.onToggleTodo = onToggleTodo
+        self.onRemoveTodo = onRemoveTodo
+        self.onAddLocation = onAddLocation
+        self.onRemoveLocation = onRemoveLocation
+        self.onAddPhoto = onAddPhoto
+        self.onAddScan = onAddScan
+        self.onAddVoiceNote = onAddVoiceNote
+        self.onTranscribeVoiceNote = onTranscribeVoiceNote
+        self.onRemoveAttachment = onRemoveAttachment
+        self.initialSelected = initialSelected
+        // Seed the @State at init time so the route's mode hint lands
+        // before the body renders.
+        self._selected = State(initialValue: initialSelected ?? .overview)
+    }
 
     /// All seven modes render — Voice was re-enabled once
     /// `VoiceSection` landed. Kept as a computed so we can drop modes

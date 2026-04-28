@@ -165,6 +165,7 @@ import app.releaf.mobile.data.notebook.Contact
 import app.releaf.mobile.data.notebook.GeoLocation
 import app.releaf.mobile.data.notebook.ScanCategory
 import app.releaf.mobile.data.notebook.TodoItem
+import app.releaf.mobile.ui.components.LeafDropdownDivider
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppRadius
@@ -182,9 +183,11 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // ============================ Shell ============================
 
@@ -1849,6 +1852,15 @@ fun PhotosSection(
      *  pdfUri, previewUri)` so the combined document lands in the
      *  Scans section under the GENERAL category. */
     onCombineToPdf: (pdfUri: String, previewUri: String?) -> Unit = { _, _ -> },
+    /** When non-null, the fullscreen photo viewer surfaces an
+     *  "Import to notes" affordance. The receiver is a fresh
+     *  `file://` URI to a local copy of the photo — callers route to
+     *  `viewModel.addSubPageFromImage(uri)` to append a new sub-page
+     *  ("note") inside the same entry, with the photo as its drawable
+     *  background. The original photo attachment is not touched
+     *  (copy semantics, not move): the local copy is independent so
+     *  removing the photo later won't break the new sub-page. */
+    onImportToNotes: ((pageImageUri: String) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var showChooser by remember { mutableStateOf(false) }
@@ -2045,6 +2057,44 @@ fun PhotosSection(
             photos       = photos,
             initialIndex = index,
             onDismiss    = { viewerIndex = null },
+            onImportToNotes = onImportToNotes?.let { handler ->
+                { photo ->
+                    // Copy the photo bytes into our own files dir so
+                    // the new sub-page's background URI is independent
+                    // of the photo attachment. If the user later
+                    // removes the photo, AttachmentStorage.deleteIfLocal
+                    // would otherwise blow away the file the sub-page
+                    // is rendering. Run the copy on IO to keep the
+                    // dismiss snappy.
+                    combineScope.launch {
+                        val source = runCatching { Uri.parse(photo.uri) }.getOrNull()
+                        val copied = if (source != null) {
+                            withContext(Dispatchers.IO) {
+                                AttachmentStorage.copyIntoStorage(
+                                    context = context,
+                                    source  = source,
+                                    ext     = "jpg",
+                                )
+                            }
+                        } else null
+                        if (copied != null) {
+                            handler(copied.toString())
+                            viewerIndex = null
+                            Toast.makeText(
+                                context,
+                                "Added to a new note",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        } else {
+                            Toast.makeText(
+                                context,
+                                "Couldn't import photo",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    }
+                }
+            },
         )
     }
 
@@ -2561,7 +2611,8 @@ private fun ScanFilterDropdown(
                     expanded = false
                 },
             )
-            ScanCategory.entries.forEach { cat ->
+            LeafDropdownDivider()
+            ScanCategory.entries.forEachIndexed { index, cat ->
                 val isActive = selected == cat
                 DropdownMenuItem(
                     text    = {
@@ -2576,6 +2627,7 @@ private fun ScanFilterDropdown(
                         expanded = false
                     },
                 )
+                if (index < ScanCategory.entries.lastIndex) LeafDropdownDivider()
             }
         }
     }
@@ -2726,6 +2778,7 @@ private fun ScanRowOverflowMenu(
                         onViewText()
                     },
                 )
+                LeafDropdownDivider()
             }
             DropdownMenuItem(
                 text        = { Text("Share") },
@@ -2741,6 +2794,7 @@ private fun ScanRowOverflowMenu(
                     onShare()
                 },
             )
+            LeafDropdownDivider()
             DropdownMenuItem(
                 text        = { Text("Edit") },
                 leadingIcon = {
@@ -2755,6 +2809,7 @@ private fun ScanRowOverflowMenu(
                     onEdit()
                 },
             )
+            LeafDropdownDivider()
             DropdownMenuItem(
                 text        = { Text("Delete", color = AppColors.Danger) },
                 leadingIcon = {

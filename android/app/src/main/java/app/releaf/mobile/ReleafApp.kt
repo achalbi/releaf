@@ -142,6 +142,13 @@ class ReleafApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Plant catalogue is parsed once from `assets/plants.json`
+        // (symlinked back to the canonical `design-system/plants.json`).
+        // Init here so every subsequent `DailyPlants.all` /
+        // `DailyPlants.forToday(...)` access — including from the
+        // notepad seeding flow that fires the moment the user opens
+        // a fresh entry — hits a populated cache.
+        app.releaf.mobile.ui.theme.DailyPlants.initialize(this)
         authStore = AuthStore.get(this)
         // Database has to be ready before LocalDriveRepository can
         // open its DAOs — flip the init order so the repo lands on

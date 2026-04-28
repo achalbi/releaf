@@ -22,8 +22,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -88,8 +90,9 @@ fun HomeScreenVariant1(
     viewModel: ShelvesViewModel = viewModel(factory = ShelvesViewModel.factory(session)),
 ) {
     val state by viewModel.state.collectAsState()
-    var filter by remember { mutableStateOf(ShelfFilter.All) }
+    var filter by remember { mutableStateOf(ShelfFilter.Active) }
     var showNewBookDialog by remember { mutableStateOf(false) }
+    var showNewShelfDialog by remember { mutableStateOf(false) }
     var showOpenTodosSheet by remember { mutableStateOf(false) }
 
     Box(modifier.fillMaxSize()) {
@@ -110,6 +113,7 @@ fun HomeScreenVariant1(
                     onOpenNotebook  = onOpenNotebook,
                     onOpenTodosTap  = { showOpenTodosSheet = true },
                     onNewNotebook   = { showNewBookDialog = true },
+                    onNewShelf      = { showNewShelfDialog = true },
                 )
                 if (showNewBookDialog) {
                     NewBookDialog(
@@ -124,6 +128,15 @@ fun HomeScreenVariant1(
                                 shelfId = shelfId,
                                 onCreated = { id -> onOpenNotebook(id) },
                             )
+                        },
+                    )
+                }
+                if (showNewShelfDialog) {
+                    NewShelfDialog(
+                        onDismiss = { showNewShelfDialog = false },
+                        onConfirm = { name ->
+                            viewModel.createShelf(name)
+                            showNewShelfDialog = false
                         },
                     )
                 }
@@ -153,6 +166,7 @@ private fun ShelvesLoaded(
     onOpenNotebook: (String) -> Unit,
     onOpenTodosTap: () -> Unit,
     onNewNotebook: () -> Unit,
+    onNewShelf: () -> Unit,
 ) {
     val filtered = filter.apply(notebooks)
     val totalPages = remember(notebooks) { notebooks.sumOf { it.pageCount } }
@@ -188,7 +202,11 @@ private fun ShelvesLoaded(
             // StatsGrid hidden per design feedback — trees-saved card
             // already anchors the top; filter row moves straight under
             // it so the shelves start higher.
-            FilterRow(selected = filter, onSelect = onFilter)
+            FilterRow(
+                selected    = filter,
+                onSelect    = onFilter,
+                onNewShelf  = onNewShelf,
+            )
 
             if (shelves.isEmpty()) {
                 Text(
@@ -362,30 +380,99 @@ private fun StatCard(
 // ================================================================== Filter row
 
 @Composable
-private fun FilterRow(selected: ShelfFilter, onSelect: (ShelfFilter) -> Unit) {
-    val options = listOf(ShelfFilter.All, ShelfFilter.Active, ShelfFilter.Archived)
-    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
-        options.forEach { option ->
-            val active = option == selected
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(AppRadius.pill))
-                    .background(if (active) AppColors.ActionPrimary else Color.Transparent)
-                    .border(
-                        width = 1.dp,
-                        color = if (active) Color.Transparent else AppColors.BorderStrong,
-                        shape = RoundedCornerShape(AppRadius.pill),
-                    )
-                    .clickable { onSelect(option) }
-                    .padding(horizontal = AppSpacing.s4, vertical = AppSpacing.s2),
-            ) {
-                Text(
-                    text = option.label,
-                    style = AppTypography.Button,
-                    color = if (active) AppColors.OnPrimary else AppColors.TextPrimary,
+private fun FilterRow(
+    selected: ShelfFilter,
+    onSelect: (ShelfFilter) -> Unit,
+    onNewShelf: () -> Unit,
+) {
+    // Capsule switch ported from the Classic library tab
+    // (NotebookTabScreen.TabSwitcher) so both library views share
+    // one segmented-control vocabulary. Two segments — Active /
+    // Archived — match the Classic affordance (the "All" filter is
+    // dropped here; the user can tap into either segment to scope
+    // the list). The "+ Shelf" pill stays right-aligned beside the
+    // switch, separated by a flexible Spacer.
+    Row(
+        modifier              = Modifier.fillMaxWidth(),
+        verticalAlignment     = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .widthIn(max = 280.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color(0xFFEFE7CD))
+                .border(
+                    width = 1.dp,
+                    color = AppColors.BorderDefault,
+                    shape = RoundedCornerShape(50),
                 )
-            }
+                .padding(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FilterSegment(
+                label    = "Active",
+                isActive = selected == ShelfFilter.Active,
+                onClick  = { onSelect(ShelfFilter.Active) },
+                modifier = Modifier.weight(1f),
+            )
+            FilterSegment(
+                label    = "Archived",
+                isActive = selected == ShelfFilter.Archived,
+                onClick  = { onSelect(ShelfFilter.Archived) },
+                modifier = Modifier.weight(1f),
+            )
         }
+        Spacer(Modifier.weight(1f))
+        // "+ Shelf" pill — accent-soft fill marks it as a creation
+        // affordance, distinct from the segmented control on the
+        // left.
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(AppRadius.pill))
+                .background(AppAccent.soft)
+                .clickable(onClick = onNewShelf)
+                .padding(horizontal = AppSpacing.s3, vertical = AppSpacing.s2),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.s1),
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.Add,
+                contentDescription = null,
+                tint               = AppAccent.deep,
+                modifier           = Modifier.size(16.dp),
+            )
+            Text(
+                text  = "Shelf",
+                style = AppTypography.Button,
+                color = AppAccent.deep,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FilterSegment(
+    label: String,
+    isActive: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val bg = if (isActive) AppColors.ThemeGreenDeep else Color.Transparent
+    val fg = if (isActive) AppColors.OnAccent else AppColors.TextSecondary
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(bg)
+            .clickable(onClick = onClick)
+            .padding(vertical = AppSpacing.s2),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text  = label,
+            style = AppTypography.Button,
+            color = fg,
+        )
     }
 }
 
@@ -424,42 +511,44 @@ private fun ShelfBlock(
             // point where the row starts horizontally scrolling on a
             // typical phone (≈4 spines + the card before clipping).
             val compactCard = books.size >= COMPACT_SHELF_THRESHOLD
-            val cardWidth   = if (compactCard) COMPACT_THIS_WEEK_CARD_WIDTH  else THIS_WEEK_CARD_WIDTH
-            val cardHeight  = if (compactCard) COMPACT_THIS_WEEK_CARD_HEIGHT else SPINE_HEIGHT_MAX
+            // Card height stays at 75% of the spine height so the
+            // panel reads as a footnote to the row of spines rather
+            // than a peer of them.
+            val cardHeight = (if (compactCard) COMPACT_THIS_WEEK_CARD_HEIGHT else SPINE_HEIGHT_MAX) * 0.75f
+            // Books row sits on its own line — fills the parent width
+            // and scrolls horizontally if the spines overflow. The
+            // THIS WK card moves to a separate full-width row below
+            // so it spans the same width as Header / TreesSavedStrip
+            // / FilterRow above (no longer sharing the row with the
+            // books).
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(booksScroll),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(booksScroll),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    books.forEach { nb ->
-                        val palette = ShelfTheme.palette(nb.colorToken)
-                        BookSpine(
-                            title    = nb.title.ifBlank { "Untitled" },
-                            color    = palette.background,
-                            onColor  = palette.onBackground,
-                            height   = spineHeightFor(nb, books),
-                            onClick  = { onOpenBook(nb.id) },
-                        )
-                    }
+                books.forEach { nb ->
+                    val palette = ShelfTheme.palette(nb.colorToken)
+                    BookSpine(
+                        title    = nb.title.ifBlank { "Untitled" },
+                        color    = palette.background,
+                        onColor  = palette.onBackground,
+                        height   = spineHeightFor(nb, books),
+                        onClick  = { onOpenBook(nb.id) },
+                    )
                 }
-                Spacer(Modifier.width(AppSpacing.s3))
-                ThisWeekCard(
-                    pages    = thisWkPages,
-                    progress = progressToGoal(thisWkPages, goal = WEEKLY_GOAL),
-                    accent   = accent,
-                    compact  = compactCard,
-                    modifier = Modifier
-                        .width(cardWidth)
-                        .height(cardHeight),
-                )
             }
             ShelfLine()
+            ThisWeekCard(
+                pages    = thisWkPages,
+                progress = progressToGoal(thisWkPages, goal = WEEKLY_GOAL),
+                accent   = accent,
+                compact  = compactCard,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(cardHeight),
+            )
         }
     }
 }
@@ -469,13 +558,12 @@ private const val WEEKLY_GOAL = 30
 private val SPINE_HEIGHT_MIN    = 116.dp
 private val SPINE_HEIGHT_MAX    = 152.dp
 private val SPINE_WIDTH         = 32.dp
-private val THIS_WEEK_CARD_WIDTH = 150.dp
 
 // Crowded-shelf affordance: when a shelf grows past this many books,
-// the THIS WK stat card shrinks to ~75% of its base size so the row
-// gives more visual weight to the spines themselves.
+// the THIS WK stat card shrinks to ~75% of its base height so it
+// reads as a quieter footnote beneath a busy spine row. The card
+// always spans the full content width.
 private const val COMPACT_SHELF_THRESHOLD = 4
-private val COMPACT_THIS_WEEK_CARD_WIDTH  = 112.dp   // 150dp × 0.75
 private val COMPACT_THIS_WEEK_CARD_HEIGHT = 114.dp   // 152dp × 0.75
 
 // ------ Book spine ------
@@ -497,12 +585,17 @@ private fun BookSpine(
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        // Unrotated text width = spine height minus 3dp on each side, so
-        // long titles get nearly the full spine length to render in.
-        // After the -90° rotation, the unrotated text *height* (line
-        // count × line-height) becomes the visible width on the spine —
-        // capped at 2 lines + ellipsis so titles never overflow the
-        // 32dp spine width even when they don't fit in a single line.
+        // Head + tail bands — paired warm-brown hairlines inset from the
+        // spine ends, evoking the binding rules on a real book's spine.
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            BookBand()
+            BookBand()
+        }
         Text(
             text = title,
             color = onColor,
@@ -515,10 +608,23 @@ private fun BookSpine(
                 fontSize = 11.sp,
                 letterSpacing = 0.02.sp,
             ),
+            // requiredWidth so the text frame can exceed the spine's
+            // 32dp parent constraint — without it the unrotated frame
+            // is clamped to 32dp and the title wraps mid-word at 6
+            // chars per line. The frame leaves a 2dp gap above and
+            // below the head/tail bands.
             modifier = Modifier
-                .width(height - 6.dp)
+                .requiredWidth(height - 29.dp)
                 .rotate(-90f),
         )
+    }
+}
+
+@Composable
+private fun BookBand() {
+    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Box(Modifier.fillMaxWidth().height(0.75.dp).background(AppColors.ThemeDryDeep))
+        Box(Modifier.fillMaxWidth().height(0.75.dp).background(AppColors.ThemeDryDeep))
     }
 }
 
@@ -764,7 +870,7 @@ private fun FloatingAddButton(
         modifier = modifier
             .size(56.dp)
             .clip(CircleShape)
-            .background(AppColors.Coral)
+            .background(AppAccent.primary)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {

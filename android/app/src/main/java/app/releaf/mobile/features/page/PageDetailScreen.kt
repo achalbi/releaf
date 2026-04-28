@@ -88,6 +88,7 @@ import app.releaf.mobile.ui.components.AppButtonVariant
 import app.releaf.mobile.ui.components.CaptureMode
 import app.releaf.mobile.ui.components.CaptureTabBar
 import app.releaf.mobile.ui.components.HairlineDivider
+import app.releaf.mobile.ui.components.LeafDropdownDivider
 import app.releaf.mobile.ui.components.LeafEyebrow
 import app.releaf.mobile.ui.components.PageOverflowButton
 import app.releaf.mobile.ui.components.PageViewMode
@@ -394,9 +395,13 @@ private fun Loaded(
                     // actions; move / template are heavier
                     // restructuring tools and sit below.
                     DropdownMenuItem(text = { Text("Edit tags") },        onClick = onEditTags)
+                    LeafDropdownDivider()
                     DropdownMenuItem(text = { Text("Duplicate") },        onClick = onDuplicate)
+                    LeafDropdownDivider()
                     DropdownMenuItem(text = { Text("Move to notebook") }, onClick = onMoveToNotebook)
+                    LeafDropdownDivider()
                     DropdownMenuItem(text = { Text("Apply template") },   onClick = onApplyTemplate)
+                    LeafDropdownDivider()
                     // Share group — would be a true submenu on iOS
                     // (SwiftUI Menu nests cleanly), but Material3
                     // DropdownMenu doesn't have a native nested
@@ -405,6 +410,7 @@ private fun Loaded(
                     // pattern here is the Share bottom-sheet
                     // (`onShareGroup`) — see below.
                     DropdownMenuItem(text = { Text("Share…") },           onClick = onShareGroup)
+                    LeafDropdownDivider()
                     DropdownMenuItem(text = { Text("Archive page") },     onClick = onArchive)
                 }
             }
@@ -1217,7 +1223,7 @@ private fun DailyPlantInfoSheet(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
                 Text(
-                    text  = "PLANT OF THE DAY",
+                    text  = "PLANT OF THE PAGE",
                     style = AppTypography.Eyebrow,
                     color = AppColors.ThemeGreenDeep,
                 )

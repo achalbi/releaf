@@ -83,6 +83,56 @@ interface NotepadDao {
     suspend fun upsert(entry: NotepadEntry)
 
     /**
+     * Bulk rename — sets `category = :newName` on every active row
+     * for [userId] whose current category matches [oldName] case-
+     * insensitively. Bumps `updated_at` + sets `dirty = 1` so the
+     * sync worker picks each row up on its next pass.
+     *
+     * Returns the number of rows updated so the caller can surface
+     * a useful "renamed N entries" toast.
+     */
+    @Query(
+        """
+        UPDATE notepad_entries
+        SET category = :newName, updated_at = :nowIso, dirty = 1
+        WHERE user_id = :userId
+          AND deleted_at IS NULL
+          AND category IS NOT NULL
+          AND TRIM(category) <> ''
+          AND LOWER(TRIM(category)) = LOWER(TRIM(:oldName))
+        """
+    )
+    suspend fun renameCategory(
+        userId: String,
+        oldName: String,
+        newName: String,
+        nowIso: String,
+    ): Int
+
+    /**
+     * Bulk uncategorise — sets `category = NULL` on every active row
+     * for [userId] whose current category matches [name] case-
+     * insensitively. Bumps `updated_at` + sets `dirty = 1`.
+     *
+     * "Delete category" semantically means "drop this label from
+     * every entry that currently carries it" — the entries
+     * themselves stay live (just uncategorised), the category just
+     * stops surfacing in the picker / filter row.
+     */
+    @Query(
+        """
+        UPDATE notepad_entries
+        SET category = NULL, updated_at = :nowIso, dirty = 1
+        WHERE user_id = :userId
+          AND deleted_at IS NULL
+          AND category IS NOT NULL
+          AND TRIM(category) <> ''
+          AND LOWER(TRIM(category)) = LOWER(TRIM(:name))
+        """
+    )
+    suspend fun deleteCategory(userId: String, name: String, nowIso: String): Int
+
+    /**
      * Soft delete. Flips deleted_at + dirty so the sync worker can propagate
      * the tombstone to Drive on its next pass.
      */

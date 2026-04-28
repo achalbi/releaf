@@ -289,6 +289,10 @@ data class NotepadEntryPayloadV2(
     // older than the v2_notepad_description migration still decode —
     // additive change, no manifest bump required.
     @SerialName("description")         val description: String? = null,
+    // Same additive-with-null-default pattern: payloads written by
+    // clients older than the v19→v20 migration still decode. NULL
+    // means "uncategorised" both on the wire and in the column.
+    @SerialName("category")            val category: String? = null,
     @SerialName("notes")               val notes: String,
     @SerialName("contacts")            val contacts: JsonElement,
     @SerialName("locations")           val locations: JsonElement,
@@ -308,6 +312,7 @@ fun NotepadEntry.toV2Payload(): NotepadEntryPayloadV2 = NotepadEntryPayloadV2(
     projectId         = projectId,
     title             = title,
     description       = description,
+    category          = category,
     notes             = notes,
     contacts          = parseJsonArrayOrEmpty(contacts),
     locations         = parseJsonArrayOrEmpty(locations),
@@ -327,6 +332,7 @@ fun NotepadEntryPayloadV2.toEntity(driveFileId: String?): NotepadEntry = Notepad
     projectId         = projectId,
     title             = title,
     description       = description,
+    category          = category,
     notes             = notes,
     contacts          = SyncJson.encodeToString(JsonElement.serializer(), contacts),
     locations         = SyncJson.encodeToString(JsonElement.serializer(), locations),

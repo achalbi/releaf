@@ -69,6 +69,25 @@ interface PageDao {
     )
     fun observeAllActive(): Flow<List<PageEntity>>
 
+    /**
+     * Real-table invalidation source for global page search. FTS queries
+     * below are intentionally one-shot suspend calls because Room cannot
+     * observe `fts_page_notes` (the virtual table is installed by the DB
+     * callback, not declared as an @Entity).
+     */
+    @Query(
+        """
+        SELECT p.id FROM pages p
+        JOIN chapters c ON c.id = p.chapter_id
+        JOIN notebooks n ON n.id = c.notebook_id
+        WHERE p.deleted_at IS NULL
+          AND c.deleted_at IS NULL
+          AND n.deleted_at IS NULL
+        ORDER BY p.updated_at DESC
+        """
+    )
+    fun observeSearchScope(): Flow<List<String>>
+
     @Query("SELECT * FROM pages WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): PageEntity?
 
@@ -110,7 +129,8 @@ interface PageDao {
      *
      * @SkipQueryVerification is required because `fts_page_notes` is a
      * virtual table installed via SchemaCallback and isn't known to KSP's
-     * @Entity-derived schema sandbox.
+     * @Entity-derived schema sandbox. Keep this a one-shot suspend query:
+     * Room Flow invalidation cannot track the virtual FTS table.
      */
     @SkipQueryVerification
     @Query(
@@ -122,7 +142,7 @@ interface PageDao {
         ORDER BY rank
         """
     )
-    fun searchAllActive(query: String): Flow<List<PageEntity>>
+    suspend fun searchAllActive(query: String): List<PageEntity>
 
     /**
      * Same global FTS search, but with notebook/chapter labels attached so
@@ -149,7 +169,7 @@ interface PageDao {
         ORDER BY rank
         """
     )
-    fun searchAllActiveWithContext(query: String): Flow<List<PageSearchHit>>
+    suspend fun searchAllActiveWithContext(query: String): List<PageSearchHit>
 
     /** Same as [searchAllActive] but scoped to one notebook. */
     @SkipQueryVerification
@@ -165,7 +185,7 @@ interface PageDao {
         ORDER BY rank
         """
     )
-    fun searchInNotebook(notebookId: String, query: String): Flow<List<PageEntity>>
+    suspend fun searchInNotebook(notebookId: String, query: String): List<PageEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entry: PageEntity)

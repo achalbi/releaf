@@ -83,6 +83,13 @@ data class NotepadEditorUiState(
      */
     val description: String = "",
     /**
+     * Category label for grouping / filtering. Null = uncategorised.
+     * Holds either one of the predefined names (Home / Work / Personal
+     * / Health / Travel / Ideas — see `NotepadCategory.Predefined`) or
+     * a free-form user string. Mirrors `entry.category`.
+     */
+    val category: String? = null,
+    /**
      * Local-calendar date (YYYY-MM-DD) the entry is filed under. Defaults
      * to today for fresh drafts; mirrors `entry.entry_date` once loaded.
      * Editable via the date chip in the editor UI.
@@ -197,6 +204,23 @@ class NotepadEditorViewModel(
      */
     private var hasPersistedNewEntry: Boolean = false
 
+    /**
+     * Stable seed key for the page's associated Ayurvedic plant. New
+     * drafts get a fresh UUID so each draft picks a different plant;
+     * loaded rows reuse their persisted id so the same plant attaches
+     * to the same page across re-opens. Used both at bootstrap-seeding
+     * time and at save-time fallback so a cleared title or description
+     * always re-fills with the page's plant info.
+     */
+    private val pagePlantSeedKey: String = if (entryId == NEW_ENTRY_ID) Uuidv7.generate() else entryId
+
+    /** The page's associated plant. Computed once from
+     *  [pagePlantSeedKey] so it stays stable across the editor session.
+     *  Referenced internally by save() to backfill blank fields, and
+     *  read by the editor screen so the "plant of the page" modal
+     *  shows the same plant that seeds the title + description. */
+    val pagePlant get() = AyurvedicCatalog.forNewEntry(entryId = pagePlantSeedKey)
+
     init { bootstrap() }
 
     private fun bootstrap() {
@@ -215,6 +239,7 @@ class NotepadEditorViewModel(
                     isLoading   = false,
                     title       = seedTitle,
                     description = seedDescription,
+                    category    = null,
                     entryDate   = IsoClock.todayLocalDate(),
                     subPages    = listOf(SubPage(id = Uuidv7.generate())),
                 )
@@ -236,10 +261,12 @@ class NotepadEditorViewModel(
                 }
                 // Backfill: when both fields load blank (older rows
                 // created before the auto-seed landed, or rows the
-                // user explicitly emptied), present today's plant as
-                // the starting values. Lazy — we don't write them
-                // back to the row until the user makes any other
-                // edit that triggers save().
+                // user explicitly emptied), present a stable per-row
+                // plant as the starting values. Hashing on the loaded
+                // row's id keeps the same plant across re-opens of
+                // the same row. Lazy — we don't write the seed back
+                // until the user makes any other edit that triggers
+                // save().
                 val (seedTitle, seedDescription) = seedTitleAndDescription(
                     loaded?.title.orEmpty(),
                     loaded?.description.orEmpty(),
@@ -249,6 +276,7 @@ class NotepadEditorViewModel(
                     entry       = loaded,
                     title       = seedTitle,
                     description = seedDescription,
+                    category    = loaded?.category,
                     entryDate   = loaded?.entryDate ?: IsoClock.todayLocalDate(),
                     subPages    = effectiveSubPages,
                     contacts    = loaded?.contacts?.parseContacts().orEmpty(),
@@ -261,25 +289,24 @@ class NotepadEditorViewModel(
     }
 
     /**
-     * Title + description prepopulation rule, applied at bootstrap on
-     * both the new-draft and load paths.
-     *
-     * If BOTH fields arrive blank, fall back to the day's Ayurvedic
-     * plant: title gets the Sanskrit/Hindi `name`, description gets
-     * `(commonName) epithet · usedFor`. If either field carries
-     * authored text we keep both verbatim — partial backfill would
-     * mismatch the pair (e.g., a user-typed title alongside an
-     * unrelated plant description).
+     * Title + description prepopulation rule. Each field is seeded
+     * independently from the page's associated Ayurvedic plant — the
+     * plant is always part of the page, so any blank field is filled
+     * with the plant's `name` (title) or `(commonName) epithet ·
+     * usedFor` (description). The plant is picked deterministically
+     * off [pagePlantSeedKey], which is the loaded row's id for an
+     * existing entry or a fresh UUIDv7 for a new draft, so the same
+     * plant attaches across re-opens. User-authored text is preserved
+     * verbatim — if either field is non-blank, that value is kept.
      */
     private fun seedTitleAndDescription(
         loadedTitle: String,
         loadedDescription: String,
     ): Pair<String, String> {
-        if (loadedTitle.isNotBlank() || loadedDescription.isNotBlank()) {
-            return loadedTitle to loadedDescription
-        }
-        val plant = AyurvedicCatalog.forNewEntry()
-        return plant.name to AyurvedicCatalog.formatDescription(plant)
+        val plant = pagePlant
+        val seedTitle       = if (loadedTitle.isBlank())       plant.name                                    else loadedTitle
+        val seedDescription = if (loadedDescription.isBlank()) AyurvedicCatalog.formatDescription(plant)     else loadedDescription
+        return seedTitle to seedDescription
     }
 
     fun updateTitle(value: String) {
@@ -288,6 +315,15 @@ class NotepadEditorViewModel(
 
     fun updateDescription(value: String) {
         _state.value = _state.value.copy(description = value)
+    }
+
+    /** Set the category label. Pass null (or blank) to clear. The
+     *  picker UI canonicalises predefined names via
+     *  `NotepadCategory.displayName` before calling this so we store
+     *  consistent casing. */
+    fun updateCategory(value: String?) {
+        val cleaned = value?.trim()?.ifEmpty { null }
+        _state.value = _state.value.copy(category = cleaned)
     }
 
     /** Local YYYY-MM-DD; callers get the string back via the date picker. */
@@ -746,6 +782,16 @@ class NotepadEditorViewModel(
         val firstStrokesJson = snapshot.subPages.firstOrNull()
             ?.strokes.orEmpty().toJsonString()
 
+        // Plant always rides along with the page — if the user cleared
+        // either field we fall back to the page's associated plant so
+        // the persisted row still reads as "this page's plant" instead
+        // of a blank header on next load.
+        val plant = pagePlant
+        val effectiveTitle       = snapshot.title.ifBlank { plant.name }
+        val effectiveDescription = snapshot.description.ifBlank {
+            AyurvedicCatalog.formatDescription(plant)
+        }
+
         if (existing == null) {
             if (!snapshot.canSave) return
             if (hasPersistedNewEntry) return
@@ -753,10 +799,11 @@ class NotepadEditorViewModel(
             viewModelScope.launch {
                 val created = repository.create(
                     userId        = userId,
-                    title         = snapshot.title,
+                    title         = effectiveTitle,
                     notes         = joinedNotes,
                     entryDate     = snapshot.entryDate.ifBlank { IsoClock.todayLocalDate() },
-                    description   = snapshot.description,
+                    description   = effectiveDescription,
+                    category      = snapshot.category,
                     contacts      = contactsJson,
                     locations     = locationsJson,
                     todos         = todosJson,
@@ -773,6 +820,8 @@ class NotepadEditorViewModel(
 
         val titleChanged       = (existing.title.orEmpty()) != snapshot.title
         val descriptionChanged = (existing.description.orEmpty()) != snapshot.description
+        val categoryChanged    = (existing.category?.trim()?.ifEmpty { null }) !=
+            (snapshot.category?.trim()?.ifEmpty { null })
         val notesChanged       = existing.notes != joinedNotes
         val entryDateChanged   = snapshot.entryDate.isNotBlank() &&
             existing.entryDate != snapshot.entryDate
@@ -782,15 +831,17 @@ class NotepadEditorViewModel(
         val attachmentsChanged = existing.attachments != attachmentsJson
         val strokesChanged     = existing.sketchStrokes != firstStrokesJson
         val subPagesChanged    = existing.subPages != subPagesJson
-        if (!titleChanged && !descriptionChanged && !notesChanged && !entryDateChanged &&
+        if (!titleChanged && !descriptionChanged && !categoryChanged &&
+            !notesChanged && !entryDateChanged &&
             !contactsChanged && !todosChanged &&
             !locationsChanged && !attachmentsChanged &&
             !strokesChanged && !subPagesChanged
         ) return
 
         val updated = existing.copy(
-            title         = snapshot.title.ifBlank { null },
-            description   = snapshot.description.ifBlank { null },
+            title         = effectiveTitle,
+            description   = effectiveDescription,
+            category      = snapshot.category?.trim()?.ifEmpty { null },
             notes         = joinedNotes,
             entryDate     = snapshot.entryDate.ifBlank { existing.entryDate },
             contacts      = contactsJson,

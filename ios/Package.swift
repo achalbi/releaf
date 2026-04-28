@@ -54,7 +54,19 @@ let package = Package(
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "GoogleSignIn", package: "GoogleSignIn-iOS"),
             ],
-            path: "Releaf/Data"
+            path: "Releaf/Data",
+            resources: [
+                // The plant catalogue is the single source of truth at
+                // `design-system/plants.json` (90 entries today,
+                // append-only). Symlinked into the data target so it
+                // ships in the bundle and `DailyPlants` can read it
+                // at runtime via `Bundle.module`. SwiftPM rejects
+                // resource paths that escape the package dir, so the
+                // canonical file is referenced via the symlink at
+                // `Notepad/Resources/plants.json` rather than
+                // pointing directly at `../../design-system/...`.
+                .copy("Notepad/Resources/plants.json"),
+            ]
         ),
         .target(
             name: "ReleafFeatures",

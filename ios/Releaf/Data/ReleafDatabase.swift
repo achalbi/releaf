@@ -444,6 +444,17 @@ public final class ReleafDatabase: @unchecked Sendable {
             try db.execute(sql: "ALTER TABLE pages ADD COLUMN page_notes_json TEXT NOT NULL DEFAULT '[]'")
         }
 
+        // v8 — adds `notepad_entries.category`. Lets a notepad entry
+        // be filed under one of the predefined categories (Home /
+        // Work / Personal / Health / Travel / Ideas) or any
+        // user-typed custom string. NULL = uncategorised — same
+        // convention the description column uses. No backfill:
+        // existing rows stay uncategorised until the user opens
+        // them and picks one. Mirrors Android's Migration19To20.
+        migrator.registerMigration("v8_notepad_category") { db in
+            try db.execute(sql: "ALTER TABLE notepad_entries ADD COLUMN category TEXT")
+        }
+
         return migrator
     }
 }

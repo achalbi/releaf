@@ -89,6 +89,12 @@ public struct UiPreferencesState: Equatable, Sendable {
     public let timelineStyle: TimelineStyle
     public let pageViewMode: PageViewMode
     public let notebookSortMode: NotebookSortMode
+    /// User-controlled display order for notepad categories — lists
+    /// every name (predefined + custom) in the order the user wants
+    /// them surfaced in the filter chip row + editor picker. Empty
+    /// = no preference, fall back to the built-in default.
+    /// Resolved end-to-end via `NotepadCategory.applyOrder(...)`.
+    public let notepadCategoryOrder: [String]
     /// Has the first-launch onboarding been seen and dismissed by
     /// the user? Defaults to `false`; flips to `true` the moment the
     /// onboarding view's "Start capturing" CTA fires.
@@ -102,6 +108,7 @@ public struct UiPreferencesState: Equatable, Sendable {
         timelineStyle: TimelineStyle = .classic,
         pageViewMode: PageViewMode = .grid,
         notebookSortMode: NotebookSortMode = .recent,
+        notepadCategoryOrder: [String] = [],
         hasSeenOnboarding: Bool = false
     ) {
         self.themeMode = themeMode
@@ -111,6 +118,7 @@ public struct UiPreferencesState: Equatable, Sendable {
         self.timelineStyle = timelineStyle
         self.pageViewMode = pageViewMode
         self.notebookSortMode = notebookSortMode
+        self.notepadCategoryOrder = notepadCategoryOrder
         self.hasSeenOnboarding = hasSeenOnboarding
     }
 }
@@ -123,14 +131,15 @@ public final class UiPreferences: ObservableObject {
     private let defaults: UserDefaults
 
     private enum Keys {
-        static let themeMode         = "releaf.ui.themeMode"
-        static let palette           = "releaf.ui.paletteId"
-        static let notebookVariant   = "releaf.ui.notebookVariant"
-        static let fontWeight        = "releaf.ui.fontWeight"
-        static let timelineStyle     = "releaf.ui.timelineStyle"
-        static let pageViewMode      = "releaf.ui.pageViewMode"
-        static let notebookSortMode  = "releaf.ui.notebookSortMode"
-        static let hasSeenOnboarding = "releaf.ui.hasSeenOnboarding"
+        static let themeMode             = "releaf.ui.themeMode"
+        static let palette               = "releaf.ui.paletteId"
+        static let notebookVariant       = "releaf.ui.notebookVariant"
+        static let fontWeight            = "releaf.ui.fontWeight"
+        static let timelineStyle         = "releaf.ui.timelineStyle"
+        static let pageViewMode          = "releaf.ui.pageViewMode"
+        static let notebookSortMode      = "releaf.ui.notebookSortMode"
+        static let notepadCategoryOrder  = "releaf.ui.notepadCategoryOrder"
+        static let hasSeenOnboarding     = "releaf.ui.hasSeenOnboarding"
     }
 
     public init(defaults: UserDefaults = .standard) {
@@ -149,6 +158,10 @@ public final class UiPreferences: ObservableObject {
             .flatMap(PageViewMode.init(rawValue:)) ?? .grid
         let notebookSortMode = defaults.string(forKey: Keys.notebookSortMode)
             .flatMap(NotebookSortMode.init(rawValue:)) ?? .recent
+        // Stored as `[String]` directly via UserDefaults — no need to
+        // join/split. Newly-installed apps get an empty array, which
+        // resolves to the built-in default order.
+        let categoryOrder = (defaults.array(forKey: Keys.notepadCategoryOrder) as? [String]) ?? []
         let hasSeenOnboarding = defaults.bool(forKey: Keys.hasSeenOnboarding)
         self.state = UiPreferencesState(
             themeMode: mode,
@@ -158,6 +171,7 @@ public final class UiPreferences: ObservableObject {
             timelineStyle: timelineStyle,
             pageViewMode: pageViewMode,
             notebookSortMode: notebookSortMode,
+            notepadCategoryOrder: categoryOrder,
             hasSeenOnboarding: hasSeenOnboarding
         )
     }
@@ -172,6 +186,7 @@ public final class UiPreferences: ObservableObject {
             timelineStyle: state.timelineStyle,
             pageViewMode: state.pageViewMode,
             notebookSortMode: state.notebookSortMode,
+            notepadCategoryOrder: state.notepadCategoryOrder,
             hasSeenOnboarding: state.hasSeenOnboarding
         )
     }
@@ -186,6 +201,7 @@ public final class UiPreferences: ObservableObject {
             timelineStyle: state.timelineStyle,
             pageViewMode: state.pageViewMode,
             notebookSortMode: state.notebookSortMode,
+            notepadCategoryOrder: state.notepadCategoryOrder,
             hasSeenOnboarding: state.hasSeenOnboarding
         )
     }
@@ -200,6 +216,7 @@ public final class UiPreferences: ObservableObject {
             timelineStyle: state.timelineStyle,
             pageViewMode: state.pageViewMode,
             notebookSortMode: state.notebookSortMode,
+            notepadCategoryOrder: state.notepadCategoryOrder,
             hasSeenOnboarding: state.hasSeenOnboarding
         )
     }
@@ -214,6 +231,7 @@ public final class UiPreferences: ObservableObject {
             timelineStyle: state.timelineStyle,
             pageViewMode: state.pageViewMode,
             notebookSortMode: state.notebookSortMode,
+            notepadCategoryOrder: state.notepadCategoryOrder,
             hasSeenOnboarding: state.hasSeenOnboarding
         )
     }
@@ -228,6 +246,7 @@ public final class UiPreferences: ObservableObject {
             timelineStyle: style,
             pageViewMode: state.pageViewMode,
             notebookSortMode: state.notebookSortMode,
+            notepadCategoryOrder: state.notepadCategoryOrder,
             hasSeenOnboarding: state.hasSeenOnboarding
         )
     }
@@ -242,6 +261,7 @@ public final class UiPreferences: ObservableObject {
             timelineStyle: state.timelineStyle,
             pageViewMode: mode,
             notebookSortMode: state.notebookSortMode,
+            notepadCategoryOrder: state.notepadCategoryOrder,
             hasSeenOnboarding: state.hasSeenOnboarding
         )
     }
@@ -256,6 +276,28 @@ public final class UiPreferences: ObservableObject {
             timelineStyle: state.timelineStyle,
             pageViewMode: state.pageViewMode,
             notebookSortMode: mode,
+            notepadCategoryOrder: state.notepadCategoryOrder,
+            hasSeenOnboarding: state.hasSeenOnboarding
+        )
+    }
+
+    /// Persist the user's preferred display order for notepad
+    /// categories. Trims + drops blanks so the round-trip is stable
+    /// even if the caller hands us a list with stray whitespace.
+    public func setNotepadCategoryOrder(_ order: [String]) {
+        let cleaned = order
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        defaults.set(cleaned, forKey: Keys.notepadCategoryOrder)
+        state = UiPreferencesState(
+            themeMode: state.themeMode,
+            paletteID: state.paletteID,
+            notebookVariant: state.notebookVariant,
+            fontWeight: state.fontWeight,
+            timelineStyle: state.timelineStyle,
+            pageViewMode: state.pageViewMode,
+            notebookSortMode: state.notebookSortMode,
+            notepadCategoryOrder: cleaned,
             hasSeenOnboarding: state.hasSeenOnboarding
         )
     }
@@ -272,6 +314,7 @@ public final class UiPreferences: ObservableObject {
             timelineStyle: state.timelineStyle,
             pageViewMode: state.pageViewMode,
             notebookSortMode: state.notebookSortMode,
+            notepadCategoryOrder: state.notepadCategoryOrder,
             hasSeenOnboarding: true
         )
     }
@@ -290,6 +333,7 @@ public final class UiPreferences: ObservableObject {
             timelineStyle: state.timelineStyle,
             pageViewMode: state.pageViewMode,
             notebookSortMode: state.notebookSortMode,
+            notepadCategoryOrder: state.notepadCategoryOrder,
             hasSeenOnboarding: false
         )
     }

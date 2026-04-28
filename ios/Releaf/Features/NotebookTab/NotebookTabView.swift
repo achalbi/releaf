@@ -105,13 +105,24 @@ public struct NotebookTabView: View {
     }
 
     private var header: some View {
-        // Composed top zone — leaf eyebrow on the left, overflow menu
-        // on the right, big serif title. No view toggle here: this
-        // screen is the shelves list and there's no second layout to
-        // toggle to. Stat tiles + search field stay below the title.
+        // Composed top zone — leaf eyebrow on its own row at the
+        // natural top, then a row that pairs the big serif title
+        // with the overflow menu on the right. Mirrors the notepad
+        // tab so the eyebrow sits at the same y-position across both
+        // screens (the previous shape vertically centered the eyebrow
+        // with the taller overflow button, which pushed the eyebrow
+        // noticeably lower than the notepad equivalent). No view
+        // toggle here: this screen is the shelves list and there's
+        // no second layout to toggle to.
         VStack(alignment: .leading, spacing: AppSpacing.s3) {
+            LeafEyebrow("releaf · shelves")
+
             HStack(alignment: .center) {
-                LeafEyebrow("releaf · shelves")
+                Text("your shelves")
+                    .font(.system(size: 32, weight: .regular, design: .serif))
+                    .foregroundStyle(AppColors.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Spacer()
                 PageOverflowButton {
                     Button {
@@ -142,12 +153,6 @@ public struct NotebookTabView: View {
                     } label: { Label("Archived", systemImage: "archivebox") }
                 }
             }
-
-            Text("your shelves")
-                .font(.system(size: 32, weight: .regular, design: .serif))
-                .foregroundStyle(AppColors.textPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
 
             Text(headerSummary)
                 .font(AppText.meta)

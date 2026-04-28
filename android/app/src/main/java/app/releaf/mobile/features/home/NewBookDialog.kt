@@ -222,7 +222,7 @@ private fun ShelfRow(name: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun NewShelfDialog(
+fun NewShelfDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {

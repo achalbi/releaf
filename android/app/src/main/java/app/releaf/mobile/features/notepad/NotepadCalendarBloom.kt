@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -98,7 +99,7 @@ fun NotepadCalendarBloom(
 
         // 5×7 tree grid, drawn into one Canvas for tight layout
         val cols = 7
-        val rowHeight = 36.dp
+        val rowHeight = 32.dp
         val rows = totalRows(month)
 
         // Pad days with leading + trailing nulls so the grid lines up
@@ -242,6 +243,21 @@ private fun TreeCell(
                     center  = Offset(cx, cyTreeMid),
                     density = day.density,
                     isToday = isToday,
+                )
+            }
+        } else {
+            // Out-of-month placeholder — drawn as a faded hollow tree
+            // so the grid stays visually complete on months whose 1st
+            // falls late in the week (Fri/Sat). Without this, partial
+            // first/last rows render as blank cells and read as a gap
+            // between the weekday strip and the tree grove.
+            Canvas(modifier = Modifier.size(28.dp, 32.dp).alpha(0.35f)) {
+                val cx = size.width / 2f
+                val cyTreeMid = size.height / 2f - 2.dp.toPx()
+                drawTree(
+                    center  = Offset(cx, cyTreeMid),
+                    density = DayDensity.Empty,
+                    isToday = false,
                 )
             }
         }

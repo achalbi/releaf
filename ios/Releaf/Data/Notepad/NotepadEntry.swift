@@ -54,6 +54,15 @@ public struct NotepadEntry: Codable, FetchableRecord, PersistableRecord,
     /// without a default so existing rows round-trip cleanly).
     public var description: String?
 
+    /// Category label for grouping / filtering. NULL = uncategorised.
+    /// Holds either one of the predefined names exposed by
+    /// `NotepadCategory` (Home / Work / Personal / Health / Travel /
+    /// Ideas) or any free-form user string — the picker turns
+    /// unrecognised strings into custom-category chips. The v8
+    /// migration adds the column without a default so existing rows
+    /// round-trip cleanly.
+    public var category: String?
+
     /// Canonical CommonMark. Empty string is valid.
     public var notes: String
 
@@ -106,6 +115,7 @@ public struct NotepadEntry: Codable, FetchableRecord, PersistableRecord,
         case projectId          = "project_id"
         case title
         case description
+        case category
         case notes
         case contacts
         case locations
@@ -129,6 +139,7 @@ public struct NotepadEntry: Codable, FetchableRecord, PersistableRecord,
         projectId: String? = nil,
         title: String? = nil,
         description: String? = nil,
+        category: String? = nil,
         notes: String = "",
         contacts: String = "[]",
         locations: String = "[]",
@@ -148,6 +159,7 @@ public struct NotepadEntry: Codable, FetchableRecord, PersistableRecord,
         self.projectId = projectId
         self.title = title
         self.description = description
+        self.category = category
         self.notes = notes
         self.contacts = contacts
         self.locations = locations

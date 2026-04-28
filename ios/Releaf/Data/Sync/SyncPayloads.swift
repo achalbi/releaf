@@ -455,6 +455,11 @@ public struct NotepadEntryPayloadV2: Codable, Equatable, Sendable {
     /// — Swift Codable's auto-synth treats absent keys as nil for
     /// Optional types. Additive change, no manifest bump.
     public let description: String?
+    /// Same additive-with-nil-default story for category — payloads
+    /// written by clients older than the v8_notepad_category
+    /// migration omit the key and decode as nil here. NULL means
+    /// "uncategorised" both on the wire and in the column.
+    public let category: String?
     public let notes: String
     public let contacts: JSONAny
     public let locations: JSONAny
@@ -473,6 +478,7 @@ public struct NotepadEntryPayloadV2: Codable, Equatable, Sendable {
         case projectId         = "project_id"
         case title
         case description
+        case category
         case notes, contacts, locations, todos, attachments
         case sketchStrokes     = "sketch_strokes"
         case subPages          = "sub_pages"
@@ -491,6 +497,7 @@ public extension NotepadEntry {
             projectId: projectId,
             title: title,
             description: description,
+            category: category,
             notes: notes,
             contacts: JSONAny.parseOrEmptyArray(contacts),
             locations: JSONAny.parseOrEmptyArray(locations),
@@ -514,6 +521,7 @@ public extension NotepadEntryPayloadV2 {
             projectId: projectId,
             title: title,
             description: description,
+            category: category,
             notes: notes,
             contacts: contacts.toCompactString(),
             locations: locations.toCompactString(),

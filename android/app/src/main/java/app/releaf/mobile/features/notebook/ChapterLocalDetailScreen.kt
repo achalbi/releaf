@@ -86,6 +86,7 @@ import app.releaf.mobile.ui.components.Breadcrumbs
 import app.releaf.mobile.ui.components.CollapsibleCard
 import app.releaf.mobile.ui.components.DeleteConfirmationDialog
 import app.releaf.mobile.ui.components.HairlineDivider
+import app.releaf.mobile.ui.components.LeafDropdownDivider
 import app.releaf.mobile.ui.components.LeafEyebrow
 import app.releaf.mobile.ui.components.MetaPill
 import app.releaf.mobile.ui.components.PageOverflowButton
@@ -185,12 +186,14 @@ fun ChapterLocalDetailScreen(
                             text    = { Text("Rename chapter") },
                             onClick = { showEditDialog = true },
                         )
+                        LeafDropdownDivider()
                         DropdownMenuItem(
                             text    = { Text("New page") },
                             onClick = {
                                 viewModel.createPage(onCreated = { id -> onOpenPage(id) })
                             },
                         )
+                        LeafDropdownDivider()
                         DropdownMenuItem(
                             text    = { Text("Archive chapter") },
                             onClick = { viewModel.archiveChapter() },

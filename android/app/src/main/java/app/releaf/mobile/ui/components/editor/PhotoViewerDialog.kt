@@ -18,6 +18,7 @@ package app.releaf.mobile.ui.components.editor
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,13 +26,16 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -44,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.releaf.mobile.data.notebook.Attachment
+import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 import coil.compose.AsyncImage
@@ -53,6 +58,13 @@ fun PhotoViewerDialog(
     photos: List<Attachment>,
     initialIndex: Int,
     onDismiss: () -> Unit,
+    /** When non-null, surfaces an "Import this photo to notes" pill
+     *  anchored to the bottom of the viewer (mirrors the affordance
+     *  on `PdfPageViewerDialog`). Tapping it calls back with the
+     *  photo currently on screen (resolved from the pager's current
+     *  page). Wrapper at the call site is responsible for any IO
+     *  + dismissing the viewer — the dialog only forwards the tap. */
+    onImportToNotes: ((Attachment) -> Unit)? = null,
 ) {
     if (photos.isEmpty()) return
     // Clamp the initial index — defensive in case the caller passed an
@@ -138,6 +150,53 @@ fun PhotoViewerDialog(
                     )
                 }
             }
+
+            // Bottom action: import current photo into a new sub-page.
+            // Mirrors `ImportPagePill` on PdfPageViewerDialog so both
+            // viewers share a visual language for the same intent.
+            if (onImportToNotes != null) {
+                val bottomInsets = WindowInsets.navigationBars.asPaddingValues()
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(bottomInsets)
+                        .padding(AppSpacing.s4),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    ImportPhotoPill(
+                        onClick = {
+                            photos.getOrNull(pagerState.currentPage)
+                                ?.let(onImportToNotes)
+                        },
+                    )
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun ImportPhotoPill(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(AppSpacing.s3))
+            .background(AppAccent.primary)
+            .clickable(onClick = onClick)
+            .padding(horizontal = AppSpacing.s4, vertical = AppSpacing.s2),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector        = Icons.AutoMirrored.Filled.NoteAdd,
+            contentDescription = null,
+            tint               = Color.White,
+            modifier           = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.size(AppSpacing.s2))
+        Text(
+            text  = "Import this photo to notes",
+            style = AppTypography.Button,
+            color = Color.White,
+        )
     }
 }

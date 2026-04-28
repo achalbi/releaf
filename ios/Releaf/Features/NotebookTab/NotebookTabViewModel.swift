@@ -13,7 +13,9 @@
 
 import Foundation
 import Combine
+import SwiftUI
 import ReleafData
+import ReleafDesignSystem
 
 @MainActor
 public final class NotebookTabViewModel: ObservableObject {

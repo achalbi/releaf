@@ -32,21 +32,21 @@ public struct OnboardingView: View {
                         ConceptTile(
                             eyebrow: "CAPTURE",
                             title: "everything in one place",
-                            body: "photos, voice, scans, to-dos and a daily note — all in one tap.",
+                            copy: "photos, voice, scans, to-dos and a daily note — all in one tap.",
                             iconName: "leaf.fill",
                             tint: AppColors.coral
                         )
                         ConceptTile(
                             eyebrow: "ORGANIZE",
                             title: "shelves, books, chapters",
-                            body: "group what you keep into shelves and notebooks, with chapters for the in-betweens.",
+                            copy: "group what you keep into shelves and notebooks, with chapters for the in-betweens.",
                             iconName: "books.vertical",
                             tint: AppColors.themeGreenPrimary
                         )
                         ConceptTile(
                             eyebrow: "RE-LEAF",
                             title: "see the trees you save",
-                            body: "every digital capture replaces a sheet of paper. we count the sheets and turn them into trees.",
+                            copy: "every digital capture replaces a sheet of paper. we count the sheets and turn them into trees.",
                             iconName: "tree.fill",
                             tint: AppColors.themeYellowDeep
                         )
@@ -91,7 +91,9 @@ public struct OnboardingView: View {
 private struct ConceptTile: View {
     let eyebrow: String
     let title: String
-    let body: String
+    /// Renamed from `body` — collided with SwiftUI's required
+    /// `var body: some View` on the View conformance.
+    let copy: String
     let iconName: String
     let tint: Color
 
@@ -114,7 +116,7 @@ private struct ConceptTile: View {
                 Text(title)
                     .font(.system(size: 20, weight: .regular, design: .serif))
                     .foregroundStyle(AppColors.textPrimary)
-                Text(body)
+                Text(copy)
                     .font(AppText.body)
                     .foregroundStyle(AppColors.textSecondary)
             }

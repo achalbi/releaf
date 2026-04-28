@@ -153,7 +153,7 @@ private struct Loaded: View {
         .sheet(isPresented: $viewModel.presentingTagEditor) {
             EditTagsSheet(
                 initialTags: page.tags,
-                onSave: { Task { await viewModel.saveTags($0) } },
+                onSave: { tags in Task { await viewModel.saveTags(tags) } },
                 onCancel: { viewModel.presentingTagEditor = false },
                 onCopyAll: { tags in viewModel.copyTagsToClipboard(tags) }
             )
@@ -940,7 +940,7 @@ private struct EditTagsSheet: View {
                 .textInputAutocapitalization(.never)
                 .focused($inputFocused)
                 .onSubmit { commitDraft() }
-                .onChange(of: draft) { _, newValue in
+                .onChange(of: draft) { newValue in
                     // Comma is a commit signal — split off everything
                     // before the comma and commit each segment.
                     if newValue.contains(",") {
@@ -1012,11 +1012,11 @@ private struct DailyPlantInfoSheet: View {
             VStack(alignment: .leading, spacing: AppSpacing.s4) {
                 InfoBlock(
                     title: "EPITHET",
-                    body: plant.epithet
+                    copy: plant.epithet
                 )
                 InfoBlock(
                     title: "TRADITIONAL USES",
-                    body: plant.usedFor
+                    copy: plant.usedFor
                 )
             }
 
@@ -1056,7 +1056,9 @@ private struct DailyPlantInfoSheet: View {
 
 private struct InfoBlock: View {
     let title: String
-    let body: String
+    /// Renamed from `body` — collided with SwiftUI's required
+    /// `var body: some View` on the View conformance.
+    let copy: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.s1) {
@@ -1064,7 +1066,7 @@ private struct InfoBlock: View {
                 .font(AppText.eyebrow)
                 .tracking(AppLetterSpacing.eyebrow)
                 .foregroundStyle(AppColors.textSecondary)
-            Text(body)
+            Text(copy)
                 .font(AppText.body)
                 .foregroundStyle(AppColors.textPrimary)
         }

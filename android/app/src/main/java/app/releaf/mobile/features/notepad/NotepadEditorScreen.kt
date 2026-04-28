@@ -32,6 +32,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -48,14 +49,19 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -89,9 +95,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.releaf.mobile.data.notebook.Attachment
 import app.releaf.mobile.data.notebook.Stroke
+import app.releaf.mobile.data.notepad.NotepadCategory
 import app.releaf.mobile.ui.components.AppToastHost
 import app.releaf.mobile.ui.components.DotGridBackground
 import app.releaf.mobile.ui.components.HairlineDivider
+import app.releaf.mobile.ui.components.LeafDropdownDivider
+import app.releaf.mobile.ui.components.LeafDropletGlyph
 import app.releaf.mobile.ui.components.LeafEyebrow
 import app.releaf.mobile.ui.components.PageOverflowButton
 import app.releaf.mobile.ui.components.PageViewMode
@@ -124,7 +133,6 @@ import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
 import app.releaf.mobile.ui.theme.DailyPlant
-import app.releaf.mobile.ui.theme.DailyPlants
 import com.mohamedrejeb.richeditor.model.RichTextState
 import java.time.Instant
 import java.time.LocalDate
@@ -138,21 +146,35 @@ import java.time.format.FormatStyle
 fun NotepadEditorScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /// Optional capture mode the screen should focus on opening. When
+    /// non-null the editor opens directly in EDIT mode and scrolls to
+    /// the matching feature section (Photos / Scans / Voice / Todo /
+    /// Contacts / Location). Drives the "open page details at the
+    /// right tab" affordance from the Recents new-entry picker.
+    initialMode: app.releaf.mobile.ui.components.CaptureMode? = null,
     viewModel: NotepadEditorViewModel = viewModel(factory = NotepadEditorViewModel.Factory),
 ) {
     val state by viewModel.state.collectAsState()
     // Overview (grid) is the default — the at-a-glance tab bar is the
     // expected entry point. Users tap the list icon to drop into the
     // single-scroll rich-text editor when they actually want to write.
+    // [initialMode] from the route layer doesn't change this default;
+    // it's threaded into OverviewPane to preselect the matching tab.
     var editorMode by rememberSaveable { mutableStateOf(EditorMode.OVERVIEW) }
     var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
     var showMergeSheet by rememberSaveable { mutableStateOf(false) }
     var showMoveSheet  by rememberSaveable { mutableStateOf(false) }
-    // Daily-plant info sheet — opened on tap of the composed-header
-    // title block. Mirrors the same affordance on PageDetailScreen so
-    // the editorial plant rotation is reachable from both editors.
+    // Category picker — opened by the category chip in the header.
+    // Closed by default; tapping the chip opens the dialog with the
+    // current category pre-selected.
+    var showCategoryPicker by rememberSaveable { mutableStateOf(false) }
+    // Plant-of-the-page info sheet — opened on tap of the leaf icon
+    // next to the title. Reads the page's associated plant from the
+    // VM so the modal shows the same plant that seeds the title +
+    // description (instead of today's globally-rotating plant, which
+    // would mismatch on every reopen).
     var showPlantInfo by rememberSaveable { mutableStateOf(false) }
-    val plant = remember { DailyPlants.forToday() }
+    val plant = viewModel.pagePlant
     val focusManager = LocalFocusManager.current
 
     // Drawing overlay controls. Persisted strokes come from the VM;
@@ -267,34 +289,36 @@ fun NotepadEditorScreen(
         }
 
         ComposedTopZone(
-            editorMode    = editorMode,
-            onChangeMode  = { newMode -> editorMode = newMode },
+            editorMode        = editorMode,
+            onChangeMode      = { newMode -> editorMode = newMode },
             // Merge / Move / Delete share the same gate as the prior
             // breadcrumb TopBar — surface them only once there's
             // something worth acting on. `showDelete` is the inner
             // guard for the destructive row; the rest of the menu
             // appears whenever `showActions` is true.
-            showActions   = state.canSave || state.entry != null,
-            showDelete    = state.entry != null,
-            onBack        = popBack,
-            onShowPlantInfo = { showPlantInfo = true },
-            onOpenMerge   = { showMergeSheet = true },
-            onOpenMove    = { showMoveSheet  = true },
-            onDelete      = { showDeleteDialog = true },
+            showActions       = state.canSave || state.entry != null,
+            showDelete        = state.entry != null,
+            entryDate         = state.entryDate,
+            onEntryDateChange = viewModel::updateEntryDate,
+            onBack            = popBack,
+            onOpenMerge       = { showMergeSheet = true },
+            onOpenMove        = { showMoveSheet  = true },
+            onDelete          = { showDeleteDialog = true },
         )
 
-        // Title + date share one row at screen level: title takes the
-        // leading space, date chip sits flush right (directly under
-        // the Delete button when shown). Living outside the mode
-        // branches keeps both Edit and Overview showing the same
-        // title surface sticky above their content.
+        // Title sits flush across the row at screen level so it scans
+        // as the dominant editorial element. The plant-of-the-page
+        // leaf icon hugs the right edge of this row so it sits
+        // directly under the more-button column. Date picker lives on
+        // the eyebrow above; category chip is rendered inline on the
+        // Overview tab's "AT A GLANCE" row.
         if (!state.isLoading) {
             Row(
-                modifier = Modifier
+                modifier              = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = AppSpacing.s4)
                     .padding(bottom = AppSpacing.s2),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
             ) {
                 TitleField(
@@ -302,11 +326,15 @@ fun NotepadEditorScreen(
                     onValueChange = viewModel::updateTitle,
                     modifier      = Modifier.weight(1f),
                 )
-                EntryDateRow(
-                    entryDate         = state.entryDate,
-                    onEntryDateChange = viewModel::updateEntryDate,
+                RoundIconButton(
+                    icon               = Icons.Filled.Spa,
+                    contentDescription = "Plant of the page",
+                    onClick            = { showPlantInfo = true },
+                    background         = AppColors.GreenSoft,
+                    tint               = AppColors.ThemeGreenDeep,
                 )
             }
+
             // Description sits flush against the title — italic serif
             // subtitle bound to state.description. Auto-seeded on
             // create as `(commonName) epithet` from the day's
@@ -318,6 +346,20 @@ fun NotepadEditorScreen(
                     .fillMaxWidth()
                     .padding(horizontal = AppSpacing.s4)
                     .padding(bottom = AppSpacing.s3),
+            )
+        }
+
+        // Category picker dialog — driven by `showCategoryPicker`
+        // state above. Renders predefined chips + a free-form text
+        // field for a custom category, plus a Clear action.
+        if (showCategoryPicker) {
+            CategoryPickerDialog(
+                current  = state.category,
+                onPick   = { picked ->
+                    viewModel.updateCategory(picked)
+                    showCategoryPicker = false
+                },
+                onDismiss = { showCategoryPicker = false },
             )
         }
 
@@ -410,9 +452,27 @@ fun NotepadEditorScreen(
                         onImportPageToNotes       = { pageImageUri ->
                             viewModel.addSubPageFromImage(pageImageUri)
                         },
+                        onImportPhotoToNotes      = { pageImageUri ->
+                            viewModel.addSubPageFromImage(pageImageUri)
+                        },
                         onEditScan                = { id, title, categoryId ->
                             viewModel.updateScan(id, title, categoryId)
                         },
+                        // Right-aligned slot on the "AT A GLANCE" row.
+                        // Hosts the category chip so the affordance
+                        // sits in line with the section header instead
+                        // of taking its own row above the body.
+                        glanceTrailing = {
+                            CategoryChip(
+                                category = state.category,
+                                onClick  = { showCategoryPicker = true },
+                            )
+                        },
+                        // Forwarded from the route layer — when the
+                        // Recents new-entry picker opened this editor
+                        // with a specific mode, OverviewPane lands on
+                        // the matching CaptureTabBar tab.
+                        initialCaptureMode = initialMode,
                     )
                 }
             }
@@ -604,18 +664,23 @@ fun NotepadEditorScreen(
  * binding (Overview ⇄ Grid, Edit ⇄ List) so the body still flips
  * between OverviewPane and EditorBody exactly as before.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ComposedTopZone(
     editorMode: EditorMode,
     onChangeMode: (EditorMode) -> Unit,
     showActions: Boolean,
     showDelete: Boolean,
+    entryDate: String,
+    onEntryDateChange: (String) -> Unit,
     onBack: () -> Unit,
-    onShowPlantInfo: () -> Unit,
     onOpenMerge: () -> Unit,
     onOpenMove: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    var showDatePicker by remember { mutableStateOf(false) }
+    val parsedDate = remember(entryDate) { parseLocalDate(entryDate) }
+
     Row(
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
@@ -628,12 +693,47 @@ private fun ComposedTopZone(
                 bottom = AppSpacing.s3,
             ),
     ) {
-        LeafEyebrow(
-            label    = "notepad · today",
-            modifier = Modifier
-                .weight(1f)
-                .clickable { onBack() },
-        )
+        // Eyebrow is split into two tap regions:
+        //   • leaf glyph + "NOTEPAD"  → back navigation
+        //   • date label              → opens the date picker
+        // Inlining the LeafEyebrow shape (rather than nesting two
+        // LeafEyebrows) keeps the visual identical to other surfaces
+        // while letting each half carry its own click handler.
+        Row(
+            modifier              = Modifier.weight(1f),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.s1),
+        ) {
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.s1),
+                modifier              = Modifier.clickable { onBack() },
+            ) {
+                LeafDropletGlyph(
+                    tint = AppColors.ThemeGreenPrimary,
+                    size = 11.dp,
+                )
+                Text(
+                    text     = "NOTEPAD",
+                    style    = AppTypography.Eyebrow,
+                    color    = AppColors.ThemeGreenDeep,
+                    maxLines = 1,
+                )
+            }
+            Text(
+                text     = "·",
+                style    = AppTypography.Eyebrow,
+                color    = AppColors.ThemeGreenDeep,
+            )
+            Text(
+                text     = formatEntryDateLabel(parsedDate).uppercase(),
+                style    = AppTypography.Eyebrow,
+                color    = AppColors.ThemeGreenDeep,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clickable { showDatePicker = true },
+            )
+        }
         // EditorMode <-> PageViewMode translation. PageViewToggle
         // exposes a List/Grid pill; on this surface the pill drives
         // Edit/Overview instead. Visual matches the page-detail
@@ -645,33 +745,60 @@ private fun ComposedTopZone(
                 onChangeMode(if (mode == PageViewMode.Grid) EditorMode.OVERVIEW else EditorMode.EDIT)
             },
         )
-        // Plant-info leaf icon. Green-soft chip so it reads as the
-        // botanical/editorial accent rather than a coral "primary"
-        // action. Tap → existing daily-plant modal drawer.
-        RoundIconButton(
-            icon               = Icons.Filled.Spa,
-            contentDescription = "Plant of the day",
-            onClick            = onShowPlantInfo,
-            background         = AppColors.GreenSoft,
-            tint               = AppColors.ThemeGreenDeep,
-        )
         if (showActions) {
             PageOverflowButton {
                 DropdownMenuItem(
                     text    = { Text("Merge with another page") },
                     onClick = onOpenMerge,
                 )
+                LeafDropdownDivider()
                 DropdownMenuItem(
                     text    = { Text("Move to notebook") },
                     onClick = onOpenMove,
                 )
                 if (showDelete) {
+                    LeafDropdownDivider()
                     DropdownMenuItem(
                         text    = { Text("Delete entry", color = AppColors.Danger) },
                         onClick = onDelete,
                     )
                 }
             }
+        }
+    }
+
+    if (showDatePicker) {
+        // M3's DatePicker works in UTC: selectedDateMillis is always
+        // midnight-UTC on the picked day. We feed the calendar in at
+        // UTC midnight on the current entry_date and convert back out
+        // of UTC on confirm so YYYY-MM-DD stays stable across
+        // timezones — matches EntryDateRow's picker exactly.
+        val initialMillis = remember(entryDate) {
+            parsedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        }
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = initialMillis,
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { millis ->
+                        val date = Instant.ofEpochMilli(millis)
+                            .atZone(ZoneOffset.UTC)
+                            .toLocalDate()
+                        onEntryDateChange(date.format(DateTimeFormatter.ISO_LOCAL_DATE))
+                    }
+                    showDatePicker = false
+                }) { Text("Set", color = AppAccent.primary) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel", color = AppColors.TextSecondary)
+                }
+            },
+        ) {
+            DatePicker(state = pickerState)
         }
     }
 }
@@ -708,7 +835,7 @@ private fun NotepadDailyPlantInfoSheet(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
                 Text(
-                    text  = "PLANT OF THE DAY",
+                    text  = "PLANT OF THE PAGE",
                     style = AppTypography.Eyebrow,
                     color = AppColors.ThemeGreenDeep,
                 )
@@ -809,6 +936,9 @@ private fun EditorBody(
             onRemove = viewModel::removeAttachment,
             onCombineToPdf = { pdfUri, previewUri ->
                 viewModel.addAttachment(Attachment.TYPE_SCAN, pdfUri, previewUri)
+            },
+            onImportToNotes = { pageImageUri ->
+                viewModel.addSubPageFromImage(pageImageUri)
             },
         )
         ScansSection(
@@ -1077,5 +1207,153 @@ private fun DescriptionField(
             modifier      = Modifier.fillMaxWidth(),
         )
     }
+}
+
+/**
+ * Compact pill that surfaces the entry's current category — predefined
+ * names (Home / Work / …) get the GreenSoft accent; custom user-typed
+ * names get a neutral tint so the predefined set reads as the
+ * "official" options. Tapping the pill opens [CategoryPickerDialog].
+ *
+ * When `category` is null, falls back to a dashed-style "Add category"
+ * placeholder. The picker still opens on tap.
+ */
+@Composable
+private fun CategoryChip(
+    category: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val display = NotepadCategory.displayName(category)
+    // Custom and predefined chips share the same green-soft styling
+    // — the user wanted both kinds to read identically rather than
+    // the predefined set looking "official" and customs faded.
+    val background = if (display == null) AppColors.CardSolid else AppColors.GreenSoft
+    val tint       = if (display == null) AppColors.TextTertiary else AppColors.ThemeGreenDeep
+    Row(
+        modifier          = modifier
+            .clip(RoundedCornerShape(AppSpacing.s3))
+            .background(background)
+            .clickable(onClick = onClick)
+            .padding(horizontal = AppSpacing.s3, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector        = Icons.AutoMirrored.Filled.Label,
+            contentDescription = null,
+            tint               = tint,
+            modifier           = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.size(AppSpacing.s1))
+        Text(
+            text  = display ?: "Add category",
+            style = AppTypography.Meta,
+            color = tint,
+        )
+    }
+}
+
+/**
+ * Picker dialog for the entry's category. Shows the six predefined
+ * categories (NotepadCategory.Predefined) as tappable chips at the
+ * top, then a free-form text field for typing a custom category. The
+ * Clear action wipes the category back to null (uncategorised) and
+ * dismisses; tapping a chip or typing + Save commits the choice.
+ *
+ * Predefined chips highlight when they match `current`; the custom
+ * field pre-fills with `current` when it's a non-predefined value so
+ * the user can edit-and-save instead of retyping.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CategoryPickerDialog(
+    current: String?,
+    onPick: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val canonicalCurrent = NotepadCategory.displayName(current)
+    val customSeed = if (canonicalCurrent != null && !NotepadCategory.isPredefined(canonicalCurrent)) {
+        canonicalCurrent
+    } else ""
+    var customText by rememberSaveable { mutableStateOf(customSeed) }
+
+    // Honour the user's display-order preference (Settings →
+    // Categories) for the predefined chips so the picker matches the
+    // chip row at the top of the notepad. `applyOrder(..., emptyList())`
+    // returns the predefined-only ordered list — customs aren't
+    // shown here (they're surfaced via the free-form text field
+    // below).
+    val pickerContext = androidx.compose.ui.platform.LocalContext.current
+    val pickerPrefs = remember(pickerContext) {
+        app.releaf.mobile.ui.theme.UiPreferences.get(pickerContext)
+    }
+    val pickerPrefsState by pickerPrefs.state.collectAsState()
+    val predefinedOrdered = remember(pickerPrefsState.notepadCategoryOrder) {
+        NotepadCategory.applyOrder(pickerPrefsState.notepadCategoryOrder, emptyList())
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title            = { Text("Choose category") },
+        text             = {
+            Column {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+                    verticalArrangement   = Arrangement.spacedBy(AppSpacing.s2),
+                ) {
+                    predefinedOrdered.forEach { name ->
+                        val active = canonicalCurrent.equals(name, ignoreCase = true)
+                        val bg   = if (active) AppAccent.primary       else AppColors.GreenSoft
+                        val tint = if (active) androidx.compose.ui.graphics.Color.White else AppColors.ThemeGreenDeep
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(AppSpacing.s3))
+                                .background(bg)
+                                .clickable { onPick(name) }
+                                .padding(horizontal = AppSpacing.s3, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(text = name, style = AppTypography.Meta, color = tint)
+                        }
+                    }
+                }
+                Spacer(Modifier.size(AppSpacing.s4))
+                OutlinedTextField(
+                    value         = customText,
+                    onValueChange = { customText = it },
+                    singleLine    = true,
+                    label         = { Text("Custom category") },
+                    placeholder   = { Text("e.g. Garden, Recipes") },
+                    modifier      = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton    = {
+            // Saves the typed custom category. Trimmed-empty falls
+            // through to a no-op on the VM (updateCategory clamps to
+            // null); use Clear to deliberately uncategorise.
+            TextButton(
+                onClick = {
+                    val trimmed = customText.trim()
+                    if (trimmed.isNotEmpty()) onPick(trimmed) else onDismiss()
+                },
+                enabled = customText.trim().isNotEmpty(),
+            ) {
+                Text("Save", color = AppAccent.primary)
+            }
+        },
+        dismissButton    = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (canonicalCurrent != null) {
+                    TextButton(onClick = { onPick(null) }) {
+                        Text("Clear", color = AppColors.Danger)
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel", color = AppColors.TextSecondary)
+                }
+            }
+        },
+    )
 }
 

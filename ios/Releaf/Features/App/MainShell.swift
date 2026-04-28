@@ -171,7 +171,10 @@ public struct MainShell: View {
                     pageDetail(id: route.id)
                 }
                 .navigationDestination(for: NotepadEditorRoute.self) { route in
-                    NotepadEditorScreen(entryId: route.entryId)
+                    NotepadEditorScreen(
+                        entryId: route.entryId,
+                        initialMode: route.initialMode
+                    )
                 }
                 .navigationDestination(for: TasksRoute.self) { _ in
                     TasksScreen()
@@ -203,10 +206,16 @@ public struct MainShell: View {
                 NotepadView(
                     onOpenEntry: { id in
                         notepadPath.append(NotepadEditorRoute(entryId: id))
+                    },
+                    onOpenEntryWithMode: { id, mode in
+                        notepadPath.append(NotepadEditorRoute(entryId: id, initialMode: mode))
                     }
                 )
                     .navigationDestination(for: NotepadEditorRoute.self) { route in
-                        NotepadEditorScreen(entryId: route.entryId)
+                        NotepadEditorScreen(
+                        entryId: route.entryId,
+                        initialMode: route.initialMode
+                    )
                     }
             }
 

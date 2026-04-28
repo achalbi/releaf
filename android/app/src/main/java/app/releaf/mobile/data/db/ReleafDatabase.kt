@@ -63,6 +63,13 @@ import app.releaf.mobile.data.task.TaskEntity
         CallHistoryEntity::class,
         app.releaf.mobile.data.activity.AuditEvent::class,
     ],
+    // v20: adds `notepad_entries.category` (nullable TEXT). Lets a
+    // notepad entry be filed under one of the predefined categories
+    // (Home / Work / Personal / Health / Travel / Ideas) or any
+    // user-typed custom string. NULL = uncategorised — same convention
+    // the description column uses. No backfill: existing rows stay
+    // uncategorised until the user opens them and picks one.
+    //
     // v19: rebuilds archive-column indices under Room's naming. v17
     // shipped raw `idx_pages_archived_at` / `idx_chapters_archived_at`
     // partial indices that the entity declarations didn't match, so
@@ -89,7 +96,7 @@ import app.releaf.mobile.data.task.TaskEntity
     //                         chapter detail a recoverable archive state.
     // Notebooks already have archived_at (added in v3→v4) so v17 only
     // touches pages + chapters.
-    version = 19,
+    version = 20,
     exportSchema = true,
 )
 abstract class ReleafDatabase : RoomDatabase() {
@@ -205,6 +212,113 @@ abstract class ReleafDatabase : RoomDatabase() {
                 BEGIN
                     DELETE FROM fts_page_notes WHERE page_id = old.id;
                 END
+                """.trimIndent()
+            )
+        }
+
+        override fun onOpen(connection: SQLiteConnection) {
+            // Existing dogfood DBs may predate the callback that installs
+            // FTS. Search should never depend on a reinstall, so make the
+            // virtual tables/triggers idempotent and rebuild their mirrors
+            // from the base tables whenever the DB opens.
+            connection.execSQL(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS fts_notepad_notes USING fts5(
+                    notepad_entry_id UNINDEXED,
+                    notes,
+                    tokenize = 'unicode61 remove_diacritics 2'
+                )
+                """.trimIndent()
+            )
+            connection.execSQL(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS fts_page_notes USING fts5(
+                    page_id UNINDEXED,
+                    notes,
+                    tokenize = 'unicode61 remove_diacritics 2'
+                )
+                """.trimIndent()
+            )
+            connection.execSQL(
+                """
+                CREATE TRIGGER IF NOT EXISTS notepad_entries_fts_ai
+                AFTER INSERT ON notepad_entries
+                WHEN new.deleted_at IS NULL AND new.notes <> ''
+                BEGIN
+                    INSERT INTO fts_notepad_notes(notepad_entry_id, notes)
+                    VALUES (new.id, new.notes);
+                END
+                """.trimIndent()
+            )
+            connection.execSQL(
+                """
+                CREATE TRIGGER IF NOT EXISTS notepad_entries_fts_au
+                AFTER UPDATE ON notepad_entries
+                BEGIN
+                    DELETE FROM fts_notepad_notes WHERE notepad_entry_id = old.id;
+                    INSERT INTO fts_notepad_notes(notepad_entry_id, notes)
+                    SELECT new.id, new.notes
+                    WHERE new.deleted_at IS NULL AND new.notes <> '';
+                END
+                """.trimIndent()
+            )
+            connection.execSQL(
+                """
+                CREATE TRIGGER IF NOT EXISTS notepad_entries_fts_ad
+                AFTER DELETE ON notepad_entries
+                BEGIN
+                    DELETE FROM fts_notepad_notes WHERE notepad_entry_id = old.id;
+                END
+                """.trimIndent()
+            )
+            connection.execSQL(
+                """
+                CREATE TRIGGER IF NOT EXISTS pages_fts_ai
+                AFTER INSERT ON pages
+                WHEN new.deleted_at IS NULL AND new.notes <> ''
+                BEGIN
+                    INSERT INTO fts_page_notes(page_id, notes)
+                    VALUES (new.id, new.notes);
+                END
+                """.trimIndent()
+            )
+            connection.execSQL(
+                """
+                CREATE TRIGGER IF NOT EXISTS pages_fts_au
+                AFTER UPDATE ON pages
+                BEGIN
+                    DELETE FROM fts_page_notes WHERE page_id = old.id;
+                    INSERT INTO fts_page_notes(page_id, notes)
+                    SELECT new.id, new.notes
+                    WHERE new.deleted_at IS NULL AND new.notes <> '';
+                END
+                """.trimIndent()
+            )
+            connection.execSQL(
+                """
+                CREATE TRIGGER IF NOT EXISTS pages_fts_ad
+                AFTER DELETE ON pages
+                BEGIN
+                    DELETE FROM fts_page_notes WHERE page_id = old.id;
+                END
+                """.trimIndent()
+            )
+            connection.execSQL("DELETE FROM fts_notepad_notes")
+            connection.execSQL(
+                """
+                INSERT INTO fts_notepad_notes(notepad_entry_id, notes)
+                SELECT id, notes
+                FROM notepad_entries
+                WHERE deleted_at IS NULL AND notes <> ''
+                """.trimIndent()
+            )
+            connection.execSQL("DELETE FROM fts_page_notes")
+            connection.execSQL(
+                """
+                INSERT INTO fts_page_notes(page_id, notes)
+                SELECT id, notes
+                FROM pages
+                WHERE deleted_at IS NULL AND notes <> ''
                 """.trimIndent()
             )
         }
@@ -692,6 +806,20 @@ abstract class ReleafDatabase : RoomDatabase() {
         }
     }
 
+    /**
+     * v19 → v20: adds `notepad_entries.category`. Nullable, no default —
+     * existing rows treat NULL as "uncategorised" (same convention as
+     * the description column added in 15→16). Predefined categories
+     * (Home / Work / Personal / Health / Travel / Ideas) and custom
+     * user-typed strings both use this single column; the predefined
+     * list is just the UI seed for the picker, not a separate table.
+     */
+    private object Migration19To20 : Migration(19, 20) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL("ALTER TABLE notepad_entries ADD COLUMN category TEXT")
+        }
+    }
+
     companion object {
         private const val DB_NAME = "releaf.db"
 
@@ -731,6 +859,7 @@ abstract class ReleafDatabase : RoomDatabase() {
                         Migration16To17,
                         Migration17To18,
                         Migration18To19,
+                        Migration19To20,
                     )
                     // Dogfood installs at v2-v6 (pre-flatten) are handled
                     // here as a downgrade: the DB wipes, Room recreates

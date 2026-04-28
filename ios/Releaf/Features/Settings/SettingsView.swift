@@ -37,6 +37,12 @@ public struct SettingsView: View {
                     onSelect: { uiPrefs.setNotebookVariant($0) }
                 )
 
+                // Category management — rename / delete the custom
+                // category labels the user has typed into notepad
+                // entries. Predefined categories are listed
+                // read-only.
+                CategoryManagementSection()
+
                 TimelineStyleCard(
                     selected: uiPrefs.state.timelineStyle,
                     onSelect: { uiPrefs.setTimelineStyle($0) }

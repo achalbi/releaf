@@ -69,6 +69,12 @@ fun CollapsibleCard(
      *  [AppTypography.SectionTitle]; pass a lighter variant when the
      *  card is grouping list items rather than headlining a section. */
     titleStyle: androidx.compose.ui.text.TextStyle = AppTypography.SectionTitle,
+    /** When false, the chevron expand/collapse affordance in the
+     *  header is omitted. Useful for surfaces that should always
+     *  render their body (the shelf cards on the library tab). The
+     *  card still honors [expanded] so callers can hide the body
+     *  programmatically if they want. */
+    showCollapseToggle: Boolean = true,
     body: @Composable () -> Unit,
 ) {
     Column(
@@ -116,12 +122,14 @@ fun CollapsibleCard(
                 }
             }
             if (trailing != null) trailing()
-            RoundIconButton(
-                icon = if (expanded) Icons.Filled.KeyboardArrowUp
-                       else Icons.Filled.KeyboardArrowDown,
-                contentDescription = if (expanded) "Collapse" else "Expand",
-                onClick = onToggle,
-            )
+            if (showCollapseToggle) {
+                RoundIconButton(
+                    icon = if (expanded) Icons.Filled.KeyboardArrowUp
+                           else Icons.Filled.KeyboardArrowDown,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    onClick = onToggle,
+                )
+            }
         }
 
         AnimatedVisibility(

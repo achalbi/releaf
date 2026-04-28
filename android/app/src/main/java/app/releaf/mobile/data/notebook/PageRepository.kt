@@ -12,8 +12,11 @@ import app.releaf.mobile.data.common.FtsQuery
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import app.releaf.mobile.data.notepad.NotepadEntry
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.mapLatest
 
 class PageRepository(
     private val pageDao: PageDao,
@@ -50,21 +53,30 @@ class PageRepository(
      * short-circuit to an empty flow so we don't pass a bad MATCH expression
      * into SQLite.
      */
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun searchAll(rawQuery: String): Flow<List<PageEntity>> {
         val match = FtsQuery.build(rawQuery) ?: return flowOf(emptyList())
-        return pageDao.searchAllActive(match)
+        return pageDao.observeAllActive()
+            .mapLatest { pageDao.searchAllActive(match) }
+            .distinctUntilChanged()
     }
 
     /** Global FTS search with notebook/chapter labels for UI context. */
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun searchAllWithContext(rawQuery: String): Flow<List<PageSearchHit>> {
         val match = FtsQuery.build(rawQuery) ?: return flowOf(emptyList())
-        return pageDao.searchAllActiveWithContext(match)
+        return pageDao.observeSearchScope()
+            .mapLatest { pageDao.searchAllActiveWithContext(match) }
+            .distinctUntilChanged()
     }
 
     /** Same as [searchAll] but scoped to a single notebook. */
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun searchInNotebook(notebookId: String, rawQuery: String): Flow<List<PageEntity>> {
         val match = FtsQuery.build(rawQuery) ?: return flowOf(emptyList())
-        return pageDao.searchInNotebook(notebookId, match)
+        return pageDao.observeForNotebook(notebookId)
+            .mapLatest { pageDao.searchInNotebook(notebookId, match) }
+            .distinctUntilChanged()
     }
 
     suspend fun createPage(

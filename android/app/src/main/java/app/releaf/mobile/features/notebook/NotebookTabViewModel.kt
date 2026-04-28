@@ -278,6 +278,25 @@ class NotebookTabViewModel(
         viewModelScope.launch { notebookRepository.undoSoftDeleteNotebook(id) }
     }
 
+    /**
+     * Soft-delete a shelf. Books that lived on it remain in the
+     * notebooks table — the screen surfaces them as orphans under the
+     * synthetic "Unshelved" group until the user moves them or the
+     * delete is undone.
+     *
+     * Refuses to delete the seeded General shelf so the fallback parent
+     * for fresh notebooks always exists.
+     */
+    fun softDeleteShelf(id: String) {
+        if (id == ShelfEntity.DEFAULT_GENERAL_ID) return
+        viewModelScope.launch { shelfRepository.softDelete(id) }
+    }
+
+    /** Restore a soft-deleted shelf. */
+    fun undoDeleteShelf(id: String) {
+        viewModelScope.launch { shelfRepository.undoSoftDelete(id) }
+    }
+
     fun archive(id: String, onComplete: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
             runCatching { notebookRepository.archiveNotebook(id) }

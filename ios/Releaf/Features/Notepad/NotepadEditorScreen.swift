@@ -41,13 +41,21 @@ public struct NotepadEditorScreen: View {
     /// `NotepadEditorViewModel.newEntryId` for a brand-new draft.
     private let entryId: String
     private let repository: NotepadRepository
+    /// Optional capture mode the screen should focus on opening — when
+    /// set, the editor opens in edit mode and scrolls to the matching
+    /// feature section (Photos / Scans / Voice / Todo / Contacts /
+    /// Location). Drives the "open page details at the right tab"
+    /// affordance from the Recents new-entry picker.
+    private let initialMode: CaptureMode?
 
     public init(
         entryId: String,
-        repository: NotepadRepository = NotepadRepository()
+        repository: NotepadRepository = NotepadRepository(),
+        initialMode: CaptureMode? = nil
     ) {
         self.entryId = entryId
         self.repository = repository
+        self.initialMode = initialMode
     }
 
     public var body: some View {
@@ -56,7 +64,8 @@ public struct NotepadEditorScreen: View {
                 EditorContent(
                     entryId: entryId,
                     repository: repository,
-                    userId: session.userId
+                    userId: session.userId,
+                    initialMode: initialMode
                 )
             } else {
                 // Defensive — the list view gates on signed-in before
@@ -93,18 +102,35 @@ private struct EditorContent: View {
     /// title block. Mirrors the same affordance on PageDetailView so
     /// the editorial plant rotation is reachable from both editors.
     @State private var showPlantInfo: Bool = false
+    /// Category picker sheet — opened by the chip below the title.
+    @State private var showCategoryPicker: Bool = false
 
     /// Today's rotated plant. Pulled once at init; the rotation is
     /// per-day deterministic so a stored let is fine for the screen's
     /// lifetime.
     private let plant: DailyPlant = DailyPlants.forToday()
 
-    init(entryId: String, repository: NotepadRepository, userId: String) {
+    /// Optional capture mode delivered from the route layer. When set,
+    /// `editorMode` initialises to `.edit` and the EditorBody scrolls
+    /// to the matching section once content loads.
+    private let initialMode: CaptureMode?
+
+    init(
+        entryId: String,
+        repository: NotepadRepository,
+        userId: String,
+        initialMode: CaptureMode? = nil
+    ) {
         _vm = StateObject(wrappedValue: NotepadEditorViewModel(
             repository: repository,
             entryId: entryId,
             userId: userId
         ))
+        // Editor opens in Overview (grid) by default — that's the
+        // expected entry point. `initialMode` is threaded into the
+        // OverviewPane so the matching CaptureTabBar tab is the
+        // initially-selected one.
+        self.initialMode = initialMode
     }
 
     var body: some View {
@@ -126,6 +152,17 @@ private struct EditorContent: View {
                         entryDate: Binding(get: { vm.entryDate }, set: { vm.entryDate = $0 })
                     )
                 }
+                .padding(.horizontal, AppSpacing.s4)
+                .padding(.bottom, AppSpacing.s2)
+
+                // Category chip — sits directly below the title row.
+                // Tap opens the picker sheet; the chip itself shows
+                // the current category (predefined or custom) or an
+                // "Add category" placeholder when uncategorised.
+                CategoryChip(
+                    category: vm.category,
+                    onTap:    { showCategoryPicker = true }
+                )
                 .padding(.horizontal, AppSpacing.s4)
                 .padding(.bottom, AppSpacing.s3)
             }
@@ -242,6 +279,21 @@ private struct EditorContent: View {
                 onClose: { showPlantInfo = false }
             )
         }
+        // Category picker sheet — opened by the CategoryChip below the
+        // title row. Predefined chips + a free-form text field; Clear
+        // wipes back to nil (uncategorised).
+        .sheet(isPresented: $showCategoryPicker) {
+            CategoryPickerSheet(
+                current: vm.category,
+                onPick: { picked in
+                    let trimmed = picked?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    vm.category = (trimmed?.isEmpty == false) ? trimmed : nil
+                    showCategoryPicker = false
+                },
+                onCancel: { showCategoryPicker = false }
+            )
+        }
     }
 
     // MARK: Overview
@@ -271,7 +323,12 @@ private struct EditorContent: View {
             onTranscribeVoiceNote: { uri, transcript in
                 vm.updateVoiceTranscript(uri: uri, transcript: transcript)
             },
-            onRemoveAttachment: { id in vm.removeAttachment(id: id) }
+            onRemoveAttachment: { id in vm.removeAttachment(id: id) },
+            // Forwarded from the route layer — when the Recents
+            // new-entry picker opened this editor with a specific
+            // mode, OverviewPane lands on the matching CaptureTabBar
+            // tab. Defaults to .overview when nil.
+            initialSelected: initialMode
         )
     }
 
@@ -649,8 +706,8 @@ private struct NotepadDailyPlantInfoSheet: View {
             Divider()
 
             VStack(alignment: .leading, spacing: AppSpacing.s4) {
-                NotepadInfoBlock(title: "EPITHET",          body: plant.epithet)
-                NotepadInfoBlock(title: "TRADITIONAL USES", body: plant.usedFor)
+                NotepadInfoBlock(title: "EPITHET",          copy: plant.epithet)
+                NotepadInfoBlock(title: "TRADITIONAL USES", copy: plant.usedFor)
             }
 
             Spacer(minLength: AppSpacing.s4)
@@ -669,7 +726,9 @@ private struct NotepadDailyPlantInfoSheet: View {
 
 private struct NotepadInfoBlock: View {
     let title: String
-    let body: String
+    /// Renamed from `body` — collided with SwiftUI's required
+    /// `var body: some View` on the View conformance.
+    let copy: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.s1) {
@@ -677,9 +736,175 @@ private struct NotepadInfoBlock: View {
                 .font(AppText.eyebrow)
                 .tracking(AppLetterSpacing.eyebrow)
                 .foregroundStyle(AppColors.textSecondary)
-            Text(body)
+            Text(copy)
                 .font(AppText.body)
                 .foregroundStyle(AppColors.textPrimary)
+        }
+    }
+}
+
+// MARK: - Category chip + picker
+
+/// Compact pill that surfaces the entry's current category. Predefined
+/// names get the green-soft accent; custom user-typed names get a
+/// neutral tint so the predefined set reads as the "official" options
+/// at a glance. Tapping the pill opens [CategoryPickerSheet] via the
+/// containing screen's `showCategoryPicker` state.
+private struct CategoryChip: View {
+    let category: String?
+    let onTap: () -> Void
+
+    var body: some View {
+        let display = NotepadCategory.displayName(category)
+        // Custom and predefined chips share the same green-soft
+        // styling — the user wanted both kinds to read identically
+        // rather than predefined looking "official" and customs
+        // faded.
+        let bg: Color = (display == nil) ? AppColors.cardSolid    : AppColors.greenSoft
+        let fg: Color = (display == nil) ? AppColors.textTertiary : AppColors.themeGreenDeep
+        Button(action: onTap) {
+            HStack(spacing: AppSpacing.s1) {
+                Image(systemName: "tag.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(fg)
+                Text(display ?? "Add category")
+                    .font(AppText.meta)
+                    .foregroundStyle(fg)
+            }
+            .padding(.horizontal, AppSpacing.s3)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: AppSpacing.s3, style: .continuous)
+                    .fill(bg)
+            )
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Category picker sheet. Predefined categories show as a wrapping
+/// chip row at the top; below sits a free-form text field so the
+/// user can type a custom category. Clear wipes back to nil
+/// (uncategorised); Save commits the typed string. Tapping any
+/// predefined chip commits and dismisses immediately.
+private struct CategoryPickerSheet: View {
+    @EnvironmentObject private var uiPrefs: UiPreferences
+
+    let current: String?
+    let onPick: (String?) -> Void
+    let onCancel: () -> Void
+
+    @State private var customText: String
+
+    init(current: String?, onPick: @escaping (String?) -> Void, onCancel: @escaping () -> Void) {
+        self.current = current
+        self.onPick = onPick
+        self.onCancel = onCancel
+        // Pre-fill the text field with the current category iff it's
+        // a custom (non-predefined) value — so the user lands on
+        // edit-and-save rather than retyping the existing label.
+        let canonical = NotepadCategory.displayName(current)
+        if let canonical, !NotepadCategory.isPredefined(canonical) {
+            _customText = State(initialValue: canonical)
+        } else {
+            _customText = State(initialValue: "")
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s4) {
+            HStack {
+                Text("Choose category")
+                    .font(.system(size: 18, weight: .semibold, design: .serif))
+                    .foregroundStyle(AppColors.textPrimary)
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .foregroundStyle(AppColors.textSecondary)
+            }
+
+            // Wrapping chip row of the predefined categories, in the
+            // user's preferred display order (Settings → Categories).
+            // Tap commits and dismisses. Active chip uses the coral
+            // accent so the current selection reads at a glance.
+            FlowChips(
+                items:    NotepadCategory.applyOrder(
+                    userOrder: uiPrefs.state.notepadCategoryOrder,
+                    customs:   []
+                ),
+                selected: NotepadCategory.displayName(current),
+                onTap:    { onPick($0) }
+            )
+
+            // Custom-category input. Commits on Save (tap or keyboard
+            // submit). Trimmed-empty leaves the current value unchanged
+            // — use Clear to deliberately uncategorise.
+            TextField("Custom category — e.g. Garden, Recipes", text: $customText)
+                .textFieldStyle(.roundedBorder)
+                .submitLabel(.done)
+                .onSubmit {
+                    let trimmed = customText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { onPick(trimmed) }
+                }
+
+            HStack(spacing: AppSpacing.s3) {
+                if NotepadCategory.displayName(current) != nil {
+                    Button("Clear", action: { onPick(nil) })
+                        .foregroundStyle(AppColors.danger)
+                }
+                Spacer()
+                Button("Save") {
+                    let trimmed = customText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { onPick(trimmed) } else { onCancel() }
+                }
+                .disabled(customText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .foregroundStyle(AppColors.coral)
+            }
+        }
+        .padding(.horizontal, AppSpacing.s5)
+        .padding(.vertical, AppSpacing.s5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppColors.cardSolid.ignoresSafeArea())
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+}
+
+/// Wrapping chip layout used by the picker sheet. SwiftUI doesn't
+/// ship a built-in flow layout on iOS 16, so we use the standard
+/// HStack-of-rows pattern via a Layout that wraps when overflow.
+/// Implementation here is intentionally minimal — a horizontally
+/// scrollable HStack — because the picker only carries 6 predefined
+/// chips. If a custom-categories chip row joins later, swap this for
+/// a real flow layout.
+private struct FlowChips: View {
+    let items: [String]
+    let selected: String?
+    let onTap: (String) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: AppSpacing.s2) {
+                ForEach(items, id: \.self) { name in
+                    let active = selected.map {
+                        $0.caseInsensitiveCompare(name) == .orderedSame
+                    } ?? false
+                    let bg = active ? AppColors.themeGreenDeep : AppColors.greenSoft
+                    let fg = active ? Color.white : AppColors.themeGreenDeep
+                    Button(action: { onTap(name) }) {
+                        Text(name)
+                            .font(AppText.meta)
+                            .foregroundStyle(fg)
+                            .padding(.horizontal, AppSpacing.s3)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: AppSpacing.s3, style: .continuous)
+                                    .fill(bg)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 }
