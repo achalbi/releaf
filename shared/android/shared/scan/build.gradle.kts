@@ -74,4 +74,11 @@ dependencies {
 
     // ML Kit document scanner — the SDK we wrap.
     implementation(libs.mlkit.document.scanner)
+
+    // ML Kit text recognition (Latin v2). Wraps onto the OcrEngine
+    // contract via MlKitTextRecognizer. The matching iOS impl
+    // (VisionTextRecognizer) uses Apple Vision's
+    // VNRecognizeTextRequest; the cross-platform contract lives in
+    // OcrEngine.kt / OcrEngine.swift.
+    implementation(libs.mlkit.text.recognition)
 }

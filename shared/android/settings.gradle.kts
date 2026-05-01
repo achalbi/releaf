@@ -66,6 +66,11 @@ include(":apps:releaf")
 project(":apps").projectDir         = file("../../apps")
 project(":apps:releaf").projectDir  = file("../../apps/releaf/android/app")
 
+// Phase 3 — sibling QuickInk app target. Uses the same `:apps`
+// projectDir override Releaf set up above (no need to re-set it).
+include(":apps:quickink")
+project(":apps:quickink").projectDir = file("../../apps/quickink/android/app")
+
 // ─── Shared library modules ────────────────────────────────────────────
 
 include(":shared:sync")

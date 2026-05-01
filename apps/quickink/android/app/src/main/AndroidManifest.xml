@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  QuickInk — minimal scaffold manifest.
+
+  Permissions added incrementally as MVP features land:
+    - INTERNET                               for Drive REST + ML Kit module download
+    - CAMERA / READ_EXTERNAL_STORAGE         for the camera-first scan home (§6.4)
+    - POST_NOTIFICATIONS                     once we ship a sync foreground service
+
+  The QuickInkApp Application + MainActivity declarations below match
+  Releaf's shape (`android:name=".QuickInkApp"` resolves against the
+  package declared in `applicationId`); everything else (icon, theme,
+  custom splash, FileProvider, etc.) lands with the brand pass per
+  QUICKINK_PROPOSAL.md §4.7.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:name=".QuickInkApp"
+        android:label="@string/app_name"
+        android:allowBackup="false"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
