@@ -223,11 +223,35 @@ fun OverviewPane(
 
     var notesSheetOpen by rememberSaveable { mutableStateOf(false) }
 
+    // Once-per-pane gate around the autoLaunch flag.
+    //
+    // The HorizontalPager disposes off-screen pages and re-composes
+    // them when they swing back into view (or get pre-composed on an
+    // adjacent swipe). Without this gate, every "first composition"
+    // of a section re-runs its `LaunchedEffect(Unit)` — so opening
+    // the editor with `autoLaunch = Voice` could re-fire the Scans
+    // scanner the next time the Scans tab is composed (e.g. when
+    // swiping Voice → Todo, since Scans is the page after Todo and
+    // gets pre-composed). Hoisting consumption to the pane level
+    // keeps the section flags reactive: they read `effectiveAutoLaunch`
+    // which becomes null after the first pass, so any later
+    // re-composition of any section sees `autoLaunch = false`.
+    var autoLaunchConsumed by rememberSaveable { mutableStateOf(false) }
+    val effectiveAutoLaunch = autoLaunch.takeIf { !autoLaunchConsumed }
+    LaunchedEffect(autoLaunch) {
+        // The matching section captures `effectiveAutoLaunch == X` by
+        // value at composition time and schedules its own
+        // LaunchedEffect synchronously, so flipping the consumed flag
+        // here doesn't race the section's first fire — but it does
+        // null out the flag for any subsequent recomposition.
+        if (autoLaunch != null) autoLaunchConsumed = true
+    }
+
     // Auto-open the fullscreen NotesEditorSheet when the caller asked
     // for a Notes auto-launch (Capture page's Notes tile). Keyed by
     // Unit so it fires once per pane instance — config changes don't
     // re-pop the sheet after the user dismisses it.
-    if (autoLaunch == CaptureMode.Notes) {
+    if (effectiveAutoLaunch == CaptureMode.Notes) {
         LaunchedEffect(Unit) { notesSheetOpen = true }
     }
 
@@ -280,7 +304,7 @@ fun OverviewPane(
                         onRemove        = onRemoveAttachment,
                         onCombineToPdf  = onCombinePhotosToPdf,
                         onImportToNotes = onImportPhotoToNotes,
-                        autoLaunch      = autoLaunch == CaptureMode.Photos,
+                        autoLaunch      = effectiveAutoLaunch == CaptureMode.Photos,
                     )
                     CaptureMode.Scans -> ScansSection(
                         scans    = attachments.filter { it.type == Attachment.TYPE_SCAN },
@@ -288,7 +312,7 @@ fun OverviewPane(
                         onRemove = onRemoveAttachment,
                         onImportPageToNotes = onImportPageToNotes,
                         onEditScan = onEditScan,
-                        autoLaunch = autoLaunch == CaptureMode.Scans,
+                        autoLaunch = effectiveAutoLaunch == CaptureMode.Scans,
                     )
                     CaptureMode.Voice -> VoiceSection(
                         notes                  = attachments.filter { it.type == Attachment.TYPE_VOICE },
@@ -296,7 +320,7 @@ fun OverviewPane(
                         onTranscribed          = onTranscribeVoiceNote,
                         onAddTranscriptToNotes = onAddVoiceNoteTranscriptToNotes,
                         onRemove               = onRemoveAttachment,
-                        autoLaunch             = autoLaunch == CaptureMode.Voice,
+                        autoLaunch             = effectiveAutoLaunch == CaptureMode.Voice,
                     )
                     CaptureMode.Todo -> TodosSection(
                         todos            = todos,
@@ -305,21 +329,21 @@ fun OverviewPane(
                         onRemove         = onRemoveTodo,
                         onUpdatePriority = onUpdateTodoPriority,
                         onReorder        = onReorderTodos,
-                        autoLaunch       = autoLaunch == CaptureMode.Todo,
+                        autoLaunch       = effectiveAutoLaunch == CaptureMode.Todo,
                     )
                     CaptureMode.Contacts -> ContactsSection(
                         contacts   = contacts,
                         onAdd      = onAddContact,
                         onEdit     = onEditContact,
                         onRemove   = onRemoveContact,
-                        autoLaunch = autoLaunch == CaptureMode.Contacts,
+                        autoLaunch = effectiveAutoLaunch == CaptureMode.Contacts,
                     )
                     CaptureMode.Location -> LocationSection(
                         locations      = locations,
                         onAdd          = onAddLocation,
                         onUpdateCoords = onUpdateLocationCoords,
                         onRemove       = onRemoveLocation,
-                        autoLaunch     = autoLaunch == CaptureMode.Location,
+                        autoLaunch     = effectiveAutoLaunch == CaptureMode.Location,
                     )
                 }
                 Spacer(Modifier.height(AppSpacing.s10))
