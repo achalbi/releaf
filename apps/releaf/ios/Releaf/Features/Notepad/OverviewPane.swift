@@ -181,6 +181,12 @@ struct OverviewPane: View {
                 onAdd:     onAddLocation,
                 onRemove:  onRemoveLocation
             )
+
+        // .notes is editor-only per CaptureMode.swift — selecting the
+        // notes tab opens the editor sheet (`notesSheetOpen = true`),
+        // not a section body. Placeholder satisfies exhaustive switch.
+        case .notes:
+            EmptyView()
         }
     }
 }

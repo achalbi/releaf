@@ -125,21 +125,11 @@ public protocol SyncDataSource: Sendable {
     func setLastAppliedManifestEtag(_ etag: String) async throws
 }
 
-// MARK: - Identity types
-
-/// Schema version embedded in the Drive manifest. Major bumps gate
-/// cross-version reads; minor bumps are forward-compatible additions.
-public struct SchemaVersion: Equatable, Sendable, Codable {
-    public let major: Int
-    public let minor: Int
-
-    public init(major: Int, minor: Int) {
-        self.major = major
-        self.minor = minor
-    }
-}
-
 // MARK: - Outbound types
+
+// Note: `SchemaVersion` is defined in Manifest.swift (same module after
+// PR #3b moves Manifest.swift into ReleafCoreSync). The protocol's
+// `var schemaVersion: SchemaVersion { get }` returns that type.
 
 /// A single locally-dirty entity ready to upload. The data source did
 /// the canonical-JSON serialisation; the sync worker just moves bytes.
@@ -206,7 +196,12 @@ public struct DirtyBatch: Sendable, Equatable {
 
 /// A single locally-recorded deletion ready to propagate as a
 /// tombstone file under `tombstones/`.
-public struct TombstoneEntry: Sendable, Equatable {
+///
+/// Distinct from `TombstoneEntry` (in Manifest.swift) — that one is the
+/// Drive wire format where the entity id is the dictionary key. This is
+/// the data source's outbound batch element, where the id is a field on
+/// the value because we're returning a list, not a map.
+public struct PendingTombstone: Sendable, Equatable {
     public let kind: String
     public let id: String
     /// ISO-8601 UTC timestamp when the local deletion happened.
@@ -220,10 +215,10 @@ public struct TombstoneEntry: Sendable, Equatable {
 }
 
 public struct TombstoneBatch: Sendable, Equatable {
-    public let entries: [TombstoneEntry]
+    public let entries: [PendingTombstone]
     public let nextCursor: SyncCursor?
 
-    public init(entries: [TombstoneEntry], nextCursor: SyncCursor?) {
+    public init(entries: [PendingTombstone], nextCursor: SyncCursor?) {
         self.entries = entries
         self.nextCursor = nextCursor
     }

@@ -41,6 +41,7 @@ public struct LeafDropletGlyph: View {
         case .contacts: return AppColors.info                           // people
         case .location: return AppColors.coralDeep                      // pin
         case .voice:    return AppColors.warning                        // amber
+        case .notes:    return AppColors.themeGreenPrimary              // ink (placeholder — tighten with design)
         case .overview: return AppColors.themeGreenPrimary
         }
     }

@@ -16,6 +16,7 @@
 
 import Foundation
 import GRDB
+import ReleafCoreDrive  // DriveError (moved in PR #3b)
 
 /// One active notebook joined with its live chapter + page counts.
 /// Feeds the variant-1 "Your shelves" view so the UI layer gets a

@@ -1,19 +1,28 @@
 /*
  * SyncEnvironment.swift
  *
- * Process-wide wiring for the sync stack. Builds the `SyncRepository`
- * singleton, hooks it into `SyncScheduler.runOnce`, and watches
+ * Process-wide wiring for Releaf's sync stack. Builds a `SyncRepository`
+ * (in ReleafCoreSync) wrapped around a `ReleafSyncDataSource` (in this
+ * module), hooks it into `SyncScheduler.runOnce`, and watches
  * `AuthStore` so sign-in / sign-out toggles background refresh.
  *
- * Call `SyncEnvironment.shared.install()` once from the app entry
- * point (e.g. inside `ReleafApp.init()`). The install is idempotent.
+ * Call `SyncEnvironment.shared.install(authStore:)` once from the app
+ * entry point (e.g. inside `ReleafApp.init()`). Idempotent.
  *
- * Swap the `driveClient` property to a real REST implementation when
- * Phase 2 lands; previews / tests continue to use `InMemoryDriveClient`.
+ * Phase 2 refactor (PR #3b): SyncRepository moved out of this module
+ * into `ReleafCoreSync` so QuickInk can reuse it. The Releaf-specific
+ * snapshot/apply/mark code that used to live in SyncRepository is now
+ * in `ReleafSyncDataSource`. Per QUICKINK_DESIGN.md §1, both are
+ * constructed lazily inside the scheduler closure so the dataSource
+ * always picks up the current signed-in user — when the user signs
+ * out and back in as a different account, the next sync pass uses
+ * fresh objects.
  */
 
 import Foundation
 import Combine
+import ReleafCoreDrive
+import ReleafCoreSync
 
 @MainActor
 public final class SyncEnvironment {
@@ -35,38 +44,36 @@ public final class SyncEnvironment {
     public let stateStore = SyncStateStore.shared
     public let scheduler  = SyncScheduler.shared
 
-    public private(set) var repository: SyncRepository?
-
     private var authObserver: AnyCancellable?
     private var installed = false
 
     private init() {}
 
-    /// Idempotent — call from the app entry point. Builds the sync
-    /// repository, registers the background refresh handler, and
-    /// observes auth for enable/cancel.
+    /// Idempotent — call from the app entry point. Registers the
+    /// background refresh handler and observes auth for sign-in/sign-out
+    /// toggles. The actual `SyncRepository` + `ReleafSyncDataSource`
+    /// pair is constructed lazily inside the scheduler's `runOnce`
+    /// closure so we always use the currently-signed-in user's id.
     ///
-    /// `authStore` is no longer defaulted to `.shared` — `AuthStore`
-    /// is `@MainActor`-isolated and Swift 6 rejects MainActor singleton
-    /// access from the nonisolated default-value evaluation context.
-    /// Callers always pass `AuthStore.shared` from a @MainActor scope
-    /// (the app's `init`); this just makes that explicit.
+    /// `authStore` is not defaulted because `AuthStore` is
+    /// `@MainActor`-isolated and Swift 6 rejects MainActor singleton
+    /// access from nonisolated default-value evaluation. Callers pass
+    /// `AuthStore.shared` from a @MainActor scope (the app's init).
     public func install(authStore: AuthStore) {
         if installed { return }
         installed = true
 
-        let repo = SyncRepository(
-            driveClient: driveClient,
-            stateStore: stateStore
-        )
-        self.repository = repo
-
         // Wire the scheduler's runOnce to actually sync.
-        scheduler.runOnce = { [weak repo, weak self] in
-            guard let repo, let self else { return }
+        scheduler.runOnce = { [weak self] in
+            guard let self else { return }
             guard let session = await self.currentSession(authStore: authStore) else { return }
+            let dataSource = ReleafSyncDataSource(userId: session.userId)
+            let repo = SyncRepository(
+                dataSource: dataSource,
+                driveClient: self.driveClient,
+                stateStore: self.stateStore
+            )
             _ = try? await repo.sync(
-                userId:      session.userId,
                 deviceId:    DeviceIdentity.get(),
                 accessToken: session.accessToken
             )

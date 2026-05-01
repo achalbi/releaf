@@ -35,6 +35,8 @@
 
 import Foundation
 import GRDB
+import ReleafCoreDrive  // DriveClient / URLSessionDriveClient (moved in PR #3b)
+import ReleafCoreSync   // SyncScheduler (moved in PR #3b)
 
 public final class LocalDriveRepository: DriveRepository, @unchecked Sendable {
 

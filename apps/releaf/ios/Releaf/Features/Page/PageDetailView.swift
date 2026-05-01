@@ -354,6 +354,11 @@ private struct Loaded: View {
         case .scans:    PageScansSection(scans: page.scannedDocuments)
         case .contacts: PageContactsSection(contacts: page.contacts)
         case .location: LocationsSection(pins: page.locations)
+        // .notes is editor-only per CaptureMode.swift; no page-detail body
+        // is currently defined for it. Placeholder satisfies exhaustive
+        // switch; design-reviewed PageNotesSection lands in CAPTURE_TAB_PLAN
+        // Phase 4 follow-up.
+        case .notes:    EmptyView()
         }
     }
 }

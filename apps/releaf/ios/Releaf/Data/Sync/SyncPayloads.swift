@@ -15,6 +15,7 @@
  */
 
 import Foundation
+import ReleafCoreSync  // CanonicalJson (moved in PR #3b)
 
 // =====================================================================
 // JSONAny — pass-through JSON value for Codable

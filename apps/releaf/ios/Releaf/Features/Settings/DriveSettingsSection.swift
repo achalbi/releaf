@@ -8,6 +8,7 @@
 import SwiftUI
 import ReleafDesignSystem
 import ReleafData
+import ReleafCoreSync  // SyncStateStore + SyncScheduler (moved in PR #3b)
 
 public struct DriveSettingsSection: View {
     @EnvironmentObject private var authStore: AuthStore

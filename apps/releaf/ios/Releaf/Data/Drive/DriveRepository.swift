@@ -7,6 +7,7 @@
  */
 
 import Foundation
+import ReleafCoreDrive  // DriveClient / DriveError / DriveFile (moved in PR #3b)
 
 public struct NotebookDetail: Equatable, Sendable {
     public let notebook: Notebook

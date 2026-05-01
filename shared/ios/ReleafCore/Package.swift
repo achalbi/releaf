@@ -35,7 +35,14 @@ let package = Package(
         // contents in this package compile against any iOS, but the
         // real modules that arrive in later PRs use UIKit / VisionKit /
         // PDFKit which all need iOS 16+.
+        //
+        // macOS is declared at 10.15 for the same SwiftPM resolver
+        // reason as Releaf's package — see the comment in
+        // apps/releaf/ios/Package.swift. PR #4 adds GRDB and
+        // GoogleSignIn-iOS as deps in this package; both require
+        // macOS 10.15+, so we set the floor preemptively.
         .iOS(.v16),
+        .macOS(.v10_15),
     ],
     products: [
         .library(name: "ReleafCoreDesignSystem", targets: ["ReleafCoreDesignSystem"]),
