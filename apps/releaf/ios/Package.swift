@@ -100,6 +100,11 @@ let package = Package(
                 // Attachments, NotepadListViewModel, NotepadEditorViewModel,
                 // RichTextEditor moved into ReleafCoreNotes.
                 .product(name: "ReleafCoreNotes", package: "ReleafCore"),
+                // PR #4i — DocumentScannerView (VisionKit wrapper) moved
+                // into ReleafCoreScan. Re-exported via the shim in
+                // Releaf/Data/ReleafCoreReexports.swift so EditorSections's
+                // existing `import ReleafData` keeps resolving the type.
+                .product(name: "ReleafCoreScan",  package: "ReleafCore"),
             ],
             path: "Releaf/Data",
             resources: [

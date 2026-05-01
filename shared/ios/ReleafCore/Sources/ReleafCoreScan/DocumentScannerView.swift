@@ -14,7 +14,10 @@
  */
 
 import SwiftUI
-import ReleafData  // AttachmentStorage (moved into ReleafCoreData in PR #4a, re-exported by ReleafData)
+// PR #4i: file moved into shared ReleafCoreScan, which depends on
+// ReleafCoreData directly. AttachmentStorage was extracted there in
+// PR #4a; QuickInk doesn't import the app-side ReleafData re-export.
+import ReleafCoreData
 
 // VisionKit's `VNDocumentCameraViewController` is iOS-only. macOS
 // preview/test builds get a placeholder view at the bottom of this
@@ -24,7 +27,7 @@ import ReleafData  // AttachmentStorage (moved into ReleafCoreData in PR #4a, re
 import UIKit
 import VisionKit
 
-struct DocumentScannerView: UIViewControllerRepresentable {
+public struct DocumentScannerView: UIViewControllerRepresentable {
 
     /// Called with the stored PDF + first-page preview JPEG URLs on a
     /// successful scan. Both file:// URLs in the app's attachments dir.
@@ -34,19 +37,27 @@ struct DocumentScannerView: UIViewControllerRepresentable {
     /// reason. No bytes written in that case.
     let onCancel: () -> Void
 
-    func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
+    public init(
+        onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.onComplete = onComplete
+        self.onCancel = onCancel
+    }
+
+    public func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
         let scanner = VNDocumentCameraViewController()
         scanner.delegate = context.coordinator
         return scanner
     }
 
-    func updateUIViewController(_ controller: VNDocumentCameraViewController, context: Context) {}
+    public func updateUIViewController(_ controller: VNDocumentCameraViewController, context: Context) {}
 
-    func makeCoordinator() -> Coordinator {
+    public func makeCoordinator() -> Coordinator {
         Coordinator(onComplete: onComplete, onCancel: onCancel)
     }
 
-    final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
+    public final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
         private let onComplete: (_ pdfURL: URL, _ previewURL: URL?) -> Void
         private let onCancel: () -> Void
 
@@ -58,7 +69,7 @@ struct DocumentScannerView: UIViewControllerRepresentable {
             self.onCancel = onCancel
         }
 
-        func documentCameraViewController(
+        public func documentCameraViewController(
             _ controller: VNDocumentCameraViewController,
             didFinishWith scan: VNDocumentCameraScan
         ) {
@@ -79,14 +90,14 @@ struct DocumentScannerView: UIViewControllerRepresentable {
             }
         }
 
-        func documentCameraViewController(
+        public func documentCameraViewController(
             _ controller: VNDocumentCameraViewController,
             didFailWithError error: Error
         ) {
             controller.dismiss(animated: true) { [onCancel] in onCancel() }
         }
 
-        func documentCameraViewControllerDidCancel(
+        public func documentCameraViewControllerDidCancel(
             _ controller: VNDocumentCameraViewController
         ) {
             controller.dismiss(animated: true) { [onCancel] in onCancel() }
@@ -131,11 +142,19 @@ struct DocumentScannerView: UIViewControllerRepresentable {
 // VisionKit which is iOS-only. Render a placeholder so the consuming
 // view hierarchy still compiles; an actual scan obviously can't run
 // here.
-struct DocumentScannerView: View {
+public struct DocumentScannerView: View {
     let onComplete: (_ pdfURL: URL, _ previewURL: URL?) -> Void
     let onCancel: () -> Void
 
-    var body: some View {
+    public init(
+        onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.onComplete = onComplete
+        self.onCancel = onCancel
+    }
+
+    public var body: some View {
         VStack(spacing: 12) {
             Text("Document scanner is iOS-only")
                 .font(.headline)
