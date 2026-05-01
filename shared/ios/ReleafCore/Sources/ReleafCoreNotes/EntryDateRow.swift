@@ -14,11 +14,15 @@
 import SwiftUI
 import ReleafCoreDesignSystem  // PR #4g — was ReleafDesignSystem before file moved here
 
-struct EntryDateRow: View {
+public struct EntryDateRow: View {
     @Binding var entryDate: String
     @State private var showPicker = false
 
-    var body: some View {
+    public init(entryDate: Binding<String>) {
+        self._entryDate = entryDate
+    }
+
+    public var body: some View {
         Button(action: { showPicker = true }) {
             HStack(spacing: AppSpacing.s2) {
                 Image(systemName: "calendar")

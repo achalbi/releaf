@@ -51,6 +51,21 @@ public final class RichTextEditorController: ObservableObject {
     /// underlying UITextView (e.g. for keyboard-focus management).
     public weak var textView: UITextView?
 
+    /// Serialize the controller's current `UITextView` content back to
+    /// markdown. Returns nil before `makeUIView` has wired a text view
+    /// in, so callers can `??` to a fallback (typically the existing
+    /// `vm.notes` binding). Used by "flush before nav pops" / "Done
+    /// button" flows where attribute-only mutations may not yet have
+    /// fired the binding callback.
+    ///
+    /// Wraps the file-internal `MarkdownBridge` so the app target
+    /// doesn't need direct access to it — keeps the markdown
+    /// round-trip encapsulated in this file as originally intended.
+    public func serializedMarkdown() -> String? {
+        guard let tv = textView else { return nil }
+        return MarkdownBridge.serialize(tv.attributedText)
+    }
+
     @Published private(set) var isBoldActive: Bool = false
     @Published private(set) var isItalicActive: Bool = false
     @Published private(set) var isUnderlineActive: Bool = false
@@ -139,7 +154,7 @@ public final class RichTextEditorController: ObservableObject {
 
 // MARK: - Editor view
 
-struct RichTextEditor: UIViewRepresentable {
+public struct RichTextEditor: UIViewRepresentable {
     @Binding var markdown: String
     @ObservedObject var controller: RichTextEditorController
     /// SwiftUI `Color` rather than `UIColor` so the call sites stay
@@ -154,7 +169,19 @@ struct RichTextEditor: UIViewRepresentable {
     /// double-tap-to-select gesture from UITextView.
     var isScrollEnabled: Bool = false
 
-    func makeUIView(context: Context) -> UITextView {
+    public init(
+        markdown: Binding<String>,
+        controller: RichTextEditorController,
+        tintColor: Color,
+        isScrollEnabled: Bool = false
+    ) {
+        self._markdown = markdown
+        self.controller = controller
+        self.tintColor = tintColor
+        self.isScrollEnabled = isScrollEnabled
+    }
+
+    public func makeUIView(context: Context) -> UITextView {
         let tv = UITextView()
         tv.delegate = context.coordinator
         tv.font = UIFont.preferredFont(forTextStyle: .body)
@@ -170,7 +197,7 @@ struct RichTextEditor: UIViewRepresentable {
         return tv
     }
 
-    func updateUIView(_ tv: UITextView, context: Context) {
+    public func updateUIView(_ tv: UITextView, context: Context) {
         // Only rehydrate on external binding changes. If the coordinator
         // is the one pushing the update (user typed), skip — otherwise
         // we'd reparse markdown mid-edit and blow away the selection.
@@ -191,9 +218,9 @@ struct RichTextEditor: UIViewRepresentable {
         }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+    public func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
-    final class Coordinator: NSObject, UITextViewDelegate {
+    public final class Coordinator: NSObject, UITextViewDelegate {
         var parent: RichTextEditor
         /// Set to true just before we write into `markdown`, cleared on
         /// the next runloop. Keeps `updateUIView` from treating the
@@ -202,7 +229,7 @@ struct RichTextEditor: UIViewRepresentable {
 
         init(parent: RichTextEditor) { self.parent = parent }
 
-        func textViewDidChange(_ textView: UITextView) {
+        public func textViewDidChange(_ textView: UITextView) {
             isInternalUpdate = true
             parent.markdown = MarkdownBridge.serialize(textView.attributedText)
             DispatchQueue.main.async { [weak self] in
@@ -211,7 +238,7 @@ struct RichTextEditor: UIViewRepresentable {
             parent.controller.refreshActiveStyles()
         }
 
-        func textViewDidChangeSelection(_ textView: UITextView) {
+        public func textViewDidChangeSelection(_ textView: UITextView) {
             parent.controller.refreshActiveStyles()
         }
     }
@@ -281,15 +308,33 @@ public final class RichTextEditorController: ObservableObject {
     func toggleItalic() {}
     func toggleUnderline() {}
     func refreshActiveStyles() {}
+
+    /// macOS stub mirror of the iOS helper. The macOS `RichTextEditor`
+    /// is a plain `TextEditor`, so there's no UITextView to serialize
+    /// from — callers fall back to whatever they already have in their
+    /// markdown binding.
+    public func serializedMarkdown() -> String? { nil }
 }
 
-struct RichTextEditor: View {
+public struct RichTextEditor: View {
     @Binding var markdown: String
     @ObservedObject var controller: RichTextEditorController
     var tintColor: Color
     var isScrollEnabled: Bool = false
 
-    var body: some View {
+    public init(
+        markdown: Binding<String>,
+        controller: RichTextEditorController,
+        tintColor: Color,
+        isScrollEnabled: Bool = false
+    ) {
+        self._markdown = markdown
+        self.controller = controller
+        self.tintColor = tintColor
+        self.isScrollEnabled = isScrollEnabled
+    }
+
+    public var body: some View {
         // Plain TextEditor is the cross-platform fallback; markdown
         // formatting toggles are no-ops via the stub controller.
         TextEditor(text: $markdown)

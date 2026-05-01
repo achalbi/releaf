@@ -15,12 +15,22 @@
 import SwiftUI
 import ReleafCoreDesignSystem  // PR #4g — was ReleafDesignSystem before file moved here
 
-struct NotesEditorSheet: View {
+public struct NotesEditorSheet: View {
     @Binding var notes: String
     @ObservedObject var controller: RichTextEditorController
     let onDismiss: () -> Void
 
-    var body: some View {
+    public init(
+        notes: Binding<String>,
+        controller: RichTextEditorController,
+        onDismiss: @escaping () -> Void
+    ) {
+        self._notes = notes
+        self.controller = controller
+        self.onDismiss = onDismiss
+    }
+
+    public var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 // No outer ScrollView: the UITextView handles its own
@@ -63,14 +73,13 @@ struct NotesEditorSheet: View {
                         // binding catches up. Writing to `notes`
                         // explicitly here guarantees the Overview
                         // preview shows the latest body on return.
-                        // The serialize-from-UITextView path is iOS-only;
-                        // on macOS the `notes` binding already reflects
+                        // `serializedMarkdown()` is the iOS-only round-
+                        // trip; on the macOS stub it returns nil and we
+                        // fall through with `notes` already reflecting
                         // the plain TextEditor content.
-                        #if os(iOS)
-                        if let tv = controller.textView {
-                            notes = MarkdownBridge.serialize(tv.attributedText)
+                        if let latest = controller.serializedMarkdown() {
+                            notes = latest
                         }
-                        #endif
                         onDismiss()
                     }
                     .foregroundStyle(AppColors.coral)

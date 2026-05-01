@@ -452,8 +452,12 @@ private struct EditorContent: View {
     /// this is mode-agnostic — whichever mode the user was last in
     /// holds the freshest buffer.
     private func flushBeforeExit() {
-        guard let tv = richTextController.textView else { return }
-        vm.notes = MarkdownBridge.serialize(tv.attributedText)
+        // `serializedMarkdown()` returns nil when no UITextView is wired
+        // (e.g. the editor was never mounted, or we're on the macOS
+        // stub) — leave `vm.notes` as-is in that case.
+        if let latest = richTextController.serializedMarkdown() {
+            vm.notes = latest
+        }
     }
 }
 

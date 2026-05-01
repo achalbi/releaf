@@ -16,10 +16,14 @@
 import SwiftUI
 import ReleafCoreDesignSystem  // PR #4g — was ReleafDesignSystem before file moved here
 
-struct RichTextFormatBar: View {
+public struct RichTextFormatBar: View {
     @ObservedObject var controller: RichTextEditorController
 
-    var body: some View {
+    public init(controller: RichTextEditorController) {
+        self.controller = controller
+    }
+
+    public var body: some View {
         HStack(spacing: AppSpacing.s2) {
             ToggleButton(
                 systemImage: "bold",
