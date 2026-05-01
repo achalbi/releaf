@@ -8,22 +8,42 @@
  * helper is the single place we decide how those land on disk.
  *
  * Directory layout:
- *   Application Support/Releaf/attachments/<UUIDv7>.<ext>
+ *   Application Support/<appFolderName>/attachments/<UUIDv7>.<ext>
  *
  * Application Support sits outside the iCloud auto-backup sweep, which
  * matches where the SQLite file lives — consistent mental model for
  * "local cache the sync worker re-asserts from Drive on fresh install".
+ *
+ * PR #4a moved this from
+ * `apps/releaf/ios/Releaf/Features/Notepad/Sections/AttachmentStorage.swift`
+ * into ReleafCoreData and parameterized the app folder name.
+ *
+ * Folder name parameterization:
+ *   `appFolderName` defaults to "Releaf" so existing call sites work
+ *   unchanged. QuickInk's app entry point (Phase 3) will set it to
+ *   "QuickInk" once at process start. Mutable static is acceptable here
+ *   because the value is process-wide and never changes after init.
  */
 
 import Foundation
-import ReleafData
 
-enum AttachmentStorage {
+public enum AttachmentStorage {
+
+    /// App-specific subfolder under Application Support. Each app sets
+    /// this once at startup. Defaults to "Releaf" for backward compat
+    /// with existing Releaf call sites; QuickInk overrides at app init.
+    ///
+    /// The static-mutable shape is deliberate: this is a process-wide
+    /// constant in practice (set once, read everywhere). A struct with
+    /// dependency injection would be more correct but would force every
+    /// call site to thread an instance through, which buys nothing for
+    /// a single-app process.
+    public static var appFolderName: String = "Releaf"
 
     /// Full directory URL, created on first access. Throws if the app
     /// container isn't writable — rare enough that the caller can surface
     /// a generic error to the user.
-    static func directory() throws -> URL {
+    public static func directory() throws -> URL {
         let fm = FileManager.default
         let base = try fm.url(
             for: .applicationSupportDirectory,
@@ -32,7 +52,7 @@ enum AttachmentStorage {
             create: true
         )
         let dir = base
-            .appendingPathComponent("Releaf", isDirectory: true)
+            .appendingPathComponent(appFolderName, isDirectory: true)
             .appendingPathComponent("attachments", isDirectory: true)
         if !fm.fileExists(atPath: dir.path) {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -43,7 +63,7 @@ enum AttachmentStorage {
     /// Writes `data` with the given extension (no leading dot) and returns
     /// the stored file's URL. Returns nil on any failure; the caller can
     /// decide whether to surface it to the user.
-    static func write(_ data: Data, ext: String) -> URL? {
+    public static func write(_ data: Data, ext: String) -> URL? {
         do {
             let dir = try directory()
             let url = dir.appendingPathComponent("\(Uuidv7.generate()).\(ext)")

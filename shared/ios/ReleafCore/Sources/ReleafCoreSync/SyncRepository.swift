@@ -27,6 +27,7 @@
  */
 
 import Foundation
+import ReleafCoreData   // IsoClock (PR #4a — was an inline helper in PR #3b)
 import ReleafCoreDrive  // DriveClient (the orchestrator's Drive transport)
 
 // MARK: - SyncResult
@@ -254,9 +255,7 @@ public final class SyncRepository: @unchecked Sendable {
         // before the index points at them. A failure mid-loop leaves
         // the previous manifest authoritative; nothing has been
         // permanently broken.
-        // PR #3b inlines this; PR #4 moves IsoClock into ReleafCoreData
-        // and replaces this with `IsoClock.nowIso()`.
-        let nowIso = nowIsoUtc()
+        let nowIso = IsoClock.nowIso()
         // ManifestV2's `schemaVersion` defaults to `SchemaVersion.current`
         // (a Releaf-derived global). For app-agnostic correctness we
         // pass the data source's version explicitly. `appId` is not
@@ -320,23 +319,6 @@ public final class SyncRepository: @unchecked Sendable {
             failed: failed
         )
     }
-
-    // MARK: - Helpers (temporary, until PR #4 moves IsoClock into ReleafCoreData)
-
-    /// Same shape as `IsoClock.nowIso()`: ISO-8601 UTC with millisecond
-    /// precision. Inlined here in PR #3b because IsoClock is still in the
-    /// Releaf module; PR #4 lifts it into ReleafCoreData and this private
-    /// duplicate goes away.
-    private func nowIsoUtc(_ date: Date = Date()) -> String {
-        Self.isoFormatter.string(from: date)
-    }
-
-    private static let isoFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        f.timeZone = TimeZone(identifier: "UTC")
-        return f
-    }()
 
     // MARK: - Manifest fetch
 

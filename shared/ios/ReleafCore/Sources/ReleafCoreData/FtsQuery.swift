@@ -9,6 +9,9 @@
  * Returns nil if the query degenerates to nothing usable; callers should
  * treat that as "empty result set" rather than passing the empty string to
  * SQLite (which would raise a MATCH error).
+ *
+ * PR #4a moved this from `apps/releaf/ios/Releaf/Data/Notepad/FtsQuery.swift`
+ * into ReleafCoreData. Behavior unchanged.
  */
 
 import Foundation

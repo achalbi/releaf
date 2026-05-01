@@ -14,6 +14,7 @@
  */
 
 import SwiftUI
+import ReleafData  // AttachmentStorage (moved into ReleafCoreData in PR #4a, re-exported by ReleafData)
 
 // VisionKit's `VNDocumentCameraViewController` is iOS-only. macOS
 // preview/test builds get a placeholder view at the bottom of this

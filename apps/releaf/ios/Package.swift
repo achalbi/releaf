@@ -75,6 +75,12 @@ let package = Package(
                 // `import ReleafCoreSync` / `import ReleafCoreDrive`.
                 .product(name: "ReleafCoreSync",  package: "ReleafCore"),
                 .product(name: "ReleafCoreDrive", package: "ReleafCore"),
+                // PR #4a — Uuidv7, IsoClock, FtsQuery, AttachmentStorage
+                // moved into ReleafCoreData. ReleafData re-exports them
+                // via the @_exported import shim in
+                // Releaf/Data/ReleafCoreReexports.swift so existing
+                // `import ReleafData` callers don't need to update.
+                .product(name: "ReleafCoreData",  package: "ReleafCore"),
             ],
             path: "Releaf/Data",
             resources: [

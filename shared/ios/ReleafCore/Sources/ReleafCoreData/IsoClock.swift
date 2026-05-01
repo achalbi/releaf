@@ -6,10 +6,13 @@
  *   2026-04-21T10:15:30.123Z
  *
  * Mirrors the Kotlin `IsoClock` so both platforms stamp identical rows into
- * the shared SQLite schema defined in design-system/migrations/v1_initial.sql.
+ * the shared SQLite schema defined in shared/design-system/migrations/v1_initial.sql.
  * Matches the SQL default `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` so a row
  * inserted without app-layer timestamps from either client still reads the
  * same way.
+ *
+ * PR #4a moved this from `apps/releaf/ios/Releaf/Data/Notepad/IsoClock.swift`
+ * into ReleafCoreData. Behavior unchanged.
  */
 
 import Foundation

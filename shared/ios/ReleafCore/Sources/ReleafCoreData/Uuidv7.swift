@@ -16,6 +16,10 @@
  *   bits 52-63  : rand_a         (12 bits)
  *   bits 64-65  : variant (10)   (2 bits)
  *   bits 66-127 : rand_b         (62 bits)
+ *
+ * PR #4a moved this from `apps/releaf/ios/Releaf/Data/Notepad/Uuidv7.swift`
+ * into ReleafCoreData. Behavior unchanged. Releaf continues to import via
+ * `@_exported import ReleafCoreData` shim in ReleafData.
  */
 
 import Foundation
