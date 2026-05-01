@@ -39,16 +39,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 
-/**
- * Default JSON configuration for sync. `ignoreUnknownKeys` lets a
- * newer writer's extra fields flow past an older reader without
- * blowing up (forward-compat for `minor` bumps per OPEN_QUESTIONS §5).
- */
-val SyncJson: Json = Json {
-    prettyPrint       = false
-    ignoreUnknownKeys = true
-    encodeDefaults    = true
-}
+// PR #3c: `val SyncJson` moved to :shared:sync/SyncJson.kt so both
+// the shared orchestrator and Releaf's payload types consume the same
+// Json instance. Same Kotlin package (`app.releaf.mobile.data.sync`),
+// no import needed within Releaf code that previously referenced it.
 
 // =====================================================================
 // Notebook

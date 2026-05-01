@@ -42,7 +42,7 @@ import app.releaf.mobile.data.panchanga.PanchangaRepository
 import app.releaf.mobile.data.perspective.PerspectiveRepository
 import app.releaf.mobile.data.reminder.ReminderAlarmReceiver
 import app.releaf.mobile.data.reminder.ReminderRepository
-import app.releaf.mobile.data.sync.SyncRepository
+// PR #3c: SyncRepository import dropped — wiring moved into SyncWorker.
 import app.releaf.mobile.data.sync.SyncScheduler
 import app.releaf.mobile.data.task.TaskRepository
 import kotlinx.coroutines.CoroutineScope
@@ -57,7 +57,10 @@ import kotlinx.coroutines.launch
  *  only per `docs/DRIVE_SCHEMA.md` §"Field reference"; not used for
  *  compatibility gating. Keep roughly in sync with versionName in
  *  app/build.gradle.kts. */
-private const val APP_VERSION = "0.1.0"
+// `internal` rather than `private` so SyncWorker (in another package
+// of the same :apps:releaf module) can reach it after the PR #3c
+// extract. Was private before sync moved out of this module.
+internal const val APP_VERSION = "0.1.0"
 
 class ReleafApp : Application() {
     lateinit var authStore: AuthStore
@@ -142,13 +145,11 @@ class ReleafApp : Application() {
     lateinit var driveClient: DriveClient
         private set
 
-    /**
-     * Push-only sync orchestrator. Consumed by [SyncWorker] — wire-up
-     * goes through here so the worker has a single address for its
-     * dependencies.
-     */
-    lateinit var syncRepository: SyncRepository
-        private set
+    // PR #3c: removed `lateinit var syncRepository: SyncRepository`.
+    // SyncWorker now constructs the orchestrator fresh per work pass
+    // with a session-scoped ReleafSyncDataSource — see SyncWorker.kt.
+    // ReleafApp still holds `database` and `driveClient`, which the
+    // worker needs as inputs; that's the whole interface now.
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -255,16 +256,9 @@ class ReleafApp : Application() {
         } else {
             OkHttpDriveClient()
         }
-        syncRepository = SyncRepository(
-            notepadDao   = database.notepadDao(),
-            notebookDao  = database.notebookDao(),
-            chapterDao   = database.chapterDao(),
-            pageDao      = database.pageDao(),
-            taskDao      = database.taskDao(),
-            syncStateDao = database.syncStateDao(),
-            driveClient  = driveClient,
-            appVersion   = APP_VERSION,
-        )
+        // PR #3c: SyncRepository wiring moved into SyncWorker.doWork() —
+        // it constructs a fresh ReleafSyncDataSource + SyncRepository
+        // per work pass against the active session's userId.
 
         observeAuthForSyncLifecycle()
     }

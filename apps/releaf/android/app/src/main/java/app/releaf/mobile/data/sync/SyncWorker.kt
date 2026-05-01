@@ -27,6 +27,7 @@ package app.releaf.mobile.data.sync
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import app.releaf.mobile.APP_VERSION
 import app.releaf.mobile.ReleafApp
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.data.drive.DriveError
@@ -55,9 +56,28 @@ class SyncWorker(
             return Result.retry()
         }
 
+        // PR #3c: SyncRepository moved to :shared:sync and now takes a
+        // SyncDataSource. Construct fresh per work pass so the Releaf
+        // data source captures the active session's userId — when the
+        // user signs out and back in as a different account, the next
+        // worker run uses fresh objects.
+        val dataSource = ReleafSyncDataSource(
+            notepadDao  = app.database.notepadDao(),
+            notebookDao = app.database.notebookDao(),
+            chapterDao  = app.database.chapterDao(),
+            pageDao     = app.database.pageDao(),
+            taskDao     = app.database.taskDao(),
+            userId      = session.userId,
+        )
+        val syncRepository = SyncRepository(
+            dataSource   = dataSource,
+            driveClient  = app.driveClient,
+            syncStateDao = app.database.syncStateDao(),
+            appVersion   = APP_VERSION,
+        )
+
         return try {
-            val result = app.syncRepository.sync(
-                userId      = session.userId,
+            val result = syncRepository.sync(
                 deviceId    = DeviceIdentity.get(applicationContext),
                 accessToken = session.accessToken,
             )

@@ -67,6 +67,13 @@ kotlin {
 }
 
 dependencies {
+    // Shared modules (PR #3c). The sync orchestrator + Drive client +
+    // supporting types live here. QuickInk depends on the same modules.
+    // ReleafSyncDataSource (in this module) implements
+    // :shared:sync's SyncDataSource interface.
+    implementation(project(":shared:sync"))
+    implementation(project(":shared:drive"))
+
     // Compose
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
