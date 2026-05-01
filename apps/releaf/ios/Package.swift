@@ -62,6 +62,15 @@ let package = Package(
     targets: [
         .target(
             name: "ReleafDesignSystem",
+            dependencies: [
+                // PR #4g — generated AppColors/Metrics, AppSpacing,
+                // AppTypography, etc. moved into ReleafCoreDesignSystem.
+                // The Releaf-only files left here (LeafColorPicker,
+                // StatGrid w/ CaptureMode, ReleafLogo, ShelfTheme, etc.)
+                // need access to the moved tokens, so this target
+                // depends on the shared one.
+                .product(name: "ReleafCoreDesignSystem", package: "ReleafCore"),
+            ],
             path: "Releaf/DesignSystem"
         ),
         .target(
@@ -117,6 +126,12 @@ let package = Package(
                 // implicitly today (re-export shim is a follow-up nicety),
                 // so a direct dep here keeps the compiler happy.
                 .product(name: "ReleafCoreSync", package: "ReleafCore"),
+                // PR #4g — design tokens + shared components moved into
+                // ReleafCoreDesignSystem. ReleafDesignSystem (Releaf-only
+                // module) re-exports it via @_exported so the existing
+                // ~80 callers of AppColors / AppText / AppSpacing keep
+                // their `import ReleafDesignSystem` unchanged.
+                .product(name: "ReleafCoreDesignSystem", package: "ReleafCore"),
             ],
             path: "Releaf/Features"
         ),

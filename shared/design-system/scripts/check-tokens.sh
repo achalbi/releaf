@@ -26,7 +26,7 @@ GENERATOR="$REPO_ROOT/shared/design-system/scripts/generate-tokens.mjs"
 
 # Platform target paths — must match the generator. When these diverge, both
 # files live in one place (the generator), so the fix is localized.
-IOS_REL="apps/releaf/ios/Releaf/DesignSystem/AppColors.generated.swift"
+IOS_REL="shared/ios/ReleafCore/Sources/ReleafCoreDesignSystem/AppColors.generated.swift"
 ANDROID_REL="apps/releaf/android/app/src/main/java/app/releaf/mobile/ui/theme/AppColors.generated.kt"
 
 # --- preflight ---
