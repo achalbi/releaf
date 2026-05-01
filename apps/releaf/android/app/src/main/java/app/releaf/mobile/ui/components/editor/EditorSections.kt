@@ -34,7 +34,6 @@ import android.provider.ContactsContract
 import android.util.Patterns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -175,9 +174,11 @@ import coil.compose.AsyncImage
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
-import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
-import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
-import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
+// PR #4j — ML Kit document-scanner setup moved into :shared:scan
+// behind `rememberDocumentScannerLauncher`. ScansSection no longer
+// needs the `GmsDocument*` types directly.
+import app.releaf.shared.scan.DocumentScanError
+import app.releaf.shared.scan.rememberDocumentScannerLauncher
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -2320,25 +2321,7 @@ fun ScansSection(
     autoLaunch: Boolean = false,
 ) {
     val context = LocalContext.current
-    val activity = context as? Activity
 
-    val options = remember {
-        GmsDocumentScannerOptions.Builder()
-            .setGalleryImportAllowed(true)
-            .setResultFormats(
-                GmsDocumentScannerOptions.RESULT_FORMAT_JPEG,
-                GmsDocumentScannerOptions.RESULT_FORMAT_PDF,
-            )
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
-            .build()
-    }
-    val scannerClient = remember { GmsDocumentScanning.getClient(options) }
-
-    // True while we're waiting for `getStartScanIntent` to resolve. On first
-    // use the ML Kit scanner module gets downloaded (~30MB) and this task
-    // can sit for 10–30s; showing a loading row keeps the user from
-    // double-tapping or assuming the app hung.
-    var isLaunching by remember { mutableStateOf(false) }
     // When non-null, opens the extracted-text dialog for that attachment.
     var viewTextFor by remember { mutableStateOf<Attachment?>(null) }
     // When non-null, opens the in-house PDF viewer for that scan —
@@ -2352,68 +2335,32 @@ fun ScansSection(
     // as a separate null state rather than overloading GENERAL.
     var filter by remember { mutableStateOf<ScanCategory?>(null) }
 
-    val scanLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
-            val cachedPdf  = scanResult?.pdf?.uri
-            val pageUris   = scanResult?.pages?.map { it.imageUri } ?: emptyList()
-            val cachedJpeg = pageUris.firstOrNull()
-
-            // ML Kit hands back content:// URIs pointing into its own cache
-            // directory. Those stop resolving once the cache rotates, so we
-            // copy both attachment artifacts (PDF + preview JPEG) into our
-            // own filesDir and store the resulting file:// URIs on the
-            // attachment. Cleanup on remove is then straightforward —
-            // delete the files we own (VM.removeAttachment handles it).
-            //
-            // The page content:// URIs are NOT copied — they're handed
-            // straight to the VM, which fires Text Recognition v2 off
-            // the Compose tree. The scanner's result URIs stay readable
-            // for the process lifetime, so a 1–3s-per-page inference run
-            // sits well within their window.
-            val localPdf  = cachedPdf?.let  { AttachmentStorage.copyIntoStorage(context, it, "pdf") }
-            val localJpeg = cachedJpeg?.let { AttachmentStorage.copyIntoStorage(context, it, "jpg") }
-
+    // ML Kit scanner setup + result extraction now lives in :shared:scan
+    // (PR #4j). The launcher returns file:// URIs already copied into
+    // AttachmentStorage; the page content:// URIs are passed through
+    // for Text Recognition v2 to consume off-tree before they expire.
+    // Releaf-specific UX — Toast wording, the "primary asset" decision,
+    // the OCR fan-out — stays here.
+    val scannerLauncher = rememberDocumentScannerLauncher(
+        onResult = { result ->
             // Prefer the PDF as the primary asset, fall back to the JPEG
             // when the scanner only returned pages.
-            val primary = localPdf ?: localJpeg
-            if (primary == null) {
-                // Nothing came back OR both copies failed. Rare, but worth
-                // surfacing so the user doesn't think the tap did nothing.
-                Toast.makeText(
-                    context,
-                    "Couldn't save scan. Try again.",
-                    Toast.LENGTH_SHORT,
-                ).show()
-            } else {
-                onAdd(primary.toString(), localJpeg?.toString(), pageUris)
+            val primary = result.pdfUri ?: result.previewUri
+            if (primary != null) {
+                onAdd(primary.toString(), result.previewUri?.toString(), result.pageUris)
             }
-        }
-    }
-
-    val onLaunch: () -> Unit = launch@{
-        val act = activity ?: return@launch
-        if (isLaunching) return@launch
-        isLaunching = true
-        scannerClient.getStartScanIntent(act)
-            .addOnSuccessListener { sender ->
-                // Clear loading before launching the scanner Activity so
-                // that when the user dismisses it the loading row isn't
-                // stuck on.
-                isLaunching = false
-                scanLauncher.launch(IntentSenderRequest.Builder(sender).build())
+        },
+        onError = { err ->
+            val message = when (err) {
+                DocumentScanError.IntentUnavailable -> "Document scanner unavailable on this device."
+                DocumentScanError.SaveFailed        -> "Couldn't save scan. Try again."
+                DocumentScanError.NoActivity        -> "Couldn't save scan. Try again."
             }
-            .addOnFailureListener {
-                isLaunching = false
-                Toast.makeText(
-                    context,
-                    "Document scanner unavailable on this device.",
-                    Toast.LENGTH_SHORT,
-                ).show()
-            }
-    }
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        },
+    )
+    val isLaunching = scannerLauncher.isLaunching
+    val onLaunch: () -> Unit = { scannerLauncher.launch() }
 
     // Auto-launch on first composition when the caller asked for it.
     // Used by the Capture page's Scan hero so the user lands directly

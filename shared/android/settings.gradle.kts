@@ -82,3 +82,9 @@ project(":shared:auth").projectDir = file("shared/auth")
 
 include(":shared:notes")
 project(":shared:notes").projectDir = file("shared/notes")
+
+include(":shared:designsystem")
+project(":shared:designsystem").projectDir = file("shared/designsystem")
+
+include(":shared:scan")
+project(":shared:scan").projectDir = file("shared/scan")

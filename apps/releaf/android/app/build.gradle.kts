@@ -76,6 +76,8 @@ dependencies {
     implementation(project(":shared:data"))  // PR #4b — Uuidv7, IsoClock, FtsQuery, AttachmentStorage
     implementation(project(":shared:auth"))  // PR #4d — AuthStore, GoogleAuthClient, RealGoogleAuthClient
     implementation(project(":shared:notes")) // PR #4f — NotepadEntry, NotepadDao, NotepadCategory
+    implementation(project(":shared:designsystem")) // PR #4h — design tokens + shared Compose components
+    implementation(project(":shared:scan"))         // PR #4j — DocumentScannerLauncher (ML Kit wrapper)
 
     // Compose
     implementation(platform(libs.compose.bom))
@@ -141,7 +143,11 @@ dependencies {
     // Page-editor feature sections. See libs.versions.toml for per-dep notes.
     implementation(libs.coil.compose)
     implementation(libs.play.services.location)
-    implementation(libs.mlkit.document.scanner)
+    // PR #4j — ML Kit document scanner now wrapped in :shared:scan,
+    // so the app no longer needs the SDK on its own classpath. The
+    // text-recognition SDK stays here while OCR is still inline in
+    // Releaf; it moves into :shared:scan in Phase 3 alongside the
+    // OcrEngine protocol + MlKitTextRecognizer impl.
     implementation(libs.mlkit.text.recognition)
     implementation(libs.activity.ktx)
 

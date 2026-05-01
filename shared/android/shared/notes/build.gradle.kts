@@ -17,8 +17,18 @@
  *     AndroidViewModel and casts applicationContext as ReleafApp;
  *     extracting it requires a DI refactor (constructor-injected
  *     dependencies instead of cast). Separate PR.
- *   - All Compose-using editor views STAY (need :shared:designsystem
- *     first, which ships in PR #4h).
+ *
+ * PR #4h additions: two of the four iOS-counterpart editor views move
+ * here now that :shared:designsystem ships:
+ *   - editor/RichTextFormatBar.kt
+ *   - editor/EditorModeToggle.kt
+ *
+ * Editor views still deferred:
+ *   - editor/NotesEditorSheet.kt — imports `data.notebook.{Stroke,SubPage}`,
+ *     which still live in the app target. Moves once the notebook
+ *     data layer extracts.
+ *   - There is no Android counterpart to iOS's `EntryDateRow.swift` —
+ *     the entry-date control is inline inside `NotepadEditorScreen.kt`.
  */
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -26,6 +36,9 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.ksp)
+    // PR #4h — Compose editor views (RichTextFormatBar, EditorModeToggle)
+    // moved into this module from the Releaf app target.
+    alias(libs.plugins.compose.compiler)
 }
 
 ksp {
@@ -38,6 +51,10 @@ android {
 
     defaultConfig {
         minSdk = 26
+    }
+
+    buildFeatures {
+        compose = true
     }
 
     compileOptions {
@@ -55,6 +72,11 @@ kotlin {
 dependencies {
     implementation(project(":shared:data"))  // Uuidv7 / IsoClock / FtsQuery
 
+    // PR #4h — editor views (RichTextFormatBar, EditorModeToggle) reach
+    // AppColors / AppTypography / AppSpacing through the design system
+    // module that just landed.
+    implementation(project(":shared:designsystem"))
+
     // Coroutines + Flow — DAO returns Flow<...> for observe* methods.
     implementation(libs.coroutines.android)
 
@@ -64,4 +86,19 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
+
+    // PR #4h — Compose deps for the editor views moved into this
+    // module. Same surface the Releaf app uses; runtime + ui-graphics
+    // come transitively through the BOM.
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.ui)
+    implementation(libs.compose.foundation)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.material.icons)
+    implementation(libs.compose.ui.tooling.preview)
+    debugImplementation(libs.compose.ui.tooling)
+
+    // RichTextFormatBar drives the rich-text state from this third-
+    // party library; needed wherever RichTextFormatBar is compiled.
+    implementation(libs.rich.editor.compose)
 }
