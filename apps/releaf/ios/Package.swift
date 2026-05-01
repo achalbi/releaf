@@ -87,6 +87,10 @@ let package = Package(
                 // ~15 Releaf callers of AuthStore keep their
                 // `import ReleafData` unchanged.
                 .product(name: "ReleafCoreAuth",  package: "ReleafCore"),
+                // PR #4e — NotepadEntry, NotepadCategory, NotepadRepository,
+                // Attachments, NotepadListViewModel, NotepadEditorViewModel,
+                // RichTextEditor moved into ReleafCoreNotes.
+                .product(name: "ReleafCoreNotes", package: "ReleafCore"),
             ],
             path: "Releaf/Data",
             resources: [

@@ -33,3 +33,4 @@
 
 @_exported import ReleafCoreData
 @_exported import ReleafCoreAuth   // PR #4c
+@_exported import ReleafCoreNotes  // PR #4e

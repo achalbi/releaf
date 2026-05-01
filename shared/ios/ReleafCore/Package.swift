@@ -62,6 +62,11 @@ let package = Package(
         // same SDK transitively through ReleafCoreAuth — keeps a
         // single OAuth surface across the two apps.
         .package(url: "https://github.com/google/GoogleSignIn-iOS.git", from: "7.1.0"),
+        // GRDB — local SQLite wrapper. Used by ReleafCoreNotes'
+        // NotepadRepository (and any future SQLite-backed shared
+        // repos). Same version pin as Releaf's Package.swift; SwiftPM
+        // dedupes through the resolution graph.
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
     ],
     targets: [
         // ─── Foundation layer ───────────────────────────────────────
@@ -103,7 +108,11 @@ let package = Package(
         // ─── Feature-shaped modules ─────────────────────────────────
         .target(
             name: "ReleafCoreNotes",
-            dependencies: ["ReleafCoreData", "ReleafCoreSync"],
+            dependencies: [
+                "ReleafCoreData",
+                "ReleafCoreSync",
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ],
             path: "Sources/ReleafCoreNotes"
         ),
         .target(
