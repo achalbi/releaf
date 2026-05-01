@@ -1,0 +1,985 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Releaf — Daily capture UX mocks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --canvas:        #F5EEE3;
+    --card-solid:    #FFFAF4;
+    --card-90:       rgba(255, 250, 244, 0.9);
+    --subtle:        #EFE7DA;
+    --muted:         #EBE4D3;
+    --border-def:    rgba(80, 62, 45, 0.12);
+    --border-strong: rgba(80, 62, 45, 0.24);
+    --text-primary:   #241D17;
+    --text-secondary: #5F5245;
+    --text-tertiary:  #8A7C6D;
+    --coral:      #E77850;
+    --coral-soft: #FCEAE0;
+    --coral-deep: #C85A30;
+    --green:      #1E5943;
+    --green-soft: #D9EDE2;
+    --info:       #2E6FB5;
+    --info-soft:  #E1ECF8;
+    --warning:    #A87418;
+    --warning-soft:#FBEECD;
+    --danger:     #C8432E;
+    --dot:        rgba(80, 62, 45, 0.14);
+    --shadow-card:  0 2px 8px rgba(36, 29, 23, 0.06);
+    --shadow-float: 0 12px 28px rgba(36, 29, 23, 0.14), 0 2px 6px rgba(36, 29, 23, 0.08);
+    --shadow-fab:   0 8px 24px rgba(231, 120, 80, 0.38);
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --r-xl: 22px;
+    --pill: 9999px;
+
+    --font-sans: Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-serif: Newsreader, Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+    background: #E8DDC9;
+    background-image: radial-gradient(circle, rgba(80,62,45,0.08) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .page {
+    max-width: 1480px;
+    margin: 0 auto;
+    padding: 56px 32px 96px;
+  }
+
+  header.hero { margin-bottom: 40px; }
+
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--coral);
+    margin: 0 0 8px;
+  }
+
+  h1 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    font-size: 36px;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    margin: 0 0 12px;
+    color: var(--text-primary);
+  }
+
+  .lede {
+    font-size: 15px;
+    line-height: 1.55;
+    max-width: 72ch;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(360px, 1fr));
+    gap: 36px;
+    align-items: start;
+  }
+  @media (max-width: 1200px) {
+    .grid { grid-template-columns: 1fr; max-width: 440px; margin: 0 auto; }
+  }
+
+  .panel { display: flex; flex-direction: column; gap: 14px; }
+
+  .panel .label {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+
+  .panel .desc {
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+  }
+
+  /* ── phone frame ────────────────────────────────────────── */
+  .phone {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 390 / 844; /* iPhone 13 mini-ish */
+    border-radius: 44px;
+    background: #1B1610;
+    padding: 12px;
+    box-shadow: var(--shadow-float);
+    overflow: hidden;
+  }
+  .screen {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 32px;
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* status bar */
+  .statusbar {
+    height: 36px;
+    padding: 12px 20px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-primary);
+    flex-shrink: 0;
+  }
+  .statusbar .icons { display: flex; gap: 4px; align-items: center; }
+  .statusbar svg { width: 13px; height: 13px; }
+
+  /* shared header */
+  .header {
+    padding: 14px 20px 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .header .title-block .day {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--coral);
+  }
+  .header .title-block .date {
+    font-family: var(--font-serif);
+    font-size: 22px;
+    line-height: 1.1;
+    margin-top: 2px;
+    color: var(--text-primary);
+  }
+  .header .actions { display: flex; gap: 10px; }
+  .icon-btn {
+    width: 36px; height: 36px;
+    border-radius: var(--pill);
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-primary);
+  }
+  .icon-btn svg { width: 16px; height: 16px; }
+
+  /* day strip */
+  .daystrip {
+    display: flex;
+    gap: 8px;
+    padding: 6px 16px 14px;
+    overflow-x: auto;
+    flex-shrink: 0;
+  }
+  .daystrip::-webkit-scrollbar { display: none; }
+  .daycell {
+    min-width: 44px;
+    flex-shrink: 0;
+    border-radius: var(--r-md);
+    padding: 8px 6px 7px;
+    text-align: center;
+    background: transparent;
+    border: 1px solid transparent;
+  }
+  .daycell .dow {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+  }
+  .daycell .dom {
+    font-family: var(--font-serif);
+    font-size: 18px;
+    margin-top: 1px;
+    color: var(--text-primary);
+  }
+  .daycell .dots {
+    margin-top: 4px;
+    height: 4px;
+    display: flex;
+    gap: 2px;
+    justify-content: center;
+  }
+  .daycell .dots span {
+    width: 4px; height: 4px; border-radius: 50%; background: var(--text-tertiary);
+  }
+  .daycell .dots .photo { background: var(--coral); }
+  .daycell .dots .voice { background: var(--info); }
+  .daycell .dots .scan  { background: var(--warning); }
+  .daycell .dots .note  { background: var(--text-secondary); }
+  .daycell.today {
+    background: var(--card-solid);
+    border-color: var(--border-def);
+    box-shadow: var(--shadow-card);
+  }
+  .daycell.today .dom { color: var(--coral); font-weight: 600; }
+
+  /* scrollable body */
+  .body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 16px 100px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .body::-webkit-scrollbar { display: none; }
+
+  .card {
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    padding: 16px 18px;
+    box-shadow: var(--shadow-card);
+  }
+  .card .card-head {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .card .card-head .pip { font-family: var(--font-serif); font-size: 14px; color: var(--coral); letter-spacing: 0; text-transform: none; font-weight: 500; }
+
+  /* notes editor card */
+  .notes-card .notes-body {
+    font-family: var(--font-serif);
+    font-size: 16px;
+    line-height: 1.55;
+    color: var(--text-primary);
+  }
+  .notes-card .notes-body p { margin: 0 0 10px; }
+  .notes-card .notes-body .cursor {
+    display: inline-block;
+    width: 2px;
+    height: 18px;
+    background: var(--coral);
+    vertical-align: text-top;
+    margin-left: 1px;
+    animation: blink 1s step-start infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  ul.todo {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0 0;
+    font-size: 14.5px;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+  }
+  ul.todo li {
+    display: flex; gap: 10px; align-items: center;
+    padding: 4px 0;
+  }
+  ul.todo li .box {
+    width: 16px; height: 16px;
+    border: 1.5px solid var(--border-strong);
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  ul.todo li.done .box { background: var(--coral); border-color: var(--coral); position: relative; }
+  ul.todo li.done .box::after {
+    content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 9px;
+    border: solid var(--canvas); border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+  ul.todo li.done span { text-decoration: line-through; color: var(--text-tertiary); }
+
+  /* capture strip */
+  .capstrip {
+    display: flex; gap: 8px;
+    flex-wrap: wrap;
+  }
+  .pill {
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--pill);
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text-primary);
+    display: flex; align-items: center; gap: 6px;
+    font-weight: 500;
+  }
+  .pill svg { width: 12px; height: 12px; }
+  .pill .count { color: var(--text-secondary); font-weight: 600; }
+  .pill.coral { background: var(--coral-soft); color: var(--coral-deep); border-color: transparent; }
+  .pill.info  { background: var(--info-soft); color: var(--info); border-color: transparent; }
+  .pill.warn  { background: var(--warning-soft); color: var(--warning); border-color: transparent; }
+  .pill.green { background: var(--green-soft); color: var(--green); border-color: transparent; }
+
+  /* photo thumbs */
+  .thumbs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .thumb {
+    aspect-ratio: 1;
+    border-radius: var(--r-sm);
+    background: var(--muted);
+    position: relative;
+    overflow: hidden;
+  }
+  .thumb.t1 { background: linear-gradient(135deg, #c8a37b, #8a6948); }
+  .thumb.t2 { background: linear-gradient(135deg, #b3c4a3, #5d7b56); }
+  .thumb.t3 { background: linear-gradient(135deg, #d4a8a0, #8a5a52); }
+
+  /* shelf rows */
+  .shelf-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border-def);
+    font-size: 13.5px;
+  }
+  .shelf-row:first-child { border-top: 0; padding-top: 0; }
+  .shelf-row .swatch {
+    width: 32px; height: 32px; border-radius: var(--r-sm);
+    background: var(--coral-soft);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .shelf-row .swatch.lime { background: #DFE9C9; }
+  .shelf-row .swatch.lilac { background: #E0D6E9; }
+  .shelf-row .meta {
+    display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0;
+  }
+  .shelf-row .meta .t { font-weight: 600; color: var(--text-primary); }
+  .shelf-row .meta .s { font-size: 11.5px; color: var(--text-tertiary); }
+  .shelf-row .arrow { color: var(--text-tertiary); }
+
+  /* bottom nav (floating) */
+  .bottomnav {
+    position: absolute;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    width: calc(100% - 32px);
+    background: var(--card-90);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border-def);
+    border-radius: var(--pill);
+    padding: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    box-shadow: var(--shadow-float);
+  }
+  .navitem {
+    width: 44px; height: 44px;
+    border-radius: var(--pill);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-tertiary);
+  }
+  .navitem.active { color: var(--text-primary); }
+  .navitem svg { width: 20px; height: 20px; }
+  .navitem.fab {
+    width: 56px; height: 56px;
+    background: var(--coral);
+    color: var(--canvas);
+    box-shadow: var(--shadow-fab);
+  }
+  .navitem.fab svg { width: 24px; height: 24px; }
+
+  /* Quick capture sheet */
+  .scrim {
+    position: absolute; inset: 0;
+    background: rgba(36, 29, 23, 0.45);
+  }
+  .sheet {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    border-radius: 28px 28px 0 0;
+    padding: 18px 20px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    border-top: 1px solid var(--border-strong);
+  }
+  .sheet .grabber {
+    width: 36px; height: 4px;
+    background: var(--border-strong);
+    border-radius: var(--pill);
+    margin: 0 auto;
+  }
+  .sheet .sheet-title {
+    font-family: var(--font-serif);
+    font-size: 22px;
+    line-height: 1.1;
+    color: var(--text-primary);
+    margin: 4px 0 2px;
+  }
+  .sheet .sheet-sub {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    margin: 0 0 6px;
+  }
+  .sheet .sheet-sub strong { color: var(--coral); font-weight: 600; }
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .tile {
+    aspect-ratio: 1;
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 8px;
+    color: var(--text-primary);
+    box-shadow: var(--shadow-card);
+  }
+  .tile .ico {
+    width: 36px; height: 36px;
+    border-radius: var(--r-md);
+    background: var(--coral-soft);
+    color: var(--coral);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .tile .ico svg { width: 18px; height: 18px; }
+  .tile .ico.info  { background: var(--info-soft);    color: var(--info); }
+  .tile .ico.warn  { background: var(--warning-soft); color: var(--warning); }
+  .tile .ico.green { background: var(--green-soft);   color: var(--green); }
+  .tile .ico.muted { background: var(--subtle);       color: var(--text-secondary); }
+  .tile .label {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .tile .hint {
+    font-size: 10.5px;
+    color: var(--text-tertiary);
+    margin-top: -4px;
+  }
+
+  /* Today FAB long-press hint */
+  .fab-hint {
+    position: absolute;
+    left: 50%;
+    bottom: 86px;
+    transform: translateX(-50%);
+    background: var(--text-primary);
+    color: var(--canvas);
+    padding: 6px 12px;
+    border-radius: var(--pill);
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    box-shadow: var(--shadow-card);
+  }
+  .fab-hint::after {
+    content: '';
+    position: absolute;
+    left: 50%; bottom: -5px;
+    transform: translateX(-50%) rotate(45deg);
+    width: 10px; height: 10px;
+    background: var(--text-primary);
+  }
+
+  /* legend */
+  .legend {
+    margin-top: 56px;
+    padding: 28px 32px;
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-card);
+  }
+  .legend h2 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    font-size: 22px;
+    margin: 0 0 12px;
+  }
+  .legend p {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    margin: 0 0 10px;
+    max-width: 80ch;
+  }
+  .legend .key {
+    display: flex; gap: 18px; flex-wrap: wrap; margin-top: 12px;
+    font-size: 12.5px;
+  }
+  .legend .key span {
+    display: flex; align-items: center; gap: 6px;
+    color: var(--text-secondary);
+  }
+  .legend .key i {
+    width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+  }
+
+  /* small svg helper */
+  .ic { width: 1em; height: 1em; vertical-align: -0.125em; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="eyebrow">Releaf · daily capture mocks</p>
+    <h1>Today is the home screen.</h1>
+    <p class="lede">
+      Three phone frames showing the proposed daily-capture flow:
+      Home with Today as the hero, the Daily Log when navigated by date,
+      and the QuickCaptureSheet that the floating Leaf button opens.
+      All three reuse the cream + dot-grid + coral palette already
+      shipping in <code>design-tokens.json</code>. Read alongside
+      <code>docs/DAILY_CAPTURE_UX.md</code>.
+    </p>
+  </header>
+
+  <div class="grid">
+
+    <!-- ───────────────────────────────────────────────── -->
+    <!-- 1. HOME — TODAY HERO                              -->
+    <!-- ───────────────────────────────────────────────── -->
+    <section class="panel">
+      <div class="label">1 · Home — Today hero</div>
+      <p class="desc">
+        Cold launch lands here. Today's NotepadEntry editor is inline —
+        first keystroke commits to the day's row. The day strip
+        (sideways scroll) jumps between days without leaving Home.
+      </p>
+      <div class="phone">
+        <div class="screen">
+          <!-- status -->
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 6.5C3.5 4 6 3 8 3s4.5 1 7 3.5l-1 1C12 5 10 4 8 4S4 5 2 7.5l-1-1zM4 9.5C5.5 8 6.5 7.5 8 7.5s2.5.5 4 2l-1 1C9.8 9.3 9 9 8 9s-1.8.3-3 1.5l-1-1zM8 11l2 2-2 2-2-2 2-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <!-- header -->
+          <div class="header">
+            <div class="title-block">
+              <div class="day">Tuesday</div>
+              <div class="date">April 28</div>
+            </div>
+            <div class="actions">
+              <div class="icon-btn" title="Search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              </div>
+              <div class="icon-btn" title="Calendar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- day strip -->
+          <div class="daystrip">
+            <div class="daycell"><div class="dow">Sat</div><div class="dom">25</div><div class="dots"><span class="note"></span></div></div>
+            <div class="daycell"><div class="dow">Sun</div><div class="dom">26</div><div class="dots"><span class="note"></span><span class="photo"></span></div></div>
+            <div class="daycell"><div class="dow">Mon</div><div class="dom">27</div><div class="dots"><span class="note"></span><span class="photo"></span><span class="voice"></span></div></div>
+            <div class="daycell today"><div class="dow">Tue</div><div class="dom">28</div><div class="dots"><span class="note"></span><span class="photo"></span><span class="voice"></span></div></div>
+            <div class="daycell"><div class="dow">Wed</div><div class="dom">29</div><div class="dots"></div></div>
+            <div class="daycell"><div class="dow">Thu</div><div class="dom">30</div><div class="dots"></div></div>
+            <div class="daycell"><div class="dow">Fri</div><div class="dom">1</div><div class="dots"></div></div>
+          </div>
+
+          <!-- body -->
+          <div class="body">
+            <!-- inline editor -->
+            <div class="card notes-card">
+              <div class="card-head">Today's notes <span class="pip">draft · saved 0:12 ago</span></div>
+              <div class="notes-body">
+                <p>Crisp morning. Heron at the pier again — perched on the third dock post for almost ten minutes before lifting off.</p>
+                <p>Coffee at the little place. Calm.<span class="cursor"></span></p>
+              </div>
+              <ul class="todo">
+                <li class="done"><span class="box"></span><span>Stretch</span></li>
+                <li><span class="box"></span><span>Refill bird feeder</span></li>
+                <li><span class="box"></span><span>Call vet about bloodwork</span></li>
+              </ul>
+            </div>
+
+            <!-- capture strip -->
+            <div class="capstrip">
+              <span class="pill coral">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M9 6V4h6v2"/></svg>
+                <span class="count">3</span> photos
+              </span>
+              <span class="pill info">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="13" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+                <span class="count">1</span> voice
+              </span>
+              <span class="pill warn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/></svg>
+                <span class="count">2</span> scans
+              </span>
+              <span class="pill green">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+                1 / 3 done
+              </span>
+            </div>
+
+            <!-- photos preview -->
+            <div class="card">
+              <div class="card-head">Today's photos <span class="pip">tap to expand</span></div>
+              <div class="thumbs">
+                <div class="thumb t1"></div>
+                <div class="thumb t2"></div>
+                <div class="thumb t3"></div>
+              </div>
+            </div>
+
+            <!-- shelves below the fold -->
+            <div class="card">
+              <div class="card-head">Saved this week</div>
+              <div class="shelf-row">
+                <div class="swatch">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#C85A30" stroke-width="2" stroke-linecap="round"><path d="M4 4v16M20 4v16M4 4h16M4 20h16"/></svg>
+                </div>
+                <div class="meta">
+                  <div class="t">Sabbatical 2026</div>
+                  <div class="s">Week 4 · 12 pages</div>
+                </div>
+                <span class="arrow">›</span>
+              </div>
+              <div class="shelf-row">
+                <div class="swatch lime">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#1E5943" stroke-width="2" stroke-linecap="round"><path d="M3 7l9 6 9-6M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7M3 7l3-3h12l3 3"/></svg>
+                </div>
+                <div class="meta">
+                  <div class="t">Notepad — Apr 27</div>
+                  <div class="s">3 photos · 1 scan</div>
+                </div>
+                <span class="arrow">›</span>
+              </div>
+              <div class="shelf-row">
+                <div class="swatch lilac">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#5F4170" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                </div>
+                <div class="meta">
+                  <div class="t">Standalone tasks</div>
+                  <div class="s">2 due tomorrow</div>
+                </div>
+                <span class="arrow">›</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- floating bottom nav -->
+          <div class="bottomnav">
+            <div class="navitem active" title="Home">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg>
+            </div>
+            <div class="navitem" title="Notebook">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4z"/><path d="M9 4v16"/></svg>
+            </div>
+            <div class="navitem fab" title="Quick capture (long-press for voice)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            </div>
+            <div class="navitem" title="Notepad">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h12l4 4v12H4z"/><path d="M16 4v4h4M8 12h8M8 16h5"/></svg>
+            </div>
+            <div class="navitem" title="Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19 12c0 1-.2 1.9-.5 2.7l1.7 1.3-2 3-2-.7c-.7.5-1.4.9-2.2 1.1L13.5 22h-3l-.5-2.6a7 7 0 0 1-2.2-1.1l-2 .7-2-3 1.7-1.3A8 8 0 0 1 5 12c0-1 .2-1.9.5-2.7L3.8 8l2-3 2 .7c.7-.5 1.4-.9 2.2-1.1L10.5 2h3l.5 2.6c.8.2 1.5.6 2.2 1.1l2-.7 2 3-1.7 1.3c.3.8.5 1.7.5 2.7z"/></svg>
+            </div>
+          </div>
+          <div class="fab-hint">tap = sheet · hold = voice</div>
+
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ───────────────────────────────────────────────── -->
+    <!-- 2. DAILY LOG (date drilled)                       -->
+    <!-- ───────────────────────────────────────────────── -->
+    <section class="panel">
+      <div class="label">2 · Daily Log — past date</div>
+      <p class="desc">
+        Same shape as Today, but for any other date. Reached via the
+        day strip, calendar, deep link, or notification. Prev / next
+        replace the screen so the back stack stays shallow.
+      </p>
+      <div class="phone">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <!-- header w/ back -->
+          <div class="header">
+            <div class="actions">
+              <div class="icon-btn" title="Back">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg>
+              </div>
+            </div>
+            <div class="title-block" style="text-align:center; flex:1;">
+              <div class="day">Monday</div>
+              <div class="date">April 27</div>
+            </div>
+            <div class="actions">
+              <div class="icon-btn" title="Date jump">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- prev / next -->
+          <div style="display:flex; justify-content:space-between; padding: 0 20px 10px; font-size: 11.5px; color: var(--text-tertiary);">
+            <span>‹ Sun, Apr 26</span>
+            <span>Tue, Apr 28 ›</span>
+          </div>
+
+          <div class="body">
+            <div class="card notes-card">
+              <div class="card-head">Notes</div>
+              <div class="notes-body">
+                <p>Walked to the harbor. Fog hadn't lifted yet — the lighthouse felt like an idea more than a thing.</p>
+                <p>Met Jo for lunch. She wants to do the trail in May.</p>
+              </div>
+              <ul class="todo">
+                <li class="done"><span class="box"></span><span>Book trail permits</span></li>
+                <li class="done"><span class="box"></span><span>Reply to Jo</span></li>
+              </ul>
+            </div>
+
+            <div class="capstrip">
+              <span class="pill coral">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M9 6V4h6v2"/></svg>
+                <span class="count">5</span> photos
+              </span>
+              <span class="pill info">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="13" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+                <span class="count">2</span> voice
+              </span>
+              <span class="pill"
+                style="background:var(--subtle); color: var(--text-secondary); border-color: transparent;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                Harbor Park
+              </span>
+            </div>
+
+            <!-- voice card -->
+            <div class="card">
+              <div class="card-head">Voice — 0:42 <span class="pip">transcribed</span></div>
+              <div style="display:flex; align-items:center; gap:10px; margin-top: 4px;">
+                <div style="width:36px; height:36px; border-radius: var(--pill); background: var(--info-soft); color: var(--info); display:flex; align-items:center; justify-content:center;">
+                  <svg viewBox="0 0 24 24" fill="currentColor" style="width:14px; height:14px;"><polygon points="6,4 20,12 6,20"/></svg>
+                </div>
+                <div style="flex:1; height: 18px; display:flex; align-items:center; gap:2px;">
+                  <span style="width:2px; height:8px; background:var(--info); border-radius:1px;"></span>
+                  <span style="width:2px; height:14px; background:var(--info); border-radius:1px;"></span>
+                  <span style="width:2px; height:6px;  background:var(--info); border-radius:1px;"></span>
+                  <span style="width:2px; height:12px; background:var(--info); border-radius:1px;"></span>
+                  <span style="width:2px; height:18px; background:var(--info); border-radius:1px;"></span>
+                  <span style="width:2px; height:10px; background:var(--info); border-radius:1px;"></span>
+                  <span style="width:2px; height:16px; background:var(--info); border-radius:1px;"></span>
+                  <span style="width:2px; height:8px;  background:var(--info); border-radius:1px;"></span>
+                  <span style="width:2px; height:14px; background:var(--info); border-radius:1px;"></span>
+                  <span style="width:2px; height:6px;  background:var(--info); border-radius:1px;"></span>
+                  <span style="width:2px; height:12px; background:var(--info); border-radius:1px;"></span>
+                  <span style="width:2px; height:18px; background:var(--info); border-radius:1px;"></span>
+                  <span style="width:2px; height:8px;  background:var(--border-strong); border-radius:1px;"></span>
+                  <span style="width:2px; height:14px; background:var(--border-strong); border-radius:1px;"></span>
+                  <span style="width:2px; height:10px; background:var(--border-strong); border-radius:1px;"></span>
+                  <span style="width:2px; height:6px;  background:var(--border-strong); border-radius:1px;"></span>
+                  <span style="width:2px; height:12px; background:var(--border-strong); border-radius:1px;"></span>
+                </div>
+              </div>
+              <p style="font-size: 12.5px; color: var(--text-secondary); margin: 10px 0 0; line-height: 1.45;">
+                "Note to self — the trail head parking is gated until May 15, so we'll have to start from the lower lot…"
+              </p>
+            </div>
+
+            <!-- photos -->
+            <div class="card">
+              <div class="card-head">Photos</div>
+              <div class="thumbs">
+                <div class="thumb t2"></div>
+                <div class="thumb t3"></div>
+                <div class="thumb t1"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bottomnav">
+            <div class="navitem active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg></div>
+            <div class="navitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4z"/><path d="M9 4v16"/></svg></div>
+            <div class="navitem fab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
+            <div class="navitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h12l4 4v12H4z"/><path d="M16 4v4h4M8 12h8M8 16h5"/></svg></div>
+            <div class="navitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19 12c0 1-.2 1.9-.5 2.7l1.7 1.3-2 3-2-.7c-.7.5-1.4.9-2.2 1.1L13.5 22h-3l-.5-2.6a7 7 0 0 1-2.2-1.1l-2 .7-2-3 1.7-1.3A8 8 0 0 1 5 12c0-1 .2-1.9.5-2.7L3.8 8l2-3 2 .7c.7-.5 1.4-.9 2.2-1.1L10.5 2h3l.5 2.6c.8.2 1.5.6 2.2 1.1l2-.7 2 3-1.7 1.3c.3.8.5 1.7.5 2.7z"/></svg></div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ───────────────────────────────────────────────── -->
+    <!-- 3. QUICK CAPTURE SHEET                            -->
+    <!-- ───────────────────────────────────────────────── -->
+    <section class="panel">
+      <div class="label">3 · QuickCaptureSheet</div>
+      <p class="desc">
+        Opened by tapping the floating Leaf button. Five fat tiles, no
+        picker. Each commits straight to today's parent — long-press a
+        tile to override.
+      </p>
+      <div class="phone">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <!-- ghost of home behind sheet -->
+          <div class="header" style="opacity: 0.55;">
+            <div class="title-block">
+              <div class="day">Tuesday</div>
+              <div class="date">April 28</div>
+            </div>
+          </div>
+          <div class="body" style="opacity: 0.35; pointer-events: none;">
+            <div class="card notes-card">
+              <div class="card-head">Today's notes</div>
+              <div class="notes-body">
+                <p>Crisp morning. Heron at the pier again — perched on the third dock post for almost ten minutes before lifting off.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- scrim -->
+          <div class="scrim"></div>
+
+          <!-- sheet -->
+          <div class="sheet">
+            <div class="grabber"></div>
+            <div class="sheet-title">Capture</div>
+            <p class="sheet-sub">into <strong>today's log</strong> · long-press a tile to choose elsewhere</p>
+
+            <div class="tiles">
+              <div class="tile">
+                <div class="ico muted">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h12M4 18h8"/></svg>
+                </div>
+                <div class="label">Text</div>
+                <div class="hint">keyboard up</div>
+              </div>
+              <div class="tile">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M9 6V4h6v2"/></svg>
+                </div>
+                <div class="label">Photo</div>
+                <div class="hint">camera</div>
+              </div>
+              <div class="tile">
+                <div class="ico info">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="13" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+                </div>
+                <div class="label">Voice</div>
+                <div class="hint">tap or hold FAB</div>
+              </div>
+              <div class="tile">
+                <div class="ico warn">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/></svg>
+                </div>
+                <div class="label">Scan</div>
+                <div class="hint">doc + OCR</div>
+              </div>
+              <div class="tile">
+                <div class="ico green">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+                </div>
+                <div class="label">Link</div>
+                <div class="hint">paste from clip</div>
+              </div>
+              <div class="tile" style="background: var(--coral); border-color: var(--coral); box-shadow: var(--shadow-fab); color: var(--canvas);">
+                <div class="ico" style="background: rgba(255,255,255,0.18); color: var(--canvas);">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 1 18 0M12 3v9l5 3"/></svg>
+                </div>
+                <div class="label" style="color: var(--canvas);">From clipboard</div>
+                <div class="hint" style="color: rgba(245, 238, 227, 0.75);">https://…</div>
+              </div>
+            </div>
+
+            <p style="font-size: 11.5px; color: var(--text-tertiary); margin: 6px 0 0; text-align: center;">
+              Hold the green Leaf button to start a voice memo without opening this sheet.
+            </p>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- legend -->
+  <section class="legend">
+    <h2>How to read these</h2>
+    <p>
+      Mock 1 (Home) is the proposed primary surface — Today's NotepadEntry editor inline,
+      not behind a "Today →" tap. Mock 2 (Daily Log) is the same shape applied to any
+      other date, reached via day strip, calendar, deep link, or notification. Mock 3
+      (QuickCaptureSheet) is the universal capture entry, opened from the floating Leaf
+      button. The five tiles map 1:1 to the capture kinds the schema already supports.
+    </p>
+    <p>
+      Visual elements pulled from <code>design-tokens.json</code>: cream canvas
+      <code>#F5EEE3</code>, dot grid at 22 px, coral accent <code>#E77850</code>,
+      Newsreader for serif headings, Manrope for everything else, floating
+      cream-card BottomNav with the coral FAB at <code>+8&nbsp;dp</code> elevation.
+    </p>
+    <div class="key">
+      <span><i style="background: var(--coral);"></i> photo capture</span>
+      <span><i style="background: var(--info);"></i> voice capture</span>
+      <span><i style="background: var(--warning);"></i> scan capture</span>
+      <span><i style="background: var(--text-secondary);"></i> note / text</span>
+      <span><i style="background: var(--green);"></i> task complete</span>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

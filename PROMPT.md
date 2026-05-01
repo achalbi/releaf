@@ -88,6 +88,16 @@ Every row gets:
 
 ## Feature set
 
+### Daily Capture UX
+
+How a user captures, stores, and retrieves daily activity is specified in detail in [`docs/DAILY_CAPTURE_UX.md`](docs/DAILY_CAPTURE_UX.md). Read it before touching Home, Notepad, or QuickCapture code. Highlights that affect the build:
+
+- **Today is Home's hero**, not a drill-in. Cold launch puts the user one keystroke away from today's NotepadEntry — the editor renders inline on Home, with a horizontal day strip above it for date jumping. `daily_log/{date}` remains a drill-in for *other* dates.
+- **`findOrCreate(today)` always returns a row.** On open, if no NotepadEntry exists for today, insert one with `allow_blank_content = true` and link it from `daily_logs.notepad_entry_id`. The first keystroke commits to a real row, not a "creating…" intermediate.
+- **Floating Leaf button has two gestures.** Tap → QuickCaptureSheet (five fat tiles: Text · Photo · Voice · Scan · Link). Long-press (≥ 250 ms) → voice recording starts immediately, no sheet, no confirmation.
+- **Parent inference is automatic.** Captures committed without an active page/entry context attach to today's DailyLog. Long-press a tile to override.
+- **Three retrieval surfaces, in priority order:** calendar (month grid with per-day capture-kind density dots) → search (FTS5, header affordance on Home + Notepad) → tags + projects (chips on the daily review screen, Settings → Manage tags).
+
 ### Core organization
 
 - **Notebook → Chapter → Page** hierarchy with reusable **page templates** (e.g. "Morning pages", "Meeting notes", "Weekly review" — user-definable, stored as seed `page.json` payloads).
@@ -117,6 +127,7 @@ All three media kinds are `captures` rows; the only thing that differs is how th
 
 - **Photos** (`kind='photo'`). Originals stored in app storage (`FileManager.documentDirectory/releaf/media/photos/<capture_id>.jpg` on iOS, `filesDir/releaf/media/photos/<capture_id>.jpg` on Android). Compress on ingest: longest side ≤ 2560px, JPEG q=0.85. Strip EXIF location unless the user opts in. `photo_width` and `photo_height` populated from EXIF. Thumbnails generated lazily on first view and cached on disk (in a separate `releaf/cache/thumbs/` folder that is **not** synced to Drive). Respect the Settings "capture quality" slider (low / standard / high).
 - **Voice notes** (`kind='voice'`) up to 120 min via native mic; format AAC / m4a, 64 kbps mono. Stored at `releaf/media/voice_notes/<capture_id>.m4a`. `voice_duration_seconds` + `voice_recorded_at` populated on save.
+  - **Hold-to-record gesture on the Leaf FAB.** Long-press (≥ 250 ms) on the floating capture button starts recording immediately without opening the QuickCaptureSheet — the highest-leverage capture path for "I had a thought walking" moments. Release → stop, transcribe, commit to inferred parent. Tap (< 250 ms) opens the sheet as normal. Implementation: `LongPressGesture(minimumDuration: 0.25)` composed with `TapGesture` via `.simultaneousGesture` on iOS; `pointerInput { detectTapGestures(onLongPress = ..., onTap = ...) }` on Android. See `docs/DAILY_CAPTURE_UX.md` §2.4.
   - iOS: `AVAudioRecorder`.
   - Android: `MediaRecorder`.
   - Auto-transcription into `captures.extracted_text` (also FTS5-indexed):
@@ -183,13 +194,15 @@ Convert a Notepad Entry into a Notebook → Chapter → Page while preserving ev
 
 ### Launcher continue-scope & shortcuts (PWA-equivalent UX)
 
-- **Home-screen shortcuts** for Quick Capture and Today.
+- **Home-screen shortcuts** for Today and Quick Capture. **Today is the primary (first-slot) shortcut** — long-pressing the app icon and tapping Today should be one tap shorter than a normal app open for the most common user goal (capturing into today's log). Quick Capture is the second-slot shortcut.
   - iOS: Home Screen Quick Actions (static in `Info.plist` + dynamic via `UIApplicationShortcutItem`).
   - Android: App Shortcuts (static XML + dynamic via `ShortcutManager`).
+  - Both wire to the existing deep-link routes: `releaf://today` and `releaf://capture`.
 - **Launcher continue-scope** preference (port from Inkcreate's `launcher_continue_scope`). Values:
+  - `today` (**default**) — appends to today's entry (find-or-create).
   - `append_to_latest` — quick-capture appends to the most recently edited Notepad Entry.
-  - `today` — appends to today's entry (find-or-create).
   - `new_shell` — always creates a fresh blank entry (respecting `allow_blank_content = true`).
+  - **Why `today` is the default**: most users think calendrically. `append_to_latest` is surprising when crossing midnight and is reserved for power users who want it. See `docs/DAILY_CAPTURE_UX.md` §6.1.
 - **Offline-first.** Every action must work without network; sync is always background.
 
 ### Settings

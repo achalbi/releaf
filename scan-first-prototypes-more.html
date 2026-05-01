@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Releaf — Scan-first prototypes (set 2)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* Brand tokens — pulled from ios/Releaf/Features/Notepad/Recents/Theme/Colors.swift */
+    --bgCanvas: #F4EDDC;
+    --bgSurface: #FBF5E2;
+    --bgSurfaceMuted: #EFE7CD;
+    --bgChip: #DDEACD;
+    --green900: #2C4520;
+    --green800: #3F5C2C;
+    --green600: #5B7A3F;
+    --green400: #7AA055;
+    --green200: #C0DD97;
+    --green100: #DDEACD;
+    --cream300: #EDE3CC;
+    --textPrimary: #1F1E18;
+    --textSecondary: #5C5C50;
+    --textMuted: #6B6B5E;
+    --textOnDark: #F4EDDC;
+    --accentImport: #BA7517;
+    --accentImportBg: #F0E0B8;
+    --borderFaint: rgba(63,92,44,0.10);
+    --borderDivider: rgba(63,92,44,0.20);
+
+    --serif: 'Fraunces', Georgia, serif;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--sans);
+    color: var(--textPrimary);
+    background: linear-gradient(180deg, #ECE3C7 0%, #DCD0AE 100%);
+    min-height: 100vh;
+    padding: 48px 24px 80px;
+  }
+  .page-head { max-width: 1200px; margin: 0 auto 40px; text-align: center; }
+  .page-head h1 {
+    font-family: var(--serif); font-weight: 600; font-size: 38px;
+    color: var(--green900); margin: 0 0 8px; letter-spacing: -0.5px;
+  }
+  .page-head p {
+    color: var(--textSecondary); font-size: 15px;
+    max-width: 680px; margin: 0 auto; line-height: 1.5;
+  }
+  .stage {
+    display: grid; grid-template-columns: repeat(3, minmax(320px, 360px));
+    gap: 32px; justify-content: center; align-items: start;
+    max-width: 1200px; margin: 0 auto;
+  }
+  @media (max-width: 1100px) { .stage { grid-template-columns: 1fr; } }
+
+  .variation { display: flex; flex-direction: column; align-items: center; }
+  .variation .label {
+    font-family: var(--sans); font-weight: 600; font-size: 11px;
+    letter-spacing: 1.4px; text-transform: uppercase;
+    color: var(--green800); margin-bottom: 6px;
+  }
+  .variation h2 {
+    font-family: var(--serif); font-weight: 600; font-size: 22px;
+    color: var(--textPrimary); margin: 0 0 18px;
+    text-align: center; letter-spacing: -0.3px;
+  }
+  .rationale {
+    margin-top: 18px; font-size: 13.5px; line-height: 1.55;
+    color: var(--textSecondary); max-width: 320px; text-align: left;
+  }
+  .rationale strong { color: var(--green900); font-weight: 600; }
+
+  /* Phone frame */
+  .phone {
+    width: 320px; height: 680px; border-radius: 38px;
+    background: #1a1a1a; padding: 9px;
+    box-shadow:
+      0 30px 60px -20px rgba(44, 69, 32, 0.35),
+      0 12px 24px -12px rgba(0,0,0,0.25),
+      0 0 0 1px rgba(0,0,0,0.4);
+    position: relative;
+  }
+  .screen {
+    width: 100%; height: 100%; border-radius: 30px;
+    overflow: hidden; position: relative; background: var(--bgCanvas);
+  }
+  .notch {
+    position: absolute; top: 6px; left: 50%;
+    transform: translateX(-50%);
+    width: 92px; height: 22px; background: #000;
+    border-radius: 16px; z-index: 30;
+  }
+  .status-bar {
+    position: absolute; top: 0; left: 0; right: 0; height: 32px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 22px; font-family: var(--sans);
+    font-weight: 600; font-size: 11px; color: var(--textPrimary); z-index: 20;
+  }
+  .status-bar.dark { color: var(--textOnDark); }
+  .status-bar .right-icons { display: flex; gap: 4px; align-items: center; opacity: 0.85; }
+  .status-bar svg { width: 12px; height: 12px; }
+
+  .wordmark {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--sans); font-size: 10px; font-weight: 600;
+    letter-spacing: 1.6px; text-transform: uppercase; color: var(--green800);
+  }
+  .wordmark .leaf {
+    width: 9px; height: 9px; border-radius: 50% 0;
+    background: var(--green800); transform: rotate(-45deg);
+  }
+
+  /* ============================================================
+     VARIATION D — Smart-tag scan + filing
+     ============================================================ */
+  .var-d .screen { background: var(--bgCanvas); }
+  .var-d .header { padding: 44px 22px 0; }
+  .var-d .header .wordmark { margin-bottom: 14px; }
+  .var-d .header h1 {
+    font-family: var(--serif); font-weight: 600; font-size: 28px;
+    color: var(--textPrimary); margin: 0 0 6px;
+    letter-spacing: -0.6px; line-height: 1.05;
+  }
+  .var-d .header .greet {
+    font-size: 13px; color: var(--textMuted);
+    font-style: italic; font-family: var(--serif);
+  }
+
+  .var-d .scan-card {
+    margin: 22px 16px 18px;
+    background: linear-gradient(140deg, #C98430 0%, var(--accentImport) 55%, #8E5410 100%);
+    border-radius: 26px;
+    padding: 22px 20px 18px;
+    color: var(--bgSurface);
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 16px 28px -10px rgba(186,117,23,0.5);
+  }
+  .var-d .scan-card::after {
+    content: '';
+    position: absolute; right: -50px; top: -40px;
+    width: 180px; height: 180px;
+    background: radial-gradient(circle, rgba(244,237,220,0.18), transparent 70%);
+    border-radius: 50%;
+  }
+  .var-d .scan-card .corner-deco {
+    position: absolute; top: 18px; right: 18px;
+    width: 60px; height: 60px;
+    pointer-events: none;
+  }
+  .var-d .scan-card .corner-deco i {
+    position: absolute; width: 16px; height: 16px;
+    border: 2px solid var(--accentImportBg); opacity: 0.6;
+  }
+  .var-d .scan-card .corner-deco i:nth-child(1){top:0;left:0;border-right:none;border-bottom:none;}
+  .var-d .scan-card .corner-deco i:nth-child(2){top:0;right:0;border-left:none;border-bottom:none;}
+  .var-d .scan-card .corner-deco i:nth-child(3){bottom:0;left:0;border-right:none;border-top:none;}
+  .var-d .scan-card .corner-deco i:nth-child(4){bottom:0;right:0;border-left:none;border-top:none;}
+  .var-d .scan-card h2 {
+    font-family: var(--serif); font-weight: 600; font-size: 24px;
+    margin: 0 0 4px; line-height: 1.1; letter-spacing: -0.4px;
+    position: relative; z-index: 2;
+  }
+  .var-d .scan-card .sub {
+    font-size: 12px; opacity: 0.92; margin-bottom: 16px; line-height: 1.4;
+    position: relative; z-index: 2;
+  }
+  .var-d .scan-card .actions {
+    display: flex; gap: 8px; align-items: center;
+    position: relative; z-index: 2;
+  }
+  .var-d .scan-card .primary {
+    background: var(--bgSurface); color: var(--accentImport);
+    font-family: var(--sans); font-weight: 700; font-size: 13px;
+    padding: 11px 18px; border-radius: 999px; border: none;
+    display: inline-flex; align-items: center; gap: 8px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.18);
+  }
+  .var-d .scan-card .primary svg { width: 16px; height: 16px; }
+  .var-d .scan-card .ghost {
+    background: rgba(244,237,220,0.18);
+    color: var(--bgSurface);
+    font-family: var(--sans); font-weight: 600; font-size: 12px;
+    padding: 10px 14px; border-radius: 999px;
+    border: 1px solid rgba(244,237,220,0.3);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .var-d .scan-card .ghost svg { width: 14px; height: 14px; }
+
+  .var-d .label-row {
+    margin: 0 22px 8px;
+    font-size: 10.5px; font-weight: 700;
+    letter-spacing: 1.4px; text-transform: uppercase;
+    color: var(--textMuted);
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .var-d .label-row em {
+    font-style: normal; font-weight: 500; color: var(--textMuted);
+    text-transform: none; letter-spacing: 0; font-size: 11px;
+  }
+
+  .var-d .tag-grid {
+    margin: 0 16px 18px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  }
+  .var-d .tag-card {
+    background: var(--bgSurface);
+    border: 1px solid var(--borderFaint);
+    border-radius: 14px;
+    padding: 12px 10px;
+    text-align: left;
+    display: flex; flex-direction: column; gap: 4px;
+    position: relative;
+  }
+  .var-d .tag-card.featured {
+    background: var(--accentImportBg);
+    border-color: rgba(186,117,23,0.3);
+  }
+  .var-d .tag-card .ico {
+    width: 22px; height: 22px;
+    color: var(--green800);
+    margin-bottom: 2px;
+  }
+  .var-d .tag-card.featured .ico { color: var(--accentImport); }
+  .var-d .tag-card .ico svg { width: 22px; height: 22px; }
+  .var-d .tag-card .name {
+    font-size: 12px; font-weight: 600; color: var(--textPrimary);
+  }
+  .var-d .tag-card .count {
+    font-size: 10px; color: var(--textMuted);
+  }
+  .var-d .tag-card.featured .count { color: var(--accentImport); font-weight: 600; }
+
+  .var-d .recent-strip {
+    margin: 0 16px;
+    background: var(--bgSurface);
+    border: 1px solid var(--borderFaint);
+    border-radius: 16px;
+    padding: 12px 14px;
+  }
+  .var-d .recent-strip .head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 10px;
+  }
+  .var-d .recent-strip .head h3 {
+    font-family: var(--serif); font-size: 15px; font-weight: 600;
+    margin: 0; color: var(--textPrimary);
+  }
+  .var-d .recent-strip .head a {
+    font-size: 11px; color: var(--green800); font-weight: 600;
+    text-decoration: none;
+  }
+  .var-d .recent-list { display: flex; flex-direction: column; gap: 8px; }
+  .var-d .recent-item {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .var-d .recent-item .thumb {
+    width: 32px; height: 40px; flex-shrink: 0;
+    background: var(--cream300); border-radius: 4px;
+    box-shadow: inset 0 0 0 1px var(--borderFaint);
+    padding: 5px 4px;
+  }
+  .var-d .recent-item .thumb i {
+    display: block; height: 1.5px; background: rgba(31,30,24,0.18);
+    margin-bottom: 2px; border-radius: 1px;
+  }
+  .var-d .recent-item .thumb i:first-child { height: 3px; width: 60%; background: rgba(31,30,24,0.5); }
+  .var-d .recent-item .thumb i:last-child { width: 50%; }
+  .var-d .recent-item .info { flex: 1; min-width: 0; }
+  .var-d .recent-item .info .t {
+    font-size: 12.5px; font-weight: 600; color: var(--textPrimary);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .var-d .recent-item .info .s {
+    font-size: 10.5px; color: var(--textMuted);
+  }
+  .var-d .recent-item .pill {
+    font-size: 9px; padding: 2px 6px;
+    background: var(--bgChip); color: var(--green800);
+    border-radius: 4px; font-weight: 700; letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .var-d .recent-item .pill.amber {
+    background: var(--accentImportBg); color: var(--accentImport);
+  }
+
+  /* ============================================================
+     VARIATION E — Batch / stack scanner
+     ============================================================ */
+  .var-e .screen { background: #14110A; }
+  .var-e .viewfinder {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(circle at 50% 30%, rgba(186,117,23,0.08), transparent 70%),
+      linear-gradient(180deg, #1f1c12 0%, #14110A 100%);
+  }
+  .var-e .top-chrome {
+    position: absolute; top: 38px; left: 0; right: 0;
+    padding: 0 20px;
+    display: flex; justify-content: space-between; align-items: center;
+    z-index: 10;
+  }
+  .var-e .top-chrome .wordmark { color: var(--cream300); }
+  .var-e .top-chrome .wordmark .leaf { background: var(--green200); }
+  .var-e .close-btn {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: rgba(244,237,220,0.12);
+    color: var(--cream300);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .var-e .close-btn svg { width: 14px; height: 14px; }
+
+  /* Document being scanned */
+  .var-e .paper-stage {
+    position: absolute; top: 86px; left: 50%;
+    transform: translateX(-50%);
+    width: 220px; height: 280px;
+  }
+  .var-e .paper {
+    position: absolute; inset: 0;
+    background: var(--bgSurface);
+    border-radius: 6px;
+    box-shadow: 0 18px 30px rgba(0,0,0,0.45);
+    padding: 16px 18px;
+    transform: rotate(-2deg);
+  }
+  .var-e .paper .pl { height: 4px; background: rgba(31,30,24,0.18); border-radius: 1px; margin-bottom: 6px; }
+  .var-e .paper .pl.t { height: 9px; width: 65%; background: rgba(31,30,24,0.55); margin-bottom: 12px; }
+  .var-e .paper .pl.s { width: 60%; }
+  .var-e .paper .pl.xs { width: 40%; }
+  .var-e .corners {
+    position: absolute; inset: -3px;
+    transform: rotate(-2deg);
+  }
+  .var-e .corners i {
+    position: absolute; width: 22px; height: 22px;
+    border: 2px solid var(--accentImport);
+  }
+  .var-e .corners i:nth-child(1){top:0;left:0;border-right:none;border-bottom:none;border-radius:4px 0 0 0;}
+  .var-e .corners i:nth-child(2){top:0;right:0;border-left:none;border-bottom:none;border-radius:0 4px 0 0;}
+  .var-e .corners i:nth-child(3){bottom:0;left:0;border-right:none;border-top:none;border-radius:0 0 0 4px;}
+  .var-e .corners i:nth-child(4){bottom:0;right:0;border-left:none;border-top:none;border-radius:0 0 4px 0;}
+
+  /* Scan stack indicator (multi-page) */
+  .var-e .stack-indicator {
+    position: absolute;
+    top: 86px; right: 22px;
+    z-index: 8;
+  }
+  .var-e .stack-indicator .stack {
+    position: relative; width: 44px; height: 56px;
+  }
+  .var-e .stack-indicator .stack .sheet {
+    position: absolute; width: 36px; height: 46px;
+    background: var(--bgSurface); border-radius: 4px;
+    border: 1px solid rgba(244,237,220,0.4);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+  }
+  .var-e .stack-indicator .stack .sheet:nth-child(1) {
+    bottom: 0; right: 0; transform: rotate(6deg);
+  }
+  .var-e .stack-indicator .stack .sheet:nth-child(2) {
+    bottom: 3px; right: 3px; transform: rotate(0deg); background: var(--bgChip);
+  }
+  .var-e .stack-indicator .stack .sheet:nth-child(3) {
+    bottom: 6px; right: 6px; transform: rotate(-5deg);
+  }
+  .var-e .stack-indicator .badge {
+    position: absolute; top: -6px; left: -8px;
+    background: var(--accentImport); color: var(--bgSurface);
+    font-size: 12px; font-weight: 700;
+    width: 24px; height: 24px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px solid #14110A;
+    z-index: 5;
+  }
+  .var-e .stack-indicator .label {
+    position: absolute; top: 64px; right: -4px;
+    color: var(--cream300); font-size: 9.5px;
+    font-weight: 600; letter-spacing: 0.4px;
+    text-align: right;
+  }
+
+  .var-e .hint-pill {
+    position: absolute;
+    top: 410px; left: 50%; transform: translateX(-50%);
+    background: rgba(20,17,10,0.7);
+    backdrop-filter: blur(8px);
+    color: var(--cream300);
+    font-family: var(--serif); font-style: italic;
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(192,221,151,0.2);
+    text-align: center; z-index: 10;
+  }
+  .var-e .hint-pill small {
+    display: block; font-style: normal; font-family: var(--sans);
+    font-size: 9.5px; color: var(--green200);
+    letter-spacing: 0.6px; margin-top: 1px;
+  }
+
+  .var-e .bottom-deck {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: linear-gradient(180deg, rgba(20,17,10,0) 0%, rgba(20,17,10,0.92) 35%, #14110A 70%);
+    padding: 32px 18px 22px; z-index: 15;
+  }
+  .var-e .stack-summary {
+    background: rgba(244,237,220,0.08);
+    border: 1px solid rgba(244,237,220,0.14);
+    border-radius: 14px;
+    padding: 10px 14px;
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 18px;
+  }
+  .var-e .stack-summary .mini-thumbs { display: flex; }
+  .var-e .stack-summary .mini-thumbs .mt {
+    width: 22px; height: 28px; border-radius: 3px;
+    background: var(--bgSurface);
+    border: 1px solid rgba(244,237,220,0.4);
+    margin-right: -6px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  }
+  .var-e .stack-summary .mini-thumbs .mt:nth-child(2) { background: var(--bgChip); }
+  .var-e .stack-summary .info { flex: 1; }
+  .var-e .stack-summary .info .t {
+    color: var(--cream300); font-size: 12px; font-weight: 600;
+  }
+  .var-e .stack-summary .info .s {
+    color: var(--green200); font-size: 10.5px; margin-top: 1px;
+  }
+  .var-e .stack-summary .review {
+    background: var(--green200); color: var(--green900);
+    border: none; border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 11px; font-weight: 700;
+  }
+
+  .var-e .capture-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 12px;
+  }
+  .var-e .capture-row .ghost {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: rgba(244,237,220,0.1); color: var(--cream300);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 600;
+    flex-direction: column; gap: 1px;
+  }
+  .var-e .capture-row .ghost svg { width: 16px; height: 16px; }
+  .var-e .shutter-wrap { position: relative; }
+  .var-e .shutter {
+    width: 76px; height: 76px; border-radius: 50%;
+    background: var(--bgSurface);
+    border: 4px solid var(--accentImport);
+    box-shadow: 0 0 0 4px rgba(186,117,23,0.25), 0 8px 20px rgba(186,117,23,0.4);
+    position: relative;
+  }
+  .var-e .shutter::after {
+    content: '';
+    position: absolute; inset: 8px;
+    border-radius: 50%; background: var(--accentImport);
+  }
+  .var-e .shutter-wrap .add-icon {
+    position: absolute;
+    bottom: -2px; right: -2px;
+    width: 22px; height: 22px;
+    background: var(--green200); color: var(--green900);
+    border-radius: 50%; font-size: 14px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px solid #14110A;
+  }
+  .var-e .done-btn {
+    background: var(--green200); color: var(--green900);
+    font-size: 11px; font-weight: 700;
+    padding: 8px 14px; border-radius: 999px;
+    border: none; letter-spacing: 0.3px;
+  }
+
+  /* ============================================================
+     VARIATION F — One-handed action button
+     ============================================================ */
+  .var-f .screen { background: var(--bgCanvas); }
+  .var-f .header {
+    padding: 44px 22px 0;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .var-f .header .right {
+    display: flex; gap: 8px; align-items: center;
+  }
+  .var-f .header .icon-btn {
+    width: 32px; height: 32px;
+    border-radius: 10px;
+    background: var(--bgSurface);
+    border: 1px solid var(--borderFaint);
+    color: var(--green800);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .var-f .header .icon-btn svg { width: 16px; height: 16px; }
+  .var-f .header .avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--green400), var(--green800));
+    color: var(--bgSurface);
+    font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .var-f .ambient {
+    margin: 32px 22px 0;
+    text-align: left;
+  }
+  .var-f .ambient .hello {
+    font-family: var(--serif); font-style: italic;
+    font-size: 14px; color: var(--textMuted);
+  }
+  .var-f .ambient h1 {
+    font-family: var(--serif); font-weight: 600;
+    font-size: 32px; line-height: 1.1; letter-spacing: -0.7px;
+    color: var(--textPrimary);
+    margin: 4px 0 14px;
+  }
+  .var-f .ambient .stat {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--textSecondary);
+  }
+  .var-f .ambient .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accentImport);
+  }
+  .var-f .ambient .stat strong {
+    color: var(--green900); font-weight: 700;
+  }
+
+  .var-f .last-scan {
+    margin: 22px 22px 0;
+    background: var(--bgSurface);
+    border: 1px solid var(--borderFaint);
+    border-radius: 18px;
+    padding: 14px;
+    display: flex; gap: 12px; align-items: center;
+  }
+  .var-f .last-scan .thumb {
+    width: 44px; height: 56px;
+    border-radius: 5px;
+    background: var(--cream300);
+    flex-shrink: 0;
+    padding: 7px 6px;
+    box-shadow: inset 0 0 0 1px var(--borderFaint);
+  }
+  .var-f .last-scan .thumb i {
+    display: block; height: 1.5px; background: rgba(31,30,24,0.18);
+    margin-bottom: 2px; border-radius: 1px;
+  }
+  .var-f .last-scan .thumb i.t { height: 4px; width: 60%; background: rgba(31,30,24,0.5); margin-bottom: 5px; }
+  .var-f .last-scan .thumb i.s { width: 50%; }
+  .var-f .last-scan .info { flex: 1; min-width: 0; }
+  .var-f .last-scan .info .lbl {
+    font-size: 9.5px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
+    color: var(--accentImport); margin-bottom: 2px;
+  }
+  .var-f .last-scan .info .t {
+    font-size: 13px; font-weight: 600; color: var(--textPrimary);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .var-f .last-scan .info .s {
+    font-size: 11px; color: var(--textMuted); margin-top: 2px;
+  }
+
+  /* The big action button anchored in the thumb zone */
+  .var-f .action-zone {
+    position: absolute;
+    bottom: 32px; left: 16px; right: 16px;
+  }
+  .var-f .secondary-row {
+    display: flex; gap: 6px;
+    margin-bottom: 14px;
+    justify-content: center;
+  }
+  .var-f .secondary-row .mini {
+    background: var(--bgSurface);
+    border: 1px solid var(--borderFaint);
+    border-radius: 999px;
+    padding: 6px 10px;
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10.5px; font-weight: 600;
+    color: var(--textSecondary);
+  }
+  .var-f .secondary-row .mini svg {
+    width: 12px; height: 12px; color: var(--green800);
+  }
+
+  .var-f .action-btn {
+    width: 100%; height: 96px;
+    background: linear-gradient(140deg, #C98430 0%, var(--accentImport) 60%, #8E5410 100%);
+    border-radius: 28px;
+    border: none;
+    color: var(--bgSurface);
+    text-align: left;
+    padding: 0 22px;
+    display: flex; align-items: center; justify-content: space-between;
+    box-shadow:
+      0 18px 30px -8px rgba(186,117,23,0.5),
+      inset 0 1px 0 rgba(244,237,220,0.18);
+    position: relative; overflow: hidden;
+  }
+  .var-f .action-btn::after {
+    content: '';
+    position: absolute; right: -30px; top: -40px;
+    width: 140px; height: 140px;
+    background: radial-gradient(circle, rgba(244,237,220,0.18), transparent 70%);
+    border-radius: 50%;
+  }
+  .var-f .action-btn .left-stack {
+    display: flex; flex-direction: column; gap: 4px;
+    z-index: 2; position: relative;
+  }
+  .var-f .action-btn .lbl {
+    font-size: 9.5px; font-weight: 700;
+    letter-spacing: 1.4px; text-transform: uppercase;
+    opacity: 0.85; color: var(--accentImportBg);
+  }
+  .var-f .action-btn .ttl {
+    font-family: var(--serif); font-weight: 600;
+    font-size: 26px; letter-spacing: -0.4px; line-height: 1;
+  }
+  .var-f .action-btn .sub {
+    font-size: 11.5px; opacity: 0.92; margin-top: 2px;
+  }
+  .var-f .action-btn .ico-circle {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: var(--bgSurface);
+    color: var(--accentImport);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: inset 0 -2px 0 rgba(186,117,23,0.18);
+    z-index: 2; position: relative;
+    flex-shrink: 0;
+  }
+  .var-f .action-btn .ico-circle svg { width: 26px; height: 26px; }
+
+  .var-f .home-indicator {
+    position: absolute;
+    bottom: 8px; left: 50%; transform: translateX(-50%);
+    width: 110px; height: 4px;
+    border-radius: 2px;
+    background: rgba(31,30,24,0.4);
+  }
+
+  /* footer note */
+  .footnote {
+    max-width: 1100px; margin: 56px auto 0; text-align: center;
+    color: var(--textSecondary); font-size: 12px;
+  }
+  .footnote code {
+    font-family: ui-monospace, SF Mono, Menlo, monospace;
+    background: rgba(63,92,44,0.08); padding: 2px 6px;
+    border-radius: 4px; color: var(--green900);
+  }
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <h1>Releaf — Scan-first prototypes (set 2)</h1>
+  <p>Three more directions exploring different mental models for prioritizing scan: smart pre-categorization, multi-page batch flow, and a one-handed thumb-zone hero. Same brand tokens as set 1.</p>
+</header>
+
+<div class="stage">
+
+  <!-- ============================================================
+       VARIATION D — Smart-tag scan
+       ============================================================ -->
+  <div class="variation var-d">
+    <span class="label">Variation D · Smart filing</span>
+    <h2>Tag-aware scan</h2>
+    <div class="phone">
+      <div class="screen">
+        <div class="notch"></div>
+        <div class="status-bar">
+          <span>6:20</span>
+          <div class="right-icons">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4a8 8 0 1 0 0 16A8 8 0 0 0 12 4zm0 14a6 6 0 1 1 0-12 6 6 0 0 1 0 12z"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 22h20V10H2z"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="8" width="16" height="8" rx="2"/></svg>
+          </div>
+        </div>
+
+        <div class="header">
+          <div class="wordmark"><span class="leaf"></span> Releaf · Notepad</div>
+          <h1>What arrived?</h1>
+          <div class="greet">Thursday, April 30 — pick a category to pre-tag your scan</div>
+        </div>
+
+        <div class="scan-card">
+          <div class="corner-deco"><i></i><i></i><i></i><i></i></div>
+          <h2>Scan a page</h2>
+          <div class="sub">We'll auto-crop and file it for you.</div>
+          <div class="actions">
+            <button class="primary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/></svg>
+              Scan now
+            </button>
+            <button class="ghost">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
+              Import
+            </button>
+          </div>
+        </div>
+
+        <div class="label-row">
+          <span>Pre-tag &amp; scan</span>
+          <em>tap to scan into category</em>
+        </div>
+        <div class="tag-grid">
+          <div class="tag-card featured">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h10l4 4v12H5z"/><path d="M14 4v5h5"/></svg></div>
+            <div class="name">Letter</div>
+            <div class="count">3 this week</div>
+          </div>
+          <div class="tag-card">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v18l3-2 3 2 3-2 3 2V3z"/><path d="M9 9h6M9 13h4"/></svg></div>
+            <div class="name">Receipt</div>
+            <div class="count">12 total</div>
+          </div>
+          <div class="tag-card">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v6M19 5l-4 4M22 12h-6M19 19l-4-4M12 22v-6M5 19l4-4M2 12h6M5 5l4 4"/></svg></div>
+            <div class="name">Medical</div>
+            <div class="count">5 total</div>
+          </div>
+          <div class="tag-card">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h6"/></svg></div>
+            <div class="name">Recipe</div>
+            <div class="count">8 total</div>
+          </div>
+          <div class="tag-card">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg></div>
+            <div class="name">School</div>
+            <div class="count">4 total</div>
+          </div>
+          <div class="tag-card">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
+            <div class="name">New tag</div>
+            <div class="count">customize</div>
+          </div>
+        </div>
+
+        <div class="recent-strip">
+          <div class="head">
+            <h3>Today's scans</h3>
+            <a href="#">See all</a>
+          </div>
+          <div class="recent-list">
+            <div class="recent-item">
+              <div class="thumb"><i></i><i></i><i></i><i></i></div>
+              <div class="info">
+                <div class="t">Daycare permission slip</div>
+                <div class="s">scanned 9:14 am</div>
+              </div>
+              <span class="pill amber">Letter</span>
+            </div>
+            <div class="recent-item">
+              <div class="thumb"><i></i><i></i><i></i><i></i></div>
+              <div class="info">
+                <div class="t">Sourdough recipe card</div>
+                <div class="s">scanned 7:48 am</div>
+              </div>
+              <span class="pill">Recipe</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <p class="rationale">
+      Same Scan hero, but with a <strong>category grid</strong> beneath it: tap "Letter" to launch the camera with that tag pre-applied. Solves the real friction of <em>filing</em> after scanning. The most-used tag (Letter) is highlighted in amber. Great for users who scan a steady stream of mail or paperwork.
+    </p>
+  </div>
+
+  <!-- ============================================================
+       VARIATION E — Batch / stack scanner
+       ============================================================ -->
+  <div class="variation var-e">
+    <span class="label">Variation E · Power user</span>
+    <h2>Batch scanner</h2>
+    <div class="phone">
+      <div class="screen">
+        <div class="notch"></div>
+        <div class="status-bar dark">
+          <span>6:20</span>
+          <div class="right-icons">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4a8 8 0 1 0 0 16A8 8 0 0 0 12 4zm0 14a6 6 0 1 1 0-12 6 6 0 0 1 0 12z"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 22h20V10H2z"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="8" width="16" height="8" rx="2"/></svg>
+          </div>
+        </div>
+
+        <div class="viewfinder"></div>
+
+        <div class="top-chrome">
+          <div class="wordmark"><span class="leaf"></span> Releaf · Multi-page scan</div>
+          <div class="close-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </div>
+        </div>
+
+        <div class="paper-stage">
+          <div class="paper">
+            <div class="pl t"></div>
+            <div class="pl"></div>
+            <div class="pl"></div>
+            <div class="pl s"></div>
+            <div class="pl"></div>
+            <div class="pl"></div>
+            <div class="pl xs"></div>
+          </div>
+          <div class="corners"><i></i><i></i><i></i><i></i></div>
+        </div>
+
+        <div class="stack-indicator">
+          <div class="badge">3</div>
+          <div class="stack">
+            <div class="sheet"></div>
+            <div class="sheet"></div>
+            <div class="sheet"></div>
+          </div>
+          <div class="label">scanned</div>
+        </div>
+
+        <div class="hint-pill">
+          page 4 detected
+          <small>HOLD STEADY</small>
+        </div>
+
+        <div class="bottom-deck">
+          <div class="stack-summary">
+            <div class="mini-thumbs">
+              <div class="mt"></div>
+              <div class="mt"></div>
+              <div class="mt"></div>
+            </div>
+            <div class="info">
+              <div class="t">3 pages in this batch</div>
+              <div class="s">Will save as one document</div>
+            </div>
+            <button class="review">Review</button>
+          </div>
+          <div class="capture-row">
+            <div class="ghost">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/></svg>
+              Auto
+            </div>
+            <div class="shutter-wrap">
+              <div class="shutter"></div>
+              <div class="add-icon">+</div>
+            </div>
+            <button class="done-btn">Done · 3</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="rationale">
+      Built for the case that breaks single-shot scanners: <strong>multi-page docs</strong>. The persistent stack counter (top right) and batch summary (bottom) make it obvious the user is building one document. The shutter has a "<strong>+</strong>" subscript so it always reads as "add another page". Auto-capture mode means hands-free scanning of a 10-page contract.
+    </p>
+  </div>
+
+  <!-- ============================================================
+       VARIATION F — One-handed action button
+       ============================================================ -->
+  <div class="variation var-f">
+    <span class="label">Variation F · Calm &amp; minimal</span>
+    <h2>One-handed action</h2>
+    <div class="phone">
+      <div class="screen">
+        <div class="notch"></div>
+        <div class="status-bar">
+          <span>6:20</span>
+          <div class="right-icons">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4a8 8 0 1 0 0 16A8 8 0 0 0 12 4zm0 14a6 6 0 1 1 0-12 6 6 0 0 1 0 12z"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 22h20V10H2z"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="8" width="16" height="8" rx="2"/></svg>
+          </div>
+        </div>
+
+        <div class="header">
+          <div class="wordmark"><span class="leaf"></span> Releaf</div>
+          <div class="right">
+            <div class="icon-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+            </div>
+            <div class="avatar">A</div>
+          </div>
+        </div>
+
+        <div class="ambient">
+          <div class="hello">Good morning, Achal.</div>
+          <h1>Your grove<br/>has 14 pages.</h1>
+          <div class="stat">
+            <span class="dot"></span>
+            <span><strong>2 scans</strong> &nbsp;·&nbsp; today, before 9 am</span>
+          </div>
+        </div>
+
+        <div class="last-scan">
+          <div class="thumb"><i class="t"></i><i></i><i class="s"></i><i></i></div>
+          <div class="info">
+            <div class="lbl">Last scan · 9:14 am</div>
+            <div class="t">Daycare permission slip</div>
+            <div class="s">2 pages · filed under today</div>
+          </div>
+        </div>
+
+        <div class="action-zone">
+          <div class="secondary-row">
+            <span class="mini">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/></svg>
+              Photo
+            </span>
+            <span class="mini">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/></svg>
+              Voice
+            </span>
+            <span class="mini">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l2 2 5-5"/><rect x="3" y="3" width="18" height="18" rx="3"/></svg>
+              To-do
+            </span>
+            <span class="mini">More</span>
+          </div>
+          <button class="action-btn">
+            <div class="left-stack">
+              <span class="lbl">Tap anywhere</span>
+              <span class="ttl">Scan a page</span>
+              <span class="sub">Auto-crops · OCR · filed under today</span>
+            </div>
+            <div class="ico-circle">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M9 6l1.5-2h3L15 6"/></svg>
+            </div>
+          </button>
+        </div>
+
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+    <p class="rationale">
+      Inspired by Apple's Action Button: a <strong>single oversized amber rectangle</strong> sits at the bottom of the screen, perfectly in the thumb zone for one-handed use. Above it, the home is calm and ambient — just yesterday's tally, today's last scan, and tiny secondary captures. Deliberately spare. <strong>Best fit if Releaf wants to feel like a quiet companion, not a productivity app.</strong>
+    </p>
+  </div>
+
+</div>
+
+<p class="footnote">
+  Same Releaf tokens as set 1 · open <code>scan-first-prototypes.html</code> alongside this file to compare all six variations.
+</p>
+
+</body>
+</html>

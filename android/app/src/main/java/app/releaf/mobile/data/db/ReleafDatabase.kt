@@ -39,6 +39,8 @@ import app.releaf.mobile.data.shelf.ShelfDao
 import app.releaf.mobile.data.shelf.ShelfEntity
 import app.releaf.mobile.data.notepad.NotepadDao
 import app.releaf.mobile.data.notepad.NotepadEntry
+import app.releaf.mobile.data.panchanga.PanchangaDao
+import app.releaf.mobile.data.panchanga.PanchangaEntity
 import app.releaf.mobile.data.perspective.PerspectiveDao
 import app.releaf.mobile.data.perspective.PerspectiveEntity
 import app.releaf.mobile.data.reminder.ReminderDao
@@ -61,6 +63,7 @@ import app.releaf.mobile.data.task.TaskEntity
         ReminderEntity::class,
         PerspectiveEntity::class,
         CallHistoryEntity::class,
+        PanchangaEntity::class,
         app.releaf.mobile.data.activity.AuditEvent::class,
     ],
     // v20: adds `notepad_entries.category` (nullable TEXT). Lets a
@@ -96,7 +99,7 @@ import app.releaf.mobile.data.task.TaskEntity
     //                         chapter detail a recoverable archive state.
     // Notebooks already have archived_at (added in v3→v4) so v17 only
     // touches pages + chapters.
-    version = 20,
+    version = 24,
     exportSchema = true,
 )
 abstract class ReleafDatabase : RoomDatabase() {
@@ -112,6 +115,7 @@ abstract class ReleafDatabase : RoomDatabase() {
     abstract fun reminderDao(): ReminderDao
     abstract fun perspectiveDao(): PerspectiveDao
     abstract fun callHistoryDao(): CallHistoryDao
+    abstract fun panchangaDao(): PanchangaDao
     abstract fun auditDao(): app.releaf.mobile.data.activity.AuditDao
 
     /**
@@ -820,6 +824,116 @@ abstract class ReleafDatabase : RoomDatabase() {
         }
     }
 
+    /**
+     * Mirror the notepad's title + description shape on notebook pages —
+     * adds a nullable `description` column so the page editor can show
+     * the same italic subtitle field beneath the title. Existing rows
+     * keep NULL until edited.
+     */
+    private object Migration20To21 : Migration(20, 21) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL("ALTER TABLE pages ADD COLUMN description TEXT")
+        }
+    }
+
+    /**
+     * Adds a `flat` flag to notebooks so the user can opt out of the
+     * chapter level on create — pages still hang off a sentinel
+     * "Default" chapter under the hood, but the detail screen renders
+     * them directly. Existing rows keep flat=0 (chaptered).
+     */
+    private object Migration21To22 : Migration(21, 22) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL(
+                "ALTER TABLE notebooks ADD COLUMN flat INTEGER NOT NULL DEFAULT 0",
+            )
+        }
+    }
+
+    /**
+     * v22 → v23: schema-self-heal for the `chapters` table.
+     *
+     * In-the-wild crash report (2026-04-26) showed Room's identity
+     * validator failing on `chapters` after a successful migration
+     * chain. Migration16To17 added `chapters.archived_at` (column
+     * only); Migration18To19 then created the matching Room-named
+     * `index_chapters_archived_at` index. Some users' DBs end up
+     * without that index — most likely from an interrupted
+     * Migration18To19 (process kill mid-migration leaves DDL
+     * partially applied) or from a development-time path where the
+     * `@Index("archived_at")` declaration on `ChapterEntity` was
+     * added before its matching migration shipped.
+     *
+     * This migration is idempotent: it re-asserts every index Room
+     * expects on `chapters` via `CREATE INDEX IF NOT EXISTS`. Healthy
+     * DBs see four no-ops; broken DBs get the missing index back.
+     * No column changes — adding to the version chain forces every
+     * device to run it once on next open.
+     */
+    private object Migration22To23 : Migration(22, 23) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_chapters_archived_at " +
+                    "ON chapters(archived_at)"
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_chapters_deleted_at " +
+                    "ON chapters(deleted_at)"
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_chapters_updated_at " +
+                    "ON chapters(updated_at)"
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_chapters_notebook_id_position " +
+                    "ON chapters(notebook_id, position)"
+            )
+        }
+    }
+
+    /**
+     * v23 → v24: adds the `panchanga` table backing the new full-screen
+     * calendar surface.
+     *
+     * The table is a read-mostly cache for the bundled
+     * `assets/panchanga_2026_27.csv` (Vontikoppal / Mysore Panchanga,
+     * Sri Parabhava year). One row per (date, tithi) pair — a few
+     * Gregorian dates carry two rows when the lunar day rolls over
+     * during the day. Primary key is `date#thithi_num` so re-importing
+     * the dataset is idempotent.
+     *
+     * Both indices match the @Index declarations on PanchangaEntity:
+     * `date` for the day-detail / month-grid lookups, and
+     * `special_day_lc` (lower-cased mirror) for case-insensitive
+     * festival search.
+     */
+    private object Migration23To24 : Migration(23, 24) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS panchanga (
+                    id              TEXT NOT NULL PRIMARY KEY,
+                    date            TEXT NOT NULL,
+                    masa            TEXT NOT NULL,
+                    paksha          TEXT NOT NULL,
+                    thithi          TEXT NOT NULL,
+                    thithi_num      TEXT NOT NULL,
+                    special_day     TEXT NOT NULL,
+                    special_day_lc  TEXT NOT NULL
+                )
+                """.trimIndent()
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_panchanga_date " +
+                    "ON panchanga(date)"
+            )
+            connection.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_panchanga_special_day_lc " +
+                    "ON panchanga(special_day_lc)"
+            )
+        }
+    }
+
     companion object {
         private const val DB_NAME = "releaf.db"
 
@@ -860,6 +974,10 @@ abstract class ReleafDatabase : RoomDatabase() {
                         Migration17To18,
                         Migration18To19,
                         Migration19To20,
+                        Migration20To21,
+                        Migration21To22,
+                        Migration22To23,
+                        Migration23To24,
                     )
                     // Dogfood installs at v2-v6 (pre-flatten) are handled
                     // here as a downgrade: the DB wipes, Room recreates

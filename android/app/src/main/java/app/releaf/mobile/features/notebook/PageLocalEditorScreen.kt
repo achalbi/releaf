@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Spa
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -138,6 +139,8 @@ fun PageLocalEditorScreen(
     // single-scroll rich-text editor.
     var editorMode by rememberSaveable { mutableStateOf(EditorMode.OVERVIEW) }
     var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
+    var showPlantInfo by rememberSaveable { mutableStateOf(false) }
+    val plant = viewModel.pagePlant
     val focusManager = LocalFocusManager.current
 
     // Drawing overlay controls. Stored separately from the editor state
@@ -293,11 +296,13 @@ fun PageLocalEditorScreen(
             )
         } else {
             TopBar(
-                segments = crumbs,
-                showDelete = state.exists,
-                editorMode = editorMode,
-                onChangeMode = { newMode -> editorMode = newMode },
-                onDelete = { showDeleteDialog = true },
+                notebookLabel = state.notebook?.title?.ifBlank { "Notebook" } ?: "Notebook",
+                chapterLabel  = state.chapter?.title?.ifBlank { "" } ?: "",
+                showDelete    = state.exists,
+                editorMode    = editorMode,
+                onChangeMode  = { newMode -> editorMode = newMode },
+                onBack        = popBack,
+                onDelete      = { showDeleteDialog = true },
             )
         }
 
@@ -306,18 +311,37 @@ fun PageLocalEditorScreen(
         // Overview's CaptureTabBar).
         if (!state.isLoading && state.exists) {
             Row(
-                modifier = Modifier
+                modifier              = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = AppSpacing.s4)
-                    .padding(bottom = AppSpacing.s3),
-                verticalAlignment = Alignment.CenterVertically,
+                    .padding(bottom = AppSpacing.s2),
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
             ) {
                 TitleField(
                     value         = state.title,
                     onValueChange = viewModel::updateTitle,
                     modifier      = Modifier.weight(1f),
                 )
+                // Plant-of-the-page affordance — same Spa icon as the
+                // notepad editor. Tapping opens a bottom sheet with
+                // the plant's name, common name, epithet, and uses.
+                app.releaf.mobile.ui.components.RoundIconButton(
+                    icon               = Icons.Filled.Spa,
+                    contentDescription = "Plant of the page",
+                    onClick            = { showPlantInfo = true },
+                    background         = AppColors.GreenSoft,
+                    tint               = AppColors.ThemeGreenDeep,
+                )
             }
+            DescriptionField(
+                value         = state.description,
+                onValueChange = viewModel::updateDescription,
+                modifier      = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = AppSpacing.s4)
+                    .padding(bottom = AppSpacing.s3),
+            )
         }
 
         when {
@@ -490,6 +514,15 @@ fun PageLocalEditorScreen(
         )
     } // end outer Box (dot-grid canvas)
 
+    // Plant-of-the-page bottom sheet — opened by the Spa icon next
+    // to the title. Same shared component as the notepad editor.
+    if (showPlantInfo) {
+        app.releaf.mobile.ui.components.DailyPlantInfoSheet(
+            plant     = plant,
+            onDismiss = { showPlantInfo = false },
+        )
+    }
+
     // Destructive-action guard — same pattern as the notepad editor.
     if (showDeleteDialog) {
         AlertDialog(
@@ -520,18 +553,18 @@ fun PageLocalEditorScreen(
 
 @Composable
 private fun TopBar(
-    segments: List<BreadcrumbSegment>,
+    notebookLabel: String,
+    chapterLabel: String,
     showDelete: Boolean,
     editorMode: EditorMode,
     onChangeMode: (EditorMode) -> Unit,
+    onBack: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    // Mirror of NotepadEditorScreen's TopBar: a More-icon → Popup
-    // dropdown that hosts the destructive Delete action. Token-styled
-    // (cream surface, hairline border, md radius) so the menu reads
-    // as part of the app instead of a Material overlay.
-    var menuOpen by remember { mutableStateOf(false) }
-
+    // Leaf-eyebrow chrome — visual + behavioral parity with
+    // NotepadEditorScreen's TopBar so the page editor reads like the
+    // same surface across the notebook + notepad flows. Pattern:
+    // [🌱 NOTEBOOK · {chapter}]   [List/Grid toggle]   [⋮]
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -541,67 +574,62 @@ private fun TopBar(
                 top    = AppSpacing.s3,
                 bottom = AppSpacing.s3,
             ),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
     ) {
-        Breadcrumbs(segments = segments, modifier = Modifier.weight(1f))
-        EditorModeIconToggle(mode = editorMode, onChange = onChangeMode)
+        Row(
+            modifier              = Modifier
+                .weight(1f)
+                .clickable(onClick = onBack),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.s1),
+        ) {
+            app.releaf.mobile.ui.components.LeafDropletGlyph(
+                tint = AppColors.ThemeGreenPrimary,
+                size = 11.dp,
+            )
+            Text(
+                text     = notebookLabel.uppercase(),
+                style    = AppTypography.Eyebrow,
+                color    = AppColors.ThemeGreenDeep,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            if (chapterLabel.isNotBlank()) {
+                Text(
+                    text  = "·",
+                    style = AppTypography.Eyebrow,
+                    color = AppColors.ThemeGreenDeep,
+                )
+                Text(
+                    text     = chapterLabel.uppercase(),
+                    style    = AppTypography.Eyebrow,
+                    color    = AppColors.ThemeGreenDeep,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+        }
+        app.releaf.mobile.ui.components.PageViewToggle(
+            selected = if (editorMode == EditorMode.OVERVIEW)
+                app.releaf.mobile.ui.components.PageViewMode.Grid
+            else
+                app.releaf.mobile.ui.components.PageViewMode.List,
+            onSelect = { mode ->
+                onChangeMode(
+                    if (mode == app.releaf.mobile.ui.components.PageViewMode.Grid)
+                        EditorMode.OVERVIEW
+                    else
+                        EditorMode.EDIT,
+                )
+            },
+        )
         if (showDelete) {
-            Spacer(Modifier.size(AppSpacing.s2))
-            Box {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .clickable { menuOpen = true },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector        = Icons.Filled.MoreVert,
-                        contentDescription = "More actions",
-                        tint               = AppColors.TextSecondary,
-                        modifier           = Modifier.size(22.dp),
-                    )
-                }
-                if (menuOpen) {
-                    Popup(
-                        alignment = Alignment.TopEnd,
-                        offset = IntOffset(0, with(LocalDensity.current) {
-                            (40.dp + AppSpacing.s1).roundToPx()
-                        }),
-                        onDismissRequest = { menuOpen = false },
-                        properties = PopupProperties(focusable = true),
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .width(260.dp)
-                                .shadow(8.dp, RoundedCornerShape(AppRadius.md))
-                                .clip(RoundedCornerShape(AppRadius.md))
-                                .background(AppColors.CardSolid)
-                                .border(
-                                    width = 1.dp,
-                                    color = AppColors.BorderDefault,
-                                    shape = RoundedCornerShape(AppRadius.md),
-                                )
-                                .padding(vertical = AppSpacing.s2),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        menuOpen = false
-                                        onDelete()
-                                    }
-                                    .padding(horizontal = AppSpacing.s4, vertical = AppSpacing.s3),
-                            ) {
-                                Text(
-                                    text  = "Delete page",
-                                    style = AppTypography.Body,
-                                    color = AppColors.Danger,
-                                )
-                            }
-                        }
-                    }
-                }
+            app.releaf.mobile.ui.components.PageOverflowButton {
+                androidx.compose.material3.DropdownMenuItem(
+                    text    = { Text("Delete page", color = AppColors.Danger) },
+                    onClick = onDelete,
+                )
             }
         }
     }
@@ -877,6 +905,37 @@ private fun TitleField(
             onValueChange = onValueChange,
             singleLine    = true,
             textStyle     = titleStyle,
+            cursorBrush   = SolidColor(AppAccent.primary),
+            modifier      = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun DescriptionField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // Italic serif at 14sp — visually subordinate to the 34sp title
+    // above. Mirrors the notepad editor's DescriptionField.
+    val descStyle = androidx.compose.ui.text.TextStyle(
+        fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+        fontStyle  = androidx.compose.ui.text.font.FontStyle.Italic,
+        fontSize   = 14.sp,
+        color      = AppColors.TextSecondary,
+    )
+    val placeholderStyle = descStyle.copy(color = AppColors.TextTertiary)
+    Box(modifier) {
+        if (value.isEmpty()) {
+            Text("Description", style = placeholderStyle)
+        }
+        BasicTextField(
+            value         = value,
+            onValueChange = onValueChange,
+            singleLine    = false,
+            maxLines      = 2,
+            textStyle     = descStyle,
             cursorBrush   = SolidColor(AppAccent.primary),
             modifier      = Modifier.fillMaxWidth(),
         )

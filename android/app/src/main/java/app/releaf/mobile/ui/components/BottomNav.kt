@@ -16,11 +16,9 @@
  *
  * Active tab: coral-soft rounded rectangle behind icon, coral tint.
  * Inactive  : textPrimary icon, no background.
- * Center    : coral-filled circle, white leaf icon, offset upward ~10dp.
+ * Center    : coral-filled circle, brand Releaf leaf (`ReleafLogoSolid`)
+ *             rendered on top, offset upward ~10dp.
  * Margins   : 16dp horizontal, 4dp bottom — the nav floats, does not span.
- *
- * NOTE: core Material icons don't include a leaf; Icons.Filled.Spa is used
- * as a visual stand-in. Swap for a vector asset once imported.
  *
  * Ported from Inkcreate mobile DS.
  */
@@ -161,6 +159,7 @@ fun BottomNav(
                     )
                     BottomNavKind.Brand -> BrandTab(
                         item = item,
+                        isSelected = selectedId == item.id,
                         modifier = Modifier.weight(1f),
                         onClick = { onBrandTap?.invoke() ?: onSelect(item.id) },
                     )
@@ -244,6 +243,7 @@ private fun RegularTab(
 @Composable
 private fun BrandTab(
     item: BottomNavItem,
+    isSelected: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -252,10 +252,16 @@ private fun BrandTab(
     // canvas. Without it the coral edge can blur into the cream
     // surface where they touch. Total visible diameter = inner +
     // 2 × ring.
+    //
+    // When `isSelected` is true (Capture is the active top-level tab),
+    // a thin coral outline is drawn at the very edge of the cream ring
+    // so the FAB reads as the active tab without changing its lifted
+    // disc identity. Matches docs/CAPTURE_TAB_PLAN.md Phase 3.
     val innerDiameter = 56.dp
     val ringWidth     = 4.dp
     val outerDiameter = innerDiameter + ringWidth * 2
     val lift          = 16.dp
+    val activeRing    = 1.5.dp
 
     // Coral → CoralDeep vertical gradient: lighter at top, deeper at bottom —
     // reads as a subtle 3D lift under ambient light.
@@ -331,7 +337,15 @@ private fun BrandTab(
                         center = Offset(cx, cy + 1.dp.toPx()),
                     )
                 }
-                .background(AppColors.Canvas, CircleShape),
+                .background(AppColors.Canvas, CircleShape)
+                // Active-tab ring: thin coral outline at the outer
+                // edge of the cream ring. Visible only when the Leaf
+                // tab is currently selected.
+                .let {
+                    if (isSelected) {
+                        it.border(activeRing, AppAccent.primary, CircleShape)
+                    } else it
+                },
             contentAlignment = Alignment.Center,
         ) {
             Box(
@@ -340,11 +354,16 @@ private fun BrandTab(
                     .background(coralGradient, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    imageVector = item.icon,
-                    contentDescription = "Releaf",
-                    tint = AppColors.TextOnAccent,
-                    modifier = Modifier.size(24.dp),
+                // Brand mark — cream Releaf leaf on the coral disc.
+                // Uses ReleafLogoSolid so the leaf silhouette matches the
+                // app icon, splash, and logo lockup. `item.icon` is
+                // ignored for the Brand kind; it stays on the data class
+                // for consistency but isn't rendered here.
+                ReleafLogoSolid(
+                    size = 30.dp,
+                    leafColor = AppColors.TextOnAccent,
+                    veinColor = AppAccent.deep,
+                    veinWidth = 1.5.dp,
                 )
             }
         }
@@ -360,6 +379,25 @@ private fun BottomNavPreview() {
         BottomNav(
             selectedId = selected,
             onSelect = { selected = it },
+            // Treat the Leaf brand tap like any other tab in the
+            // preview so we can see the active-ring on the FAB by
+            // tapping it. Phase 2 wires this to a real navigation.
+            onBrandTap = { selected = "leaf" },
+        )
+    }
+}
+
+/** Active-state preview: Leaf is the current tab — thin coral
+ *  outline visible at the edge of the cream ring. */
+@Preview(showBackground = true, backgroundColor = 0xFFF5EEE3, widthDp = 390)
+@Composable
+private fun BottomNavLeafActivePreview() {
+    Column {
+        Box(Modifier.fillMaxWidth().height(560.dp))
+        BottomNav(
+            selectedId = "leaf",
+            onSelect = {},
+            onBrandTap = {},
         )
     }
 }

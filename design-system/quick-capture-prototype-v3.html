@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Releaf — QuickCapture v3 — 6-tile grid</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Newsreader:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --canvas:        #F5EEE3;
+    --card-solid:    #FFFAF4;
+    --card-90:       rgba(255, 250, 244, 0.9);
+    --subtle:        #EFE7DA;
+    --muted:         #EBE4D3;
+    --tan:           #E8DDC9;
+    --border-def:    rgba(80, 62, 45, 0.12);
+    --border-strong: rgba(80, 62, 45, 0.24);
+    --text-primary:   #241D17;
+    --text-secondary: #5F5245;
+    --text-tertiary:  #8A7C6D;
+
+    --coral:      #E77850;
+    --coral-soft: #FCEAE0;
+    --coral-deep: #C85A30;
+
+    --info:       #2E6FB5;
+    --info-soft:  #E1ECF8;
+
+    --warning:    #A87418;
+    --warning-soft:#FBEECD;
+
+    --forest:       #1E5943;
+    --forest-soft:  #DDEAD8;
+    --forest-tint:  #E8F0E2;
+
+    --danger:      #C8432E;
+    --danger-soft: #FDEEE9;
+
+    --dot:        rgba(80, 62, 45, 0.14);
+    --shadow-card:   0 2px 8px rgba(36, 29, 23, 0.06);
+    --shadow-float:  0 12px 28px rgba(36, 29, 23, 0.14), 0 2px 6px rgba(36, 29, 23, 0.08);
+    --shadow-fab:    0 8px 24px rgba(231, 120, 80, 0.38);
+    --shadow-card-l: 0 -8px 24px rgba(36, 29, 23, 0.10);
+
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --r-xl: 20px;
+    --pill: 9999px;
+
+    --font-sans: Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-serif: Newsreader, Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0;
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+    background: var(--tan);
+    background-image: radial-gradient(circle, rgba(80,62,45,0.08) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .page {
+    max-width: 1640px;
+    margin: 0 auto;
+    padding: 56px 32px 96px;
+  }
+
+  header.hero { margin-bottom: 48px; }
+
+  .eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--coral); margin: 0 0 8px;
+  }
+  h1 {
+    font-family: var(--font-serif); font-weight: 500;
+    font-size: 36px; line-height: 1.15; letter-spacing: -0.01em;
+    margin: 0 0 12px; color: var(--text-primary);
+  }
+  .lede {
+    font-size: 15px; line-height: 1.55; max-width: 78ch;
+    color: var(--text-secondary); margin: 0;
+  }
+  .lede + .lede { margin-top: 10px; }
+  code, code.inline {
+    background: var(--subtle);
+    padding: 1px 6px; border-radius: 4px;
+    font-size: 12.5px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--text-primary);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(360px, 460px) minmax(320px, 1fr);
+    gap: 44px;
+    align-items: start;
+  }
+  @media (max-width: 1100px) {
+    .grid { grid-template-columns: 1fr; max-width: 480px; margin: 0 auto; }
+  }
+
+  .panel { display: flex; flex-direction: column; gap: 14px; }
+  .panel-head {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .panel-head .num {
+    font-family: var(--font-serif);
+    font-size: 28px;
+    color: var(--coral);
+    line-height: 1;
+  }
+  .panel-head .ttl {
+    font-family: var(--font-serif);
+    font-size: 24px;
+    color: var(--text-primary);
+  }
+  .panel-head .tag {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: var(--pill);
+    margin-left: auto;
+    background: var(--coral-soft);
+    color: var(--coral-deep);
+  }
+
+  .panel .desc {
+    font-size: 14px; line-height: 1.55; color: var(--text-secondary);
+  }
+
+  /* phone frame */
+  .phone {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 390 / 844;
+    border-radius: 44px;
+    background: #1B1610;
+    padding: 12px;
+    box-shadow: var(--shadow-float);
+    overflow: hidden;
+  }
+  .screen {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 32px;
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .statusbar {
+    height: 36px;
+    padding: 12px 20px 0;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; font-weight: 700; color: var(--text-primary);
+    flex-shrink: 0;
+  }
+  .statusbar .icons { display: flex; gap: 4px; align-items: center; }
+  .statusbar svg { width: 13px; height: 13px; }
+
+  /* Home header (matches existing pattern) */
+  .home-head {
+    padding: 14px 20px 16px;
+    display: flex; justify-content: space-between; align-items: flex-end;
+    flex-shrink: 0;
+  }
+  .home-head .title-block .day {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.10em;
+    text-transform: uppercase; color: var(--coral);
+    margin-bottom: 4px;
+  }
+  .home-head .title-block .date {
+    font-family: var(--font-serif); font-size: 30px;
+    line-height: 1.05; letter-spacing: -0.01em;
+    color: var(--text-primary);
+  }
+  .home-head .actions { display: flex; gap: 10px; }
+  .head-icon-btn {
+    width: 38px; height: 38px;
+    border-radius: var(--pill);
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-primary);
+    box-shadow: var(--shadow-card);
+  }
+  .head-icon-btn svg { width: 16px; height: 16px; }
+
+  /* Backdrop body (faint, behind scrim) */
+  .backdrop-body {
+    flex: 1;
+    overflow: hidden;
+    padding: 4px 16px;
+    display: flex; flex-direction: column; gap: 12px;
+    opacity: 0.65;
+  }
+  .bd-card {
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    padding: 14px 16px;
+    box-shadow: var(--shadow-card);
+  }
+  .bd-card .eb {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--coral);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .bd-card .body {
+    font-family: var(--font-serif);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  /* Scrim */
+  .scrim {
+    position: absolute; inset: 0;
+    background: rgba(36, 29, 23, 0.45);
+  }
+
+  /* The merged sheet */
+  .sheet {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: 0;
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    border-radius: 24px 24px 0 0;
+    border-top: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-card-l);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    padding: 12px 20px 28px;
+    gap: 18px;
+  }
+  .sheet .grabber {
+    width: 40px; height: 4px;
+    background: var(--border-strong);
+    border-radius: var(--pill);
+    margin: 0 auto 4px;
+    flex-shrink: 0;
+  }
+
+  /* Sheet header — title + search + calendar */
+  .sheet-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 12px;
+    margin-top: -2px;
+  }
+  .sheet-head .title-block {
+    flex: 1; min-width: 0;
+  }
+  .sheet-head h2 {
+    font-family: var(--font-serif);
+    font-weight: 700;
+    font-size: 36px;
+    line-height: 1;
+    letter-spacing: -0.015em;
+    color: var(--text-primary);
+    margin: 0 0 8px;
+  }
+  .sheet-head .subline {
+    font-size: 13.5px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    max-width: 240px;
+    margin: 0;
+  }
+  .sheet-head .subline strong {
+    color: var(--coral);
+    font-weight: 600;
+  }
+  .sheet-head .actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+    margin-top: 6px;
+  }
+  .sheet-head .head-btn {
+    width: 38px; height: 38px;
+    border-radius: var(--pill);
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-primary);
+    box-shadow: var(--shadow-card);
+  }
+  .sheet-head .head-btn svg { width: 16px; height: 16px; }
+
+  /* Tile grid */
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .tile {
+    aspect-ratio: 1;
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 9px;
+    color: var(--text-primary);
+    box-shadow: var(--shadow-card);
+    padding: 6px;
+  }
+  .tile .ico {
+    width: 38px; height: 38px;
+    border-radius: var(--r-md);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .tile .ico svg { width: 19px; height: 19px; }
+  .tile .label {
+    font-size: 12.5px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-primary);
+  }
+  .tile .hint {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-top: -5px;
+    text-align: center;
+    font-weight: 500;
+  }
+
+  /* per-tile color washes */
+  .tile.notes   .ico { background: var(--subtle);       color: var(--text-secondary); }
+  .tile.photo   .ico { background: var(--coral-soft);   color: var(--coral); }
+  .tile.voice   .ico { background: var(--info-soft);    color: var(--info); }
+  .tile.todo    .ico { background: var(--forest-tint);  color: var(--forest); }
+  .tile.contact .ico { background: var(--warning-soft); color: var(--warning); }
+  .tile.pin     .ico { background: var(--danger-soft);  color: var(--danger); }
+
+  /* Footer hint */
+  .sheet-foot {
+    font-size: 12.5px;
+    color: var(--text-tertiary);
+    text-align: center;
+    line-height: 1.5;
+    padding: 4px 6px 0;
+    margin-top: -4px;
+  }
+  .sheet-foot strong {
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+
+  /* Annotation panel */
+  .annotations {
+    padding: 32px 36px;
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-card);
+  }
+  .annotations h2 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    font-size: 24px;
+    margin: 0 0 6px;
+  }
+  .annotations h3 {
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--coral);
+    margin: 24px 0 8px;
+  }
+  .annotations p {
+    font-size: 14px; line-height: 1.6;
+    color: var(--text-secondary);
+    margin: 0 0 10px;
+    max-width: 86ch;
+  }
+  .annotations p strong { color: var(--text-primary); }
+
+  .modes {
+    display: grid;
+    grid-template-columns: 110px 1fr 1fr;
+    gap: 0;
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    margin-top: 12px;
+    font-size: 13px;
+  }
+  .modes > * {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-def);
+    line-height: 1.45;
+  }
+  .modes > .hd {
+    font-weight: 700;
+    background: var(--subtle);
+    color: var(--text-secondary);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .modes > .nm {
+    background: var(--canvas);
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .modes > .nm i {
+    width: 12px; height: 12px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .modes > :nth-last-child(-n+3) { border-bottom: 0; }
+
+  .qlist {
+    display: flex; flex-direction: column;
+    gap: 14px;
+    margin-top: 12px;
+  }
+  .qlist .q {
+    background: var(--canvas);
+    border-left: 3px solid var(--coral);
+    padding: 12px 14px;
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  }
+  .qlist .q .qq {
+    font-weight: 700;
+    color: var(--text-primary);
+    font-size: 13.5px;
+    margin-bottom: 4px;
+  }
+  .qlist .q .qa {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+  }
+  .qlist .q .qa em {
+    font-style: normal;
+    color: var(--coral-deep);
+    font-weight: 700;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="eyebrow">Releaf · QuickCapture · v3 · 6-tile grid</p>
+    <h1>Capture · 2×3 grid · search and calendar in the header.</h1>
+    <p class="lede">
+      Adopting your reference design with the six tiles you specified:
+      <strong>Notes · Photo · Voice · Todo · Contact · Pin</strong>.
+      Search and calendar icon buttons sit on the right side of the
+      <strong>"Capture"</strong> title; the <em>"into today's log · long-press
+      a tile to choose elsewhere"</em> subtitle and the <em>"Hold the green Leaf
+      button…"</em> footer carry over verbatim. Backdrop is the existing Home.
+    </p>
+    <p class="lede">
+      Each tile gets a different soft color wash so the modes are individually
+      recognizable at a glance. The tile composable, the sheet host, and the
+      cream canvas / 24 dp top corners / drag handle are unchanged from
+      <code>QuickCaptureSheet.kt</code>. The annotation column on the right
+      covers the diff from v1/v2, why <strong>Scan</strong> isn't on this grid,
+      and where the search button routes.
+    </p>
+  </header>
+
+  <div class="grid">
+
+    <!-- ───────────── phone ───────────── -->
+    <section class="panel">
+      <div class="panel-head">
+        <span class="num">v3</span>
+        <span class="ttl">Capture sheet on Home</span>
+        <span class="tag">proposed</span>
+      </div>
+      <p class="desc">
+        FAB tap from the BottomNav opens the sheet. Sheet rises to its natural
+        content height (no Day/Recents toggle, no inline calendar panel) — the
+        calendar icon now opens the full calendar route instead of expanding inline.
+      </p>
+      <div class="phone">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 6.5C3.5 4 6 3 8 3s4.5 1 7 3.5l-1 1C12 5 10 4 8 4S4 5 2 7.5l-1-1zM4 9.5C5.5 8 6.5 7.5 8 7.5s2.5.5 4 2l-1 1C9.8 9.3 9 9 8 9s-1.8.3-3 1.5l-1-1zM8 11l2 2-2 2-2-2 2-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <!-- Home header backdrop -->
+          <div class="home-head">
+            <div class="title-block">
+              <div class="day">Tuesday</div>
+              <div class="date">April 28</div>
+            </div>
+            <div class="actions">
+              <div class="head-icon-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              </div>
+              <div class="head-icon-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- Backdrop body -->
+          <div class="backdrop-body">
+            <div class="bd-card">
+              <div class="eb">Today's notes</div>
+              <div class="body">Crisp morning. Heron at the pier again — perched on the third dock post for almost ten minutes…</div>
+            </div>
+          </div>
+
+          <!-- Scrim -->
+          <div class="scrim"></div>
+
+          <!-- The sheet -->
+          <div class="sheet">
+            <div class="grabber"></div>
+
+            <div class="sheet-head">
+              <div class="title-block">
+                <h2>Capture</h2>
+                <p class="subline">into <strong>today's log</strong> · long-press a tile to choose elsewhere</p>
+              </div>
+              <div class="actions">
+                <div class="head-btn" title="Search">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+                </div>
+                <div class="head-btn" title="Calendar">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                </div>
+              </div>
+            </div>
+
+            <div class="tiles">
+
+              <div class="tile notes">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h12M4 18h8"/></svg>
+                </div>
+                <div class="label">Notes</div>
+                <div class="hint">keyboard up</div>
+              </div>
+
+              <div class="tile photo">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M9 6V4h6v2"/></svg>
+                </div>
+                <div class="label">Photo</div>
+                <div class="hint">camera</div>
+              </div>
+
+              <div class="tile voice">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="13" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+                </div>
+                <div class="label">Voice</div>
+                <div class="hint">tap or hold FAB</div>
+              </div>
+
+              <div class="tile todo">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/></svg>
+                </div>
+                <div class="label">Todo</div>
+                <div class="hint">checklist item</div>
+              </div>
+
+              <div class="tile contact">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+                </div>
+                <div class="label">Contact</div>
+                <div class="hint">phone · email</div>
+              </div>
+
+              <div class="tile pin">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                </div>
+                <div class="label">Pin</div>
+                <div class="hint">tag this place</div>
+              </div>
+
+            </div>
+
+            <p class="sheet-foot">
+              <strong>Hold</strong> the green Leaf button to start a voice memo without opening this sheet.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ───────────── annotations ───────────── -->
+    <section class="panel">
+      <div class="annotations">
+        <h2>What this version does</h2>
+        <p>
+          This is <strong>v3</strong> — your tile-grid reference applied verbatim with the six modes you
+          named. v1 had Note · Photo · Voice · <em>Scan</em> · Link · From&nbsp;Clipboard. v2 promoted Scan to
+          a hero with pre-tag categories. v3 drops Scan and Link from the primary grid, swaps in the
+          page-context modes (Todo · Contact · Pin), and pulls search and calendar up to the header so
+          they're reachable without dismissing the sheet.
+        </p>
+
+        <h3>The six tiles</h3>
+        <div class="modes">
+          <span class="hd">Tile</span>
+          <span class="hd">What it does on tap</span>
+          <span class="hd">Schema row created</span>
+
+          <span class="nm"><i style="background: var(--subtle);"></i>Notes</span>
+          <span>Sheet keeps state, swaps to text-input mode with keyboard up. First newline / Save commits.</span>
+          <span><code>notepad_entries.notes</code> append (or new entry per <code>launcher_continue_scope</code>)</span>
+
+          <span class="nm"><i style="background: var(--coral-soft);"></i>Photo</span>
+          <span>Open system camera; review screen on shutter; commit with caption.</span>
+          <span><code>captures</code> row, <code>kind='photo'</code></span>
+
+          <span class="nm"><i style="background: var(--info-soft);"></i>Voice</span>
+          <span>Open recorder; transcribe on stop; commit. Tap = open recorder, hold the FAB outside the sheet = direct record.</span>
+          <span><code>captures</code> row, <code>kind='voice'</code></span>
+
+          <span class="nm"><i style="background: var(--forest-tint);"></i>Todo</span>
+          <span>Inline single-line input; Enter creates a todo item attached to today's entry.</span>
+          <span><code>todo_items</code> row on today's <code>notepad_entries.todo_list</code></span>
+
+          <span class="nm"><i style="background: var(--warning-soft);"></i>Contact</span>
+          <span>Mini-form: name, primary phone, email. iOS contact picker as alt entry.</span>
+          <span>Append to <code>notepad_entries.contacts</code> JSON array on today's entry</span>
+
+          <span class="nm"><i style="background: var(--danger-soft);"></i>Pin</span>
+          <span>Use current GPS or pick on map; resolve address; commit.</span>
+          <span>Append to <code>notepad_entries.locations</code> JSON array on today's entry</span>
+        </div>
+
+        <h3>Header buttons</h3>
+        <p>
+          <strong>Search.</strong> Routes to <code>releaf://search</code> via the existing
+          <code>NAV_GRAPH.md</code> entry. Sheet dismisses on tap and re-opens on back. The same affordance
+          replaces the per-screen search icons in the Home and Notepad headers, which was already
+          the recommendation in <code>DAILY_CAPTURE_UX.md §4.2</code>.
+        </p>
+        <p>
+          <strong>Calendar.</strong> Replaces the inline calendar pill that lives in the current
+          <code>QuickCaptureSheet.kt</code>. Tap opens the full calendar route
+          (<code>features/calendar/CalendarScreen.kt</code>) instead of expanding the panchanga panel
+          inline — moving it out of the sheet keeps the sheet height predictable and matches what users
+          expect from a calendar icon. The inline panchanga panel still ships, just at a destination URL,
+          not inside the capture sheet.
+        </p>
+
+        <h3>Where Scan went</h3>
+        <p>
+          <strong>Not on this grid by design.</strong> Three places it could live:
+        </p>
+        <p>
+          <strong>(a) Long-press the Photo tile.</strong> Photo and Scan share the camera flow — long-press
+          could swap to "Scan a document" with edge detection on. Cheap to implement; risk is that nobody
+          discovers it.
+        </p>
+        <p>
+          <strong>(b) Inside the page-detail editor.</strong> The page-detail tab bar already has Scans as
+          a mode (per <code>CaptureMode.kt</code>). Quick capture's job is the daily flow; one-off
+          structured captures live in their actual home.
+        </p>
+        <p>
+          <strong>(c) A 7th tile — accept the asymmetric 3+3+1 layout.</strong> Doable but visually messy.
+        </p>
+        <p>
+          <em>Recommend (a) + (b)</em>: long-press Photo for quick scan, plus the page-detail entry for
+          deliberate scanning sessions. v2's "scan-as-hero" framing belongs on a dedicated Scans surface,
+          not in the daily capture sheet.
+        </p>
+
+        <h3>Color rationale</h3>
+        <p>
+          Six different soft washes so the modes are individually recognizable at a glance — same idea as
+          the original reference, but without the special coral "From clipboard" tile (no longer in the
+          mode set) and with the new Pin/Contact/Todo modes getting unique tints rather than reusing an
+          existing one. All six washes already exist in <code>design-tokens.json</code> as
+          <code>color.semantic.*Soft</code>; this is composition, not new tokens.
+        </p>
+
+        <h3>Open questions</h3>
+        <div class="qlist">
+          <div class="q">
+            <div class="qq">1 · Should "Notes" be the first tile or the most visually distinctive?</div>
+            <div class="qa">
+              Notes sits top-left as the highest-frequency mode in a journaling app. Its washed-grey
+              icon-chip reads as the most muted of the six though, which is the inverse of "most
+              important." <em>Consider:</em> Notes gets a cream/coral wash to match its frequency, with
+              the muted treatment moving to a lower-frequency tile.
+            </div>
+          </div>
+          <div class="q">
+            <div class="qq">2 · "Pin" or "Place" or "Location"?</div>
+            <div class="qa">
+              Existing schema calls it <code>locations</code>; existing CaptureMode calls it
+              <code>Location</code>; v2 used "Place." You named it <em>Pin</em> here — friendlier and
+              more affordance-y (a pin is something you place). <em>Recommend:</em> ship "Pin" as the
+              user-facing label; keep <code>parent_*</code> column names and <code>kind</code> enum
+              unchanged. UI label only.
+            </div>
+          </div>
+          <div class="q">
+            <div class="qq">3 · Does long-press on a tile open a "Capture into…" picker?</div>
+            <div class="qa">
+              The subtitle says "long-press a tile to choose elsewhere" — implies yes. The interaction
+              should swap the grid in place with a target list (Today · Yesterday · A specific page · Pick
+              later) rather than open a nested modal. Same recommendation as v1, lower risk on Android
+              compose-foundation. <em>Confirm:</em> "elsewhere" means parent picker, not destination type.
+            </div>
+          </div>
+          <div class="q">
+            <div class="qq">4 · Hint copy under each tile — keep or drop?</div>
+            <div class="qa">
+              "keyboard up", "camera", "tap or hold FAB", "checklist item", "phone · email", "tag this
+              place." All six fit. Useful for first-time users; visual noise for repeat users.
+              <em>Recommend:</em> hide hints after the first 7 days; the tiles' icons + labels carry
+              enough signal once the muscle memory is there.
+            </div>
+          </div>
+        </div>
+
+        <h3>Implementation footprint</h3>
+        <p>
+          One file changes meaningfully on each platform.
+          <strong>Android</strong> — <code>QuickCaptureSheet.kt</code>:
+          drop the calendar-toggle pill, replace the <code>LazyColumn</code> with a
+          <code>LazyVerticalGrid(GridCells.Fixed(3))</code> of <code>CaptureTile</code> composables, add
+          a <code>Row</code> in the header for the search and calendar icon buttons.
+          <strong>iOS</strong> — <code>QuickCaptureSheet.swift</code> mirrors with <code>LazyVGrid</code>.
+          <code>CaptureMode.kt</code>: add <code>Notes</code>, rename <code>Location</code> →
+          <code>Pin</code> for display, drop <code>Overview</code> and <code>Scans</code> from the
+          quick-capture set (they remain in the page-detail tab bar). No SQL migration; no nav graph
+          change.
+        </p>
+      </div>
+    </section>
+
+  </div>
+
+</div>
+</body>
+</html>

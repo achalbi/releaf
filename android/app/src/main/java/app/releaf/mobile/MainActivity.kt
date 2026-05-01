@@ -4,7 +4,7 @@
  * persistent BottomNav and Scaffold-hosted NavHost.
  *
  * Top-level routes (BottomNav visible):
- *   home, notebooks, notepad, settings
+ *   home, notebooks, capture, notepad, settings
  * Drill-in routes (BottomNav hidden):
  *   notebook/{notebookId}, page/{pageId}                       — Drive-fake surfaces (Home tab).
  *   notebook/local/{notebookId}, page/local/{pageId}           — Room-backed surfaces (Notebooks tab).
@@ -14,7 +14,8 @@
  * makes the Drive-fake path unnecessary; until then they coexist to avoid
  * breaking the Home cards while the Room stack stabilises.
  *
- * The center "Leaf" tab opens QuickCaptureSheet rather than navigating.
+ * The center "Leaf" tab is now a real top-level destination — tapping the
+ * lifted FAB navigates to `capture`. Was a ModalBottomSheet pre-CAPTURE_TAB_PLAN.md.
  */
 
 package app.releaf.mobile
@@ -32,12 +33,14 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -49,11 +52,13 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
 import app.releaf.mobile.auth.GoogleAuthSession
 import app.releaf.mobile.auth.rememberGoogleSignInAction
 import app.releaf.mobile.features.auth.SignInScreen
+import app.releaf.mobile.features.calendar.CalendarScreen
 import app.releaf.mobile.features.callhistory.CallHistoryScreen
 import app.releaf.mobile.features.contacts.ContactsScreen
 import app.releaf.mobile.features.home.HomeDrawerContent
@@ -84,10 +89,12 @@ import app.releaf.mobile.features.reminder.ReminderEditorViewModel
 import app.releaf.mobile.features.reminder.RemindersScreen
 import app.releaf.mobile.features.settings.SettingsScreen
 import app.releaf.mobile.features.tasks.TasksScreen
+import app.releaf.mobile.features.capture.CaptureScreen
+import app.releaf.mobile.features.capture.CaptureTile
+import app.releaf.mobile.features.capture.toCaptureMode
 import app.releaf.mobile.ui.components.BottomNav
 import app.releaf.mobile.ui.components.BottomNavItem
 import app.releaf.mobile.ui.components.CaptureMode
-import app.releaf.mobile.ui.components.QuickCaptureSheet
 import app.releaf.mobile.ui.theme.NotebookListVariant
 import app.releaf.mobile.ui.theme.ReleafCanvas
 import app.releaf.mobile.ui.theme.ReleafTheme
@@ -130,6 +137,13 @@ private object Routes {
     const val NOTEBOOKS             = "notebooks"
     const val NOTEPAD               = "notepad"
     const val SETTINGS              = "settings"
+    /**
+     * Capture is a top-level destination owned by the center "Leaf"
+     * slot in the BottomNav. Promoted from a ModalBottomSheet to a
+     * real route per docs/CAPTURE_TAB_PLAN.md. BottomNav stays
+     * visible (CAPTURE is in [topLevel]).
+     */
+    const val CAPTURE               = "capture"
     const val NOTEBOOK_DETAIL       = "notebook/{notebookId}"
     const val PAGE                  = "page/{pageId}"
     const val NOTEBOOK_LOCAL_DETAIL = "notebook/local/{notebookId}"
@@ -140,13 +154,27 @@ private object Routes {
      */
     const val PAGE_LOCAL            = "page/local/{pageId}?mode={mode}"
     const val ARG_CAPTURE_MODE      = "mode"
-    const val NOTEPAD_EDIT          = "notepad/edit/{entryId}?mode={mode}"
+    const val NOTEPAD_EDIT          = "notepad/edit/{entryId}?mode={mode}&autoLaunch={autoLaunch}"
+    /**
+     * Optional `autoLaunch` query carries a [CaptureMode] name. When
+     * present, the editor's matching section auto-fires its primary
+     * action on first composition (e.g. `autoLaunch=Scans` boots the
+     * ML Kit scanner; `autoLaunch=Voice` opens the recording sheet).
+     * Set by the Capture page tiles so a tap goes straight from the
+     * Capture surface into the chosen capture flow without an
+     * intermediate "tap inside the section" step.
+     */
+    const val ARG_AUTO_LAUNCH       = "autoLaunch"
     const val TASKS                 = "tasks"
     const val REMINDERS             = "reminders"
     const val CONTACTS              = "contacts"
     /** Phase-1 activity feed — full-screen list reachable from the
      *  Home timeline card's "See full timeline" link. */
     const val ACTIVITY              = "activity"
+    /** Full-screen panchanga calendar — reachable from the drawer
+     *  ("Calendar" leaf) and the QuickCaptureSheet footer. Bottom nav
+     *  hidden via absence from `topLevel`. */
+    const val CALENDAR              = "calendar"
     const val CALL_HISTORY          = "call-history"
     const val REMINDER_EDIT         = "reminders/edit/{reminderId}"
 
@@ -167,17 +195,33 @@ private object Routes {
     fun notepadEditWithMode(
         id: String,
         mode: app.releaf.mobile.ui.components.CaptureMode,
-    ): String = "notepad/edit/$id?mode=${mode.name}"
+        autoLaunch: app.releaf.mobile.ui.components.CaptureMode? = null,
+    ): String = buildString {
+        append("notepad/edit/$id?mode=${mode.name}")
+        if (autoLaunch != null) append("&autoLaunch=${autoLaunch.name}")
+    }
+
+    /** Convenience for the Capture page tiles — opens the notepad
+     *  editor on today's latest entry, lands on [mode]'s tab, and
+     *  auto-fires that section's primary action so the user goes
+     *  straight from "tap tile" to "do the thing" (frame document,
+     *  start recording, request GPS, …) without an intermediate
+     *  tap inside the section. */
+    fun notepadEditAutoLaunch(
+        id: String,
+        mode: app.releaf.mobile.ui.components.CaptureMode,
+    ): String = notepadEditWithMode(id = id, mode = mode, autoLaunch = mode)
     /** Pass `ReminderEditorViewModel.NEW_REMINDER_ID` to compose a fresh reminder. */
     fun reminderEdit(id: String)        = "reminders/edit/$id"
 
     /** Top-level destinations that should show the BottomNav. */
-    val topLevel = setOf(HOME, NOTEBOOKS, NOTEPAD, SETTINGS)
+    val topLevel = setOf(HOME, NOTEBOOKS, NOTEPAD, SETTINGS, CAPTURE)
 
     /** Map a tab id from BottomNavItem to its NavHost route. */
     fun routeForTab(tabId: String): String? = when (tabId) {
         "home"     -> HOME
         "notebook" -> NOTEBOOKS
+        "leaf"     -> CAPTURE
         "notepad"  -> NOTEPAD
         "settings" -> SETTINGS
         else       -> null
@@ -187,6 +231,7 @@ private object Routes {
     fun selectedTabForRoute(route: String?): String = when (route) {
         HOME      -> "home"
         NOTEBOOKS -> "notebook"
+        CAPTURE   -> "leaf"
         NOTEPAD   -> "notepad"
         SETTINGS  -> "settings"
         else      -> "home"
@@ -201,18 +246,36 @@ private fun RootScreen(authStore: AuthStore) {
     // default placeholder string (see strings.xml + GoogleSignInBinding).
     val onSignIn = rememberGoogleSignInAction(authStore)
 
+    // Branded splash hold: the system SplashScreen (leaf + wordmark
+    // drawable) animates into this activity's first frame; we then keep
+    // the full Compose SplashScreen — leaf + wordmark + WRITE. ERASE.
+    // REPEAT. tagline + subtitle + animated loading dots — on screen for
+    // BRANDED_SPLASH_MS so cold-launches show the full marketing splash
+    // before falling through to the auth-state-driven UI.
+    var brandedSplashVisible by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        delay(BRANDED_SPLASH_MS)
+        brandedSplashVisible = false
+    }
+
     ReleafCanvas {
-        when (val s = state) {
-            is AuthState.SignedOut, is AuthState.Failed ->
-                SignInScreen(state = s, onSignIn = onSignIn)
+        when {
+            brandedSplashVisible -> SplashScreen()
 
-            AuthState.SigningIn -> SplashScreen()
+            else -> when (val s = state) {
+                is AuthState.SignedOut, is AuthState.Failed ->
+                    SignInScreen(state = s, onSignIn = onSignIn)
 
-            is AuthState.SignedIn ->
-                SignedInShell(session = s.session, onSignOut = authStore::signOut)
+                AuthState.SigningIn -> SplashScreen()
+
+                is AuthState.SignedIn ->
+                    SignedInShell(session = s.session, onSignOut = authStore::signOut)
+            }
         }
     }
 }
+
+private const val BRANDED_SPLASH_MS = 2000L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -222,7 +285,6 @@ private fun SignedInShell(session: GoogleAuthSession, onSignOut: () -> Unit) {
     val currentRoute = backStackEntry?.destination?.route
 
     val showBottomBar = currentRoute in Routes.topLevel
-    var showCapture by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val releafApp = context.applicationContext as ReleafApp
@@ -324,6 +386,7 @@ private fun SignedInShell(session: GoogleAuthSession, onSignOut: () -> Unit) {
                 onOpenTasks       = closeAndGo { nav.navigate(Routes.TASKS) },
                 onOpenReminders   = closeAndGo { nav.navigate(Routes.REMINDERS) },
                 onOpenContacts    = closeAndGo { nav.navigate(Routes.CONTACTS) },
+                onOpenCalendar    = closeAndGo { nav.navigate(Routes.CALENDAR) },
                 onSignOut = {
                     scope.launch { drawerState.close() }
                     onSignOut()
@@ -350,7 +413,21 @@ private fun SignedInShell(session: GoogleAuthSession, onSignOut: () -> Unit) {
                                 }
                             }
                         },
-                        onBrandTap = { showCapture = true },
+                        onBrandTap = {
+                            // Tap the lifted Leaf FAB → navigate to
+                            // the Capture top-level destination.
+                            // Same popUpTo / restoreState dance the
+                            // other tabs use so back-stack state is
+                            // preserved when the user flips between
+                            // Capture and Home.
+                            if (Routes.CAPTURE != currentRoute) {
+                                nav.navigate(Routes.CAPTURE) {
+                                    popUpTo(Routes.HOME) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                        },
                     )
                 }
             },
@@ -392,23 +469,13 @@ private fun SignedInShell(session: GoogleAuthSession, onSignOut: () -> Unit) {
         )
     }
 
-    if (showCapture) {
-        QuickCaptureSheet(
-            onDismiss = { showCapture = false },
-            onSelect = { mode ->
-                scope.launch {
-                    val chapterId = releafApp.notebookRepository
-                        .resolveQuickCaptureChapter()
-                    val page = releafApp.pageRepository.createPage(
-                        chapterId = chapterId,
-                        title     = null,
-                        notes     = "",
-                    )
-                    nav.navigate(Routes.pageLocal(page.id, mode))
-                }
-            },
-        )
-    }
+    // The Capture flow used to be a ModalBottomSheet rendered here
+    // when `showCapture` was true. Per docs/CAPTURE_TAB_PLAN.md Phase
+    // 2, Capture is now a real top-level destination — `onBrandTap`
+    // (on the BottomNav above) navigates to `Routes.CAPTURE` instead
+    // of toggling a boolean. The sheet host (`QuickCaptureSheet.kt`)
+    // is kept for one release cycle for any deep links that still
+    // resolve through it; remove it in the next release.
 }
 
 @Composable
@@ -532,6 +599,80 @@ private fun SignedInNavHost(
             SettingsScreen(onSignOut = onSignOut)
         }
 
+        // Capture is a top-level destination owned by the center
+        // "Leaf" slot in BottomNav. Tapping a tile creates a fresh
+        // page in the user's quick-capture chapter and navigates to
+        // the page editor preset to the matching CaptureMode tab —
+        // same flow that lived inside the old QuickCaptureSheet.
+        composable(Routes.CAPTURE) {
+            val captureScope = rememberCoroutineScope()
+            val app = LocalContext.current.applicationContext as ReleafApp
+
+            // Shared launcher: open today's latest notepad entry (or
+            // create one when the day is empty) and land on the
+            // editor preset to the given mode, auto-firing that
+            // section's primary action (scan, record, GPS, …) when
+            // [autoLaunch] is true. Used by every Capture-page tile
+            // and the Scan-hero card.
+            //
+            // Quick Capture lands on the Notepad's daily page rather
+            // than the Notebook quick-capture chapter so taps from the
+            // center FAB always file into the same per-day surface the
+            // user already sees on the Notepad tab. "Latest page" =
+            // most-recently-updated entry filed under today.
+            val launchCapture: (mode: CaptureMode?, autoLaunch: Boolean) -> Unit =
+                { mode, autoLaunch ->
+                    captureScope.launch {
+                        val today = IsoClock.todayLocalDate()
+                        val targetId = (
+                            app.notepadRepository.findLatestForDate(session.userId, today)
+                                ?: app.notepadRepository.create(
+                                    userId    = session.userId,
+                                    title     = null,
+                                    notes     = "",
+                                    entryDate = today,
+                                )
+                        ).id
+                        val route = when {
+                            mode != null && autoLaunch ->
+                                Routes.notepadEditAutoLaunch(targetId, mode)
+                            mode != null ->
+                                Routes.notepadEditWithMode(targetId, mode)
+                            else ->
+                                Routes.notepadEdit(targetId)
+                        }
+                        nav.navigate(route)
+                    }
+                }
+
+            CaptureScreen(
+                // Every tile is a one-tap entry into its section's
+                // primary action — Notes opens the writing sheet,
+                // Photo opens the camera/gallery chooser, Voice
+                // starts the recorder, Todo focuses the input,
+                // Contact opens the add-contact sheet, Pin fires
+                // GPS capture. Auto-launch is opt-in per call so
+                // other entry points to this editor (e.g. Recents)
+                // can keep landing on the section without firing
+                // its action.
+                onSelectTile  = { tile ->
+                    launchCapture(tile.toCaptureMode(), /* autoLaunch = */ true)
+                },
+                // The Scan hero is the same flow as a Scans tile —
+                // editor opens on the Scans tab and the ML Kit
+                // scanner fires immediately.
+                onScanNow     = { launchCapture(CaptureMode.Scans, true) },
+                // Header calendar icon → existing panchanga calendar
+                // route. Search is stubbed (no SearchScreen yet — see
+                // CAPTURE_TAB_PLAN.md open question #1); falls through
+                // to a no-op for now.
+                onOpenSearch   = { /* TODO: route to releaf://search */ },
+                onOpenCalendar = { nav.navigate(Routes.CALENDAR) },
+                // Pretag chip selection is wired in a follow-up once
+                // tagRepository exists — see CaptureScreen.kt header.
+            )
+        }
+
         // Tasks is a drill-in surface (not a top-level tab), so it's
         // absent from BottomNav. Entry lives on the Home screen's
         // Tasks card; the back arrow / breadcrumb returns there.
@@ -546,6 +687,14 @@ private fun SignedInNavHost(
             app.releaf.mobile.features.activity.ActivityScreen(
                 onBack = { nav.popBackStack() },
             )
+        }
+
+        // Calendar — drill-in surface backed by the Vontikoppal
+        // panchanga dataset. Reachable from the home drawer's
+        // "Calendar" leaf and the QuickCaptureSheet's "Open full
+        // calendar" footer link.
+        composable(Routes.CALENDAR) {
+            CalendarScreen(onBack = { nav.popBackStack() })
         }
 
         // Contacts — drill-in surface from the Home Contacts card.
@@ -631,6 +780,17 @@ private fun SignedInNavHost(
                     nullable = true
                     defaultValue = null
                 },
+                // Optional `autoLaunch` query carries a CaptureMode
+                // name — set by the Capture page tiles so the
+                // editor's matching section auto-fires its primary
+                // action on first composition (scan, record, GPS,
+                // open contact sheet, focus todo input, open notes
+                // sheet). Skips the "tap inside the section" step.
+                navArgument(Routes.ARG_AUTO_LAUNCH) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
             ),
         ) { backStackEntry ->
             val modeName = backStackEntry.arguments?.getString("mode")
@@ -639,9 +799,17 @@ private fun SignedInNavHost(
                     app.releaf.mobile.ui.components.CaptureMode.valueOf(name)
                 }.getOrNull()
             }
+            val autoLaunch = backStackEntry.arguments
+                ?.getString(Routes.ARG_AUTO_LAUNCH)
+                ?.let { name ->
+                    runCatching {
+                        app.releaf.mobile.ui.components.CaptureMode.valueOf(name)
+                    }.getOrNull()
+                }
             NotepadEditorScreen(
                 onBack = { nav.popBackStack() },
                 initialMode = initialMode,
+                autoLaunch = autoLaunch,
             )
         }
 
@@ -653,9 +821,10 @@ private fun SignedInNavHost(
             }),
         ) {
             NotebookLocalDetailScreen(
-                onBack = navigateToNotebooksTab,
-                onHome = navigateHome,
+                onBack        = navigateToNotebooksTab,
+                onHome        = navigateHome,
                 onOpenChapter = { id -> nav.navigate(Routes.chapterLocalDetail(id)) },
+                onOpenPage    = { id -> nav.navigate(Routes.pageLocal(id)) },
             )
         }
         composable(

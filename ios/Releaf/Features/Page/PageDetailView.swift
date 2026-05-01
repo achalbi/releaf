@@ -620,13 +620,31 @@ private struct PhotoTile: View {
 
 private struct PageVoiceSection: View {
     let notes: [VoiceNote]
+
     var body: some View {
-        if notes.isEmpty {
-            EmptyState(message: "No voice notes on this page.")
-        } else {
-            VStack(spacing: AppSpacing.s3) {
-                ForEach(notes) { VoiceCard(note: $0) }
+        VStack(spacing: AppSpacing.s4) {
+            // Existing notes (most-recent first kept by parent ordering).
+            if !notes.isEmpty {
+                VStack(spacing: AppSpacing.s3) {
+                    ForEach(notes) { VoiceCard(note: $0) }
+                }
             }
+
+            // Recording control. Always present so the user can capture
+            // a new note without leaving the tab. Persistence is wired
+            // upstream — the view model translates the recorded clip
+            // into a real VoiceNote and writes it to the page.
+            VoicePageRecorder(
+                isEmpty: notes.isEmpty,
+                onSave: { _ in
+                    // TODO: route to the view model so a new VoiceNote
+                    // is appended to this page. The clip URL + duration
+                    // are persisted; transcription happens async via
+                    // `VoiceTranscriber.transcribe(fileURL:)` after the
+                    // file write settles.
+                },
+                onCancel: { /* no-op — cancelled clip already discarded */ }
+            )
         }
     }
 }

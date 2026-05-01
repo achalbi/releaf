@@ -1,0 +1,1013 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Releaf — QuickCapture v2 — Scan hero + pre-tags</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Newsreader:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --canvas:        #F5EEE3;
+    --card-solid:    #FFFAF4;
+    --card-90:       rgba(255, 250, 244, 0.9);
+    --subtle:        #EFE7DA;
+    --muted:         #EBE4D3;
+    --tan:           #E8DDC9;
+    --border-def:    rgba(80, 62, 45, 0.12);
+    --border-strong: rgba(80, 62, 45, 0.24);
+    --text-primary:   #241D17;
+    --text-secondary: #5F5245;
+    --text-tertiary:  #8A7C6D;
+
+    --coral:      #E77850;
+    --coral-soft: #FCEAE0;
+    --coral-deep: #C85A30;
+
+    /* Mustard / saffron family — for Scan hero */
+    --mustard:      #B27A2A;
+    --mustard-deep: #8E5F1F;
+    --mustard-soft: #F4E2BE;
+    --mustard-tint: #FBEFD3;
+
+    /* Active pre-tag tile (Letter in screenshot) */
+    --letter-bg:    #F0DDA8;
+    --letter-deep:  #8E5F1F;
+
+    /* Forest greens for secondary tiles */
+    --forest:       #1E5943;
+    --forest-soft:  #DDEAD8;
+    --forest-tint:  #E8F0E2;
+    --forest-leaf:  #7AA874;
+
+    --info:       #2E6FB5;
+    --info-soft:  #E1ECF8;
+
+    --dot:        rgba(80, 62, 45, 0.14);
+    --shadow-card:   0 2px 8px rgba(36, 29, 23, 0.06);
+    --shadow-float:  0 12px 28px rgba(36, 29, 23, 0.14), 0 2px 6px rgba(36, 29, 23, 0.08);
+    --shadow-fab:    0 8px 24px rgba(231, 120, 80, 0.38);
+    --shadow-mustard:0 8px 22px rgba(178, 122, 42, 0.34);
+    --shadow-card-l: 0 -8px 24px rgba(36, 29, 23, 0.10);
+
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --r-xl: 20px;
+    --r-hero: 22px;
+    --pill: 9999px;
+
+    --font-sans: Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-serif: Newsreader, Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0;
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+    background: var(--tan);
+    background-image: radial-gradient(circle, rgba(80,62,45,0.08) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .page {
+    max-width: 1640px;
+    margin: 0 auto;
+    padding: 56px 32px 96px;
+  }
+
+  header.hero { margin-bottom: 48px; }
+
+  .eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--coral); margin: 0 0 8px;
+  }
+  h1 {
+    font-family: var(--font-serif); font-weight: 500;
+    font-size: 36px; line-height: 1.15; letter-spacing: -0.01em;
+    margin: 0 0 12px; color: var(--text-primary);
+  }
+  .lede {
+    font-size: 15px; line-height: 1.55; max-width: 78ch;
+    color: var(--text-secondary); margin: 0;
+  }
+  .lede + .lede { margin-top: 10px; }
+  code, code.inline {
+    background: var(--subtle);
+    padding: 1px 6px; border-radius: 4px;
+    font-size: 12.5px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--text-primary);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(360px, 460px) minmax(320px, 1fr);
+    gap: 44px;
+    align-items: start;
+  }
+  @media (max-width: 1100px) {
+    .grid { grid-template-columns: 1fr; max-width: 480px; margin: 0 auto; }
+  }
+
+  .panel { display: flex; flex-direction: column; gap: 14px; }
+  .panel-head {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .panel-head .num {
+    font-family: var(--font-serif);
+    font-size: 28px;
+    color: var(--coral);
+    line-height: 1;
+  }
+  .panel-head .ttl {
+    font-family: var(--font-serif);
+    font-size: 24px;
+    color: var(--text-primary);
+  }
+  .panel-head .tag {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: var(--pill);
+    margin-left: auto;
+    background: var(--mustard-soft);
+    color: var(--mustard-deep);
+  }
+
+  .panel .desc {
+    font-size: 14px; line-height: 1.55; color: var(--text-secondary);
+  }
+
+  /* ────────── phone frame ────────── */
+  .phone {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 390 / 844;
+    border-radius: 44px;
+    background: #1B1610;
+    padding: 12px;
+    box-shadow: var(--shadow-float);
+    overflow: hidden;
+  }
+  .screen {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 32px;
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .statusbar {
+    height: 36px;
+    padding: 12px 20px 0;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; font-weight: 700; color: var(--text-primary);
+    flex-shrink: 0;
+  }
+  .statusbar .icons { display: flex; gap: 4px; align-items: center; }
+  .statusbar svg { width: 13px; height: 13px; }
+
+  /* ────────── Home header (matches screenshot 3) ────────── */
+  .home-head {
+    padding: 14px 20px 16px;
+    display: flex; justify-content: space-between; align-items: flex-end;
+    flex-shrink: 0;
+  }
+  .home-head .title-block .day {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.10em;
+    text-transform: uppercase; color: var(--coral);
+    margin-bottom: 4px;
+  }
+  .home-head .title-block .date {
+    font-family: var(--font-serif); font-size: 30px;
+    line-height: 1.05; letter-spacing: -0.01em;
+    color: var(--text-primary);
+  }
+  .home-head .actions { display: flex; gap: 10px; }
+  .head-icon-btn {
+    width: 38px; height: 38px;
+    border-radius: var(--pill);
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-primary);
+    box-shadow: var(--shadow-card);
+  }
+  .head-icon-btn svg { width: 16px; height: 16px; }
+
+  /* ────────── Backdrop body content (faint, behind scrim) ────────── */
+  .backdrop-body {
+    flex: 1;
+    overflow: hidden;
+    padding: 4px 16px;
+    display: flex; flex-direction: column; gap: 12px;
+    opacity: 0.7;
+  }
+  .bd-card {
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    padding: 14px 16px;
+    box-shadow: var(--shadow-card);
+  }
+  .bd-card .eb {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--coral);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .bd-card .body {
+    font-family: var(--font-serif);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  /* ────────── Scrim ────────── */
+  .scrim {
+    position: absolute; inset: 0;
+    background: rgba(36, 29, 23, 0.45);
+  }
+
+  /* ────────── The merged sheet ────────── */
+  .sheet {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: 0;
+    top: 110px;            /* leaves the Home header visible above */
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    border-radius: 24px 24px 0 0;
+    border-top: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-card-l);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .sheet .grabber {
+    width: 40px; height: 4px;
+    background: var(--border-strong);
+    border-radius: var(--pill);
+    margin: 10px auto 0;
+    flex-shrink: 0;
+  }
+
+  /* Scope toggle: Day | Recents */
+  .scope {
+    margin: 14px 16px 6px;
+    background: var(--subtle);
+    border-radius: var(--pill);
+    padding: 4px;
+    display: inline-flex;
+    align-self: flex-start;
+    flex-shrink: 0;
+  }
+  .scope .seg {
+    padding: 7px 18px;
+    border-radius: var(--pill);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .scope .seg.active {
+    background: var(--forest);
+    color: var(--canvas);
+    box-shadow: var(--shadow-card);
+  }
+
+  /* Scrollable interior */
+  .sheet-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 16px 24px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .sheet-body::-webkit-scrollbar { display: none; }
+
+  /* "What arrived?" title */
+  .arrived-title {
+    font-family: var(--font-serif);
+    font-size: 36px;
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+    color: var(--text-primary);
+    margin: 4px 0 0;
+  }
+  .arrived-sub {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: 14.5px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    margin: -2px 0 4px;
+  }
+
+  /* ────────── Scan hero ────────── */
+  .scan-hero {
+    background: linear-gradient(135deg, #C68628 0%, var(--mustard) 50%, var(--mustard-deep) 100%);
+    border-radius: var(--r-hero);
+    padding: 22px 22px 18px;
+    color: var(--canvas);
+    position: relative;
+    overflow: hidden;
+    box-shadow: var(--shadow-mustard);
+  }
+  .scan-hero::after {
+    /* subtle warm vignette top-right */
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 100% 0%, rgba(255,221,160,0.22), transparent 55%);
+    pointer-events: none;
+    border-radius: var(--r-hero);
+  }
+  .scan-hero .eb {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.78);
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 6px;
+  }
+  .scan-hero .eb i {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--canvas);
+    box-shadow: 0 0 6px rgba(255,255,255,0.6);
+  }
+  .scan-hero .h2 {
+    font-family: var(--font-serif);
+    font-weight: 700;
+    font-size: 30px;
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+    color: var(--text-primary);
+    margin: 0 0 6px;
+    max-width: 220px;
+  }
+  .scan-hero .blurb {
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--canvas);
+    margin: 0 0 16px;
+    max-width: 230px;
+  }
+  /* crop-corner brackets */
+  .scan-hero .corners {
+    position: absolute;
+    top: 16px; right: 16px;
+    width: 110px; height: 130px;
+    z-index: 1;
+  }
+  .scan-hero .corner {
+    position: absolute;
+    width: 22px; height: 22px;
+    border: 2.5px solid var(--canvas);
+    opacity: 0.85;
+  }
+  .scan-hero .corner.tl { top: 0; left: 0;     border-right: 0; border-bottom: 0; border-radius: 4px 0 0 0; }
+  .scan-hero .corner.tr { top: 0; right: 0;    border-left: 0;  border-bottom: 0; border-radius: 0 4px 0 0; }
+  .scan-hero .corner.bl { bottom: 0; left: 0;  border-right: 0; border-top: 0;    border-radius: 0 0 0 4px; }
+  .scan-hero .corner.br { bottom: 0; right: 0; border-left: 0;  border-top: 0;    border-radius: 0 0 4px 0; }
+  /* Page illustration inside corners */
+  .scan-hero .paper {
+    position: absolute;
+    top: 22px; right: 24px;
+    width: 78px; height: 96px;
+    background: var(--canvas);
+    border-radius: 6px;
+    box-shadow: 0 6px 14px rgba(36, 29, 23, 0.30);
+    transform: rotate(8deg);
+    z-index: 2;
+  }
+  .scan-hero .paper::before, .scan-hero .paper::after {
+    content: '';
+    position: absolute;
+    left: 12px; right: 18px;
+    height: 3px;
+    background: var(--text-tertiary);
+    border-radius: 1.5px;
+    opacity: 0.6;
+  }
+  .scan-hero .paper::before { top: 18px; }
+  .scan-hero .paper::after  { top: 28px; right: 28px; opacity: 0.4; }
+  .scan-hero .paper i {
+    position: absolute;
+    left: 12px; right: 18px;
+    height: 2px;
+    background: var(--text-tertiary);
+    border-radius: 1px;
+    opacity: 0.3;
+  }
+  .scan-hero .paper i:nth-child(1) { top: 38px; }
+  .scan-hero .paper i:nth-child(2) { top: 46px; right: 22px; }
+  .scan-hero .paper i:nth-child(3) { top: 54px; }
+  .scan-hero .paper i:nth-child(4) { top: 62px; right: 30px; }
+
+  .scan-hero .actions {
+    display: flex; gap: 10px;
+    position: relative; z-index: 3;
+  }
+  .scan-hero .btn-pri {
+    background: var(--canvas);
+    color: var(--mustard-deep);
+    padding: 11px 18px;
+    border-radius: var(--pill);
+    font-size: 14px;
+    font-weight: 700;
+    display: inline-flex; align-items: center; gap: 7px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.10);
+  }
+  .scan-hero .btn-pri svg { width: 14px; height: 14px; }
+  .scan-hero .btn-out {
+    background: rgba(255,255,255,0.15);
+    color: var(--canvas);
+    padding: 11px 18px;
+    border-radius: var(--pill);
+    font-size: 14px;
+    font-weight: 600;
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid rgba(255,255,255,0.35);
+  }
+  .scan-hero .btn-out svg { width: 14px; height: 14px; }
+
+  /* ────────── PRE-TAG section ────────── */
+  .section-row {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin: 6px 2px -2px;
+  }
+  .section-row .lbl {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.10em;
+    text-transform: uppercase; color: var(--text-secondary);
+  }
+  .section-row .sub {
+    font-size: 11.5px; color: var(--text-tertiary);
+  }
+
+  .tag-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .tag-tile {
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-md);
+    padding: 12px 12px 11px;
+    display: flex; flex-direction: column; gap: 5px;
+    box-shadow: var(--shadow-card);
+    min-height: 86px;
+  }
+  .tag-tile .ico {
+    width: 22px; height: 22px;
+    color: var(--forest);
+    margin-bottom: 2px;
+  }
+  .tag-tile .ico svg { width: 22px; height: 22px; }
+  .tag-tile .nm {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.1;
+  }
+  .tag-tile .ct {
+    font-size: 11.5px;
+    color: var(--text-tertiary);
+    line-height: 1.2;
+  }
+  .tag-tile.active {
+    background: var(--letter-bg);
+    border-color: rgba(142, 95, 31, 0.25);
+    box-shadow: 0 2px 10px rgba(142, 95, 31, 0.15);
+  }
+  .tag-tile.active .ico { color: var(--letter-deep); }
+  .tag-tile.active .ct { color: var(--letter-deep); font-weight: 600; }
+  .tag-tile.add { border-style: dashed; background: transparent; box-shadow: none; }
+  .tag-tile.add .ico { color: var(--text-secondary); }
+  .tag-tile.add .ct  { color: var(--text-tertiary); font-style: italic; }
+
+  /* ────────── OR CAPTURE DIFFERENTLY ────────── */
+  .divider-row {
+    display: flex; align-items: center; gap: 12px;
+    margin: 12px 2px 0;
+  }
+  .divider-row .ln {
+    flex: 1; height: 1px;
+    background: var(--border-def);
+  }
+  .divider-row .lbl {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.10em;
+    text-transform: uppercase; color: var(--text-tertiary);
+  }
+
+  .alt-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .alt-tile {
+    background: var(--forest-tint);
+    border: 1px solid rgba(122, 168, 116, 0.25);
+    border-radius: var(--r-md);
+    padding: 10px 4px 9px;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .alt-tile .ico {
+    width: 24px; height: 24px;
+    color: var(--forest);
+  }
+  .alt-tile .ico svg { width: 24px; height: 24px; }
+  .alt-tile .lbl {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  /* ────────── Annotation panel ────────── */
+  .annotations {
+    margin-top: 56px;
+    padding: 32px 36px;
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-card);
+  }
+  .annotations h2 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    font-size: 24px;
+    margin: 0 0 6px;
+  }
+  .annotations h3 {
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--coral);
+    margin: 24px 0 8px;
+  }
+  .annotations p {
+    font-size: 14px; line-height: 1.6;
+    color: var(--text-secondary);
+    margin: 0 0 10px;
+    max-width: 86ch;
+  }
+  .annotations p strong { color: var(--text-primary); }
+  .annotations .recipe {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 0;
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    margin-top: 12px;
+    font-size: 13px;
+  }
+  .annotations .recipe > * {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-def);
+  }
+  .annotations .recipe > .hd {
+    font-weight: 700;
+    background: var(--subtle);
+    color: var(--text-secondary);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .annotations .recipe > :nth-child(2n+1):not(.hd) {
+    background: var(--canvas);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .annotations .recipe > :last-child,
+  .annotations .recipe > :nth-last-child(2) { border-bottom: 0; }
+  .annotations .recipe span.same   { color: var(--text-secondary); }
+  .annotations .recipe span.change { color: var(--coral-deep); font-weight: 500; }
+
+  .qlist {
+    display: flex; flex-direction: column;
+    gap: 14px;
+    margin-top: 12px;
+  }
+  .qlist .q {
+    background: var(--canvas);
+    border-left: 3px solid var(--mustard);
+    padding: 12px 14px;
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  }
+  .qlist .q .qq {
+    font-weight: 700; color: var(--text-primary);
+    font-size: 13.5px; margin-bottom: 4px;
+  }
+  .qlist .q .qa {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+  }
+  .qlist .q .qa em {
+    font-style: normal;
+    color: var(--mustard-deep);
+    font-weight: 700;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="eyebrow">Releaf · QuickCapture · v2 · merged prototype</p>
+    <h1>Scan as the hero. Pre-tag at capture time. Other modes still one tap away.</h1>
+    <p class="lede">
+      You shared three references and asked me to merge them on top of the existing quick-capture
+      prototype. Here they are stitched into one sheet:
+      the <strong>"What arrived?" serif title + date subtitle</strong>,
+      the <strong>mustard "Scan a page" hero</strong> with Scan&nbsp;now / Import buttons,
+      the <strong>2×3 pre-tag category grid</strong> (Letter · Receipt · Medical · Recipe · School · + New),
+      the <strong>"or capture differently" divider</strong> with five smaller secondary tiles,
+      and the <strong>Day&nbsp;|&nbsp;Recents scope toggle</strong> at the top.
+      All sitting on the actual existing Home backdrop with the
+      <strong><code>TUESDAY · April 28 · search + calendar</code></strong> header from your screenshot 3.
+    </p>
+    <p class="lede">
+      This is a <strong>significant pivot from v1</strong> — instead of treating all capture modes as
+      visually equal tiles, it elevates Scan to the primary action and demotes the other five.
+      The annotation panel below covers the diff, the schema implications (pre-tag categories
+      ride existing <code>tags</code>), and the open questions before any code changes.
+    </p>
+  </header>
+
+  <div class="grid">
+
+    <!-- ────────── Phone ────────── -->
+    <section class="panel">
+      <div class="panel-head">
+        <span class="num">v2</span>
+        <span class="ttl">Merged sheet on existing Home</span>
+        <span class="tag">proposed</span>
+      </div>
+      <p class="desc">
+        FAB tap from the BottomNav. Sheet rises ~110 dp from the top, leaving the Home header
+        ("TUESDAY · April 28") visible above the scrim — same rule as iOS Photos / Maps sheets.
+        Internally scrolls when the keyboard or category grid pushes content past viewport.
+      </p>
+      <div class="phone">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 6.5C3.5 4 6 3 8 3s4.5 1 7 3.5l-1 1C12 5 10 4 8 4S4 5 2 7.5l-1-1zM4 9.5C5.5 8 6.5 7.5 8 7.5s2.5.5 4 2l-1 1C9.8 9.3 9 9 8 9s-1.8.3-3 1.5l-1-1zM8 11l2 2-2 2-2-2 2-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <!-- Home header (matches screenshot 3) -->
+          <div class="home-head">
+            <div class="title-block">
+              <div class="day">Tuesday</div>
+              <div class="date">April 28</div>
+            </div>
+            <div class="actions">
+              <div class="head-icon-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              </div>
+              <div class="head-icon-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- Backdrop body (faint, behind scrim) -->
+          <div class="backdrop-body">
+            <div class="bd-card">
+              <div class="eb">Today's notes</div>
+              <div class="body">Crisp morning. Heron at the pier again — perched on the third dock post for almost ten minutes…</div>
+            </div>
+          </div>
+
+          <!-- Scrim -->
+          <div class="scrim"></div>
+
+          <!-- ░░░░░ THE MERGED SHEET ░░░░░ -->
+          <div class="sheet">
+            <div class="grabber"></div>
+
+            <!-- Day | Recents scope toggle -->
+            <div class="scope">
+              <span class="seg active">Day</span>
+              <span class="seg">Recents</span>
+            </div>
+
+            <div class="sheet-body">
+
+              <!-- Title block -->
+              <h2 class="arrived-title">What arrived?</h2>
+              <p class="arrived-sub">Thursday, April 30 — pick a category to pre-tag your scan</p>
+
+              <!-- Mustard Scan hero -->
+              <div class="scan-hero">
+                <div class="corners">
+                  <span class="corner tl"></span>
+                  <span class="corner tr"></span>
+                  <span class="corner bl"></span>
+                  <span class="corner br"></span>
+                </div>
+                <div class="paper">
+                  <i></i><i></i><i></i><i></i>
+                </div>
+                <div class="eb"><i></i> Today's first capture</div>
+                <h3 class="h2">Scan a page</h3>
+                <p class="blurb">Auto-crops, OCRs, and files under today.</p>
+                <div class="actions">
+                  <span class="btn-pri">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M9 6V4h6v2"/></svg>
+                    Scan now
+                  </span>
+                  <span class="btn-out">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                    Import
+                  </span>
+                </div>
+              </div>
+
+              <!-- PRE-TAG section -->
+              <div class="section-row">
+                <span class="lbl">Pre-tag &amp; scan</span>
+                <span class="sub">tap to scan into category</span>
+              </div>
+              <div class="tag-grid">
+                <div class="tag-tile active">
+                  <div class="ico">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/></svg>
+                  </div>
+                  <div class="nm">Letter</div>
+                  <div class="ct">3 this week</div>
+                </div>
+                <div class="tag-tile">
+                  <div class="ico">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M6 3h12v18l-3-3-3 3-3-3-3 3z"/><path d="M9 8h6M9 12h6"/></svg>
+                  </div>
+                  <div class="nm">Receipt</div>
+                  <div class="ct">12 total</div>
+                </div>
+                <div class="tag-tile">
+                  <div class="ico">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 4v3M12 17v3M4 12h3M17 12h3M6.34 6.34l2.12 2.12M15.54 15.54l2.12 2.12M6.34 17.66l2.12-2.12M15.54 8.46l2.12-2.12"/></svg>
+                  </div>
+                  <div class="nm">Medical</div>
+                  <div class="ct">5 total</div>
+                </div>
+                <div class="tag-tile">
+                  <div class="ico">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>
+                  </div>
+                  <div class="nm">Recipe</div>
+                  <div class="ct">8 total</div>
+                </div>
+                <div class="tag-tile">
+                  <div class="ico">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 8 9 5 9-5"/><path d="M3 13l9 5 9-5"/></svg>
+                  </div>
+                  <div class="nm">School</div>
+                  <div class="ct">4 total</div>
+                </div>
+                <div class="tag-tile add">
+                  <div class="ico">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                  </div>
+                  <div class="nm" style="color: var(--text-secondary);">New tag</div>
+                  <div class="ct">customize</div>
+                </div>
+              </div>
+
+              <!-- OR CAPTURE DIFFERENTLY -->
+              <div class="divider-row">
+                <span class="ln"></span>
+                <span class="lbl">or capture differently</span>
+                <span class="ln"></span>
+              </div>
+              <div class="alt-row">
+                <div class="alt-tile">
+                  <div class="ico">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M9 6V4h6v2"/></svg>
+                  </div>
+                  <div class="lbl">Photo</div>
+                </div>
+                <div class="alt-tile">
+                  <div class="ico">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="9" y="3" width="6" height="13" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+                  </div>
+                  <div class="lbl">Voice</div>
+                </div>
+                <div class="alt-tile">
+                  <div class="ico">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/></svg>
+                  </div>
+                  <div class="lbl">To-do</div>
+                </div>
+                <div class="alt-tile">
+                  <div class="ico">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+                  </div>
+                  <div class="lbl">Contact</div>
+                </div>
+                <div class="alt-tile">
+                  <div class="ico">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                  </div>
+                  <div class="lbl">Place</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ────────── Annotation column ────────── -->
+    <section class="panel">
+      <div class="annotations" style="margin-top: 0;">
+        <h2>What this prototype does and doesn't claim</h2>
+        <p>
+          This is a <strong>visual stitch</strong>, not a full functional spec. It's intended to
+          let you and the team look at the merged composition and react before any
+          <code>QuickCaptureSheet.kt</code> changes land. Three things are happening at once
+          — pulling them apart for clarity:
+        </p>
+
+        <h3>1 · Layout merge</h3>
+        <p>
+          The "What arrived?" serif title from screenshot 1, the mustard Scan hero from
+          screenshot 1 + 2, and the "or capture differently" small-tile row from screenshot 2
+          are stacked into a single full-height bottom sheet. Day&nbsp;|&nbsp;Recents lives at the
+          top of the sheet (above the title) so it's reachable with the thumb without
+          scrolling. The Home header pattern (<code>TUESDAY · April 28 · search + calendar</code>)
+          stays visible above the scrim — it's not part of the sheet, it's the page underneath.
+        </p>
+
+        <h3>2 · Mode-set pivot from v1</h3>
+        <p>
+          v1 of this prototype put all capture modes on equal footing in a 2×3 tile grid.
+          v2 promotes <strong>Scan</strong> to a hero with category pre-tagging and demotes the
+          other five (Photo · Voice · To-do · Contact · Place) to a secondary row. This is a
+          substantive editorial choice: it bets that <strong>document scanning is the
+          highest-value, most-organizationally-fraught capture</strong> — receipts, medical
+          records, school papers — and that pre-tagging at capture time saves the user from
+          a separate filing pass. If most users actually open the app to write a note or
+          take a photo, this hierarchy is wrong and the v1 grid is closer to right.
+        </p>
+
+        <h3>3 · Pre-tag categories ride existing <code>tags</code></h3>
+        <div class="recipe">
+          <span class="hd">Concept</span>
+          <span class="hd">Implementation</span>
+
+          <span>Pre-tag categories</span>
+          <span class="same">Reuse <code>tags</code> table verbatim. The 6 tiles are just the user's
+          5 most-frequent <code>tag_id</code>s + an "add new" affordance. No new schema; the
+          counts ("3 this week", "12 total") are live SQL aggregates.</span>
+
+          <span>"Pre-tag" semantic</span>
+          <span class="change">Tap a category tile → open scanner with that <code>tag_id</code>
+          pre-set on the not-yet-saved <code>captures</code> row. On save, the row is committed
+          with <code>kind='scan'</code> + the pre-selected tag attached via <code>capture_tags</code>.
+          Pre-tag is a UX shortcut, not a separate column.</span>
+
+          <span>"3 this week" / "12 total"</span>
+          <span class="same">Both query <code>capture_tags</code> joined to <code>captures</code>
+          where <code>kind='scan'</code>. "this week" filters by <code>created_at &gt;=
+          datetime('now', '-7 days')</code>; "total" is unbounded.</span>
+
+          <span>"+ New tag"</span>
+          <span class="same">Same flow as Settings → Manage tags → New, returned to this sheet.
+          Inline create keeps the user in the capture flow.</span>
+
+          <span>Active-state highlight</span>
+          <span class="change">A pre-tag tile shows the <code>letter-bg</code> amber wash when
+          it was the last category the user pre-tagged with. Heuristic, not a setting — gets
+          out of the way after one capture.</span>
+
+          <span>"Scan now" vs "Import"</span>
+          <span class="same">Scan now → ML Kit Document Scanner / VisionKit. Import → system
+          file picker for an existing image or PDF, runs through the same OCR + crop
+          pipeline. Both end at the same <code>captures</code> row.</span>
+        </div>
+
+        <h3>4 · "Day | Recents" toggle</h3>
+        <p>
+          <strong>Day</strong> is what's shown — the capture surface. <strong>Recents</strong>
+          is a flip of the same sheet to a list view of the last 10–15 captures across
+          all kinds, with thumbnails / waveforms / first-line snippets. Tapping a recent
+          item opens its detail screen; long-press re-uses it ("scan another receipt like
+          this one"). Backed by a <code>SELECT * FROM captures WHERE deleted_at IS NULL
+          ORDER BY created_at DESC LIMIT 15</code> — no new tables.
+        </p>
+
+        <h3>5 · What's new visually</h3>
+        <p>
+          The mustard / saffron palette didn't exist in <code>design-tokens.json</code>. Adding
+          it as <code>color.scale.mustard.{50,100,500,700}</code> + role tokens
+          <code>color.scan.{primary,deep,soft,tint}</code> follows the same shape as the
+          existing coral and green entries. The mustard shadow under the hero
+          (<code>0&nbsp;8&nbsp;22&nbsp;rgba(178,&nbsp;122,&nbsp;42,&nbsp;0.34)</code>) is new — sister to
+          <code>shadow-fab</code> for the coral FAB.
+        </p>
+
+        <h3>Open questions</h3>
+        <div class="qlist">
+          <div class="q">
+            <div class="qq">1 · Is Scan really the right hero?</div>
+            <div class="qa">
+              The whole prototype hinges on this. If the daily-capture user opens the app to
+              write or photograph 80% of the time, Scan-as-hero is wrong and v1's equal grid
+              wins. <em>Recommend:</em> instrument the existing v1 sheet for one release —
+              count taps per mode — before committing to v2.
+            </div>
+          </div>
+          <div class="q">
+            <div class="qq">2 · Where do "the rest" of the captures appear when there's no scan intent?</div>
+            <div class="qa">
+              Right now Photo / Voice / To-do / Contact / Place are visually demoted to a
+              5-tile row at the bottom. That's fine if Scan dominates, but feels punitive
+              if a user is here for Voice. <em>Consider:</em> if the user has captured zero
+              scans in the last 7 days, swap the hero to a Photo or Voice hero personalized
+              by recency. A single "what arrived?" sheet that reshuffles based on usage.
+            </div>
+          </div>
+          <div class="q">
+            <div class="qq">3 · "What arrived?" + "Today's first capture" — too much?</div>
+            <div class="qa">
+              The sheet has the serif title <em>and</em> the eyebrow inside the hero. Reads
+              as two competing voices. <em>Recommend:</em> drop the eyebrow inside the hero;
+              let "What arrived?" carry the framing, the hero just describes the action.
+            </div>
+          </div>
+          <div class="q">
+            <div class="qq">4 · How do pre-tag tiles handle a user with 30 tags?</div>
+            <div class="qa">
+              Six tiles fits 5 + "new". Beyond that, options: a horizontal scroller after
+              tile 5; a "More tags" drill-in that swaps the grid to a full list; or rank by
+              recency-weighted frequency and clip to the top 5. <em>Recommend:</em> the
+              recency-weighted top-5 — keeps the grid stable, surfaces the seasonal stuff
+              ("medical" during a doctor visit week, "school" during back-to-school).
+            </div>
+          </div>
+          <div class="q">
+            <div class="qq">5 · Schema: is "scan category" the same as "tag"?</div>
+            <div class="qa">
+              Treating them as identical (this prototype) means scans and notes share the
+              same flat tag namespace. A user tagging notes with "travel" gets that tag
+              available for scans too — usually fine, occasionally weird (you don't want
+              "Letter" showing up as a tag suggestion on a hike photo). <em>Alternative:</em>
+              add a <code>scope</code> column to <code>tags</code> with values
+              <code>scan | universal</code> — costs one column, lets us filter the
+              pre-tag grid to scan-scoped tags only. <em>Recommend:</em> ship without scope
+              first; add it if real usage shows the namespace pollution.
+            </div>
+          </div>
+        </div>
+
+        <h3>Implementation footprint</h3>
+        <p>
+          One file changes meaningfully on each platform. <strong>Android</strong>:
+          <code>QuickCaptureSheet.kt</code> swaps the LazyColumn-of-rows for: a Day/Recents
+          tab row, a serif title block, a <code>ScanHeroCard</code> composable, a
+          <code>LazyVerticalGrid(GridCells.Fixed(3))</code> over the user's top-5 tags + an
+          add tile, a divider row, and a <code>LazyRow</code> of the 5 alt-mode tiles.
+          <strong>iOS</strong>: <code>QuickCaptureSheet.swift</code> mirrors with a
+          <code>LazyVGrid</code>. Tokens: add a <code>mustard</code> ramp + <code>scan</code>
+          role family to <code>design-tokens.json</code>; the pipeline regenerates the
+          platform theme files. No SQL schema migration if we accept question 5's "tags
+          are tags" answer.
+        </p>
+      </div>
+    </section>
+
+  </div>
+
+</div>
+</body>
+</html>

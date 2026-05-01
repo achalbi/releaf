@@ -13,7 +13,8 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.SkipQueryVerification
+import androidx.room.RawQuery
+import androidx.room.RoomRawQuery
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -123,69 +124,37 @@ interface PageDao {
     suspend fun findArchived(): List<PageEntity>
 
     /**
-     * Full-text search across *every* live page the user can see. `query` must
-     * already be in FTS5 MATCH syntax — the repo sanitizes it (reuses the
-     * same builder as notepad; see `NotebookSearchUtils.buildFtsQuery`).
+     * Full-text search across *every* live page the user can see. The query
+     * is built by the repository as a [RoomRawQuery] (see
+     * `PageRepository.searchAll`); the bound MATCH expression must already
+     * be in FTS5 MATCH syntax (see `FtsQuery.build`).
      *
-     * @SkipQueryVerification is required because `fts_page_notes` is a
-     * virtual table installed via SchemaCallback and isn't known to KSP's
-     * @Entity-derived schema sandbox. Keep this a one-shot suspend query:
-     * Room Flow invalidation cannot track the virtual FTS table.
+     * Uses `@RawQuery` (not `@Query`) because `fts_page_notes` is a virtual
+     * table installed by `ReleafDatabase.SchemaCallback` and isn't declared
+     * as an @Entity. Room 2.7's invalidation tracker validates every observed
+     * table at query time — including for `suspend` queries, since the
+     * generated DAO_Impl routes them through `FlowUtil.createFlow` for
+     * thread management — and would throw `IllegalArgumentException: There
+     * is no table with name fts_page_notes` if the table name appeared in a
+     * `@Query` SQL. `@RawQuery(observedEntities = [...])` skips SQL parsing
+     * entirely and only watches the entities listed.
      */
-    @SkipQueryVerification
-    @Query(
-        """
-        SELECT p.* FROM pages p
-        JOIN fts_page_notes fts ON fts.page_id = p.id
-        WHERE p.deleted_at IS NULL
-          AND fts_page_notes MATCH :query
-        ORDER BY rank
-        """
-    )
-    suspend fun searchAllActive(query: String): List<PageEntity>
+    @RawQuery(observedEntities = [PageEntity::class])
+    suspend fun searchAllActive(query: RoomRawQuery): List<PageEntity>
 
     /**
      * Same global FTS search, but with notebook/chapter labels attached so
-     * the notebook tab can tell the user where a matching page lives.
+     * the notebook tab can tell the user where a matching page lives. See
+     * the comment on [searchAllActive] for the `@RawQuery` rationale; observed
+     * entities are widened to include `chapters` and `notebooks` because the
+     * SELECT joins them.
      */
-    @SkipQueryVerification
-    @Query(
-        """
-        SELECT
-            p.id AS id,
-            p.title AS title,
-            p.notes AS notes,
-            p.updated_at AS updatedAt,
-            n.title AS notebookTitle,
-            c.title AS chapterTitle
-        FROM pages p
-        JOIN chapters c ON c.id = p.chapter_id
-        JOIN notebooks n ON n.id = c.notebook_id
-        JOIN fts_page_notes fts ON fts.page_id = p.id
-        WHERE p.deleted_at IS NULL
-          AND c.deleted_at IS NULL
-          AND n.deleted_at IS NULL
-          AND fts_page_notes MATCH :query
-        ORDER BY rank
-        """
-    )
-    suspend fun searchAllActiveWithContext(query: String): List<PageSearchHit>
+    @RawQuery(observedEntities = [PageEntity::class, ChapterEntity::class, NotebookEntity::class])
+    suspend fun searchAllActiveWithContext(query: RoomRawQuery): List<PageSearchHit>
 
     /** Same as [searchAllActive] but scoped to one notebook. */
-    @SkipQueryVerification
-    @Query(
-        """
-        SELECT p.* FROM pages p
-        JOIN chapters c ON c.id = p.chapter_id
-        JOIN fts_page_notes fts ON fts.page_id = p.id
-        WHERE c.notebook_id = :notebookId
-          AND p.deleted_at IS NULL
-          AND c.deleted_at IS NULL
-          AND fts_page_notes MATCH :query
-        ORDER BY rank
-        """
-    )
-    suspend fun searchInNotebook(notebookId: String, query: String): List<PageEntity>
+    @RawQuery(observedEntities = [PageEntity::class, ChapterEntity::class])
+    suspend fun searchInNotebook(query: RoomRawQuery): List<PageEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entry: PageEntity)

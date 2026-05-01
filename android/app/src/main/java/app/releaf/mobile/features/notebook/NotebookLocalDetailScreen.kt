@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.automirrored.filled.MenuBook
@@ -94,6 +95,7 @@ fun NotebookLocalDetailScreen(
     onBack: () -> Unit,
     onHome: () -> Unit,
     onOpenChapter: (String) -> Unit,
+    onOpenPage: (String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: NotebookLocalDetailViewModel = viewModel(factory = NotebookLocalDetailViewModel.Factory),
 ) {
@@ -102,6 +104,8 @@ fun NotebookLocalDetailScreen(
     val scope = rememberCoroutineScope()
     var showCreateChapterDialog by rememberSaveable { mutableStateOf(false) }
     var showEditNotebookDialog by rememberSaveable { mutableStateOf(false) }
+    var showArchivedChaptersSheet by rememberSaveable { mutableStateOf(false) }
+    val archivedChapters by viewModel.archivedChapters.collectAsState()
     // Soft-delete confirmation for the notebook itself — surfaced from
     // the destructive button on the Edit modal. Splits state from the
     // edit dialog so closing the edit modal doesn't kill the confirm
@@ -110,6 +114,11 @@ fun NotebookLocalDetailScreen(
     // Pending delete — holds the chapter the user swiped until they confirm
     // via the guard dialog.
     var pendingChapterDelete by remember { mutableStateOf<ChapterEntity?>(null) }
+    // Flat-notebook page delete (same shape as chapter delete — guard
+    // dialog routes through to softDeletePage with snackbar undo).
+    var pendingPageDelete by remember {
+        mutableStateOf<app.releaf.mobile.data.notebook.PageEntity?>(null)
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -185,17 +194,35 @@ fun NotebookLocalDetailScreen(
                 state.notFound -> NotFoundState(onBack = onBack, modifier = Modifier.weight(1f))
                 else -> {
                     NotebookDetailBody(
-                        state             = state,
-                        onAddChapter      = { showCreateChapterDialog = true },
-                        onOpenChapter     = onOpenChapter,
-                        onMoveChapterUp   = { id ->
+                        state              = state,
+                        archivedCount      = archivedChapters.size,
+                        onAddChapter       = { showCreateChapterDialog = true },
+                        onOpenChapter      = onOpenChapter,
+                        onMoveChapterUp    = { id ->
                             viewModel.moveChapter(id, ChapterMoveDirection.Up)
                         },
-                        onMoveChapterDown = { id ->
+                        onMoveChapterDown  = { id ->
                             viewModel.moveChapter(id, ChapterMoveDirection.Down)
                         },
-                        onDeleteChapter   = { chapter -> pendingChapterDelete = chapter },
-                        modifier          = Modifier.weight(1f, fill = true),
+                        onDeleteChapter    = { chapter -> pendingChapterDelete = chapter },
+                        onViewArchived     = { showArchivedChaptersSheet = true },
+                        // Flat-notebook hooks — only fire when the
+                        // notebook has flat=true. Open routes into the
+                        // page editor via the screen-level callback;
+                        // add creates under the sentinel chapter; move
+                        // reorders within the sentinel's page list.
+                        onAddPage          = {
+                            viewModel.createPageOnDefault(onCreated = onOpenPage)
+                        },
+                        onOpenPage         = onOpenPage,
+                        onMovePageUp       = { id ->
+                            viewModel.movePage(id, ChapterMoveDirection.Up)
+                        },
+                        onMovePageDown     = { id ->
+                            viewModel.movePage(id, ChapterMoveDirection.Down)
+                        },
+                        onDeletePage       = { page -> pendingPageDelete = page },
+                        modifier           = Modifier.weight(1f, fill = true),
                     )
                 }
             }
@@ -312,6 +339,39 @@ fun NotebookLocalDetailScreen(
             },
         )
     }
+
+    if (showArchivedChaptersSheet) {
+        ArchivedChaptersSheet(
+            chapters  = archivedChapters,
+            onDismiss = { showArchivedChaptersSheet = false },
+            onRestore = { id -> viewModel.undoDeleteChapter(id) },
+        )
+    }
+
+    pendingPageDelete?.let { page ->
+        val title = page.title?.takeIf { it.isNotBlank() } ?: "Untitled page"
+        DeleteConfirmationDialog(
+            title = "Delete page?",
+            message = "“$title” will be deleted. " +
+                "You can undo this immediately after.",
+            onDismiss = { pendingPageDelete = null },
+            onConfirm = {
+                val id = page.id
+                pendingPageDelete = null
+                viewModel.softDeletePage(id)
+                scope.launch {
+                    val result = snackbarHostState.showSnackbar(
+                        message     = "Page deleted",
+                        actionLabel = "Undo",
+                        duration    = SnackbarDuration.Short,
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        viewModel.undoDeletePage(id)
+                    }
+                }
+            },
+        )
+    }
 }
 
 /* ---------- body ---------- */
@@ -319,11 +379,18 @@ fun NotebookLocalDetailScreen(
 @Composable
 private fun NotebookDetailBody(
     state: NotebookLocalDetailUiState,
+    archivedCount: Int,
     onAddChapter: () -> Unit,
     onOpenChapter: (String) -> Unit,
     onMoveChapterUp: (String) -> Unit,
     onMoveChapterDown: (String) -> Unit,
     onDeleteChapter: (ChapterEntity) -> Unit,
+    onViewArchived: () -> Unit,
+    onAddPage: () -> Unit,
+    onOpenPage: (String) -> Unit,
+    onMovePageUp: (String) -> Unit,
+    onMovePageDown: (String) -> Unit,
+    onDeletePage: (app.releaf.mobile.data.notebook.PageEntity) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val notebook = state.notebook ?: return
@@ -339,20 +406,44 @@ private fun NotebookDetailBody(
     ) {
         item(key = "hero") {
             NotebookHeroCard(
-                notebook = notebook,
-                chapterCount = state.totalChapterCount,
-                pageCount = state.totalPageCount,
+                notebook       = notebook,
+                chapterCount   = state.totalChapterCount,
+                pageCount      = state.totalPageCount,
+                // Falls back to the notebook's own updatedAt when the
+                // tree is empty so the row never shows a blank time.
+                lastEditedIso  = state.lastEditedAt ?: notebook.updatedAt,
             )
         }
-        item(key = "chapters_card") {
-            ChaptersCard(
-                state      = state,
-                onAdd      = onAddChapter,
-                onOpen     = onOpenChapter,
-                onMoveUp   = onMoveChapterUp,
-                onMoveDown = onMoveChapterDown,
-                onDelete   = onDeleteChapter,
-            )
+        // Flat notebooks skip the chapter level — render a pages card
+        // bound directly to the sentinel chapter's pages so the user
+        // sees a notebook → page hierarchy. Chaptered notebooks
+        // continue to render the chapters card.
+        if (notebook.flat) {
+            val sentinel = state.chapters.firstOrNull()
+            val pages    = sentinel?.let { state.pagesByChapter[it.id] }.orEmpty()
+            item(key = "pages_card") {
+                FlatPagesCard(
+                    pages       = pages,
+                    onAdd       = onAddPage,
+                    onOpen      = onOpenPage,
+                    onMoveUp    = onMovePageUp,
+                    onMoveDown  = onMovePageDown,
+                    onDelete    = onDeletePage,
+                )
+            }
+        } else {
+            item(key = "chapters_card") {
+                ChaptersCard(
+                    state          = state,
+                    archivedCount  = archivedCount,
+                    onAdd          = onAddChapter,
+                    onOpen         = onOpenChapter,
+                    onMoveUp       = onMoveChapterUp,
+                    onMoveDown     = onMoveChapterDown,
+                    onDelete       = onDeleteChapter,
+                    onViewArchived = onViewArchived,
+                )
+            }
         }
         item { Spacer(Modifier.height(AppSpacing.s6)) }
     }
@@ -373,6 +464,7 @@ private fun NotebookHeroCard(
     notebook: NotebookEntity,
     chapterCount: Int,
     pageCount: Int,
+    lastEditedIso: String,
 ) {
     Column(
         modifier = Modifier
@@ -391,6 +483,11 @@ private fun NotebookHeroCard(
             horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
             verticalAlignment     = Alignment.Top,
         ) {
+            // Center column ("Pages") gets a smaller weight than the
+            // outer two — its content (single small integer) needs less
+            // room than the multi-line "Chapter(s)" label or the
+            // wrappable "28 Apr '26" date, so dropping its share keeps
+            // the row visually balanced.
             StatCell(
                 value = chapterCount.toString(),
                 label = if (chapterCount == 1) "CHAPTER" else "CHAPTERS",
@@ -400,7 +497,7 @@ private fun NotebookHeroCard(
             StatCell(
                 value = pageCount.toString(),
                 label = if (pageCount == 1) "PAGE" else "PAGES",
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(0.7f),
             )
             VerticalRule()
             CreatedStatCell(
@@ -410,7 +507,7 @@ private fun NotebookHeroCard(
         }
         HairlineDivider()
         LastOpenedRow(
-            updatedAtIso = notebook.updatedAt,
+            updatedAtIso = lastEditedIso,
             modifier     = Modifier.padding(
                 horizontal = AppSpacing.s4,
                 vertical   = AppSpacing.s1,
@@ -472,14 +569,16 @@ private fun CreatedStatCell(
         horizontalAlignment = Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
     ) {
+        // Allow the date to wrap (e.g. "28 Apr" / "'26") rather than
+        // truncating with an ellipsis on narrow columns.
         Text(
             text     = display,
             style    = androidx.compose.ui.text.TextStyle(
                 fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
                 fontSize   = 18.sp,
             ),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            maxLines = 2,
+            softWrap = true,
         )
         Text(
             text  = "CREATED",
@@ -533,7 +632,7 @@ private fun LastOpenedRow(
         val display = remember(rel, primary, secondary) {
             buildAnnotatedString {
                 withStyle(SpanStyle(color = secondary)) {
-                    append("Last opened ")
+                    append("Last edited ")
                 }
                 withStyle(
                     SpanStyle(
@@ -557,11 +656,13 @@ private fun LastOpenedRow(
 @Composable
 private fun ChaptersCard(
     state: NotebookLocalDetailUiState,
+    archivedCount: Int,
     onAdd: () -> Unit,
     onOpen: (String) -> Unit,
     onMoveUp: (String) -> Unit,
     onMoveDown: (String) -> Unit,
     onDelete: (ChapterEntity) -> Unit,
+    onViewArchived: () -> Unit,
 ) {
     CollapsibleCard(
         title = "Chapters",
@@ -603,7 +704,242 @@ private fun ChaptersCard(
                     )
                 }
             }
+            // Archived footer — only renders when there's something
+            // to recover. Clicking opens the bottom sheet.
+            if (archivedCount > 0) {
+                HairlineDivider()
+                Row(
+                    modifier              = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onViewArchived)
+                        .padding(
+                            horizontal = AppSpacing.s4,
+                            vertical   = AppSpacing.s3,
+                        ),
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+                ) {
+                    Icon(
+                        imageVector        = Icons.Filled.Archive,
+                        contentDescription = null,
+                        tint               = AppColors.TextSecondary,
+                        modifier           = Modifier.size(16.dp),
+                    )
+                    Text(
+                        text  = if (archivedCount == 1)
+                            "View 1 archived chapter"
+                        else
+                            "View $archivedCount archived chapters",
+                        style = AppTypography.Meta,
+                        color = AppColors.TextSecondary,
+                    )
+                }
+            }
         }
+    }
+}
+
+/**
+ * Flat-notebook pages card — same shape as the chapters card but binds
+ * to the sentinel chapter's pages directly. Inline implementation
+ * (rather than reusing ChapterLocalDetailScreen.PagesCard) so the
+ * notebook detail screen owns its visuals end-to-end and the chapter
+ * detail screen can keep evolving independently.
+ */
+@Composable
+private fun FlatPagesCard(
+    pages: List<app.releaf.mobile.data.notebook.PageEntity>,
+    onAdd: () -> Unit,
+    onOpen: (String) -> Unit,
+    onMoveUp: (String) -> Unit,
+    onMoveDown: (String) -> Unit,
+    onDelete: (app.releaf.mobile.data.notebook.PageEntity) -> Unit,
+) {
+    CollapsibleCard(
+        title = "Pages",
+        subtitle = "Notes, photos, and scans in this notebook.",
+        expanded = true,
+        onToggle = {},
+        showCollapseToggle = false,
+        titleStyle = AppTypography.SectionTitleLight.copy(fontSize = 16.sp),
+        trailing = {
+            RoundIconButton(
+                icon = Icons.Filled.Add,
+                contentDescription = "New page",
+                onClick = onAdd,
+            )
+        },
+    ) {
+        if (pages.isEmpty()) {
+            EmptyFlatPagesBody(onAdd = onAdd)
+        } else {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                pages.forEachIndexed { index, page ->
+                    if (index > 0) HairlineDivider()
+                    FlatPageRow(
+                        page         = page,
+                        order        = index + 1,
+                        canMoveUp    = index > 0,
+                        canMoveDown  = index < pages.lastIndex,
+                        onOpen       = { onOpen(page.id) },
+                        onMoveUp     = { onMoveUp(page.id) },
+                        onMoveDown   = { onMoveDown(page.id) },
+                        onDelete     = { onDelete(page) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyFlatPagesBody(onAdd: () -> Unit) {
+    Column(
+        modifier            = Modifier
+            .fillMaxWidth()
+            .padding(AppSpacing.s6),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+    ) {
+        Text(
+            text     = "No pages yet",
+            style    = AppTypography.SectionTitleLight,
+            color    = AppColors.TextSecondary,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            text     = "Tap the + button to start writing.",
+            style    = AppTypography.Body,
+            color    = AppColors.TextTertiary,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(AppSpacing.s1))
+        TextButton(onClick = onAdd) {
+            Text("Create a page", color = AppAccent.primary, style = AppTypography.Body)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FlatPageRow(
+    page: app.releaf.mobile.data.notebook.PageEntity,
+    order: Int,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onOpen: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) { onDelete(); false } else false
+        },
+    )
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = true,
+        backgroundContent = { FlatPageSwipeDeleteBackground() },
+    ) {
+        val titleText = page.title?.takeIf { it.isNotBlank() } ?: "Page $order"
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(AppColors.CardSolid)
+                .clickable(onClick = onOpen)
+                .padding(AppSpacing.s4),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+            verticalAlignment     = Alignment.Top,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(AppRadius.md))
+                    .background(AppAccent.soft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.AutoMirrored.Filled.MenuBook,
+                    contentDescription = null,
+                    tint               = AppAccent.deep,
+                    modifier           = Modifier.size(20.dp),
+                )
+            }
+            Column(
+                modifier            = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.s1),
+            ) {
+                Row(
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+                ) {
+                    Text(
+                        text     = titleText,
+                        style    = AppTypography.SectionTitleLight.copy(fontSize = 16.sp),
+                        color    = AppColors.TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    MetaPill(text = "Pg. $order")
+                }
+                page.description?.takeIf { it.isNotBlank() }?.let { desc ->
+                    Text(
+                        text     = desc,
+                        style    = androidx.compose.ui.text.TextStyle(
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                            fontStyle  = androidx.compose.ui.text.font.FontStyle.Italic,
+                            fontSize   = 14.sp,
+                        ),
+                        color    = AppColors.TextSecondary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    text  = "Updated ${relativeTimeAgo(page.updatedAt)}",
+                    style = AppTypography.Meta,
+                    color = AppColors.TextTertiary,
+                )
+            }
+            Column(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                ChapterReorderArrow(
+                    icon        = Icons.Filled.KeyboardArrowUp,
+                    description = "Move page up",
+                    enabled     = canMoveUp,
+                    onClick     = onMoveUp,
+                )
+                ChapterReorderArrow(
+                    icon        = Icons.Filled.KeyboardArrowDown,
+                    description = "Move page down",
+                    enabled     = canMoveDown,
+                    onClick     = onMoveDown,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FlatPageSwipeDeleteBackground() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AppColors.Danger)
+            .padding(horizontal = AppSpacing.s4),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        Icon(
+            Icons.Filled.Delete,
+            contentDescription = null,
+            tint               = AppColors.OnAccent,
+            modifier           = Modifier.size(20.dp),
+        )
     }
 }
 
@@ -951,6 +1287,130 @@ private fun TitledDialog(
         dismissButton = null,
         containerColor = AppColors.CardSolid,
     )
+}
+
+/**
+ * Bottom sheet listing archived chapters under this notebook. Each
+ * row shows the chapter title + archived-date with a Restore pill on
+ * the trailing edge — tapping it lifts the chapter back to active
+ * via the existing undoDeleteChapter flow. Self-dismisses if the
+ * archived list drops to zero (e.g. after the last restore) so the
+ * user doesn't sit in front of an empty sheet.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ArchivedChaptersSheet(
+    chapters: List<ChapterEntity>,
+    onDismiss: () -> Unit,
+    onRestore: (String) -> Unit,
+) {
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(
+        skipPartiallyExpanded = false,
+    )
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = AppColors.CardSolid,
+        contentColor     = AppColors.TextPrimary,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.s5)
+                .padding(bottom = AppSpacing.s5),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+        ) {
+            Text(
+                text  = "ARCHIVED",
+                style = AppTypography.Eyebrow,
+                color = AppColors.ThemeGreenDeep,
+            )
+            Text(
+                text  = "Archived chapters",
+                style = androidx.compose.ui.text.TextStyle(
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                    fontSize   = 24.sp,
+                ),
+                color = AppColors.TextPrimary,
+            )
+            Text(
+                text  = "Chapters you've archived stay here. Restore brings them back to this notebook in their original position.",
+                style = AppTypography.Meta,
+                color = AppColors.TextSecondary,
+            )
+            if (chapters.isEmpty()) {
+                Text(
+                    text  = "Nothing archived yet.",
+                    style = AppTypography.Body,
+                    color = AppColors.TextTertiary,
+                    modifier = Modifier.padding(vertical = AppSpacing.s3),
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+                    chapters.forEach { chapter ->
+                        ArchivedChapterRow(
+                            chapter   = chapter,
+                            onRestore = { onRestore(chapter.id) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArchivedChapterRow(
+    chapter: ChapterEntity,
+    onRestore: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppRadius.md))
+            .background(AppColors.Canvas)
+            .border(1.dp, AppColors.BorderDefault, RoundedCornerShape(AppRadius.md))
+            .padding(horizontal = AppSpacing.s3, vertical = AppSpacing.s3),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+    ) {
+        Icon(
+            imageVector        = Icons.Filled.Archive,
+            contentDescription = null,
+            tint               = AppColors.GreenText,
+            modifier           = Modifier.size(14.dp),
+        )
+        Column(
+            modifier            = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text     = chapter.title.ifBlank { "Untitled chapter" },
+                style    = AppTypography.SectionTitleLight.copy(fontSize = 15.sp),
+                color    = AppColors.TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text  = "Archived ${relativeTimeAgo(chapter.deletedAt)}",
+                style = AppTypography.Tag,
+                color = AppColors.TextTertiary,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(AppRadius.pill))
+                .background(AppColors.GreenSoft)
+                .clickable(onClick = onRestore)
+                .padding(horizontal = AppSpacing.s3, vertical = AppSpacing.s1),
+        ) {
+            Text(
+                text  = "Restore",
+                style = AppTypography.Button,
+                color = AppColors.GreenText,
+            )
+        }
+    }
 }
 
 @Composable

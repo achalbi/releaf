@@ -132,7 +132,6 @@ import app.releaf.mobile.ui.theme.AppAccent
 import app.releaf.mobile.ui.theme.AppRadius
 import app.releaf.mobile.ui.theme.AppSpacing
 import app.releaf.mobile.ui.theme.AppTypography
-import app.releaf.mobile.ui.theme.DailyPlant
 import com.mohamedrejeb.richeditor.model.RichTextState
 import java.time.Instant
 import java.time.LocalDate
@@ -152,6 +151,13 @@ fun NotepadEditorScreen(
     /// Contacts / Location). Drives the "open page details at the
     /// right tab" affordance from the Recents new-entry picker.
     initialMode: app.releaf.mobile.ui.components.CaptureMode? = null,
+    /// When non-null, the matching section auto-fires its primary
+    /// action on first composition. Drives the Capture-page tile
+    /// flows: tapping a tile lands here scrolled to the section AND
+    /// kicks off the section's action (scan, record, GPS request,
+    /// open contact sheet, focus todo input, open notes sheet) so
+    /// the user doesn't take a second tap inside the section.
+    autoLaunch: app.releaf.mobile.ui.components.CaptureMode? = null,
     viewModel: NotepadEditorViewModel = viewModel(factory = NotepadEditorViewModel.Factory),
 ) {
     val state by viewModel.state.collectAsState()
@@ -473,6 +479,11 @@ fun NotepadEditorScreen(
                         // with a specific mode, OverviewPane lands on
                         // the matching CaptureTabBar tab.
                         initialCaptureMode = initialMode,
+                        // Forwarded from the route layer — set by
+                        // Capture-page tiles so the matching section
+                        // auto-fires its primary action on first
+                        // composition (scan, record, GPS, …).
+                        autoLaunch = autoLaunch,
                     )
                 }
             }
@@ -638,7 +649,7 @@ fun NotepadEditorScreen(
     // sheet on PageDetailScreen so the editorial layer reads
     // consistently across both editors.
     if (showPlantInfo) {
-        NotepadDailyPlantInfoSheet(
+        app.releaf.mobile.ui.components.DailyPlantInfoSheet(
             plant     = plant,
             onDismiss = { showPlantInfo = false },
         )
@@ -808,79 +819,8 @@ private fun ComposedTopZone(
  * copy as the equivalent sheet on PageDetailScreen — the editorial
  * surface should read identically whichever editor surfaced it.
  */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun NotepadDailyPlantInfoSheet(
-    plant: DailyPlant,
-    onDismiss: () -> Unit,
-) {
-    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(
-        skipPartiallyExpanded = false,
-    )
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState       = sheetState,
-        containerColor   = AppColors.CardSolid,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    start  = AppSpacing.s5,
-                    end    = AppSpacing.s5,
-                    top    = AppSpacing.s2,
-                    bottom = AppSpacing.s6,
-                ),
-            verticalArrangement = Arrangement.spacedBy(AppSpacing.s4),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
-                Text(
-                    text  = "PLANT OF THE PAGE",
-                    style = AppTypography.Eyebrow,
-                    color = AppColors.ThemeGreenDeep,
-                )
-                Text(
-                    text  = plant.name,
-                    style = TextStyle(fontFamily = FontFamily.Serif, fontSize = 36.sp),
-                    color = AppColors.TextPrimary,
-                )
-                if (plant.commonName.isNotEmpty()) {
-                    Text(
-                        text  = plant.commonName,
-                        style = TextStyle(
-                            fontFamily = FontFamily.Serif,
-                            fontSize   = 18.sp,
-                            fontStyle  = FontStyle.Italic,
-                        ),
-                        color = AppColors.TextSecondary,
-                    )
-                }
-            }
-
-            HairlineDivider()
-
-            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s4)) {
-                NotepadPlantInfoBlock(title = "EPITHET",          body = plant.epithet)
-                NotepadPlantInfoBlock(title = "TRADITIONAL USES", body = plant.usedFor)
-            }
-
-            TextButton(
-                onClick  = onDismiss,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Close", color = AppColors.TextSecondary)
-            }
-        }
-    }
-}
-
-@Composable
-private fun NotepadPlantInfoBlock(title: String, body: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s1)) {
-        Text(text = title, style = AppTypography.Eyebrow, color = AppColors.TextSecondary)
-        Text(text = body,  style = AppTypography.Body,    color = AppColors.TextPrimary)
-    }
-}
+// Plant info sheet moved to shared DailyPlantInfoSheet — see
+// app.releaf.mobile.ui.components.DailyPlantInfoSheet.
 
 @Composable
 private fun EditorBody(

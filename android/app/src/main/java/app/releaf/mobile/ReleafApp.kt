@@ -38,6 +38,7 @@ import app.releaf.mobile.data.notebook.NotebookRepository
 import app.releaf.mobile.data.notebook.PageRepository
 import app.releaf.mobile.data.shelf.ShelfRepository
 import app.releaf.mobile.data.notepad.NotepadRepository
+import app.releaf.mobile.data.panchanga.PanchangaRepository
 import app.releaf.mobile.data.perspective.PerspectiveRepository
 import app.releaf.mobile.data.reminder.ReminderAlarmReceiver
 import app.releaf.mobile.data.reminder.ReminderRepository
@@ -102,6 +103,17 @@ class ReleafApp : Application() {
         private set
 
     lateinit var reminderRepository: ReminderRepository
+        private set
+
+    /**
+     * Bundled Vontikoppal / Mysore Panchanga dataset (Sri Parabhava
+     * year, 2026-03-19 → 2027-04-06). Parsed once on first launch
+     * from `assets/panchanga_2026_27.csv` and cached in Room; the
+     * full-screen calendar (`features/calendar`) reads from this
+     * repo. Source-of-truth dataset is community / OCR-derived;
+     * see `PanchangaEntity` for the upstream link.
+     */
+    lateinit var panchangaRepository: PanchangaRepository
         private set
 
     /**
@@ -212,6 +224,16 @@ class ReleafApp : Application() {
             context = this,
             dao     = database.reminderDao(),
         )
+        panchangaRepository = PanchangaRepository(
+            context = this,
+            dao     = database.panchangaDao(),
+        )
+        appScope.launch {
+            // First-launch bootstrap: parse the bundled CSV into Room
+            // if the table is empty. Subsequent launches no-op on the
+            // count check inside `ensureLoaded`.
+            panchangaRepository.ensureLoaded()
+        }
 
         createReminderNotificationChannel()
         appScope.launch {

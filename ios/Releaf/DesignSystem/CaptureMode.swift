@@ -14,6 +14,12 @@ import SwiftUI
 
 public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
     case overview
+    // Notes — text-first capture, added per CAPTURE_TAB_PLAN.md
+    // Phase 4. Lands the page editor on the notes/body text input.
+    // The "first-newline commits" UX from DAILY_CAPTURE_UX.md §2.3 is
+    // a separate follow-up; this case just gives the editor a tab to
+    // land on.
+    case notes
     case photos
     case voice
     case todo
@@ -26,6 +32,7 @@ public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
     public var title: String {
         switch self {
         case .overview: return "Overview"
+        case .notes:    return "Notes"
         case .photos:   return "Photos"
         case .voice:    return "Voice note"
         case .todo:     return "To-do"
@@ -38,6 +45,7 @@ public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
     public var subtitle: String {
         switch self {
         case .overview: return "All sections at a glance"
+        case .notes:    return "Type a quick note"
         case .photos:   return "Camera or upload"
         case .voice:    return "Record audio"
         case .todo:     return "Quick checklist item"
@@ -55,6 +63,7 @@ public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
         // the accent-palette square; inactive state shows the same
         // glyph in the default text color.
         case .overview: return "leaf.fill"
+        case .notes:    return "square.and.pencil"
         case .photos:   return "camera"
         case .voice:    return "mic"
         case .todo:     return "checklist"

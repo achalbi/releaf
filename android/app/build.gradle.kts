@@ -10,6 +10,8 @@ plugins {
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.google.gms.google.services)
+    alias(libs.plugins.google.firebase.crashlytics)
 }
 
 // Point Room's KSP processor at a `schemas/` directory under the module.
@@ -72,6 +74,7 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons)
     implementation(libs.compose.ui.tooling.preview)
+    implementation(libs.firebase.crashlytics)
     debugImplementation(libs.compose.ui.tooling)
 
     // Cold-launch branded splash. `installSplashScreen()` in MainActivity
@@ -141,6 +144,10 @@ dependencies {
     implementation(libs.mlkit.genai.speech)
     implementation(libs.sherpa.onnx)
     implementation(libs.commons.compress)
+
+    // commons-suncalc — sunrise/sunset/twilight calculator. Drives
+    // the precise Rahu Kala window in the Calendar surface.
+    implementation(libs.commons.suncalc)
 
     // Natty — natural-language date/time parser. Handles phrases
     // like "call mom at 7pm tomorrow" / "in 2 hours" / "next

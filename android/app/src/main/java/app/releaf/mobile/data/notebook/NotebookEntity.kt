@@ -101,4 +101,14 @@ data class NotebookEntity(
     /** ISO-8601 UTC when soft-deleted; null = active. */
     @ColumnInfo(name = "deleted_at")
     val deletedAt: String? = null,
+
+    /**
+     * When true the notebook skips the chapter level entirely — pages
+     * still live under a sentinel chapter (named "Default") under the
+     * hood, but the UI surfaces them directly so the user sees a flat
+     * notebook → page hierarchy. Existing rows default to false; new
+     * notebooks pick this from the create dialog's toggle.
+     */
+    @ColumnInfo(name = "flat", defaultValue = "0")
+    val flat: Boolean = false,
 )

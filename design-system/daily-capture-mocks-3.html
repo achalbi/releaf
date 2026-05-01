@@ -1,0 +1,1107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Releaf — Daily capture mocks (set 3)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --canvas:        #F5EEE3;
+    --card-solid:    #FFFAF4;
+    --card-90:       rgba(255, 250, 244, 0.9);
+    --subtle:        #EFE7DA;
+    --muted:         #EBE4D3;
+    --border-def:    rgba(80, 62, 45, 0.12);
+    --border-strong: rgba(80, 62, 45, 0.24);
+    --text-primary:   #241D17;
+    --text-secondary: #5F5245;
+    --text-tertiary:  #8A7C6D;
+    --coral:      #E77850;
+    --coral-soft: #FCEAE0;
+    --coral-deep: #C85A30;
+    --green:      #1E5943;
+    --green-soft: #D9EDE2;
+    --info:       #2E6FB5;
+    --info-soft:  #E1ECF8;
+    --warning:    #A87418;
+    --warning-soft:#FBEECD;
+    --danger:     #C8432E;
+    --danger-soft:#FDEEE9;
+    --dot:        rgba(80, 62, 45, 0.14);
+    --shadow-card:  0 2px 8px rgba(36, 29, 23, 0.06);
+    --shadow-float: 0 12px 28px rgba(36, 29, 23, 0.14), 0 2px 6px rgba(36, 29, 23, 0.08);
+    --shadow-fab:   0 8px 24px rgba(231, 120, 80, 0.38);
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --r-xl: 22px;
+    --pill: 9999px;
+
+    --font-sans: Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-serif: Newsreader, Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+    background: #E8DDC9;
+    background-image: radial-gradient(circle, rgba(80,62,45,0.08) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .page {
+    max-width: 1840px;
+    margin: 0 auto;
+    padding: 56px 32px 96px;
+  }
+
+  header.hero { margin-bottom: 40px; }
+
+  .eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--coral); margin: 0 0 8px;
+  }
+  h1 {
+    font-family: var(--font-serif); font-weight: 500;
+    font-size: 36px; line-height: 1.15; letter-spacing: -0.01em;
+    margin: 0 0 12px; color: var(--text-primary);
+  }
+  .lede {
+    font-size: 15px; line-height: 1.55; max-width: 72ch;
+    color: var(--text-secondary); margin: 0;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(340px, 1fr));
+    gap: 28px;
+    align-items: start;
+  }
+  @media (max-width: 1500px) { .grid { grid-template-columns: repeat(2, minmax(340px, 1fr)); max-width: 900px; margin: 0 auto; } }
+  @media (max-width: 760px)  { .grid { grid-template-columns: 1fr; max-width: 440px; } }
+
+  .panel { display: flex; flex-direction: column; gap: 14px; }
+  .panel .label {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--text-secondary);
+  }
+  .panel .desc {
+    font-size: 13.5px; line-height: 1.5; color: var(--text-secondary);
+  }
+
+  /* phone frame */
+  .phone {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 390 / 844;
+    border-radius: 44px;
+    background: #1B1610;
+    padding: 12px;
+    box-shadow: var(--shadow-float);
+    overflow: hidden;
+  }
+  .screen {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 32px;
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .screen.dark {
+    background: #1B1610;
+    background-image: none;
+  }
+
+  .statusbar {
+    height: 36px;
+    padding: 12px 20px 0;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; font-weight: 700; color: var(--text-primary);
+    flex-shrink: 0;
+  }
+  .statusbar.light { color: var(--canvas); }
+  .statusbar .icons { display: flex; gap: 4px; align-items: center; }
+  .statusbar svg { width: 13px; height: 13px; }
+
+  .header {
+    padding: 14px 20px 8px;
+    display: flex; justify-content: space-between; align-items: center;
+    flex-shrink: 0;
+  }
+  .header .title-block .day {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--coral);
+  }
+  .header .title-block .date {
+    font-family: var(--font-serif); font-size: 22px; line-height: 1.1;
+    margin-top: 2px; color: var(--text-primary);
+  }
+  .header .actions { display: flex; gap: 10px; }
+  .icon-btn {
+    width: 36px; height: 36px;
+    border-radius: var(--pill);
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-primary);
+  }
+  .icon-btn svg { width: 16px; height: 16px; }
+  .icon-btn.ghost { background: transparent; border-color: transparent; color: var(--text-secondary); }
+  .icon-btn.dark {
+    background: rgba(255,255,255,0.14);
+    border-color: rgba(255,255,255,0.18);
+    color: var(--canvas);
+  }
+
+  /* ── shared bits ───────────────────────────────────────── */
+
+  .card {
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    padding: 16px 18px;
+    box-shadow: var(--shadow-card);
+  }
+  .card .card-head {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--text-secondary);
+    margin-bottom: 10px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .card .card-head .pip {
+    font-family: var(--font-serif); font-size: 14px; color: var(--coral);
+    letter-spacing: 0; text-transform: none; font-weight: 500;
+  }
+
+  .pill {
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--pill);
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text-primary);
+    display: inline-flex; align-items: center; gap: 6px;
+    font-weight: 500;
+  }
+  .pill svg { width: 12px; height: 12px; }
+  .pill.coral { background: var(--coral-soft); color: var(--coral-deep); border-color: transparent; }
+  .pill.info  { background: var(--info-soft); color: var(--info); border-color: transparent; }
+  .pill.warn  { background: var(--warning-soft); color: var(--warning); border-color: transparent; }
+  .pill.green { background: var(--green-soft); color: var(--green); border-color: transparent; }
+  .pill.ghost { background: transparent; border: 1px dashed var(--border-strong); color: var(--text-tertiary); }
+
+  /* Photo review specific */
+  .photo-stage {
+    flex: 1;
+    background: linear-gradient(135deg, #B3C4A3 0%, #5D7B56 60%, #2F4730 100%);
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+  }
+  .photo-stage .scrim-grad {
+    position: absolute;
+    left: 0; right: 0; top: 0;
+    height: 120px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.4) 0%, transparent 100%);
+  }
+  .photo-stage .heron {
+    position: absolute;
+    left: 50%; top: 56%;
+    transform: translate(-50%, -50%);
+    width: 48px; height: 92px;
+  }
+  .photo-stage .post {
+    position: absolute;
+    left: 50%; bottom: 0;
+    width: 18px;
+    height: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(180deg, #4a3826 0%, #2a2014 100%);
+  }
+
+  .photo-actions {
+    background: var(--card-solid);
+    padding: 18px 20px 22px;
+    border-radius: 24px 24px 0 0;
+    border-top: 1px solid var(--border-def);
+    box-shadow: 0 -4px 16px rgba(36, 29, 23, 0.08);
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .photo-actions .target-row {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12.5px;
+  }
+  .photo-actions .target-row .target {
+    color: var(--text-secondary);
+  }
+  .photo-actions .target-row .target strong { color: var(--coral); font-weight: 600; }
+  .photo-actions .target-row a {
+    color: var(--text-tertiary);
+    font-size: 11.5px;
+    text-decoration: underline dotted;
+  }
+  .caption-input {
+    background: rgba(70, 60, 49, 0.05);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-md);
+    padding: 12px 14px;
+    font-family: var(--font-serif);
+    font-size: 16px;
+    color: var(--text-primary);
+    line-height: 1.4;
+  }
+  .caption-input .ph { color: var(--text-tertiary); font-style: italic; }
+  .caption-input .typed { color: var(--text-primary); }
+  .caption-input .cursor {
+    display: inline-block;
+    width: 2px; height: 18px;
+    background: var(--coral);
+    vertical-align: text-top;
+    margin-left: 1px;
+    animation: blink 1s step-start infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .tag-row {
+    display: flex; gap: 6px;
+    flex-wrap: wrap;
+  }
+  .button-row {
+    display: flex; gap: 10px; margin-top: 4px;
+  }
+  .btn {
+    flex: 1;
+    padding: 14px;
+    border-radius: var(--pill);
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+    border: 1px solid var(--border-def);
+    background: var(--canvas);
+    color: var(--text-primary);
+  }
+  .btn.primary {
+    background: var(--coral);
+    color: var(--canvas);
+    border-color: var(--coral);
+    box-shadow: var(--shadow-fab);
+  }
+  .btn.danger {
+    background: transparent;
+    color: var(--danger);
+    border-color: rgba(200, 67, 46, 0.3);
+  }
+
+  /* shutter overlay */
+  .shutter-overlay {
+    position: absolute;
+    top: 60px; left: 20px;
+    background: rgba(0,0,0,0.55);
+    color: var(--canvas);
+    padding: 5px 11px;
+    border-radius: var(--pill);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .shutter-overlay i {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--coral);
+    box-shadow: 0 0 8px var(--coral);
+  }
+
+  /* Scan w/ OCR */
+  .scan-paper {
+    margin: 16px;
+    background: #FBF6EC;
+    border-radius: var(--r-md);
+    padding: 22px 24px;
+    box-shadow: 0 4px 12px rgba(36, 29, 23, 0.10);
+    position: relative;
+    flex-shrink: 0;
+  }
+  .scan-paper::before {
+    content: '';
+    position: absolute; inset: 0;
+    border-radius: var(--r-md);
+    box-shadow: inset 0 0 0 1px rgba(80, 62, 45, 0.10);
+    pointer-events: none;
+  }
+  .scan-paper .letterhead {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: 14.5px;
+    margin-bottom: 1px;
+  }
+  .scan-paper .sub {
+    font-size: 10.5px;
+    color: var(--text-tertiary);
+    margin-bottom: 14px;
+    letter-spacing: 0.03em;
+  }
+  .ocr-line {
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    position: relative;
+    margin-bottom: 4px;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  .ocr-line.high {
+    background: rgba(76, 154, 106, 0.13);
+    box-shadow: 0 0 0 1px rgba(76, 154, 106, 0.20);
+  }
+  .ocr-line.med {
+    background: rgba(168, 116, 24, 0.13);
+    box-shadow: 0 0 0 1px rgba(168, 116, 24, 0.20);
+  }
+  .ocr-line .conf {
+    position: absolute; right: 6px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--text-tertiary);
+  }
+
+  .ocr-meta {
+    margin: 0 16px 10px;
+    display: flex; gap: 8px;
+    font-size: 11.5px;
+  }
+  .meta-pill {
+    padding: 5px 10px;
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    border-radius: var(--pill);
+    color: var(--text-secondary);
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .meta-pill svg { width: 11px; height: 11px; }
+  .meta-pill .num { font-weight: 700; }
+  .meta-pill.green { background: var(--green-soft); color: var(--green); border-color: transparent; }
+
+  .extracted-card {
+    margin: 6px 16px 0;
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    padding: 14px 16px;
+    box-shadow: var(--shadow-card);
+    flex-shrink: 0;
+  }
+  .extracted-card .head {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .extracted-card .body {
+    font-size: 12.5px;
+    color: var(--text-primary);
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  .extracted-card .head a {
+    color: var(--coral);
+    text-decoration: none;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 12px;
+  }
+
+  /* Capture detail */
+  .cap-detail-stage {
+    flex: 1;
+    background: linear-gradient(140deg, #C8A37B 0%, #8A6948 60%, #4a3624 100%);
+    position: relative;
+  }
+  .cap-detail-bottom-grad {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 180px;
+    background: linear-gradient(0deg, rgba(0,0,0,0.55) 0%, transparent 100%);
+    pointer-events: none;
+  }
+
+  .cap-meta-bar {
+    position: absolute;
+    left: 16px; right: 16px;
+    bottom: 88px;
+    color: var(--canvas);
+    z-index: 2;
+  }
+  .cap-meta-bar .cap-caption {
+    font-family: var(--font-serif);
+    font-size: 22px;
+    line-height: 1.2;
+    margin: 0 0 6px;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.45);
+  }
+  .cap-meta-bar .cap-meta-line {
+    font-size: 12px;
+    color: rgba(245, 238, 227, 0.88);
+    margin-bottom: 10px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  }
+  .cap-meta-bar .cap-meta-line a {
+    color: var(--coral-soft);
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .cap-meta-bar .cap-tags {
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .cap-meta-bar .pill-dark {
+    background: rgba(0,0,0,0.35);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: var(--canvas);
+    padding: 5px 11px;
+    border-radius: var(--pill);
+    font-size: 11.5px;
+    backdrop-filter: blur(8px);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .cap-meta-bar .pill-dark svg { width: 11px; height: 11px; }
+
+  .cap-action-bar {
+    position: absolute;
+    left: 16px; right: 16px;
+    bottom: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    z-index: 3;
+  }
+  .cap-action {
+    flex: 1;
+    height: 48px;
+    border-radius: var(--pill);
+    background: rgba(255, 250, 244, 0.92);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.4);
+    color: var(--text-primary);
+    display: flex; align-items: center; justify-content: center;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 600;
+    box-shadow: var(--shadow-card);
+  }
+  .cap-action svg { width: 16px; height: 16px; }
+  .cap-action.danger { color: var(--danger); }
+
+  .cap-breadcrumb {
+    position: absolute;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--canvas);
+    font-size: 12px;
+    background: rgba(0,0,0,0.45);
+    padding: 5px 12px;
+    border-radius: var(--pill);
+    backdrop-filter: blur(8px);
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .cap-breadcrumb svg { width: 11px; height: 11px; opacity: 0.7; }
+
+  /* Conflict resolver */
+  .conflict-banner {
+    margin: 4px 16px 12px;
+    background: var(--warning-soft);
+    border: 1px solid rgba(168, 116, 24, 0.25);
+    border-radius: var(--r-md);
+    padding: 12px 14px;
+    display: flex;
+    gap: 10px;
+    font-size: 12.5px;
+    color: var(--warning);
+    align-items: flex-start;
+  }
+  .conflict-banner svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; }
+  .conflict-banner .text { line-height: 1.45; }
+  .conflict-banner .text strong { font-weight: 700; display: block; color: var(--text-primary); margin-bottom: 1px; font-size: 13px; }
+
+  .scrim {
+    position: absolute; inset: 0;
+    background: rgba(36, 29, 23, 0.45);
+  }
+  .sheet {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    border-radius: 28px 28px 0 0;
+    padding: 18px 20px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    border-top: 1px solid var(--border-strong);
+  }
+  .sheet .grabber {
+    width: 36px; height: 4px;
+    background: var(--border-strong);
+    border-radius: var(--pill);
+    margin: 0 auto;
+  }
+  .sheet .sheet-eyebrow {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--coral);
+    margin: 4px 0 -2px;
+  }
+  .sheet .sheet-title {
+    font-family: var(--font-serif);
+    font-size: 22px;
+    line-height: 1.2;
+    color: var(--text-primary);
+    margin: 0 0 2px;
+  }
+  .sheet .sheet-sub {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    margin: 0 0 6px;
+    line-height: 1.4;
+  }
+
+  .conflict-pair {
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .conflict-side {
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-md);
+    padding: 12px 14px;
+    box-shadow: var(--shadow-card);
+  }
+  .conflict-side .side-head {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+  }
+  .conflict-side .side-head .who {
+    background: var(--info-soft);
+    color: var(--info);
+    padding: 2px 8px;
+    border-radius: var(--pill);
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+    font-size: 10.5px;
+  }
+  .conflict-side.local .side-head .who { background: var(--coral-soft); color: var(--coral-deep); }
+  .conflict-side .stamp {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .conflict-side .body-r {
+    font-family: var(--font-serif);
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--text-primary);
+  }
+  .conflict-side .body-r .add {
+    background: rgba(76, 154, 106, 0.18);
+    border-radius: 3px;
+    padding: 0 3px;
+  }
+  .conflict-side .body-r .rem {
+    background: rgba(200, 67, 46, 0.18);
+    text-decoration: line-through;
+    border-radius: 3px;
+    padding: 0 3px;
+  }
+
+  .legend {
+    margin-top: 56px;
+    padding: 28px 32px;
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-card);
+  }
+  .legend h2 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    font-size: 22px;
+    margin: 0 0 12px;
+  }
+  .legend p {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    margin: 0 0 10px;
+    max-width: 80ch;
+  }
+  .legend p strong { color: var(--text-primary); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="eyebrow">Releaf · daily capture mocks · set 3</p>
+    <h1>Closing the capture loop.</h1>
+    <p class="lede">
+      Four more frames covering states the first two batches left out:
+      photo capture review (post-shutter, pre-commit), a scan with OCR
+      overlay and confidence highlighting, the full-screen capture
+      detail viewer, and the conflict-resolver sheet from
+      <code>OPEN_QUESTIONS.md §10</code>. Companion to
+      <code>daily-capture-mocks.html</code>,
+      <code>daily-capture-mocks-2.html</code>, and
+      <code>docs/DAILY_CAPTURE_UX.md</code>.
+    </p>
+  </header>
+
+  <div class="grid">
+
+    <!-- ───────────────────────────────────────────────── -->
+    <!-- 8. PHOTO REVIEW — post-shutter, pre-commit        -->
+    <!-- ───────────────────────────────────────────────── -->
+    <section class="panel">
+      <div class="label">8 · Photo review — post-shutter</div>
+      <p class="desc">
+        After the shutter fires. Photo fills the top, action sheet docked
+        at the bottom shows where the capture is going, lets the user add
+        a caption + tags, and commits with one tap. "Save without caption"
+        commits immediately for the speed-over-thoroughness path.
+      </p>
+      <div class="phone">
+        <div class="screen dark">
+          <div class="statusbar light">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <div class="photo-stage">
+            <div class="scrim-grad"></div>
+            <div class="shutter-overlay"><i></i> JUST CAPTURED · 8:14 AM</div>
+            <div class="post"></div>
+            <svg class="heron" viewBox="0 0 48 92" xmlns="http://www.w3.org/2000/svg">
+              <ellipse cx="24" cy="60" rx="14" ry="20" fill="#dde6d8" />
+              <ellipse cx="24" cy="44" rx="9" ry="11" fill="#dde6d8" />
+              <path d="M22 36 L20 18 L22 17 L24 36 Z" fill="#dde6d8" />
+              <path d="M21 18 L9 14 L21 17 Z" fill="#cf9f48" />
+              <circle cx="20.5" cy="17" r="0.8" fill="#241D17" />
+              <line x1="20" y1="78" x2="18" y2="92" stroke="#caa57a" stroke-width="1.4" />
+              <line x1="28" y1="78" x2="30" y2="92" stroke="#caa57a" stroke-width="1.4" />
+            </svg>
+          </div>
+
+          <div class="photo-actions">
+            <div class="target-row">
+              <span class="target">→ <strong>today's log</strong> · Apr 28</span>
+              <a>Change…</a>
+            </div>
+            <div class="caption-input">
+              <span class="typed">Heron at the dock</span><span class="cursor"></span>
+            </div>
+            <div class="tag-row">
+              <span class="pill green">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m4 12 6 6 12-12"/></svg>
+                wildlife
+              </span>
+              <span class="pill ghost">+ Add tag</span>
+            </div>
+            <div class="button-row">
+              <span class="btn">Discard</span>
+              <span class="btn primary">Save</span>
+            </div>
+            <div style="text-align: center;">
+              <a style="font-size: 11.5px; color: var(--text-tertiary); text-decoration: underline dotted;">Save without caption</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ───────────────────────────────────────────────── -->
+    <!-- 9. SCAN WITH OCR OVERLAY                          -->
+    <!-- ───────────────────────────────────────────────── -->
+    <section class="panel">
+      <div class="label">9 · Scan + OCR — confidence overlay</div>
+      <p class="desc">
+        After a document scan: the deskewed image is shown with each OCR
+        line tinted by its confidence score. Tap a tinted line to fix the
+        text — the edit is saved to <code>capture_revisions</code>. The
+        full extracted text is searchable via <code>fts_capture_text</code>.
+      </p>
+      <div class="phone">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <div class="header">
+            <div class="actions">
+              <div class="icon-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg>
+              </div>
+            </div>
+            <div class="title-block" style="text-align:center; flex:1;">
+              <div class="day" style="color: var(--text-tertiary);">Scan · Apr 27</div>
+              <div class="date" style="font-size: 17px;">Bloodwork — Hazel</div>
+            </div>
+            <div class="actions">
+              <div class="icon-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="6"  r="1.4"/><circle cx="12" cy="18" r="1.4"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="ocr-meta">
+            <span class="meta-pill green">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+              <span class="num">91%</span>&nbsp;avg confidence
+            </span>
+            <span class="meta-pill">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 3v4a1 1 0 0 0 1 1h4M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/></svg>
+              PDF saved
+            </span>
+            <span class="meta-pill">
+              FTS-indexed
+            </span>
+          </div>
+
+          <div class="scan-paper">
+            <div class="letterhead">Riverside Veterinary</div>
+            <div class="sub">2841 Harbor Blvd · April 27, 2026</div>
+
+            <div class="ocr-line high">Patient: Hazel (canine, 7y) <span class="conf">96</span></div>
+            <div class="ocr-line high">CBC: WNL <span class="conf">94</span></div>
+            <div class="ocr-line high">Chem panel: WNL <span class="conf">94</span></div>
+            <div class="ocr-line med">Notes: Recheck in 3 months. <span class="conf">82</span></div>
+            <div class="ocr-line med">Diet plan unchanged. <span class="conf">79</span></div>
+            <div class="ocr-line high">Dr. M. Patel · DVM <span class="conf">92</span></div>
+
+            <div style="margin-top: 18px; height: 24px; display: flex; align-items: flex-end; gap: 2px;">
+              <span style="display:inline-block; width:80px; height: 16px; background: linear-gradient(90deg, #2d2114, #2d2114 50%, transparent 50%, transparent); background-size: 4px 100%; opacity: 0.45; border-radius: 1px;"></span>
+            </div>
+            <div style="margin-top: 8px; font-family: var(--font-serif); font-size: 13.5px; color: var(--text-tertiary); font-style: italic;">— signature —</div>
+          </div>
+
+          <div class="extracted-card">
+            <div class="head">
+              Extracted text
+              <a>Edit ›</a>
+            </div>
+            <div class="body">Riverside Veterinary
+April 27, 2026
+Patient: Hazel (canine, 7y)
+CBC: WNL
+Chem panel: WNL
+Notes: Recheck in 3 months. Diet plan unchanged.</div>
+          </div>
+
+          <div style="height: 18px;"></div>
+
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ───────────────────────────────────────────────── -->
+    <!-- 10. CAPTURE DETAIL — full-screen photo viewer     -->
+    <!-- ───────────────────────────────────────────────── -->
+    <section class="panel">
+      <div class="label">10 · Capture detail — full screen</div>
+      <p class="desc">
+        Tap a photo tile from anywhere → this. Caption + meta + tags
+        float over a darkened gradient at the bottom; an action bar
+        offers Edit caption, Share, Move, Delete. Breadcrumb at the
+        top shows the parent so the user knows where back leads.
+      </p>
+      <div class="phone">
+        <div class="screen dark">
+          <div class="statusbar light">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <div class="header" style="position: absolute; top: 36px; left: 0; right: 0; z-index: 4;">
+            <div class="actions">
+              <div class="icon-btn dark">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg>
+              </div>
+            </div>
+            <div></div>
+            <div class="actions">
+              <div class="icon-btn dark">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="6"  r="1.4"/><circle cx="12" cy="18" r="1.4"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="cap-breadcrumb">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+            Today · April 28 · photo 1 of 3
+          </div>
+
+          <div class="cap-detail-stage">
+            <!-- decorative boats -->
+            <svg viewBox="0 0 390 700" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" style="position:absolute; inset:0; width:100%; height:100%; opacity: 0.85;">
+              <rect x="0" y="0" width="390" height="700" fill="url(#sky)" />
+              <defs>
+                <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#d8c4a4" />
+                  <stop offset="1" stop-color="#7d5e3e" />
+                </linearGradient>
+              </defs>
+              <!-- water -->
+              <rect x="0" y="430" width="390" height="270" fill="#3e3a2c" opacity="0.85"/>
+              <!-- boats -->
+              <g fill="#1B1610" opacity="0.86">
+                <path d="M40 430 L100 430 L92 460 L48 460 Z"/>
+                <line x1="70" y1="430" x2="70" y2="395" stroke="#1B1610" stroke-width="2"/>
+              </g>
+              <g fill="#1B1610" opacity="0.86">
+                <path d="M120 432 L186 432 L178 462 L128 462 Z"/>
+                <line x1="153" y1="432" x2="153" y2="392" stroke="#1B1610" stroke-width="2"/>
+              </g>
+              <g fill="#1B1610" opacity="0.86">
+                <path d="M210 434 L274 434 L266 462 L218 462 Z"/>
+                <line x1="242" y1="434" x2="242" y2="394" stroke="#1B1610" stroke-width="2"/>
+              </g>
+              <g fill="#1B1610" opacity="0.86">
+                <path d="M298 432 L356 432 L348 460 L306 460 Z"/>
+                <line x1="327" y1="432" x2="327" y2="396" stroke="#1B1610" stroke-width="2"/>
+              </g>
+              <!-- reflections -->
+              <g opacity="0.5">
+                <line x1="70" y1="465" x2="70" y2="490" stroke="#caa57a" stroke-width="2"/>
+                <line x1="153" y1="465" x2="153" y2="497" stroke="#caa57a" stroke-width="2"/>
+                <line x1="242" y1="465" x2="242" y2="492" stroke="#caa57a" stroke-width="2"/>
+                <line x1="327" y1="465" x2="327" y2="490" stroke="#caa57a" stroke-width="2"/>
+              </g>
+            </svg>
+          </div>
+
+          <div class="cap-detail-bottom-grad"></div>
+
+          <div class="cap-meta-bar">
+            <h2 class="cap-caption">The boats, lined up</h2>
+            <div class="cap-meta-line">
+              Apr 28 · 8:31 am · iPhone 15 · 2560×1920 · <a>Harbor Park</a>
+            </div>
+            <div class="cap-tags">
+              <span class="pill-dark">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                Harbor Park
+              </span>
+              <span class="pill-dark">+ tag</span>
+            </div>
+          </div>
+
+          <div class="cap-action-bar">
+            <span class="cap-action">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4z"/></svg>
+              Edit
+            </span>
+            <span class="cap-action">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>
+              Share
+            </span>
+            <span class="cap-action">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l-3-3M3 7l3 3M21 17H8l3 3M21 17l-3-3"/></svg>
+              Move
+            </span>
+            <span class="cap-action danger">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+              Delete
+            </span>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ───────────────────────────────────────────────── -->
+    <!-- 11. CONFLICT RESOLVER                             -->
+    <!-- ───────────────────────────────────────────────── -->
+    <section class="panel">
+      <div class="label">11 · Conflict resolver — local vs remote</div>
+      <p class="desc">
+        Two-option sheet from <code>OPEN_QUESTIONS §10</code>. Per-entry
+        banner taps open this; remote and local copies sit side-by-side
+        with a colored diff. "Keep local" discards remote, "Keep remote"
+        overwrites with the remote text. The losing edit isn't deleted —
+        it lives in <code>conflict_stub</code> until resolution.
+      </p>
+      <div class="phone">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <div class="header" style="opacity: 0.6;">
+            <div class="title-block">
+              <div class="day">Sunday</div>
+              <div class="date">April 26</div>
+            </div>
+          </div>
+
+          <div class="conflict-banner" style="opacity: 0.55;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m12 9 0 4M12 17h.01M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.41 0z"/></svg>
+            <div class="text"><strong>Conflicting version from another device</strong>Tap to resolve</div>
+          </div>
+
+          <div class="card" style="margin: 0 16px; opacity: 0.45;">
+            <div class="card-head">Notes</div>
+            <p style="margin: 0; font-family: var(--font-serif); font-size: 14.5px; line-height: 1.55;">## What went well<br>- The seal piece is real now…</p>
+          </div>
+
+          <div class="scrim"></div>
+
+          <div class="sheet">
+            <div class="grabber"></div>
+            <div class="sheet-eyebrow">Conflict · Apr 26 entry</div>
+            <h2 class="sheet-title">Two versions of this entry exist.</h2>
+            <p class="sheet-sub">Pick one to keep. The other is discarded — there's no manual merge yet.</p>
+
+            <div class="conflict-pair">
+
+              <div class="conflict-side local">
+                <div class="side-head">
+                  <span>This device</span>
+                  <span class="who">local</span>
+                </div>
+                <div class="stamp">edited 14 min ago · iPhone</div>
+                <div class="body-r" style="margin-top: 6px;">
+                  ## What went well<br>
+                  - The seal piece is real now<br>
+                  - Mara conversation<br>
+                  <span class="add">- Cape trail recon — saved future-me from a closed gate</span>
+                </div>
+              </div>
+
+              <div class="conflict-side">
+                <div class="side-head">
+                  <span>From another device</span>
+                  <span class="who">remote</span>
+                </div>
+                <div class="stamp">edited 2 days ago · iPad</div>
+                <div class="body-r" style="margin-top: 6px;">
+                  ## What went well<br>
+                  - The seal piece is real now<br>
+                  - Mara conversation<br>
+                  <span class="rem">- Cape trail — possible June</span>
+                </div>
+              </div>
+
+            </div>
+
+            <div class="button-row" style="margin-top: 4px;">
+              <span class="btn">Keep remote</span>
+              <span class="btn primary">Keep local</span>
+            </div>
+
+            <div style="text-align: center;">
+              <a style="font-size: 11.5px; color: var(--text-tertiary); text-decoration: underline dotted;">View all conflicts (4) →</a>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <section class="legend">
+    <h2>What this batch covers</h2>
+    <p>
+      <strong>Photo review (8)</strong> is the gap between shutter and commit.
+      The capture is already in <code>captures</code> with <code>dirty=1</code>
+      the moment the shutter fires — this screen just lets the user enrich it
+      before the row settles. "Save without caption" is intentional: it commits
+      the row as-is and dismisses, because the speed-over-thoroughness path is
+      what makes daily journaling actually happen.
+    </p>
+    <p>
+      <strong>Scan + OCR overlay (9)</strong> is the visible payoff of the
+      <code>fts_capture_text</code> trigger. Each line is tinted by its OCR
+      confidence so the user knows where the OCR is rough and worth fixing.
+      Tapping a tinted line opens an inline editor that writes a
+      <code>capture_revisions</code> row — preserving the original text in case
+      the edit is wrong. Search results from <code>set 2 mock 7</code> are the
+      surface where this content reappears.
+    </p>
+    <p>
+      <strong>Capture detail (10)</strong> is reachable from any photo tile
+      anywhere — Daily Log, Page detail, NotepadEntry editor, Search. The
+      breadcrumb pill at the top tells the user where back leads, which matters
+      because the deep-link entry path may have rebuilt the parent stack
+      synthetically. Edit / Share / Move / Delete map onto the four highest-
+      frequency actions on a single capture; everything else lives behind the
+      kebab.
+    </p>
+    <p>
+      <strong>Conflict resolver (11)</strong> implements <code>OPEN_QUESTIONS
+      §10</code>: two options, no merge UI. The diff highlights show the user
+      exactly what differs without asking them to read both versions in full.
+      "View all conflicts (4)" routes to the aggregated list from
+      <code>OPEN_QUESTIONS §12</code> for batch resolution. The local edit
+      survives in <code>conflict_stub</code> until the user decides — there is
+      no destructive write before that tap.
+    </p>
+  </section>
+
+</div>
+</body>
+</html>

@@ -333,8 +333,15 @@ fun ContactsSection(
         website: String?,
     ) -> Unit,
     onRemove: (id: String) -> Unit,
+    /** When true, opens the add-contact sheet exactly once on first
+     *  composition — used by the Capture page's Contact tile so a
+     *  tap goes straight to filling the form. */
+    autoLaunch: Boolean = false,
 ) {
     var isAdding by remember { mutableStateOf(false) }
+    if (autoLaunch) {
+        LaunchedEffect(Unit) { isAdding = true }
+    }
     // Tap a card → open the contact-actions sheet (Call / Edit / Add-to-
     // Contacts / Email / Delete). Delete from the sheet still routes
     // through the confirmation alert below so the destructive action
@@ -1173,6 +1180,10 @@ fun TodosSection(
     onRemove: (id: String) -> Unit,
     onUpdatePriority: (id: String, priority: Int) -> Unit = { _, _ -> },
     onReorder: (newList: List<TodoItem>) -> Unit = {},
+    /** When true, focuses the "Add a new todo…" input on first
+     *  composition (raising the soft keyboard) — used by the
+     *  Capture page's Todo tile so a tap goes straight to typing. */
+    autoLaunch: Boolean = false,
 ) {
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
     val done = todos.count { it.done }
@@ -1202,7 +1213,7 @@ fun TodosSection(
         // Add-new input pinned at the top. Different visual shape from
         // the other sections' InlineTextInput — this one's the primary
         // CTA of the whole section, so it gets the filled coral + chip.
-        TodoAddRow(onSubmit = onAdd)
+        TodoAddRow(onSubmit = onAdd, autoFocus = autoLaunch)
 
         todos.forEach { t ->
             val isDragging = draggingId == t.id
@@ -1481,13 +1492,25 @@ private fun TodoProgressBar(done: Int, total: Int, percent: Int) {
  *  the text field on the left and a filled coral + button on the
  *  right. IME Done and the + button both commit. */
 @Composable
-private fun TodoAddRow(onSubmit: (String) -> Unit) {
+private fun TodoAddRow(onSubmit: (String) -> Unit, autoFocus: Boolean = false) {
     var value by remember { mutableStateOf("") }
     val commit: () -> Unit = {
         val trimmed = value.trim()
         if (trimmed.isNotEmpty()) {
             onSubmit(trimmed)
             value = ""
+        }
+    }
+
+    val focusRequester = remember { FocusRequester() }
+    if (autoFocus) {
+        LaunchedEffect(Unit) {
+            // Small delay so the pager's tab-change animation has
+            // settled before the IME pops up — without it the
+            // keyboard occasionally races the page transition and
+            // the field ends up unfocused.
+            kotlinx.coroutines.delay(100)
+            runCatching { focusRequester.requestFocus() }
         }
     }
 
@@ -1520,7 +1543,9 @@ private fun TodoAddRow(onSubmit: (String) -> Unit) {
                 cursorBrush   = SolidColor(AppAccent.primary),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { commit() }),
-                modifier      = Modifier.fillMaxWidth(),
+                modifier      = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
             )
         }
         // Filled coral + button — stays as a solid rounded chip on the
@@ -1560,6 +1585,11 @@ fun LocationSection(
      *  "refine in background" half of the two-stage capture flow. */
     onUpdateCoords: (id: String, lat: Double, lng: Double) -> Unit,
     onRemove: (id: String) -> Unit,
+    /** When true, fires the "Use current location" flow exactly
+     *  once on first composition — used by the Capture page's Pin
+     *  tile so a tap goes straight to GPS capture (with a
+     *  permission prompt on first run). */
+    autoLaunch: Boolean = false,
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -1632,6 +1662,10 @@ fun LocationSection(
     }
 
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
+
+    if (autoLaunch) {
+        LaunchedEffect(Unit) { onUseCurrent() }
+    }
 
     SectionShell(title = "LOCATION") {
         // Affordance on top.
@@ -1861,9 +1895,16 @@ fun PhotosSection(
      *  (copy semantics, not move): the local copy is independent so
      *  removing the photo later won't break the new sub-page. */
     onImportToNotes: ((pageImageUri: String) -> Unit)? = null,
+    /** When true, opens the camera/gallery chooser sheet exactly
+     *  once on first composition — used by the Capture page's Photo
+     *  tile so a tap goes straight to picking a source. */
+    autoLaunch: Boolean = false,
 ) {
     val context = LocalContext.current
     var showChooser by remember { mutableStateOf(false) }
+    if (autoLaunch) {
+        LaunchedEffect(Unit) { showChooser = true }
+    }
 
     // Camera capture: we pre-create a destination file in our attachments
     // dir and hand the camera app a FileProvider URI pointing at it. On
@@ -2272,6 +2313,11 @@ fun ScansSection(
      *  `ScanCategory.name` or null to fall back to the derived
      *  classification. */
     onEditScan: (id: String, title: String?, categoryId: String?) -> Unit = { _, _, _ -> },
+    /** When true, the section fires the ML Kit document scanner
+     *  exactly once on first composition — used by the Capture
+     *  page's Scan hero so a tap there goes straight to the
+     *  scanner without an extra "Scan document" tap. */
+    autoLaunch: Boolean = false,
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -2367,6 +2413,16 @@ fun ScansSection(
                     Toast.LENGTH_SHORT,
                 ).show()
             }
+    }
+
+    // Auto-launch on first composition when the caller asked for it.
+    // Used by the Capture page's Scan hero so the user lands directly
+    // in the scanner instead of having to tap "Scan document" inside
+    // this section. Keyed by `Unit` so the LaunchedEffect fires once
+    // per section instance — config changes / recompositions don't
+    // re-trigger the scanner mid-session.
+    if (autoLaunch) {
+        LaunchedEffect(Unit) { onLaunch() }
     }
 
     // Delete guard — tap × on a row → open the alert. Actual remove
@@ -3021,6 +3077,7 @@ private fun shareScan(context: Context, attachment: Attachment) {
  * v1 since voice notes are short and the list rarely grows past a
  * couple of items.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceSection(
     notes: List<Attachment>,
@@ -3039,6 +3096,10 @@ fun VoiceSection(
      *  that don't wire a body-editor up working. */
     onAddTranscriptToNotes: (transcript: String) -> Unit = {},
     onRemove: (id: String) -> Unit,
+    /** When true, opens the recording bottom sheet exactly once on
+     *  first composition — used by the Capture page's Voice tile so
+     *  a tap goes straight to the recorder. */
+    autoLaunch: Boolean = false,
 ) {
     val context = LocalContext.current
 
@@ -3064,6 +3125,23 @@ fun VoiceSection(
     // across every card in the section so the chevron controls the whole
     // list at once.
     var isExpanded by remember { mutableStateOf(false) }
+
+    // Recording sheet — when the user taps the Record pill we open a
+    // modal bottom sheet that hosts `VoicePageRecorder` (live waveform,
+    // progress ring, slide-up-to-cancel) instead of running the inline
+    // recorder. The sheet's `onSave` callback funnels back into the
+    // existing `onAdd(uri, durationMs)` path so persistence,
+    // transcription, and playback all stay wired the same way.
+    var showRecordingSheet by remember { mutableStateOf(false) }
+    if (autoLaunch) {
+        LaunchedEffect(Unit) { showRecordingSheet = true }
+    }
+    // Skip the half-height detent — the recording stage (eyebrow,
+    // waveform, counter, cancel-zone slot, stop button, hint copy)
+    // is taller than the partial state, so the bottom hint and the
+    // "Swipe up to cancel" cue would clip out of view if the sheet
+    // settled at the medium detent.
+    val recordingSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // URIs whose transcription is in flight. Added only when `stop()`
     // reports the callback will fire asynchronously — prevents a 0-ms
@@ -3245,7 +3323,13 @@ fun VoiceSection(
             isRecording = isRecording,
             isExpanded = isExpanded,
             onToggleExpand = { isExpanded = !isExpanded },
-            onRecordClick = if (isRecording) stopRecording else onTapRecord,
+            // Tapping Record now opens the modal-sheet recorder (live
+            // waveform + progress ring + slide-up-to-cancel). The
+            // legacy inline-recording state-machine above stays in
+            // place so any code path that flips `recorderBundle`
+            // directly still works, but the user-facing trigger goes
+            // through the sheet.
+            onRecordClick = if (isRecording) stopRecording else { { showRecordingSheet = true } },
         )
 
         if (isRecording) {
@@ -3302,6 +3386,26 @@ fun VoiceSection(
                 }
             },
         )
+    }
+
+    if (showRecordingSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showRecordingSheet = false },
+            sheetState = recordingSheetState,
+            containerColor = AppColors.Canvas,
+        ) {
+            app.releaf.mobile.features.page.VoicePageRecorder(
+                isEmpty = notes.isEmpty(),
+                onSave = { clip ->
+                    // Funnel through the existing add path so
+                    // attachment storage, view-model state, and
+                    // downstream transcription wiring stay intact.
+                    onAdd(clip.uri, clip.durationMs)
+                    showRecordingSheet = false
+                },
+                onCancel = { showRecordingSheet = false },
+            )
+        }
     }
 }
 

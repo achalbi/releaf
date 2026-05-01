@@ -1,0 +1,1075 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Releaf — QuickCapture v5 — no scroll, single viewport</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Newsreader:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --canvas:        #F5EEE3;
+    --card-solid:    #FFFAF4;
+    --card-90:       rgba(255, 250, 244, 0.9);
+    --subtle:        #EFE7DA;
+    --muted:         #EBE4D3;
+    --tan:           #E8DDC9;
+    --border-def:    rgba(80, 62, 45, 0.12);
+    --border-strong: rgba(80, 62, 45, 0.24);
+    --text-primary:   #241D17;
+    --text-secondary: #5F5245;
+    --text-tertiary:  #8A7C6D;
+
+    --coral:      #E77850;
+    --coral-soft: #FCEAE0;
+    --coral-deep: #C85A30;
+
+    --info:       #2E6FB5;
+    --info-soft:  #E1ECF8;
+
+    --warning:    #A87418;
+    --warning-soft:#FBEECD;
+
+    --forest:       #1E5943;
+    --forest-soft:  #DDEAD8;
+    --forest-tint:  #E8F0E2;
+
+    --danger:      #C8432E;
+    --danger-soft: #FDEEE9;
+
+    --mustard:      #B27A2A;
+    --mustard-deep: #8E5F1F;
+    --mustard-soft: #F4E2BE;
+    --letter-bg:    #F0DDA8;
+    --letter-deep:  #8E5F1F;
+
+    --dot:        rgba(80, 62, 45, 0.14);
+    --shadow-card:    0 2px 8px rgba(36, 29, 23, 0.06);
+    --shadow-float:   0 12px 28px rgba(36, 29, 23, 0.14), 0 2px 6px rgba(36, 29, 23, 0.08);
+    --shadow-fab:     0 8px 24px rgba(231, 120, 80, 0.38);
+    --shadow-mustard: 0 6px 18px rgba(178, 122, 42, 0.32);
+    --shadow-card-l:  0 -8px 24px rgba(36, 29, 23, 0.10);
+
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 14px;
+    --r-xl: 18px;
+    --r-hero: 18px;
+    --pill: 9999px;
+
+    --font-sans: Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-serif: Newsreader, Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0;
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+    background: var(--tan);
+    background-image: radial-gradient(circle, rgba(80,62,45,0.08) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .page { max-width: 1500px; margin: 0 auto; padding: 56px 32px 96px; }
+
+  header.hero { margin-bottom: 48px; }
+
+  .eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--coral); margin: 0 0 8px;
+  }
+  h1 {
+    font-family: var(--font-serif); font-weight: 500;
+    font-size: 36px; line-height: 1.15; letter-spacing: -0.01em;
+    margin: 0 0 12px; color: var(--text-primary);
+  }
+  .lede {
+    font-size: 15px; line-height: 1.55; max-width: 78ch;
+    color: var(--text-secondary); margin: 0;
+  }
+  .lede + .lede { margin-top: 10px; }
+  code, code.inline {
+    background: var(--subtle);
+    padding: 1px 6px; border-radius: 4px;
+    font-size: 12.5px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--text-primary);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(380px, 460px) minmax(320px, 1fr);
+    gap: 44px;
+    align-items: start;
+  }
+  @media (max-width: 1100px) {
+    .grid { grid-template-columns: 1fr; max-width: 480px; margin: 0 auto; }
+  }
+
+  .panel { display: flex; flex-direction: column; gap: 14px; }
+  .panel-head {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .panel-head .num {
+    font-family: var(--font-serif); font-size: 28px;
+    color: var(--mustard); line-height: 1;
+  }
+  .panel-head .ttl {
+    font-family: var(--font-serif); font-size: 22px;
+    color: var(--text-primary);
+  }
+  .panel-head .tag {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: var(--pill);
+    margin-left: auto;
+    background: var(--forest-soft); color: var(--forest);
+  }
+  .panel .desc {
+    font-size: 13.5px; line-height: 1.55; color: var(--text-secondary);
+  }
+
+  /* phone */
+  .phone {
+    position: relative; width: 100%;
+    aspect-ratio: 390 / 844;
+    border-radius: 44px;
+    background: #1B1610;
+    padding: 12px;
+    box-shadow: var(--shadow-float);
+    overflow: hidden;
+  }
+  .screen {
+    position: relative; width: 100%; height: 100%;
+    border-radius: 32px;
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+
+  .statusbar {
+    height: 36px; padding: 12px 20px 0;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; font-weight: 700; color: var(--text-primary);
+    flex-shrink: 0;
+  }
+  .statusbar .icons { display: flex; gap: 4px; align-items: center; }
+  .statusbar svg { width: 13px; height: 13px; }
+
+  /* Home header — compact (just enough to anchor context) */
+  .home-head {
+    padding: 8px 18px 10px;
+    display: flex; justify-content: space-between; align-items: flex-end;
+    flex-shrink: 0;
+  }
+  .home-head .title-block .day {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.10em;
+    text-transform: uppercase; color: var(--coral);
+    margin-bottom: 2px;
+  }
+  .home-head .title-block .date {
+    font-family: var(--font-serif); font-size: 22px;
+    line-height: 1.05; letter-spacing: -0.01em;
+    color: var(--text-primary);
+  }
+  .home-head .actions { display: flex; gap: 8px; }
+  .head-icon-btn {
+    width: 32px; height: 32px;
+    border-radius: var(--pill);
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-primary);
+    box-shadow: var(--shadow-card);
+  }
+  .head-icon-btn svg { width: 14px; height: 14px; }
+
+  .scrim {
+    position: absolute; inset: 0;
+    background: rgba(36, 29, 23, 0.45);
+    top: 78px;
+  }
+
+  /* The compact sheet */
+  .sheet {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    top: 78px;
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    border-radius: 22px 22px 0 0;
+    border-top: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-card-l);
+    display: flex; flex-direction: column;
+    padding: 8px 14px 14px;
+    overflow: hidden;
+  }
+  .sheet .grabber {
+    width: 36px; height: 4px;
+    background: var(--border-strong);
+    border-radius: var(--pill);
+    margin: 0 auto 8px;
+    flex-shrink: 0;
+  }
+
+  /* Top row: Day/Recents + title-block */
+  .top-row {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    gap: 12px;
+    margin-bottom: 4px;
+    flex-shrink: 0;
+  }
+  .scope {
+    background: var(--subtle);
+    border-radius: var(--pill);
+    padding: 3px;
+    display: inline-flex;
+    flex-shrink: 0;
+  }
+  .scope .seg {
+    padding: 5px 14px;
+    border-radius: var(--pill);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .scope .seg.active {
+    background: var(--forest);
+    color: var(--canvas);
+    box-shadow: var(--shadow-card);
+  }
+  .day-pill-meta {
+    font-size: 10.5px;
+    color: var(--text-tertiary);
+    font-weight: 500;
+    margin-bottom: 6px;
+    text-align: right;
+  }
+
+  /* Title row */
+  .title-row {
+    margin: 4px 4px 8px;
+    flex-shrink: 0;
+  }
+  .arrived-title {
+    font-family: var(--font-serif);
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.015em;
+    color: var(--text-primary);
+    margin: 0;
+  }
+  .arrived-sub {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: 13px;
+    line-height: 1.3;
+    color: var(--text-secondary);
+    margin: 4px 0 0;
+  }
+
+  /* Compact Scan hero */
+  .scan-hero {
+    background: linear-gradient(135deg, #C68628 0%, var(--mustard) 50%, var(--mustard-deep) 100%);
+    border-radius: var(--r-hero);
+    padding: 14px 16px 14px;
+    color: var(--canvas);
+    position: relative;
+    overflow: hidden;
+    box-shadow: var(--shadow-mustard);
+    flex-shrink: 0;
+    margin-bottom: 10px;
+  }
+  .scan-hero::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(circle at 100% 0%, rgba(255,221,160,0.22), transparent 55%);
+    pointer-events: none;
+    border-radius: var(--r-hero);
+  }
+  .scan-hero .left {
+    position: relative;
+    z-index: 2;
+    max-width: 220px;
+  }
+  .scan-hero .eb {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.78);
+    display: flex; align-items: center; gap: 5px;
+    margin-bottom: 3px;
+  }
+  .scan-hero .eb i {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--canvas);
+  }
+  .scan-hero .h2 {
+    font-family: var(--font-serif);
+    font-weight: 700;
+    font-size: 22px;
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    color: var(--text-primary);
+    margin: 0 0 4px;
+  }
+  .scan-hero .blurb {
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--canvas);
+    margin: 0 0 10px;
+  }
+  /* paper + brackets in the corner */
+  .scan-hero .corners {
+    position: absolute;
+    top: 12px; right: 12px;
+    width: 76px; height: 90px;
+    z-index: 1;
+  }
+  .scan-hero .corner {
+    position: absolute;
+    width: 16px; height: 16px;
+    border: 2px solid var(--canvas);
+    opacity: 0.75;
+  }
+  .scan-hero .corner.tl { top: 0; left: 0;     border-right: 0; border-bottom: 0; border-radius: 3px 0 0 0; }
+  .scan-hero .corner.tr { top: 0; right: 0;    border-left: 0;  border-bottom: 0; border-radius: 0 3px 0 0; }
+  .scan-hero .corner.bl { bottom: 0; left: 0;  border-right: 0; border-top: 0;    border-radius: 0 0 0 3px; }
+  .scan-hero .corner.br { bottom: 0; right: 0; border-left: 0;  border-top: 0;    border-radius: 0 0 3px 0; }
+  .scan-hero .paper {
+    position: absolute;
+    top: 16px; right: 18px;
+    width: 56px; height: 70px;
+    background: var(--canvas);
+    border-radius: 5px;
+    box-shadow: 0 4px 10px rgba(36, 29, 23, 0.25);
+    transform: rotate(8deg);
+    z-index: 2;
+  }
+  .scan-hero .paper i {
+    position: absolute;
+    left: 8px; right: 12px;
+    height: 1.5px;
+    background: var(--text-tertiary);
+    border-radius: 1px;
+    opacity: 0.4;
+  }
+  .scan-hero .paper i:nth-child(1) { top: 14px; height: 2px; opacity: 0.55; }
+  .scan-hero .paper i:nth-child(2) { top: 22px; right: 18px; opacity: 0.40; }
+  .scan-hero .paper i:nth-child(3) { top: 30px; }
+  .scan-hero .paper i:nth-child(4) { top: 38px; right: 16px; }
+  .scan-hero .paper i:nth-child(5) { top: 46px; }
+  .scan-hero .paper i:nth-child(6) { top: 54px; right: 22px; }
+
+  .scan-hero .actions {
+    display: flex; gap: 8px;
+    position: relative; z-index: 3;
+  }
+  .scan-hero .btn-pri {
+    background: var(--canvas);
+    color: var(--mustard-deep);
+    padding: 8px 14px;
+    border-radius: var(--pill);
+    font-size: 12.5px;
+    font-weight: 700;
+    display: inline-flex; align-items: center; gap: 5px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.10);
+  }
+  .scan-hero .btn-pri svg { width: 12px; height: 12px; }
+  .scan-hero .btn-out {
+    background: rgba(255,255,255,0.15);
+    color: var(--canvas);
+    padding: 8px 14px;
+    border-radius: var(--pill);
+    font-size: 12.5px;
+    font-weight: 600;
+    display: inline-flex; align-items: center; gap: 5px;
+    border: 1px solid rgba(255,255,255,0.35);
+  }
+  .scan-hero .btn-out svg { width: 12px; height: 12px; }
+
+  /* Pre-tag horizontal-scroll chip row */
+  .pretag-label-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin: 0 4px 6px;
+    flex-shrink: 0;
+  }
+  .pretag-label-row .lbl {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.10em;
+    text-transform: uppercase; color: var(--text-secondary);
+  }
+  .pretag-label-row .sub {
+    font-size: 11px; color: var(--text-tertiary);
+  }
+  .pretag-row {
+    display: flex; gap: 8px;
+    overflow-x: auto;
+    padding: 2px 0 6px;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+    scroll-snap-type: x mandatory;
+  }
+  .pretag-row::-webkit-scrollbar { display: none; }
+  .pretag-chip {
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-md);
+    padding: 8px 12px;
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: var(--shadow-card);
+    flex-shrink: 0;
+    scroll-snap-align: start;
+    min-width: 0;
+  }
+  .pretag-chip .ico {
+    width: 22px; height: 22px;
+    color: var(--forest);
+    flex-shrink: 0;
+  }
+  .pretag-chip .ico svg { width: 22px; height: 22px; }
+  .pretag-chip .text { display: flex; flex-direction: column; }
+  .pretag-chip .nm {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.1;
+  }
+  .pretag-chip .ct {
+    font-size: 10.5px;
+    color: var(--text-tertiary);
+    line-height: 1.2;
+    margin-top: 1px;
+  }
+  .pretag-chip.active {
+    background: var(--letter-bg);
+    border-color: rgba(142, 95, 31, 0.25);
+    box-shadow: 0 2px 8px rgba(142, 95, 31, 0.15);
+  }
+  .pretag-chip.active .ico { color: var(--letter-deep); }
+  .pretag-chip.active .ct { color: var(--letter-deep); font-weight: 600; }
+  .pretag-chip.add {
+    border-style: dashed; background: transparent; box-shadow: none;
+    padding: 8px 14px;
+  }
+  .pretag-chip.add .ico { color: var(--text-secondary); }
+  .pretag-chip.add .nm { color: var(--text-secondary); }
+
+  /* Divider with center label */
+  .divider-row {
+    display: flex; align-items: center; gap: 10px;
+    margin: 4px 4px 6px;
+    flex-shrink: 0;
+  }
+  .divider-row .ln { flex: 1; height: 1px; background: var(--border-def); }
+  .divider-row .lbl {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.10em;
+    text-transform: uppercase; color: var(--text-tertiary);
+  }
+
+  /* v3 capture tiles — slightly compressed */
+  .cap-tiles {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .cap-tile {
+    aspect-ratio: 1.05;
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 6px;
+    color: var(--text-primary);
+    box-shadow: var(--shadow-card);
+    padding: 4px;
+  }
+  .cap-tile .ico {
+    width: 32px; height: 32px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cap-tile .ico svg { width: 17px; height: 17px; }
+  .cap-tile .label {
+    font-size: 11.5px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-primary);
+  }
+  .cap-tile .hint {
+    font-size: 9.5px;
+    color: var(--text-tertiary);
+    margin-top: -4px;
+    text-align: center;
+    font-weight: 500;
+  }
+  .cap-tile.notes   .ico { background: var(--subtle);       color: var(--text-secondary); }
+  .cap-tile.photo   .ico { background: var(--coral-soft);   color: var(--coral); }
+  .cap-tile.voice   .ico { background: var(--info-soft);    color: var(--info); }
+  .cap-tile.todo    .ico { background: var(--forest-tint);  color: var(--forest); }
+  .cap-tile.contact .ico { background: var(--warning-soft); color: var(--warning); }
+  .cap-tile.pin     .ico { background: var(--danger-soft);  color: var(--danger); }
+
+  /* Compact footer */
+  .sheet-foot {
+    font-size: 10.5px;
+    color: var(--text-tertiary);
+    text-align: center;
+    line-height: 1.4;
+    padding: 8px 4px 0;
+    margin-top: auto;
+    flex-shrink: 0;
+  }
+  .sheet-foot strong { color: var(--text-secondary); font-weight: 600; }
+
+  /* Ruler — visual aid showing the height budget */
+  .ruler {
+    position: absolute;
+    top: 12px; bottom: 12px;
+    right: -22px;
+    width: 18px;
+    pointer-events: none;
+  }
+  .ruler .rmark {
+    position: absolute;
+    right: 0;
+    width: 18px;
+    height: 1px;
+    background: rgba(80, 62, 45, 0.35);
+  }
+  .ruler .rmark::after {
+    content: attr(data-px);
+    position: absolute;
+    right: 22px;
+    top: -7px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 9px;
+    color: var(--text-tertiary);
+    background: var(--tan);
+    padding: 0 4px;
+    white-space: nowrap;
+  }
+
+  /* Annotation panel */
+  .annotations {
+    padding: 32px 36px;
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-card);
+  }
+  .annotations h2 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    font-size: 24px;
+    margin: 0 0 6px;
+  }
+  .annotations h3 {
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--mustard-deep);
+    margin: 24px 0 8px;
+  }
+  .annotations p {
+    font-size: 14px; line-height: 1.6;
+    color: var(--text-secondary);
+    margin: 0 0 10px;
+    max-width: 90ch;
+  }
+  .annotations p strong { color: var(--text-primary); }
+  .annotations p em { font-style: normal; color: var(--mustard-deep); font-weight: 600; }
+
+  .budget {
+    display: grid;
+    grid-template-columns: 1fr 80px 80px 80px;
+    gap: 0;
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    margin-top: 12px;
+    font-size: 12.5px;
+  }
+  .budget > * {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border-def);
+    line-height: 1.35;
+  }
+  .budget > .hd {
+    font-weight: 700;
+    background: var(--subtle);
+    color: var(--text-secondary);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: right;
+  }
+  .budget > .hd:first-child { text-align: left; }
+  .budget > .nm {
+    background: var(--canvas);
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  .budget > .v4, .budget > .v5, .budget > .delta {
+    text-align: right;
+    color: var(--text-secondary);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+  }
+  .budget > .delta { font-weight: 700; }
+  .budget > .delta.minus { color: var(--forest); }
+  .budget > .delta.same { color: var(--text-tertiary); }
+  .budget > .delta.plus { color: var(--coral-deep); }
+  .budget > :nth-last-child(-n+4) { border-bottom: 0; }
+  .budget > .sumcell {
+    background: var(--mustard-soft);
+    border-top: 2px solid var(--mustard);
+    color: var(--text-primary);
+    font-weight: 700;
+  }
+
+  .qlist {
+    display: flex; flex-direction: column;
+    gap: 14px;
+    margin-top: 12px;
+  }
+  .qlist .q {
+    background: var(--canvas);
+    border-left: 3px solid var(--mustard);
+    padding: 12px 14px;
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  }
+  .qlist .q .qq {
+    font-weight: 700;
+    color: var(--text-primary);
+    font-size: 13.5px;
+    margin-bottom: 4px;
+  }
+  .qlist .q .qa {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="eyebrow">Releaf · QuickCapture · v5 · no scroll</p>
+    <h1>Same content, single viewport.</h1>
+    <p class="lede">
+      Compressing v4 to fit on one screen meant three real cuts: the pre-tag categories
+      become a <strong>horizontal-scroll chip row</strong> instead of a 2×3 grid (saves ~140 px),
+      the Scan hero compacts to a <strong>single-line title with side-by-side buttons</strong>
+      (~130 px instead of 200 px), and the title block tightens to ~50 px without losing
+      "What arrived?". The capture tiles drop slightly in aspect ratio (1.05:1 instead of 1:1).
+      Total sheet height: <strong>~676 px</strong> on a 390 × 844 phone, fits in the available
+      ~735 px without scroll.
+    </p>
+    <p class="lede">
+      Nothing got removed — only resized and reflowed. The Scan hero still has corner
+      brackets and the rotated paper detail; pre-tag tiles still show icon + name + count;
+      capture tiles still carry icons + labels + hint text; the footer hint is still there.
+    </p>
+  </header>
+
+  <div class="grid">
+
+    <!-- ────────── phone ────────── -->
+    <section class="panel">
+      <div class="panel-head">
+        <span class="num">v5</span>
+        <span class="ttl">No scroll, single viewport</span>
+        <span class="tag">fits</span>
+      </div>
+      <p class="desc">
+        Sheet starts ~78 px from the top, leaving the compact Home header
+        (<code>TUESDAY · April 28</code>) visible above the scrim. Everything else
+        lives inside the sheet and renders without internal scroll.
+      </p>
+      <div class="phone">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 6.5C3.5 4 6 3 8 3s4.5 1 7 3.5l-1 1C12 5 10 4 8 4S4 5 2 7.5l-1-1zM4 9.5C5.5 8 6.5 7.5 8 7.5s2.5.5 4 2l-1 1C9.8 9.3 9 9 8 9s-1.8.3-3 1.5l-1-1zM8 11l2 2-2 2-2-2 2-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <!-- Compact Home header -->
+          <div class="home-head">
+            <div class="title-block">
+              <div class="day">Tuesday</div>
+              <div class="date">April 28</div>
+            </div>
+            <div class="actions">
+              <div class="head-icon-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              </div>
+              <div class="head-icon-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="scrim"></div>
+
+          <!-- ░░░░░ THE COMPACT SHEET ░░░░░ -->
+          <div class="sheet">
+            <div class="grabber"></div>
+
+            <!-- Top row: Day/Recents + tiny date -->
+            <div class="top-row">
+              <div class="scope">
+                <span class="seg active">Day</span>
+                <span class="seg">Recents</span>
+              </div>
+              <div class="day-pill-meta">Thursday · Apr 30</div>
+            </div>
+
+            <!-- Title -->
+            <div class="title-row">
+              <h2 class="arrived-title">What arrived?</h2>
+              <p class="arrived-sub">pick a category to pre-tag your scan</p>
+            </div>
+
+            <!-- Compact Scan hero -->
+            <div class="scan-hero">
+              <div class="corners">
+                <span class="corner tl"></span>
+                <span class="corner tr"></span>
+                <span class="corner bl"></span>
+                <span class="corner br"></span>
+              </div>
+              <div class="paper">
+                <i></i><i></i><i></i><i></i><i></i><i></i>
+              </div>
+              <div class="left">
+                <div class="eb"><i></i> Today's first capture</div>
+                <h3 class="h2">Scan a page</h3>
+                <p class="blurb">Auto-crops, OCRs, files under today.</p>
+                <div class="actions">
+                  <span class="btn-pri">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M9 6V4h6v2"/></svg>
+                    Scan now
+                  </span>
+                  <span class="btn-out">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                    Import
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Pre-tag chips (horizontal scroll) -->
+            <div class="pretag-label-row">
+              <span class="lbl">Pre-tag &amp; scan</span>
+              <span class="sub">scroll for more →</span>
+            </div>
+            <div class="pretag-row">
+              <div class="pretag-chip active">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/></svg>
+                </div>
+                <div class="text">
+                  <div class="nm">Letter</div>
+                  <div class="ct">3 this week</div>
+                </div>
+              </div>
+              <div class="pretag-chip">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M6 3h12v18l-3-3-3 3-3-3-3 3z"/><path d="M9 8h6M9 12h6"/></svg>
+                </div>
+                <div class="text">
+                  <div class="nm">Receipt</div>
+                  <div class="ct">12 total</div>
+                </div>
+              </div>
+              <div class="pretag-chip">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 4v3M12 17v3M4 12h3M17 12h3M6.34 6.34l2.12 2.12M15.54 15.54l2.12 2.12M6.34 17.66l2.12-2.12M15.54 8.46l2.12-2.12"/></svg>
+                </div>
+                <div class="text">
+                  <div class="nm">Medical</div>
+                  <div class="ct">5 total</div>
+                </div>
+              </div>
+              <div class="pretag-chip">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>
+                </div>
+                <div class="text">
+                  <div class="nm">Recipe</div>
+                  <div class="ct">8</div>
+                </div>
+              </div>
+              <div class="pretag-chip">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 8 9 5 9-5"/><path d="M3 13l9 5 9-5"/></svg>
+                </div>
+                <div class="text">
+                  <div class="nm">School</div>
+                  <div class="ct">4</div>
+                </div>
+              </div>
+              <div class="pretag-chip add">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                </div>
+                <div class="text">
+                  <div class="nm">New tag</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- OR CAPTURE DIFFERENTLY -->
+            <div class="divider-row">
+              <span class="ln"></span>
+              <span class="lbl">or capture differently</span>
+              <span class="ln"></span>
+            </div>
+
+            <!-- v3 6-tile grid (compressed aspect) -->
+            <div class="cap-tiles">
+              <div class="cap-tile notes">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h12M4 18h8"/></svg>
+                </div>
+                <div class="label">Notes</div>
+                <div class="hint">keyboard up</div>
+              </div>
+              <div class="cap-tile photo">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M9 6V4h6v2"/></svg>
+                </div>
+                <div class="label">Photo</div>
+                <div class="hint">camera</div>
+              </div>
+              <div class="cap-tile voice">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="13" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+                </div>
+                <div class="label">Voice</div>
+                <div class="hint">tap or hold FAB</div>
+              </div>
+              <div class="cap-tile todo">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/></svg>
+                </div>
+                <div class="label">Todo</div>
+                <div class="hint">checklist</div>
+              </div>
+              <div class="cap-tile contact">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+                </div>
+                <div class="label">Contact</div>
+                <div class="hint">phone · email</div>
+              </div>
+              <div class="cap-tile pin">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                </div>
+                <div class="label">Pin</div>
+                <div class="hint">tag this place</div>
+              </div>
+            </div>
+
+            <p class="sheet-foot">
+              <strong>Hold</strong> the green Leaf button to record voice without opening this sheet.
+            </p>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ────────── annotations ────────── -->
+    <section class="panel">
+      <div class="annotations">
+        <h2>Where ~250 px came from</h2>
+        <p>
+          v4 stacked everything vertically and let the user scroll.
+          v5 keeps every section but tightens each one.
+          The biggest single cut is the pre-tag grid → chip row, which gives back a full
+          row of vertical real estate while preserving the "tap a category, scan into it"
+          interaction. Everything else is dimensional trim.
+        </p>
+
+        <h3>Height budget — section by section</h3>
+        <div class="budget">
+          <span class="hd">Section</span>
+          <span class="hd">v4</span>
+          <span class="hd">v5</span>
+          <span class="hd">Δ</span>
+
+          <span class="nm">Drag handle + margin</span>
+          <span class="v4">14</span>
+          <span class="v5">12</span>
+          <span class="delta minus">−2</span>
+
+          <span class="nm">Day | Recents (+ inline date in v5)</span>
+          <span class="v4">52</span>
+          <span class="v5">38</span>
+          <span class="delta minus">−14</span>
+
+          <span class="nm">"What arrived?" + subtitle</span>
+          <span class="v4">86</span>
+          <span class="v5">52</span>
+          <span class="delta minus">−34</span>
+
+          <span class="nm">Scan hero</span>
+          <span class="v4">200</span>
+          <span class="v5">130</span>
+          <span class="delta minus">−70</span>
+
+          <span class="nm">"Pre-tag &amp; scan" label row</span>
+          <span class="v4">28</span>
+          <span class="v5">22</span>
+          <span class="delta minus">−6</span>
+
+          <span class="nm">Pre-tag tiles (grid → chip row)</span>
+          <span class="v4">200</span>
+          <span class="v5">76</span>
+          <span class="delta minus">−124</span>
+
+          <span class="nm">"Or capture differently" divider</span>
+          <span class="v4">38</span>
+          <span class="v5">28</span>
+          <span class="delta minus">−10</span>
+
+          <span class="nm">Capture tiles (1:1 → 1.05:1)</span>
+          <span class="v4">240</span>
+          <span class="v5">196</span>
+          <span class="delta minus">−44</span>
+
+          <span class="nm">Footer hint + bottom padding</span>
+          <span class="v4">66</span>
+          <span class="v5">42</span>
+          <span class="delta minus">−24</span>
+
+          <span class="sumcell">Total content height</span>
+          <span class="sumcell">~924</span>
+          <span class="sumcell">~596</span>
+          <span class="sumcell">−328</span>
+        </div>
+        <p style="margin-top: 10px; font-size: 12.5px;">
+          Numbers are approximate (margins drop in or out depending on browser).
+          Available sheet height on a 390×844 phone with the sheet starting at top=78 is ~735 px.
+          v5's ~596 px content + ~80 px breathing room fits comfortably without scroll.
+        </p>
+
+        <h3>Three real cuts</h3>
+        <p>
+          <strong>1 · Pre-tag grid → horizontal-scroll chip row (saves ~124 px).</strong>
+          Five most-frequent tags + "New tag" sit in a single horizontal row. User swipes
+          left to reveal more. Same icon + name + count info; about half the row is visible
+          at rest, the rest peeks past the right edge as a discoverability cue. Tapping a
+          chip pre-tags the next scan exactly like before.
+        </p>
+        <p>
+          <strong>2 · Compact Scan hero (saves ~70 px).</strong>
+          Same gradient, same paper detail in the corner, same buttons — just less padding
+          around the title and tighter line-height. The "Today's first capture" eyebrow is
+          shorter; the "Scan a page" title drops from 30 px to 22 px serif; the blurb stays
+          two lines but shorter copy ("Auto-crops, OCRs, files under today" instead of
+          "Auto-crops, OCRs, and files under today"). All visual signature retained.
+        </p>
+        <p>
+          <strong>3 · Title block tightens (saves ~34 px).</strong>
+          "What arrived?" drops from 36 px to 30 px serif. Date moves from a separate italic
+          subtitle line to a small meta label aligned with the Day/Recents toggle on the
+          right. The italic subtitle below "What arrived?" becomes shorter ("pick a
+          category to pre-tag your scan") since the date is now elsewhere.
+        </p>
+
+        <h3>What didn't get cut</h3>
+        <p>
+          The Day/Recents toggle, "What arrived?" header voice, the mustard hero with paper
+          + crop-corner brackets, the pre-tag affordance with active-amber state, the
+          "or capture differently" divider, all six capture tiles with distinct color
+          washes, and the "Hold the Leaf button" footer all survive intact. Nothing was
+          dropped — everything was resized.
+        </p>
+
+        <h3>Consequences worth knowing</h3>
+        <div class="qlist">
+          <div class="q">
+            <div class="qq">1 · The pre-tag chip row hides tags past the visible edge</div>
+            <div class="qa">
+              In a grid, all 6 tags are visible at once. In a horizontal scroll, the
+              user only sees ~3 at rest. Net cost: tags 4–6 are slightly less discoverable.
+              <em>Mitigation:</em> rank by recency-weighted frequency (already proposed in v2)
+              so the top 3 are the user's most-used; the "scroll for more →" hint signals
+              the rest is reachable.
+            </div>
+          </div>
+          <div class="q">
+            <div class="qq">2 · Capture tiles got a hair smaller</div>
+            <div class="qa">
+              Aspect ratio 1.05:1 instead of 1:1. Icon chip 32 px instead of 38 px. Hint
+              text 9.5 px instead of 11 px. Still well above 44 dp tap-target minimums for
+              the whole tile, but the visual presence dropped. <em>Watch:</em> if usability
+              testing shows users miss "Pin" or "Contact" labels, bump back to 1:1 and let
+              the sheet scroll a tiny bit.
+            </div>
+          </div>
+          <div class="q">
+            <div class="qq">3 · "What arrived?" shrunk — does it still feel editorial?</div>
+            <div class="qa">
+              30 px serif is still distinct from any other text on the screen. The voice
+              survives. <em>If it doesn't:</em> drop "What arrived?" entirely and let the
+              Scan hero's "Scan a page" title carry the framing. Saves another ~50 px and
+              gives the sheet more breathing room.
+            </div>
+          </div>
+          <div class="q">
+            <div class="qq">4 · iPhone SE / smaller phones</div>
+            <div class="qa">
+              v5's height budget assumes a 390 × 844 phone. iPhone SE is 375 × 667 — that's
+              ~70 px less vertical room. v5 will need scroll there, or the sheet starts
+              higher (top=40 instead of top=78), or the alternative <em>Scan | Capture tab
+              swap</em> from v4's open question takes over.
+            </div>
+          </div>
+        </div>
+
+        <h3>Implementation footprint</h3>
+        <p>
+          Same files as v4, smaller dimensions. <strong>Android</strong> —
+          <code>QuickCaptureSheet.kt</code>: pre-tag grid becomes a <code>LazyRow</code> instead
+          of <code>LazyVerticalGrid</code>; everything else just gets smaller padding /
+          font-size constants. <strong>iOS</strong> mirrors with <code>ScrollView(.horizontal)</code>
+          for the pre-tag chips. The compose <code>SheetState</code> stays at
+          <code>skipPartiallyExpanded&nbsp;=&nbsp;true</code> but the natural content height now fits
+          well below the largest stop, so the sheet sits at its content size instead of
+          maxing out.
+        </p>
+      </div>
+    </section>
+
+  </div>
+
+</div>
+</body>
+</html>

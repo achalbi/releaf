@@ -67,4 +67,8 @@ fun leafDropletTintFor(mode: CaptureMode): Color = when (mode) {
     CaptureMode.Location -> AppColors.CoralDeep
     CaptureMode.Voice    -> AppColors.Warning
     CaptureMode.Overview -> AppColors.ThemeGreenPrimary
+    // Notes — text capture, deep-coral tint matching the brand
+    // accent so the droplet reads as the "writing" surface
+    // among the other section glyphs.
+    CaptureMode.Notes    -> AppColors.CoralDeep
 }

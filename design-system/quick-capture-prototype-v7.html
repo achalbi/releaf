@@ -1,0 +1,1060 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Releaf — QuickCapture v7 — Leaf tab page</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Newsreader:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --canvas:        #F5EEE3;
+    --card-solid:    #FFFAF4;
+    --card-90:       rgba(255, 250, 244, 0.9);
+    --subtle:        #EFE7DA;
+    --muted:         #EBE4D3;
+    --tan:           #E8DDC9;
+    --border-def:    rgba(80, 62, 45, 0.12);
+    --border-strong: rgba(80, 62, 45, 0.24);
+    --text-primary:   #241D17;
+    --text-secondary: #5F5245;
+    --text-tertiary:  #8A7C6D;
+
+    --coral:      #E77850;
+    --coral-soft: #FCEAE0;
+    --coral-deep: #C85A30;
+
+    --info:       #2E6FB5;
+    --info-soft:  #E1ECF8;
+
+    --warning:    #A87418;
+    --warning-soft:#FBEECD;
+
+    --forest:       #1E5943;
+    --forest-soft:  #DDEAD8;
+    --forest-tint:  #E8F0E2;
+
+    --danger:      #C8432E;
+    --danger-soft: #FDEEE9;
+
+    --mustard:      #B27A2A;
+    --mustard-deep: #8E5F1F;
+    --mustard-soft: #F4E2BE;
+    --letter-bg:    #F0DDA8;
+    --letter-deep:  #8E5F1F;
+
+    --dot:        rgba(80, 62, 45, 0.14);
+    --shadow-card:    0 2px 8px rgba(36, 29, 23, 0.06);
+    --shadow-float:   0 12px 28px rgba(36, 29, 23, 0.14), 0 2px 6px rgba(36, 29, 23, 0.08);
+    --shadow-fab:     0 8px 24px rgba(231, 120, 80, 0.38);
+    --shadow-mustard: 0 8px 22px rgba(178, 122, 42, 0.34);
+
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --r-xl: 20px;
+    --r-hero: 22px;
+    --pill: 9999px;
+
+    --font-sans: Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-serif: Newsreader, Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0;
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+    background: var(--tan);
+    background-image: radial-gradient(circle, rgba(80,62,45,0.08) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .page-wrap { max-width: 1500px; margin: 0 auto; padding: 56px 32px 96px; }
+
+  header.hero { margin-bottom: 48px; }
+
+  .eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--coral); margin: 0 0 8px;
+  }
+  h1 {
+    font-family: var(--font-serif); font-weight: 500;
+    font-size: 36px; line-height: 1.15; letter-spacing: -0.01em;
+    margin: 0 0 12px; color: var(--text-primary);
+  }
+  .lede {
+    font-size: 15px; line-height: 1.55; max-width: 80ch;
+    color: var(--text-secondary); margin: 0;
+  }
+  .lede + .lede { margin-top: 10px; }
+  code, code.inline {
+    background: var(--subtle);
+    padding: 1px 6px; border-radius: 4px;
+    font-size: 12.5px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--text-primary);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(380px, 460px) minmax(320px, 1fr);
+    gap: 44px;
+    align-items: start;
+  }
+  @media (max-width: 1100px) {
+    .grid { grid-template-columns: 1fr; max-width: 480px; margin: 0 auto; }
+  }
+
+  .panel { display: flex; flex-direction: column; gap: 14px; }
+  .panel-head {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .panel-head .num {
+    font-family: var(--font-serif); font-size: 28px;
+    color: var(--mustard); line-height: 1;
+  }
+  .panel-head .ttl {
+    font-family: var(--font-serif); font-size: 22px;
+    color: var(--text-primary);
+  }
+  .panel-head .tag {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: var(--pill);
+    margin-left: auto;
+    background: var(--forest-soft); color: var(--forest);
+  }
+  .panel .desc {
+    font-size: 13.5px; line-height: 1.55; color: var(--text-secondary);
+  }
+
+  /* phone */
+  .phone {
+    position: relative; width: 100%;
+    aspect-ratio: 390 / 844;
+    border-radius: 44px;
+    background: #1B1610;
+    padding: 12px;
+    box-shadow: var(--shadow-float);
+    overflow: hidden;
+  }
+  .screen {
+    position: relative; width: 100%; height: 100%;
+    border-radius: 32px;
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+
+  .statusbar {
+    height: 36px; padding: 12px 20px 0;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; font-weight: 700; color: var(--text-primary);
+    flex-shrink: 0;
+  }
+  .statusbar .icons { display: flex; gap: 4px; align-items: center; }
+  .statusbar svg { width: 13px; height: 13px; }
+
+  /* ────────── Page header (replaces sheet header) ────────── */
+  .page-head {
+    padding: 14px 18px 12px;
+    display: flex; justify-content: space-between; align-items: flex-end;
+    flex-shrink: 0;
+  }
+  .page-head .title-block {
+    flex: 1; min-width: 0;
+  }
+  .page-head .eb {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--coral);
+    margin-bottom: 3px;
+  }
+  .page-head .title {
+    font-family: var(--font-serif);
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+    color: var(--text-primary);
+  }
+  .page-head .actions { display: flex; gap: 8px; }
+  .head-icon-btn {
+    width: 36px; height: 36px;
+    border-radius: var(--pill);
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-primary);
+    box-shadow: var(--shadow-card);
+  }
+  .head-icon-btn svg { width: 16px; height: 16px; }
+
+  /* Page body (no sheet, no scrim, no rounded top corners) */
+  .page-body {
+    flex: 1;
+    padding: 0 14px 12px;
+    display: flex; flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+  }
+
+  /* Top row: Day/Recents + tiny date */
+  .top-row {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+    padding: 0 4px;
+  }
+  .scope {
+    background: var(--subtle);
+    border-radius: var(--pill);
+    padding: 3px;
+    display: inline-flex;
+    flex-shrink: 0;
+  }
+  .scope .seg {
+    padding: 6px 14px;
+    border-radius: var(--pill);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .scope .seg.active {
+    background: var(--forest);
+    color: var(--canvas);
+    box-shadow: var(--shadow-card);
+  }
+  .day-meta {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-weight: 500;
+  }
+
+  /* Full Scan hero — same dimensions as v6 */
+  .scan-hero {
+    background: linear-gradient(135deg, #C68628 0%, var(--mustard) 50%, var(--mustard-deep) 100%);
+    border-radius: var(--r-hero);
+    padding: 22px 22px 18px;
+    color: var(--canvas);
+    position: relative;
+    overflow: hidden;
+    box-shadow: var(--shadow-mustard);
+    flex-shrink: 0;
+  }
+  .scan-hero::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(circle at 100% 0%, rgba(255,221,160,0.22), transparent 55%);
+    pointer-events: none;
+    border-radius: var(--r-hero);
+  }
+  .scan-hero .eb {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.78);
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 6px;
+  }
+  .scan-hero .eb i {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--canvas);
+    box-shadow: 0 0 6px rgba(255,255,255,0.6);
+  }
+  .scan-hero .h2 {
+    font-family: var(--font-serif);
+    font-weight: 700;
+    font-size: 30px;
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+    color: var(--text-primary);
+    margin: 0 0 6px;
+    max-width: 220px;
+  }
+  .scan-hero .blurb {
+    font-size: 13.5px;
+    line-height: 1.45;
+    color: var(--canvas);
+    margin: 0 0 16px;
+    max-width: 220px;
+  }
+  .scan-hero .corners {
+    position: absolute;
+    top: 16px; right: 16px;
+    width: 110px; height: 130px;
+    z-index: 1;
+  }
+  .scan-hero .corner {
+    position: absolute;
+    width: 22px; height: 22px;
+    border: 2.5px solid var(--canvas);
+    opacity: 0.85;
+  }
+  .scan-hero .corner.tl { top: 0; left: 0;     border-right: 0; border-bottom: 0; border-radius: 4px 0 0 0; }
+  .scan-hero .corner.tr { top: 0; right: 0;    border-left: 0;  border-bottom: 0; border-radius: 0 4px 0 0; }
+  .scan-hero .corner.bl { bottom: 0; left: 0;  border-right: 0; border-top: 0;    border-radius: 0 0 0 4px; }
+  .scan-hero .corner.br { bottom: 0; right: 0; border-left: 0;  border-top: 0;    border-radius: 0 0 4px 0; }
+  .scan-hero .paper {
+    position: absolute;
+    top: 22px; right: 24px;
+    width: 78px; height: 96px;
+    background: var(--canvas);
+    border-radius: 6px;
+    box-shadow: 0 6px 14px rgba(36, 29, 23, 0.30);
+    transform: rotate(8deg);
+    z-index: 2;
+  }
+  .scan-hero .paper i {
+    position: absolute;
+    left: 12px; right: 18px;
+    height: 2px;
+    background: var(--text-tertiary);
+    border-radius: 1px;
+    opacity: 0.4;
+  }
+  .scan-hero .paper i:nth-child(1) { top: 22px; height: 3px; opacity: 0.55; }
+  .scan-hero .paper i:nth-child(2) { top: 32px; right: 28px; opacity: 0.40; }
+  .scan-hero .paper i:nth-child(3) { top: 42px; }
+  .scan-hero .paper i:nth-child(4) { top: 50px; right: 22px; }
+  .scan-hero .paper i:nth-child(5) { top: 58px; }
+  .scan-hero .paper i:nth-child(6) { top: 66px; right: 30px; }
+
+  .scan-hero .actions {
+    display: flex; gap: 10px;
+    position: relative; z-index: 3;
+  }
+  .scan-hero .btn-pri {
+    background: var(--canvas);
+    color: var(--mustard-deep);
+    padding: 11px 18px;
+    border-radius: var(--pill);
+    font-size: 13.5px;
+    font-weight: 700;
+    display: inline-flex; align-items: center; gap: 7px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.10);
+  }
+  .scan-hero .btn-pri svg { width: 14px; height: 14px; }
+  .scan-hero .btn-out {
+    background: rgba(255,255,255,0.15);
+    color: var(--canvas);
+    padding: 11px 18px;
+    border-radius: var(--pill);
+    font-size: 13.5px;
+    font-weight: 600;
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid rgba(255,255,255,0.35);
+  }
+  .scan-hero .btn-out svg { width: 14px; height: 14px; }
+
+  /* Pre-tag */
+  .pretag-label-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin: 0 4px -2px;
+    flex-shrink: 0;
+  }
+  .pretag-label-row .lbl {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.10em;
+    text-transform: uppercase; color: var(--text-secondary);
+  }
+  .pretag-label-row .sub {
+    font-size: 11px; color: var(--text-tertiary);
+  }
+  .pretag-row {
+    display: flex; gap: 8px;
+    overflow-x: auto;
+    padding: 4px 0 6px;
+    flex-shrink: 0;
+  }
+  .pretag-row::-webkit-scrollbar { display: none; }
+  .pretag-chip {
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-md);
+    padding: 8px 12px;
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: var(--shadow-card);
+    flex-shrink: 0;
+  }
+  .pretag-chip .ico {
+    width: 22px; height: 22px;
+    color: var(--forest);
+    flex-shrink: 0;
+  }
+  .pretag-chip .ico svg { width: 22px; height: 22px; }
+  .pretag-chip .text { display: flex; flex-direction: column; }
+  .pretag-chip .nm {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.1;
+  }
+  .pretag-chip .ct {
+    font-size: 10.5px;
+    color: var(--text-tertiary);
+    line-height: 1.2;
+    margin-top: 1px;
+  }
+  .pretag-chip.active {
+    background: var(--letter-bg);
+    border-color: rgba(142, 95, 31, 0.25);
+    box-shadow: 0 2px 8px rgba(142, 95, 31, 0.15);
+  }
+  .pretag-chip.active .ico { color: var(--letter-deep); }
+  .pretag-chip.active .ct { color: var(--letter-deep); font-weight: 600; }
+  .pretag-chip.add {
+    border-style: dashed; background: transparent; box-shadow: none;
+    padding: 8px 14px;
+  }
+  .pretag-chip.add .ico { color: var(--text-secondary); }
+  .pretag-chip.add .nm { color: var(--text-secondary); }
+
+  /* Divider */
+  .divider-row {
+    display: flex; align-items: center; gap: 10px;
+    margin: 4px 4px 4px;
+    flex-shrink: 0;
+  }
+  .divider-row .ln { flex: 1; height: 1px; background: var(--border-def); }
+  .divider-row .lbl {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.10em;
+    text-transform: uppercase; color: var(--text-tertiary);
+  }
+
+  /* Capture tiles 1.05:1 — slightly more room than v6 since it's a page */
+  .cap-tiles {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .cap-tile {
+    aspect-ratio: 1.05;
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 7px;
+    color: var(--text-primary);
+    box-shadow: var(--shadow-card);
+    padding: 4px;
+  }
+  .cap-tile .ico {
+    width: 34px; height: 34px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cap-tile .ico svg { width: 18px; height: 18px; }
+  .cap-tile .label {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-primary);
+  }
+  .cap-tile .hint {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    margin-top: -4px;
+    text-align: center;
+    font-weight: 500;
+  }
+  .cap-tile.notes   .ico { background: var(--subtle);       color: var(--text-secondary); }
+  .cap-tile.photo   .ico { background: var(--coral-soft);   color: var(--coral); }
+  .cap-tile.voice   .ico { background: var(--info-soft);    color: var(--info); }
+  .cap-tile.todo    .ico { background: var(--forest-tint);  color: var(--forest); }
+  .cap-tile.contact .ico { background: var(--warning-soft); color: var(--warning); }
+  .cap-tile.pin     .ico { background: var(--danger-soft);  color: var(--danger); }
+
+  .body-foot {
+    font-size: 10.5px;
+    color: var(--text-tertiary);
+    text-align: center;
+    line-height: 1.4;
+    padding: 4px 4px 0;
+    margin-top: auto;
+    flex-shrink: 0;
+  }
+  .body-foot strong { color: var(--text-secondary); font-weight: 600; }
+
+  /* ────── Floating BottomNav (existing app pattern) ────── */
+  .bottomnav {
+    position: absolute;
+    left: 50%;
+    bottom: 12px;
+    transform: translateX(-50%);
+    width: calc(100% - 24px);
+    background: var(--card-90);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border-def);
+    border-radius: var(--pill);
+    padding: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    box-shadow: var(--shadow-float);
+    z-index: 50;
+  }
+  .navitem {
+    width: 44px; height: 44px;
+    border-radius: var(--pill);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-tertiary);
+  }
+  .navitem.active { color: var(--text-primary); }
+  .navitem svg { width: 20px; height: 20px; }
+  .navitem.fab {
+    width: 56px; height: 56px;
+    background: linear-gradient(180deg, var(--coral) 0%, var(--coral-deep) 100%);
+    color: var(--canvas);
+    box-shadow: var(--shadow-fab);
+    position: relative;
+  }
+  .navitem.fab svg { width: 24px; height: 24px; }
+  .navitem.fab.tab-active {
+    box-shadow: var(--shadow-fab), 0 0 0 3px var(--canvas), 0 0 0 4px var(--coral);
+  }
+
+  /* room above the floating nav */
+  .nav-spacer { flex-shrink: 0; height: 78px; }
+
+  /* annotations */
+  .annotations {
+    padding: 32px 36px;
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-card);
+  }
+  .annotations h2 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    font-size: 24px;
+    margin: 0 0 6px;
+  }
+  .annotations h3 {
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--forest);
+    margin: 24px 0 8px;
+  }
+  .annotations p {
+    font-size: 14px; line-height: 1.6;
+    color: var(--text-secondary);
+    margin: 0 0 10px;
+    max-width: 90ch;
+  }
+  .annotations p strong { color: var(--text-primary); }
+
+  .compare {
+    display: grid;
+    grid-template-columns: 200px 1fr 1fr;
+    gap: 0;
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    margin-top: 12px;
+    font-size: 13px;
+  }
+  .compare > * {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border-def);
+    line-height: 1.4;
+  }
+  .compare > .hd {
+    font-weight: 700;
+    background: var(--subtle);
+    color: var(--text-secondary);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .compare > .nm {
+    background: var(--canvas);
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  .compare span.win   { color: var(--forest);     font-weight: 600; }
+  .compare span.cost  { color: var(--coral-deep); font-weight: 600; }
+  .compare span.same  { color: var(--text-secondary); }
+  .compare > :nth-last-child(-n+3) { border-bottom: 0; }
+
+  .qlist {
+    display: flex; flex-direction: column;
+    gap: 14px;
+    margin-top: 12px;
+  }
+  .qlist .q {
+    background: var(--canvas);
+    border-left: 3px solid var(--forest);
+    padding: 12px 14px;
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  }
+  .qlist .q .qq {
+    font-weight: 700;
+    color: var(--text-primary);
+    font-size: 13.5px;
+    margin-bottom: 4px;
+  }
+  .qlist .q .qa {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+  }
+  .qlist .q .qa em { font-style: normal; color: var(--forest); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+  <header class="hero">
+    <p class="eyebrow">Releaf · QuickCapture · v7 · Leaf tab page</p>
+    <h1>Capture is a tab now, not a modal.</h1>
+    <p class="lede">
+      Promoting Quick Capture from a <code>ModalBottomSheet</code> to a top-level destination.
+      The center "Leaf" slot in the BottomNav becomes a real tab that owns its route, its
+      back stack, and its persistent state. Tapping the coral FAB no longer opens a sheet
+      over the current screen — it navigates to <code>releaf://capture</code>, like tapping
+      Home or Settings.
+    </p>
+    <p class="lede">
+      The visual content is identical to v6 (full Scan hero, pre-tag chip row, six capture
+      tiles), but the surface changes: no drag handle, no rounded top corners, no scrim, no
+      sheet-internal scroll concerns. The page sits on the cream canvas with the BottomNav
+      floating below as on every other tab. The <strong>"Leaf" FAB</strong> in the nav gets a
+      coral ring around it to indicate the tab is active.
+    </p>
+  </header>
+
+  <div class="grid">
+
+    <!-- ────────── phone ────────── -->
+    <section class="panel">
+      <div class="panel-head">
+        <span class="num">v7</span>
+        <span class="ttl">Capture as a top-level page</span>
+        <span class="tag">Leaf tab</span>
+      </div>
+      <p class="desc">
+        Same content as v6, restructured as a real screen instead of a bottom sheet.
+        Page header at top with "Capture" serif title and search + calendar icons.
+        BottomNav stays visible at the bottom; the coral FAB shows the active-tab ring.
+      </p>
+      <div class="phone">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 6.5C3.5 4 6 3 8 3s4.5 1 7 3.5l-1 1C12 5 10 4 8 4S4 5 2 7.5l-1-1zM4 9.5C5.5 8 6.5 7.5 8 7.5s2.5.5 4 2l-1 1C9.8 9.3 9 9 8 9s-1.8.3-3 1.5l-1-1zM8 11l2 2-2 2-2-2 2-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <!-- Page header (replaces sheet header, no drag handle) -->
+          <div class="page-head">
+            <div class="title-block">
+              <div class="eb">RELEAF</div>
+              <div class="title">Capture</div>
+            </div>
+            <div class="actions">
+              <div class="head-icon-btn" title="Search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              </div>
+              <div class="head-icon-btn" title="Calendar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="page-body">
+            <div class="top-row">
+              <div class="scope">
+                <span class="seg active">Day</span>
+                <span class="seg">Recents</span>
+              </div>
+              <div class="day-meta">Thursday · April 30</div>
+            </div>
+
+            <!-- Full Scan hero -->
+            <div class="scan-hero">
+              <div class="corners">
+                <span class="corner tl"></span>
+                <span class="corner tr"></span>
+                <span class="corner bl"></span>
+                <span class="corner br"></span>
+              </div>
+              <div class="paper">
+                <i></i><i></i><i></i><i></i><i></i><i></i>
+              </div>
+              <div class="eb"><i></i> Today's first capture</div>
+              <h3 class="h2">Scan a page</h3>
+              <p class="blurb">Auto-crops, OCRs, and files under today.</p>
+              <div class="actions">
+                <span class="btn-pri">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M9 6V4h6v2"/></svg>
+                  Scan now
+                </span>
+                <span class="btn-out">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                  Import
+                </span>
+              </div>
+            </div>
+
+            <!-- Pre-tag chips -->
+            <div class="pretag-label-row">
+              <span class="lbl">Pre-tag &amp; scan</span>
+              <span class="sub">scroll for more →</span>
+            </div>
+            <div class="pretag-row">
+              <div class="pretag-chip active">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/></svg>
+                </div>
+                <div class="text">
+                  <div class="nm">Letter</div>
+                  <div class="ct">3 this week</div>
+                </div>
+              </div>
+              <div class="pretag-chip">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M6 3h12v18l-3-3-3 3-3-3-3 3z"/><path d="M9 8h6M9 12h6"/></svg>
+                </div>
+                <div class="text">
+                  <div class="nm">Receipt</div>
+                  <div class="ct">12 total</div>
+                </div>
+              </div>
+              <div class="pretag-chip">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 4v3M12 17v3M4 12h3M17 12h3M6.34 6.34l2.12 2.12M15.54 15.54l2.12 2.12M6.34 17.66l2.12-2.12M15.54 8.46l2.12-2.12"/></svg>
+                </div>
+                <div class="text">
+                  <div class="nm">Medical</div>
+                  <div class="ct">5 total</div>
+                </div>
+              </div>
+              <div class="pretag-chip">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>
+                </div>
+                <div class="text">
+                  <div class="nm">Recipe</div>
+                  <div class="ct">8</div>
+                </div>
+              </div>
+              <div class="pretag-chip">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 8 9 5 9-5"/><path d="M3 13l9 5 9-5"/></svg>
+                </div>
+                <div class="text">
+                  <div class="nm">School</div>
+                  <div class="ct">4</div>
+                </div>
+              </div>
+              <div class="pretag-chip add">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                </div>
+                <div class="text">
+                  <div class="nm">New tag</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Divider -->
+            <div class="divider-row">
+              <span class="ln"></span>
+              <span class="lbl">or capture differently</span>
+              <span class="ln"></span>
+            </div>
+
+            <!-- Capture tiles -->
+            <div class="cap-tiles">
+              <div class="cap-tile notes">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h12M4 18h8"/></svg>
+                </div>
+                <div class="label">Notes</div>
+                <div class="hint">keyboard up</div>
+              </div>
+              <div class="cap-tile photo">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M9 6V4h6v2"/></svg>
+                </div>
+                <div class="label">Photo</div>
+                <div class="hint">camera</div>
+              </div>
+              <div class="cap-tile voice">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="13" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+                </div>
+                <div class="label">Voice</div>
+                <div class="hint">tap or hold FAB</div>
+              </div>
+              <div class="cap-tile todo">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/></svg>
+                </div>
+                <div class="label">Todo</div>
+                <div class="hint">checklist</div>
+              </div>
+              <div class="cap-tile contact">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+                </div>
+                <div class="label">Contact</div>
+                <div class="hint">phone · email</div>
+              </div>
+              <div class="cap-tile pin">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                </div>
+                <div class="label">Pin</div>
+                <div class="hint">tag this place</div>
+              </div>
+            </div>
+
+            <p class="body-foot">
+              <strong>Hold</strong> the green Leaf button on any tab to record voice without leaving.
+            </p>
+            <div class="nav-spacer"></div>
+          </div>
+
+          <!-- BottomNav (Leaf is the active tab) -->
+          <div class="bottomnav">
+            <div class="navitem" title="Home">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg>
+            </div>
+            <div class="navitem" title="Notebook">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4z"/><path d="M9 4v16"/></svg>
+            </div>
+            <div class="navitem fab tab-active" title="Capture (current tab)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 4 13V8a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v5a7 7 0 0 1-7 7z"/><path d="M11 20v-9"/></svg>
+            </div>
+            <div class="navitem" title="Notepad">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h12l4 4v12H4z"/><path d="M16 4v4h4M8 12h8M8 16h5"/></svg>
+            </div>
+            <div class="navitem" title="Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19 12c0 1-.2 1.9-.5 2.7l1.7 1.3-2 3-2-.7c-.7.5-1.4.9-2.2 1.1L13.5 22h-3l-.5-2.6a7 7 0 0 1-2.2-1.1l-2 .7-2-3 1.7-1.3A8 8 0 0 1 5 12c0-1 .2-1.9.5-2.7L3.8 8l2-3 2 .7c.7-.5 1.4-.9 2.2-1.1L10.5 2h3l.5 2.6c.8.2 1.5.6 2.2 1.1l2-.7 2 3-1.7 1.3c.3.8.5 1.7.5 2.7z"/></svg>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ────────── annotations ────────── -->
+    <section class="panel">
+      <div class="annotations">
+        <h2>What changes when Capture becomes a page</h2>
+        <p>
+          The visual content stays nearly identical to v6. The bigger shifts are
+          architectural — Capture moves from a transient modal to a destination with
+          identity, state, and a route. That has real consequences worth pulling apart.
+        </p>
+
+        <h3>Modal vs page — concern by concern</h3>
+        <div class="compare">
+          <span class="hd">Concern</span>
+          <span class="hd">v6 — modal sheet</span>
+          <span class="hd">v7 — Leaf tab page</span>
+
+          <span class="nm">Entry point</span>
+          <span class="same">Tap FAB → sheet rises over current screen</span>
+          <span class="same">Tap FAB → navigate to Leaf tab</span>
+
+          <span class="nm">Dismiss</span>
+          <span class="same">Swipe down · tap scrim</span>
+          <span class="same">Tap another BottomNav tab</span>
+
+          <span class="nm">Deep link</span>
+          <span class="cost">Awkward — needs to cold-launch, then trigger sheet</span>
+          <span class="win">Native — <code>releaf://capture</code> lands on the tab</span>
+
+          <span class="nm">Day/Recents state</span>
+          <span class="cost">Lost on dismiss; sheet always opens to "Day"</span>
+          <span class="win">Persistent across navigations (tab state survives)</span>
+
+          <span class="nm">Modal-on-modal risk</span>
+          <span class="cost">Real — compose-foundation 1.7.x bug for sub-sheets</span>
+          <span class="win">Eliminated — no parent sheet, sub-sheets work fine</span>
+
+          <span class="nm">Available height</span>
+          <span class="same">~750&nbsp;px (top=70 + content + bottom safe)</span>
+          <span class="same">~728&nbsp;px (BottomNav steals back ~76)</span>
+
+          <span class="nm">Status bar treatment</span>
+          <span class="same">Sheet covers it from 70 px down; status visible</span>
+          <span class="same">Status visible; page header sits below it</span>
+
+          <span class="nm">Backdrop</span>
+          <span class="same">Previous screen + scrim</span>
+          <span class="same">Cream canvas + dot grid (no previous screen)</span>
+
+          <span class="nm">Active-tab signal</span>
+          <span class="cost">Coral FAB is just a button; no sense of "where am I"</span>
+          <span class="win">Coral FAB gets cream/coral ring → "Capture is the current tab"</span>
+
+          <span class="nm">Search/calendar buttons</span>
+          <span class="same">Top-right of sheet header</span>
+          <span class="same">Top-right of page header — same position, same icons</span>
+
+          <span class="nm">Cold-launch behavior</span>
+          <span class="cost">Lands on Home; user taps FAB to capture</span>
+          <span class="win">Configurable — could land on Capture for "capture-first" users</span>
+        </div>
+
+        <h3>The height surprise</h3>
+        <p>
+          Going from modal to page <strong>doesn't actually buy more vertical room</strong>.
+          The modal was hiding ~70 px of Home above (sheet started at top=70) and showing
+          the BottomNav was either inside the sheet's chrome or hidden. The page version
+          shows the BottomNav (~76 px) plus the page header (~62 px) and the status bar
+          (~36 px), leaving ~670 px of body content. That's roughly the same as v6's modal
+          (~750 px sheet, but with the title block + drag handle eating some of that).
+        </p>
+        <p>
+          So v7's body still uses the same compression strategy as v5/v6: chip-row pre-tags,
+          1.05:1 capture tiles. The Scan hero stays at full size. Everything fits without
+          internal scroll on a 390×844 phone.
+        </p>
+
+        <h3>What this resolves</h3>
+        <p>
+          <strong>Persistent Day/Recents state.</strong> A user who flips to Recents to check
+          what they last captured, then goes elsewhere and comes back, sees Recents still
+          selected. With the modal, every dismiss reset the state to Day.
+        </p>
+        <p>
+          <strong>Deep linking.</strong> <code>releaf://capture</code>,
+          <code>releaf://capture?kind=photo</code>, and <code>releaf://capture?tag=letter</code>
+          all become trivial because Capture is now a real route. The modal version had to
+          be triggered after cold-launching into Home, which is a fragile dance.
+        </p>
+        <p>
+          <strong>Modal-on-modal fragility.</strong> v1's open question 3 worried about
+          opening a "Capture into…" sheet on long-press from inside the modal sheet —
+          because Android's <code>compose-foundation 1.7.x</code> has a real bug stacking
+          sheets. v7 makes it a non-issue: long-press opens a sub-sheet on top of a regular
+          page, which works.
+        </p>
+        <p>
+          <strong>Conceptual ambiguity of the FAB.</strong> The center "Leaf" was always a
+          weird hybrid — it lived in the BottomNav slot but didn't own a destination.
+          Promoting it to a real tab makes the slot consistent with Home / Notebook / Notepad
+          / Settings.
+        </p>
+
+        <h3>What this costs</h3>
+        <p>
+          <strong>Capture is no longer a "quick" gesture.</strong> Tapping FAB → sheet
+          felt lightweight, dismissible. Tapping FAB → tab navigation feels like switching
+          context. For users who think of capture as "interrupt my current screen to add
+          something," the modal idiom matched their mental model better.
+        </p>
+        <p>
+          <strong>Mitigation:</strong> the <em>Hold the green Leaf button to record voice
+          without opening this tab</em> footer survives. Voice — the highest-frequency
+          quick capture — still works as a gesture from anywhere via the FAB long-press.
+          Photo / Scan / Note all still go through the tab, but those are deliberate
+          captures anyway.
+        </p>
+
+        <h3>NAV_GRAPH.md changes required</h3>
+        <p>
+          The current <code>docs/NAV_GRAPH.md</code> lists <code>quick_capture</code> as a
+          "Modal" kind hosted under <em>any</em> tab. v7 changes it to a "Top-level" kind
+          with route id <code>capture</code> (or keeps <code>quick_capture</code> as the
+          route name; either is fine). The five-tab BottomNav already has Leaf in the
+          center slot — it's already visible, just gains a real destination behind it.
+          The deep-link table updates: <code>releaf://capture</code> goes from "open modal"
+          to "select Leaf tab"; <code>releaf://capture?kind=photo</code> goes from "open
+          modal with kind preset" to "select Leaf tab + open the Photo tile flow."
+        </p>
+
+        <h3>Open questions</h3>
+        <div class="qlist">
+          <div class="q">
+            <div class="qq">1 · Should Capture be the cold-launch landing for some users?</div>
+            <div class="qa">
+              The launcher continue-scope already has a setting for "what happens on app
+              icon tap" (per <code>DAILY_CAPTURE_UX.md</code>). Adding "land on Capture
+              tab" as a fourth value (<code>today / append_to_latest / new_shell /
+              capture_tab</code>) lets capture-first users skip the Home detour entirely.
+              <em>Recommend:</em> ship without it; add if usage data shows users immediately
+              tapping FAB after cold-launch &gt;50% of the time.
+            </div>
+          </div>
+          <div class="q">
+            <div class="qq">2 · Does the Capture tab show below-the-fold content if the user scrolls?</div>
+            <div class="qa">
+              v7 fits all six tiles + the hero in one viewport. But unlike a modal, a page
+              naturally invites scroll. Adding a "Recent captures" section below the tiles
+              (last 3 captures across all kinds) gives the page more substance without
+              hurting the above-the-fold flow. <em>Recommend:</em> add the recent-captures
+              strip in a follow-up; ship the same v6 content for v1.
+            </div>
+          </div>
+          <div class="q">
+            <div class="qq">3 · How does "back" work from a Capture sub-flow?</div>
+            <div class="qa">
+              Tap Photo tile → camera opens. Cancel → back to Capture tab? Or back to the
+              previous tab the user was on? <em>Recommend:</em> back to Capture tab, since
+              that's where the action started. The Capture tab itself doesn't have a back
+              button (it's a top-level destination); pressing system back from Capture
+              returns to the previously-active tab.
+            </div>
+          </div>
+          <div class="q">
+            <div class="qq">4 · Does the FAB visual change need a token?</div>
+            <div class="qa">
+              The "active tab" treatment is a cream ring + coral outline around the coral
+              FAB. Add it as <code>color.nav.fabActiveRing</code> in <code>design-tokens.json</code>
+              alongside the existing <code>shadow.fab</code>. It's effectively a new visual
+              state for the FAB; doesn't affect any other component.
+            </div>
+          </div>
+        </div>
+
+        <h3>Implementation footprint</h3>
+        <p>
+          More substantial than previous iterations because the navigation shape changes.
+          <strong>Android</strong> — add a <code>CaptureScreen.kt</code> under
+          <code>features/capture/</code> with the same body content as the v6 sheet. Update
+          the <code>NavHost</code> in the app shell to add a <code>capture</code> top-level
+          destination. The <code>BottomNav</code> already has Leaf in the center slot;
+          gate its <code>onClick</code> from <code>openSheet()</code> to
+          <code>navController.navigate("capture")</code>. Delete <code>QuickCaptureSheet.kt</code>'s
+          <code>ModalBottomSheet</code> wrapper (keep the row composables, they'll live
+          on the page). <strong>iOS</strong> mirrors — new <code>CaptureView.swift</code>,
+          tab item added to <code>MainShell</code>, no more <code>.sheet</code> presentation.
+          <strong>Routes</strong> — update <code>docs/NAV_GRAPH.md</code> per above.
+          No SQL migration; pre-tag still rides existing <code>tags</code>.
+        </p>
+      </div>
+    </section>
+
+  </div>
+
+</div>
+</body>
+</html>

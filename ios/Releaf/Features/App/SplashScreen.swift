@@ -1,64 +1,89 @@
 /*
  * SplashScreen.swift
- * Full-bleed launch splash. Matches the Releaf Branding Figma spec (live
- * DOM extraction, April 2026):
- *   - Linear gradient background, theme-primary → theme-deep, top-left
- *     to bottom-right.
- *   - 120pt leaf (canonical 24-viewport SVG, filled + cream outline +
- *     vein) with a subtle pulse.
- *   - "Releaf" wordmark, sans-serif 48pt medium, tracking -1.2pt in
- *     OnAccent cream.
- *   - "The notebook that grows back." tagline, sans-serif 18pt, OnAccent
- *     @ 90% opacity.
- *   - Three bouncing 8pt cream loading dots.
+ * Full-bleed launch splash derived from the April 2026 Releaf marketing
+ * material:
+ *   - Deep green gradient background with faint dot-grid texture.
+ *   - Cream-filled diagonal leaf with deep-green vein.
+ *   - Lowercase serif "releaf" wordmark.
+ *   - "WRITE. ERASE. REPEAT." loop tagline.
  */
 
 import SwiftUI
 import ReleafDesignSystem
 
 public struct SplashScreen: View {
-    @Environment(\.accentPalette) private var accent
+    private let brandGreenTop = Color(hex: 0x0F5A35)
+    private let brandGreenBottom = Color(hex: 0x062F1D)
 
     public init() {}
 
     public var body: some View {
         ZStack {
             LinearGradient(
-                colors: [accent.primary, accent.deep],
+                colors: [brandGreenTop, Color(hex: 0x0B4328), brandGreenBottom],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
 
+            SplashDotGrid()
+                .ignoresSafeArea()
+
             VStack(spacing: 0) {
-                ReleafLogo(
-                    size: 120,
-                    filled: true,
-                    outlineColor: AppColors.onAccent,
-                    fillGradientStart: accent.primary,
-                    fillGradientEnd: accent.deep,
-                    lineWidth: 2
+                ReleafLogoSolid(
+                    size: 136,
+                    leafColor: AppColors.onAccent,
+                    veinColor: brandGreenBottom,
+                    veinWidth: 4
                 )
 
-                Spacer().frame(height: AppSpacing.s8)
+                Spacer().frame(height: 28)
 
-                Text("Releaf")
-                    .font(.system(size: 48))
-                    .tracking(-1.2)
+                Text("releaf")
+                    .font(.system(size: 64, weight: .regular, design: .serif))
+                    .tracking(-1)
                     .foregroundStyle(AppColors.onAccent)
 
-                Spacer().frame(height: AppSpacing.s3)
+                Spacer().frame(height: AppSpacing.s2)
 
-                Text("The notebook that grows back.")
-                    .font(.system(size: 18))
-                    .foregroundStyle(AppColors.onAccent.opacity(0.9))
+                Text("WRITE. ERASE. REPEAT.")
+                    .font(.system(size: 18, weight: .bold, design: .default))
+                    .tracking(2.2)
+                    .foregroundStyle(AppColors.onAccent)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, AppSpacing.s6)
 
-                Spacer().frame(height: 64)
+                Spacer().frame(height: AppSpacing.s3)
+
+                Text("Reusable notebook + smart app companion.")
+                    .font(.system(size: 17))
+                    .foregroundStyle(AppColors.onAccent.opacity(0.82))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, AppSpacing.s6)
+
+                Spacer().frame(height: 72)
 
                 LoadingDots()
             }
+        }
+    }
+}
+
+private struct SplashDotGrid: View {
+    var body: some View {
+        Canvas { context, size in
+            let step: CGFloat = 18
+            var path = Path()
+            var y: CGFloat = 0
+            while y <= size.height {
+                var x: CGFloat = 0
+                while x <= size.width {
+                    path.addEllipse(in: CGRect(x: x, y: y, width: 2, height: 2))
+                    x += step
+                }
+                y += step
+            }
+            context.fill(path, with: .color(AppColors.onAccent.opacity(0.07)))
         }
     }
 }

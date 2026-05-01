@@ -12,7 +12,8 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.SkipQueryVerification
+import androidx.room.RawQuery
+import androidx.room.RoomRawQuery
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -43,40 +44,47 @@ interface NotepadDao {
     suspend fun findById(id: String): NotepadEntry?
 
     /**
+     * Most recently updated active entry for [userId] filed under
+     * [date]. Returns null when the day has no entries yet — Quick
+     * Capture uses this as the "latest page of the day" target so a
+     * tile tap always lands on whichever notepad page the user most
+     * recently touched today (or creates one when none exists).
+     */
+    @Query(
+        """
+        SELECT * FROM notepad_entries
+        WHERE user_id = :userId
+          AND entry_date = :date
+          AND deleted_at IS NULL
+        ORDER BY updated_at DESC
+        LIMIT 1
+        """
+    )
+    suspend fun findLatestForDate(userId: String, date: String): NotepadEntry?
+
+    /**
      * Full-text search over `notes`, scoped to one user and to live rows.
-     * `query` must already be in FTS5 MATCH syntax — the repository does the
-     * sanitization (see NotepadRepository.buildFtsQuery). Results come back
+     * The query is built by the repository as a [RoomRawQuery] (see
+     * `NotepadRepository.search`); the bound MATCH expression must already
+     * be in FTS5 MATCH syntax (see `FtsQuery.build`). Results come back
      * ranked best-match first via SQLite's built-in `rank` column.
      *
      * The FTS5 virtual table (`fts_notepad_notes`) and its maintenance
-     * triggers are created in ReleafDatabase.SchemaCallback — Room's KSP
-     * verifier doesn't know about them (they're not @Entity-declared), so
-     * @SkipQueryVerification is required here. Room still maps the cursor
-     * to NotepadEntry because the row selector is `notepad_entries.*`.
-     *
-     * Returned as a one-shot `suspend` (not `Flow`) because Room 2.7's
-     * invalidation tracker validates every observed table up-front, and
-     * `fts_notepad_notes` isn't registered with Room (it's a virtual
-     * table installed out-of-band by SchemaCallback), which would throw
-     * `IllegalArgumentException: There is no table with name
-     * fts_notepad_notes` at query time. The repository composes a Flow
-     * on top of `observeActive`, which IS tracked — and since the FTS
-     * triggers mirror every notepad_entries change, re-running the
-     * search on each notepad_entries emission yields identical
-     * reactivity without the tracker problem.
+     * triggers are created in `ReleafDatabase.SchemaCallback` — it isn't
+     * declared as an @Entity. Room 2.7's invalidation tracker validates
+     * every observed table at query time, including for `suspend` queries
+     * (the generated DAO_Impl routes them through `FlowUtil.createFlow`
+     * for thread management), and would throw `IllegalArgumentException:
+     * There is no table with name fts_notepad_notes` if the table name
+     * appeared in a `@Query` SQL — even with `@SkipQueryVerification`,
+     * which only silences compile-time SQL verification, not runtime
+     * table-name validation. `@RawQuery(observedEntities = [...])` skips
+     * SQL parsing entirely and only watches the entities listed; the
+     * repository wraps this in a Flow on top of `observeActive` so the
+     * UI still reactively re-runs the search on every write.
      */
-    @SkipQueryVerification
-    @Query(
-        """
-        SELECT n.* FROM notepad_entries n
-        JOIN fts_notepad_notes fts ON fts.notepad_entry_id = n.id
-        WHERE n.user_id = :userId
-          AND n.deleted_at IS NULL
-          AND fts_notepad_notes MATCH :query
-        ORDER BY rank
-        """
-    )
-    suspend fun searchActive(userId: String, query: String): List<NotepadEntry>
+    @RawQuery(observedEntities = [NotepadEntry::class])
+    suspend fun searchActive(query: RoomRawQuery): List<NotepadEntry>
 
     /** Insert-or-replace. Callers are responsible for bumping updated_at. */
     @Insert(onConflict = OnConflictStrategy.REPLACE)

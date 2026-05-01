@@ -19,7 +19,7 @@
       `installSplashScreen()` releases the keep-condition in MainActivity.
     -->
     <style name="Theme.Releaf.Splash" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">@color/releaf_theme_green</item>
+        <item name="windowSplashScreenBackground">@color/releaf_brand_green</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_leaf</item>
         <item name="postSplashScreenTheme">@style/Theme.Releaf</item>
     </style>

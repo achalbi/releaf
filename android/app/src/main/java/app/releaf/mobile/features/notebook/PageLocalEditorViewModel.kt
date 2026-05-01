@@ -71,6 +71,8 @@ data class PageLocalEditorUiState(
     val chapter: ChapterEntity? = null,
     val notebook: NotebookEntity? = null,
     val title: String = "",
+    /** Italic subtitle, mirrors the notepad editor's description. */
+    val description: String = "",
     /**
      * Horizontal sub-pages inside this page. Each sub-page owns its own
      * notes body + freehand strokes; the user pager-swipes between them
@@ -98,6 +100,15 @@ class PageLocalEditorViewModel(
     private val _state = MutableStateFlow(PageLocalEditorUiState())
     val state: StateFlow<PageLocalEditorUiState> = _state.asStateFlow()
 
+    /**
+     * Plant of the page — deterministic mapping from the page id to
+     * an Ayurvedic plant in the catalog so the same plant attaches to
+     * the same page across re-opens. Mirrors the notepad editor's
+     * pagePlant so both surfaces show the affordance the same way.
+     */
+    val pagePlant get() = app.releaf.mobile.data.notepad.AyurvedicCatalog
+        .forNewEntry(entryId = pageId)
+
     init { bootstrap() }
 
     private fun bootstrap() {
@@ -121,12 +132,23 @@ class PageLocalEditorViewModel(
                     )
                 )
             }
+            // Plant-of-the-page seed: blank title / description on a
+            // freshly-created page (and on legacy rows that pre-date the
+            // description column) get prepopulated from the page's
+            // deterministic plant. The plant is keyed off pageId so the
+            // same plant persists across re-opens. User-authored text is
+            // preserved verbatim — non-blank values pass through.
+            val (seedTitle, seedDescription) = seedTitleAndDescription(
+                loaded?.title.orEmpty(),
+                loaded?.description.orEmpty(),
+            )
             _state.value = PageLocalEditorUiState(
                 isLoading   = false,
                 page        = loaded,
                 chapter     = chapter,
                 notebook    = notebook,
-                title       = loaded?.title.orEmpty(),
+                title       = seedTitle,
+                description = seedDescription,
                 subPages    = effectiveSubPages,
                 contacts    = loaded?.contacts?.parseContacts().orEmpty(),
                 todos       = loaded?.todos?.parseTodos().orEmpty(),
@@ -138,6 +160,30 @@ class PageLocalEditorViewModel(
 
     fun updateTitle(value: String) {
         _state.value = _state.value.copy(title = value)
+    }
+
+    fun updateDescription(value: String) {
+        _state.value = _state.value.copy(description = value)
+    }
+
+    /**
+     * Plant-seeded prepopulation rule, mirrored from the notepad
+     * editor: blank title gets `plant.name`, blank description gets
+     * `(commonName) epithet · usedFor`. Non-blank values pass through
+     * untouched so user edits are preserved.
+     */
+    private fun seedTitleAndDescription(
+        loadedTitle: String,
+        loadedDescription: String,
+    ): Pair<String, String> {
+        val plant = pagePlant
+        val seedTitle       = if (loadedTitle.isBlank())
+            plant.name
+        else loadedTitle
+        val seedDescription = if (loadedDescription.isBlank())
+            app.releaf.mobile.data.notepad.AyurvedicCatalog.formatDescription(plant)
+        else loadedDescription
+        return seedTitle to seedDescription
     }
 
     // ------------------------- Sub-pages -------------------------
@@ -574,15 +620,16 @@ class PageLocalEditorViewModel(
         val firstStrokesJson = snapshot.subPages.firstOrNull()
             ?.strokes.orEmpty().toJsonString()
 
-        val titleChanged       = (existing.title.orEmpty()) != snapshot.title
-        val notesChanged       = existing.notes != joinedNotes
-        val contactsChanged    = existing.contacts != contactsJson
-        val todosChanged       = existing.todos != todosJson
-        val locationsChanged   = existing.locations != locationsJson
-        val attachmentsChanged = existing.attachments != attachmentsJson
-        val strokesChanged     = existing.sketchStrokes != firstStrokesJson
-        val subPagesChanged    = existing.subPages != subPagesJson
-        if (!titleChanged && !notesChanged &&
+        val titleChanged        = (existing.title.orEmpty()) != snapshot.title
+        val descriptionChanged  = (existing.description.orEmpty()) != snapshot.description
+        val notesChanged        = existing.notes != joinedNotes
+        val contactsChanged     = existing.contacts != contactsJson
+        val todosChanged        = existing.todos != todosJson
+        val locationsChanged    = existing.locations != locationsJson
+        val attachmentsChanged  = existing.attachments != attachmentsJson
+        val strokesChanged      = existing.sketchStrokes != firstStrokesJson
+        val subPagesChanged     = existing.subPages != subPagesJson
+        if (!titleChanged && !descriptionChanged && !notesChanged &&
             !contactsChanged && !todosChanged &&
             !locationsChanged && !attachmentsChanged &&
             !strokesChanged && !subPagesChanged
@@ -590,6 +637,7 @@ class PageLocalEditorViewModel(
 
         val updated = existing.copy(
             title         = snapshot.title.ifBlank { null },
+            description   = snapshot.description.ifBlank { null },
             notes         = joinedNotes,
             contacts      = contactsJson,
             todos         = todosJson,

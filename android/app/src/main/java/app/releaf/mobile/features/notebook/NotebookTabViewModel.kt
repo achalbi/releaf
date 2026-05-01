@@ -246,6 +246,7 @@ class NotebookTabViewModel(
         colorHex: String? = null,
         colorToken: String? = null,
         shelfId: String? = null,
+        flat: Boolean = false,
         onCreated: (String) -> Unit = {},
     ) {
         val trimmed = title.trim()
@@ -260,6 +261,7 @@ class NotebookTabViewModel(
                 colorHex    = resolvedHex,
                 description = description,
                 shelfId     = resolvedShelf,
+                flat        = flat,
             )
             onCreated(created.id)
         }

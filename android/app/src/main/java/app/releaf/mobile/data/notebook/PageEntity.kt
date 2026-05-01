@@ -48,6 +48,14 @@ data class PageEntity(
     @ColumnInfo(name = "title")
     val title: String? = null,
 
+    /**
+     * Optional italic subtitle shown below the page title, mirroring
+     * the notepad entry's description. Auto-seeded from the page's
+     * "plant of the page" on create; user can edit or clear.
+     */
+    @ColumnInfo(name = "description")
+    val description: String? = null,
+
     /** Canonical CommonMark. Empty string is valid. */
     @ColumnInfo(name = "notes", defaultValue = "''")
     val notes: String = "",

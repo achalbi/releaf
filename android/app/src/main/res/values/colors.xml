@@ -14,6 +14,10 @@
     <color name="releaf_theme_yellow">#F4C430</color>
     <color name="releaf_theme_dry">#B8956A</color>
 
+    <!-- Mobile brand launch green, derived from the April 2026 marketing
+         material's deep Releaf logo and app-download panel. -->
+    <color name="releaf_brand_green">#0B4328</color>
+
     <!-- Ink color for the leaf on the splash — cream-onAccent, matches
          AppColors.OnAccent. -->
     <color name="releaf_on_accent">#F5EEDF</color>

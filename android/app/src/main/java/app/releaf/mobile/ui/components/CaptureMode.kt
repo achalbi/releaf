@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Eco
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PersonOutline
@@ -32,6 +33,13 @@ enum class CaptureMode(
     // accent-palette square; inactive state shows the same glyph in
     // the default text color.
     Overview("Overview",       "All sections at a glance", Icons.Filled.Eco),
+    // Notes — text-first capture, added per CAPTURE_TAB_PLAN.md
+    // Phase 4. Lands the page editor on the notes/body text input
+    // with the keyboard up. Implementation of the "first-newline
+    // commits" UX from DAILY_CAPTURE_UX.md §2.3 is a separate
+    // follow-up; this enum entry just gives the editor a tab to
+    // land on.
+    Notes   ("Notes",          "Type a quick note",        Icons.Filled.EditNote),
     Photos  ("Photos",         "Camera or upload",         Icons.Filled.CameraAlt),
     Voice   ("Voice note",     "Record audio",             Icons.Filled.Mic),
     Todo    ("To-do",          "Quick checklist item",     Icons.Filled.Checklist),

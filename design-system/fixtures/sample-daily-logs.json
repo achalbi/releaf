@@ -1,0 +1,748 @@
+{
+  "_meta": {
+    "name": "sample-daily-logs",
+    "version": "1.0.0",
+    "generated_at": "2026-04-30",
+    "purpose": "Realistic seven-day fixture data for previews, designer mocks, and in-memory repository fakes. One DailyLog + NotepadEntry per day, plus standalone captures, tasks, and reference_links cross-cutting the week. Conforms to docs/DRIVE_SCHEMA.md v2 payload shapes; structure here is by-day for ergonomics — see README.md for how each row maps to its canonical Drive path. All timestamps ISO-8601 UTC. All IDs are UUIDv7-style placeholders, time-sortable to make the fixture diff-able.",
+    "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+    "device_id": "018f5c9d-mock-7000-8000-fixturedevice01",
+    "date_range": { "from": "2026-04-22", "to": "2026-04-28" },
+    "today": "2026-04-28"
+  },
+
+  "projects": [
+    {
+      "id": "018f7b00-0001-7000-8000-000000000001",
+      "name": "Sabbatical 2026",
+      "color_token": "coral",
+      "archived_at": null,
+      "created_at": "2026-04-01T08:00:00.000Z",
+      "updated_at": "2026-04-01T08:00:00.000Z"
+    },
+    {
+      "id": "018f7b00-0002-7000-8000-000000000002",
+      "name": "Health",
+      "color_token": "green",
+      "archived_at": null,
+      "created_at": "2026-03-12T14:22:00.000Z",
+      "updated_at": "2026-03-12T14:22:00.000Z"
+    }
+  ],
+
+  "tags": [
+    { "id": "018f8100-0001-7000-8000-000000000001", "name": "travel",   "color_token": "info",    "created_at": "2026-04-01T08:00:00.000Z", "updated_at": "2026-04-01T08:00:00.000Z" },
+    { "id": "018f8100-0002-7000-8000-000000000002", "name": "writing",  "color_token": "warning", "created_at": "2026-04-01T08:00:00.000Z", "updated_at": "2026-04-01T08:00:00.000Z" },
+    { "id": "018f8100-0003-7000-8000-000000000003", "name": "wildlife", "color_token": "green",   "created_at": "2026-04-01T08:00:00.000Z", "updated_at": "2026-04-01T08:00:00.000Z" },
+    { "id": "018f8100-0004-7000-8000-000000000004", "name": "errands",  "color_token": "neutral", "created_at": "2026-04-01T08:00:00.000Z", "updated_at": "2026-04-01T08:00:00.000Z" },
+    { "id": "018f8100-0005-7000-8000-000000000005", "name": "weekly",   "color_token": "coral",   "created_at": "2026-04-01T08:00:00.000Z", "updated_at": "2026-04-01T08:00:00.000Z" }
+  ],
+
+  "days": [
+
+    {
+      "_label": "Wed Apr 22 — busy creative day",
+      "daily_log": {
+        "id": "018f9d22-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "log_date": "2026-04-22",
+        "notepad_entry_id": "018f9e22-0001-7000-8000-000000000001",
+        "created_at": "2026-04-22T07:02:11.000Z",
+        "updated_at": "2026-04-22T22:04:09.000Z"
+      },
+      "notepad_entry": {
+        "id": "018f9e22-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "project_id": "018f7b00-0001-7000-8000-000000000001",
+        "entry_date": "2026-04-22",
+        "title": "Morning, paint, the long bench",
+        "notes": "# Morning, paint, the long bench\n\nUp before the light. Coffee, then sketching the boats from memory before they wake up.\n\nThe new ochre is too warm — needs a bit of payne's grey to keep it from looking like dessert. Note for next time: mix on the palette, not in the cup.\n\n## Afternoon\n\nWalked to the long bench at the breakwater. Two herons, then nothing for forty-five minutes, then a seal. Wrote 800 words about it that I'm not sure I'll keep.\n\n- [x] Stretch\n- [x] First pass on the seal piece\n- [ ] Re-read it tomorrow before deciding\n- [ ] Clean brushes\n",
+        "todo_list": {
+          "enabled": true,
+          "hide_completed": false,
+          "items": [
+            { "id": "018f9f01-0001-7000-8000-000000000001", "content": "Stretch", "completed": true, "position": 1024, "updated_at": "2026-04-22T07:18:00.000Z" },
+            { "id": "018f9f01-0002-7000-8000-000000000002", "content": "First pass on the seal piece", "completed": true, "position": 2048, "updated_at": "2026-04-22T15:42:00.000Z" },
+            { "id": "018f9f01-0003-7000-8000-000000000003", "content": "Re-read it tomorrow before deciding", "completed": false, "position": 3072, "updated_at": "2026-04-22T15:43:00.000Z" },
+            { "id": "018f9f01-0004-7000-8000-000000000004", "content": "Clean brushes", "completed": false, "position": 4096, "updated_at": "2026-04-22T15:43:00.000Z" }
+          ]
+        },
+        "contacts": [],
+        "locations": [
+          {
+            "name": "Long bench, breakwater",
+            "address": "Harbor Park, Dock 3",
+            "latitude": 47.6101,
+            "longitude": -122.3421,
+            "label": "Watching",
+            "maps_url": "https://maps.apple.com/?ll=47.6101,-122.3421",
+            "source": "apple-maps",
+            "secondary_line": "South-facing"
+          }
+        ],
+        "tag_ids": ["018f8100-0002-7000-8000-000000000002", "018f8100-0003-7000-8000-000000000003"],
+        "allow_blank_content": false,
+        "conflict_stub": null,
+        "created_at": "2026-04-22T07:02:11.000Z",
+        "updated_at": "2026-04-22T22:04:09.000Z"
+      },
+      "captures": [
+        {
+          "id": "018fa022-0001-7000-8000-000000000001",
+          "kind": "photo",
+          "parent_notepad_entry_id": "018f9e22-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": "018f7b00-0001-7000-8000-000000000001",
+          "position": 1024,
+          "media_filename": "018fa022-0001-7000-8000-000000000001.jpg",
+          "byte_size": 2148492,
+          "mime_type": "image/jpeg",
+          "photo_width": 2560,
+          "photo_height": 1920,
+          "caption": "Boats at the marina, before the light",
+          "extracted_text": null,
+          "voice_duration_seconds": null,
+          "voice_recorded_at": null,
+          "scan_title": null,
+          "scan_confidence": null,
+          "scan_pdf_filename": null,
+          "tag_ids": ["018f8100-0002-7000-8000-000000000002"],
+          "created_at": "2026-04-22T06:48:03.000Z",
+          "updated_at": "2026-04-22T06:48:09.000Z"
+        },
+        {
+          "id": "018fa022-0002-7000-8000-000000000002",
+          "kind": "photo",
+          "parent_notepad_entry_id": "018f9e22-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": "018f7b00-0001-7000-8000-000000000001",
+          "position": 2048,
+          "media_filename": "018fa022-0002-7000-8000-000000000002.jpg",
+          "byte_size": 1842110,
+          "mime_type": "image/jpeg",
+          "photo_width": 2560,
+          "photo_height": 1920,
+          "caption": "Sketch — herons (graphite + ochre wash)",
+          "extracted_text": null,
+          "tag_ids": ["018f8100-0002-7000-8000-000000000002", "018f8100-0003-7000-8000-000000000003"],
+          "created_at": "2026-04-22T11:14:21.000Z",
+          "updated_at": "2026-04-22T11:14:25.000Z"
+        },
+        {
+          "id": "018fa022-0003-7000-8000-000000000003",
+          "kind": "photo",
+          "parent_notepad_entry_id": "018f9e22-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": "018f7b00-0001-7000-8000-000000000001",
+          "position": 3072,
+          "media_filename": "018fa022-0003-7000-8000-000000000003.jpg",
+          "byte_size": 2412884,
+          "mime_type": "image/jpeg",
+          "photo_width": 2560,
+          "photo_height": 1920,
+          "caption": "Seal, eventually",
+          "extracted_text": null,
+          "tag_ids": ["018f8100-0003-7000-8000-000000000003"],
+          "created_at": "2026-04-22T15:31:18.000Z",
+          "updated_at": "2026-04-22T15:31:22.000Z"
+        }
+      ],
+      "tasks": [],
+      "reference_links": []
+    },
+
+    {
+      "_label": "Thu Apr 23 — meetings, voice memos, a business card",
+      "daily_log": {
+        "id": "018f9d23-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "log_date": "2026-04-23",
+        "notepad_entry_id": "018f9e23-0001-7000-8000-000000000001",
+        "created_at": "2026-04-23T08:11:02.000Z",
+        "updated_at": "2026-04-23T19:50:14.000Z"
+      },
+      "notepad_entry": {
+        "id": "018f9e23-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "project_id": null,
+        "entry_date": "2026-04-23",
+        "title": "Three meetings, one good one",
+        "notes": "# Three meetings, one good one\n\nFirst two were the usual cycle of \"who owns this?\" The third was actually useful — Mara from the press is open to running a piece if I can hand her something by July.\n\n## Things to remember\n\n- She wants the seal essay if it lives\n- Word count cap is 1,800 — keep it tight\n- Photos welcome but not required\n- Pitch by June 1, draft by July 1\n",
+        "todo_list": {
+          "enabled": true,
+          "hide_completed": false,
+          "items": [
+            { "id": "018f9f02-0001-7000-8000-000000000001", "content": "Email Mara to confirm scope", "completed": true, "position": 1024, "updated_at": "2026-04-23T17:20:00.000Z" },
+            { "id": "018f9f02-0002-7000-8000-000000000002", "content": "Block writing time on calendar", "completed": false, "position": 2048, "updated_at": "2026-04-23T17:20:00.000Z" }
+          ]
+        },
+        "contacts": [
+          {
+            "name": "Mara Lin",
+            "primary_phone": "+1-555-0142",
+            "secondary_phone": null,
+            "email": "mara@thelocalpress.example",
+            "website": "https://thelocalpress.example/about/mara"
+          }
+        ],
+        "locations": [],
+        "tag_ids": ["018f8100-0002-7000-8000-000000000002"],
+        "allow_blank_content": false,
+        "conflict_stub": null,
+        "created_at": "2026-04-23T08:11:02.000Z",
+        "updated_at": "2026-04-23T19:50:14.000Z"
+      },
+      "captures": [
+        {
+          "id": "018fa023-0001-7000-8000-000000000001",
+          "kind": "voice",
+          "parent_notepad_entry_id": "018f9e23-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": null,
+          "position": 1024,
+          "media_filename": "018fa023-0001-7000-8000-000000000001.m4a",
+          "byte_size": 348021,
+          "mime_type": "audio/mp4",
+          "caption": null,
+          "extracted_text": "Note to self after the Mara meeting — the angle she likes is the slowness of it. Don't sell the seal showing up, sell the forty-five minutes of nothing first. That's the piece.",
+          "voice_duration_seconds": 47,
+          "voice_recorded_at": "2026-04-23T17:08:30.000Z",
+          "voice_language": "en-US",
+          "scan_title": null,
+          "scan_confidence": null,
+          "scan_pdf_filename": null,
+          "tag_ids": ["018f8100-0002-7000-8000-000000000002"],
+          "created_at": "2026-04-23T17:09:18.000Z",
+          "updated_at": "2026-04-23T17:09:24.000Z"
+        },
+        {
+          "id": "018fa023-0002-7000-8000-000000000002",
+          "kind": "scan",
+          "parent_notepad_entry_id": "018f9e23-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": null,
+          "position": 2048,
+          "media_filename": "018fa023-0002-7000-8000-000000000002.jpg",
+          "byte_size": 412088,
+          "mime_type": "image/jpeg",
+          "caption": null,
+          "extracted_text": "Mara Lin\nThe Local Press\nFeatures editor\nmara@thelocalpress.example\n+1 555 0142\nthelocalpress.example/about/mara",
+          "scan_title": "Business card — Mara Lin",
+          "scan_confidence": 0.94,
+          "scan_pdf_filename": null,
+          "tag_ids": [],
+          "created_at": "2026-04-23T17:14:01.000Z",
+          "updated_at": "2026-04-23T17:14:09.000Z"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "018fa800-0001-7000-8000-000000000001",
+          "title": "Pitch the seal piece to Mara",
+          "description": "Tight 200-word pitch. Lean into the slowness. Reference the bench, the time signature, the eventual seal. Don't oversell.",
+          "project_id": null,
+          "due_at": "2026-06-01T17:00:00-07:00",
+          "completed_at": null,
+          "position": 1024,
+          "linked_capture_id": "018fa023-0001-7000-8000-000000000001",
+          "subtasks": [
+            { "id": "018fa800-0001-sub1-8000-000000000001", "title": "Re-read seal piece", "completed_at": null, "position": 1024, "updated_at": "2026-04-23T17:30:00.000Z" },
+            { "id": "018fa800-0001-sub2-8000-000000000002", "title": "Draft the pitch", "completed_at": null, "position": 2048, "updated_at": "2026-04-23T17:30:00.000Z" }
+          ],
+          "reminders": [
+            { "id": "018fa800-0001-rem1-8000-000000000001", "fire_at": "2026-05-30T17:00:00-07:00", "snoozed_until": null, "dismissed_at": null, "updated_at": "2026-04-23T17:30:00.000Z" }
+          ],
+          "tag_ids": ["018f8100-0002-7000-8000-000000000002"],
+          "created_at": "2026-04-23T17:30:00.000Z",
+          "updated_at": "2026-04-23T17:30:00.000Z"
+        }
+      ],
+      "reference_links": []
+    },
+
+    {
+      "_label": "Fri Apr 24 — light",
+      "daily_log": {
+        "id": "018f9d24-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "log_date": "2026-04-24",
+        "notepad_entry_id": "018f9e24-0001-7000-8000-000000000001",
+        "created_at": "2026-04-24T19:42:00.000Z",
+        "updated_at": "2026-04-24T22:11:00.000Z"
+      },
+      "notepad_entry": {
+        "id": "018f9e24-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "project_id": null,
+        "entry_date": "2026-04-24",
+        "title": "Quiet",
+        "notes": "Quiet day. Read most of the morning, walked in the afternoon, didn't write anything I want to keep.\n\nFound this — saving for later.\n",
+        "todo_list": { "enabled": false, "hide_completed": false, "items": [] },
+        "contacts": [],
+        "locations": [],
+        "tag_ids": [],
+        "allow_blank_content": false,
+        "conflict_stub": null,
+        "created_at": "2026-04-24T19:42:00.000Z",
+        "updated_at": "2026-04-24T22:11:00.000Z"
+      },
+      "captures": [],
+      "tasks": [],
+      "reference_links": [
+        {
+          "id": "018fab24-0001-7000-8000-000000000001",
+          "parent_notepad_entry_id": "018f9e24-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "url": "https://example.com/essays/the-pace-of-watching",
+          "title": "The pace of watching",
+          "description": "How patience changes what you see. A short essay on slowness, attention, and the bench at the breakwater.",
+          "preview_image_url": "https://example.com/essays/og/the-pace-of-watching.jpg",
+          "caption": "Reminded me of yesterday — keep this for the pitch",
+          "position": 1024,
+          "created_at": "2026-04-24T22:08:11.000Z",
+          "updated_at": "2026-04-24T22:08:11.000Z"
+        }
+      ]
+    },
+
+    {
+      "_label": "Sat Apr 25 — travel / outdoor day",
+      "daily_log": {
+        "id": "018f9d25-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "log_date": "2026-04-25",
+        "notepad_entry_id": "018f9e25-0001-7000-8000-000000000001",
+        "created_at": "2026-04-25T07:14:00.000Z",
+        "updated_at": "2026-04-25T20:36:00.000Z"
+      },
+      "notepad_entry": {
+        "id": "018f9e25-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "project_id": "018f7b00-0001-7000-8000-000000000001",
+        "entry_date": "2026-04-25",
+        "title": "Drove out to the cape",
+        "notes": "# Drove out to the cape\n\nLeft at 6:30. Beat the trail crowd by an hour. Trail head parking is gated until May 15, so we started from the lower lot — adds about a mile each way.\n\n- The bridge at mile 2 is washed out; detour adds 20 minutes\n- Bring the lighter jacket next time\n- The pancake place near the turnoff opens at 7am Sat/Sun only\n\nMet a couple from Eugene at the summit. They're doing a thru-hike in June — I want that.\n",
+        "todo_list": {
+          "enabled": true,
+          "hide_completed": true,
+          "items": [
+            { "id": "018f9f04-0001-7000-8000-000000000001", "content": "Pack the lighter jacket", "completed": false, "position": 1024, "updated_at": "2026-04-25T15:00:00.000Z" }
+          ]
+        },
+        "contacts": [
+          {
+            "name": "Sam & Wren",
+            "primary_phone": null,
+            "secondary_phone": null,
+            "email": "sam.wren@example.com",
+            "website": null
+          }
+        ],
+        "locations": [
+          {
+            "name": "Cape trailhead — lower lot",
+            "address": "FS Road 4140, Mile 12",
+            "latitude": 44.4280,
+            "longitude": -123.8830,
+            "label": "Start",
+            "maps_url": "https://maps.apple.com/?ll=44.4280,-123.8830",
+            "source": "apple-maps",
+            "secondary_line": "Gated upper lot until May 15"
+          },
+          {
+            "name": "Cape summit",
+            "address": null,
+            "latitude": 44.4520,
+            "longitude": -123.8990,
+            "label": "Top",
+            "maps_url": "https://maps.apple.com/?ll=44.4520,-123.8990",
+            "source": "gps",
+            "secondary_line": "1,140 ft elevation"
+          }
+        ],
+        "tag_ids": ["018f8100-0001-7000-8000-000000000001"],
+        "allow_blank_content": false,
+        "conflict_stub": null,
+        "created_at": "2026-04-25T07:14:00.000Z",
+        "updated_at": "2026-04-25T20:36:00.000Z"
+      },
+      "captures": [
+        {
+          "id": "018fa025-0001-7000-8000-000000000001",
+          "kind": "voice",
+          "parent_notepad_entry_id": "018f9e25-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": null,
+          "position": 1024,
+          "media_filename": "018fa025-0001-7000-8000-000000000001.m4a",
+          "byte_size": 982140,
+          "mime_type": "audio/mp4",
+          "caption": null,
+          "extracted_text": "Recorded from the trail — the trail head parking is gated until May 15, so we'll have to start from the lower lot. Bridge at mile two is washed out, detour adds about twenty minutes. Note for next time, bring the lighter jacket.",
+          "voice_duration_seconds": 84,
+          "voice_recorded_at": "2026-04-25T09:42:11.000Z",
+          "voice_language": "en-US",
+          "scan_title": null,
+          "scan_confidence": null,
+          "scan_pdf_filename": null,
+          "tag_ids": ["018f8100-0001-7000-8000-000000000001"],
+          "created_at": "2026-04-25T09:43:38.000Z",
+          "updated_at": "2026-04-25T09:43:42.000Z"
+        },
+        {
+          "id": "018fa025-0002-7000-8000-000000000002",
+          "kind": "photo",
+          "parent_notepad_entry_id": "018f9e25-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": "018f7b00-0001-7000-8000-000000000001",
+          "position": 2048,
+          "media_filename": "018fa025-0002-7000-8000-000000000002.jpg",
+          "byte_size": 3142089,
+          "mime_type": "image/jpeg",
+          "photo_width": 4032,
+          "photo_height": 3024,
+          "caption": "Cape summit — fog still in the bowl",
+          "extracted_text": null,
+          "tag_ids": ["018f8100-0001-7000-8000-000000000001"],
+          "created_at": "2026-04-25T10:31:42.000Z",
+          "updated_at": "2026-04-25T10:31:45.000Z"
+        },
+        {
+          "id": "018fa025-0003-7000-8000-000000000003",
+          "kind": "photo",
+          "parent_notepad_entry_id": "018f9e25-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": "018f7b00-0001-7000-8000-000000000001",
+          "position": 3072,
+          "media_filename": "018fa025-0003-7000-8000-000000000003.jpg",
+          "byte_size": 2840012,
+          "mime_type": "image/jpeg",
+          "photo_width": 4032,
+          "photo_height": 3024,
+          "caption": "Bridge out at mile 2",
+          "extracted_text": null,
+          "tag_ids": ["018f8100-0001-7000-8000-000000000001"],
+          "created_at": "2026-04-25T11:08:09.000Z",
+          "updated_at": "2026-04-25T11:08:12.000Z"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "018fa800-0002-7000-8000-000000000001",
+          "title": "Email Sam & Wren about June thru-hike",
+          "description": "They're planning the thru-hike in June. Ask if there's room for one more.",
+          "project_id": "018f7b00-0001-7000-8000-000000000001",
+          "due_at": "2026-05-04T19:00:00-07:00",
+          "completed_at": null,
+          "position": 1024,
+          "linked_capture_id": null,
+          "subtasks": [],
+          "reminders": [
+            { "id": "018fa800-0002-rem1-8000-000000000001", "fire_at": "2026-05-04T18:30:00-07:00", "snoozed_until": null, "dismissed_at": null, "updated_at": "2026-04-25T20:30:00.000Z" }
+          ],
+          "tag_ids": ["018f8100-0001-7000-8000-000000000001"],
+          "created_at": "2026-04-25T20:30:00.000Z",
+          "updated_at": "2026-04-25T20:30:00.000Z"
+        }
+      ],
+      "reference_links": []
+    },
+
+    {
+      "_label": "Sun Apr 26 — quiet, weekly review",
+      "daily_log": {
+        "id": "018f9d26-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "log_date": "2026-04-26",
+        "notepad_entry_id": "018f9e26-0001-7000-8000-000000000001",
+        "created_at": "2026-04-26T09:30:00.000Z",
+        "updated_at": "2026-04-26T18:11:00.000Z"
+      },
+      "notepad_entry": {
+        "id": "018f9e26-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "project_id": null,
+        "entry_date": "2026-04-26",
+        "title": "Weekly review",
+        "notes": "# Weekly review\n\n## What went well\n\n- The seal piece is real now\n- Mara conversation\n- Cape trail recon — saved future-me from a closed gate\n\n## What didn't\n\n- Two flat days mid-week, didn't notice them in time\n- Brushes still not cleaned (it's been three days)\n\n## Next week\n\n- Pitch draft by Wednesday\n- One outdoors day, one studio day, one nothing day\n- Vet for the bloodwork follow-up\n",
+        "todo_list": {
+          "enabled": true,
+          "hide_completed": false,
+          "items": [
+            { "id": "018f9f05-0001-7000-8000-000000000001", "content": "Clean brushes (still!)", "completed": false, "position": 1024, "updated_at": "2026-04-26T18:00:00.000Z" },
+            { "id": "018f9f05-0002-7000-8000-000000000002", "content": "Block one studio day next week", "completed": false, "position": 2048, "updated_at": "2026-04-26T18:00:00.000Z" },
+            { "id": "018f9f05-0003-7000-8000-000000000003", "content": "Block one nothing day next week", "completed": false, "position": 3072, "updated_at": "2026-04-26T18:00:00.000Z" }
+          ]
+        },
+        "contacts": [],
+        "locations": [],
+        "tag_ids": ["018f8100-0005-7000-8000-000000000005"],
+        "allow_blank_content": false,
+        "conflict_stub": null,
+        "created_at": "2026-04-26T09:30:00.000Z",
+        "updated_at": "2026-04-26T18:11:00.000Z"
+      },
+      "captures": [],
+      "tasks": [],
+      "reference_links": []
+    },
+
+    {
+      "_label": "Mon Apr 27 — work + errands",
+      "daily_log": {
+        "id": "018f9d27-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "log_date": "2026-04-27",
+        "notepad_entry_id": "018f9e27-0001-7000-8000-000000000001",
+        "created_at": "2026-04-27T07:55:00.000Z",
+        "updated_at": "2026-04-27T21:14:00.000Z"
+      },
+      "notepad_entry": {
+        "id": "018f9e27-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "project_id": null,
+        "entry_date": "2026-04-27",
+        "title": "Bloodwork, hardware store, fog",
+        "notes": "Vet at 10. Bloodwork was fine — they want a follow-up in three months.\n\nGrocery + hardware in the afternoon. The good kind of slow day.\n\nFog hadn't lifted by 4pm. The lighthouse felt like an idea more than a thing.\n",
+        "todo_list": {
+          "enabled": true,
+          "hide_completed": false,
+          "items": [
+            { "id": "018f9f06-0001-7000-8000-000000000001", "content": "Book trail permits",  "completed": true, "position": 1024, "updated_at": "2026-04-27T11:30:00.000Z" },
+            { "id": "018f9f06-0002-7000-8000-000000000002", "content": "Reply to Jo",          "completed": true, "position": 2048, "updated_at": "2026-04-27T15:42:00.000Z" }
+          ]
+        },
+        "contacts": [
+          {
+            "name": "Dr. Patel — Riverside Vet",
+            "primary_phone": "+1-555-0188",
+            "secondary_phone": null,
+            "email": "frontdesk@riversidevet.example",
+            "website": "https://riversidevet.example"
+          }
+        ],
+        "locations": [
+          {
+            "name": "Harbor Park",
+            "address": "Harbor Park, Dock 3",
+            "latitude": 47.6101,
+            "longitude": -122.3421,
+            "label": "Afternoon walk",
+            "maps_url": "https://maps.apple.com/?ll=47.6101,-122.3421",
+            "source": "apple-maps",
+            "secondary_line": null
+          }
+        ],
+        "tag_ids": ["018f8100-0004-7000-8000-000000000004"],
+        "allow_blank_content": false,
+        "conflict_stub": null,
+        "created_at": "2026-04-27T07:55:00.000Z",
+        "updated_at": "2026-04-27T21:14:00.000Z"
+      },
+      "captures": [
+        {
+          "id": "018fa027-0001-7000-8000-000000000001",
+          "kind": "scan",
+          "parent_notepad_entry_id": "018f9e27-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": "018f7b00-0002-7000-8000-000000000002",
+          "position": 1024,
+          "media_filename": "018fa027-0001-7000-8000-000000000001.jpg",
+          "byte_size": 612884,
+          "mime_type": "image/jpeg",
+          "caption": null,
+          "extracted_text": "Riverside Veterinary\nApril 27, 2026\nPatient: Hazel (canine, 7y)\nCBC: WNL\nChem panel: WNL\nNotes: Recheck in 3 months. Diet plan unchanged.",
+          "scan_title": "Bloodwork results — Apr 27",
+          "scan_confidence": 0.91,
+          "scan_pdf_filename": "018fa027-0001-7000-8000-000000000001.pdf",
+          "tag_ids": [],
+          "created_at": "2026-04-27T10:42:18.000Z",
+          "updated_at": "2026-04-27T10:42:32.000Z"
+        },
+        {
+          "id": "018fa027-0002-7000-8000-000000000002",
+          "kind": "voice",
+          "parent_notepad_entry_id": "018f9e27-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": null,
+          "position": 2048,
+          "media_filename": "018fa027-0002-7000-8000-000000000002.m4a",
+          "byte_size": 488110,
+          "mime_type": "audio/mp4",
+          "caption": null,
+          "extracted_text": "Note to self — the trail head parking is gated until May 15, so we'll have to start from the lower lot. Adds a mile each way. And the heron was sitting on the post the whole time we were down there.",
+          "voice_duration_seconds": 42,
+          "voice_recorded_at": "2026-04-27T16:14:08.000Z",
+          "voice_language": "en-US",
+          "scan_title": null,
+          "scan_confidence": null,
+          "scan_pdf_filename": null,
+          "tag_ids": ["018f8100-0001-7000-8000-000000000001", "018f8100-0003-7000-8000-000000000003"],
+          "created_at": "2026-04-27T16:14:50.000Z",
+          "updated_at": "2026-04-27T16:14:55.000Z"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "018fa800-0003-7000-8000-000000000001",
+          "title": "Vet recheck — Hazel bloodwork",
+          "description": "Three-month follow-up per Dr. Patel.",
+          "project_id": "018f7b00-0002-7000-8000-000000000002",
+          "due_at": "2026-07-27T10:00:00-07:00",
+          "completed_at": null,
+          "position": 1024,
+          "linked_capture_id": "018fa027-0001-7000-8000-000000000001",
+          "subtasks": [],
+          "reminders": [
+            { "id": "018fa800-0003-rem1-8000-000000000001", "fire_at": "2026-07-20T17:00:00-07:00", "snoozed_until": null, "dismissed_at": null, "updated_at": "2026-04-27T11:00:00.000Z" }
+          ],
+          "tag_ids": [],
+          "created_at": "2026-04-27T11:00:00.000Z",
+          "updated_at": "2026-04-27T11:00:00.000Z"
+        }
+      ],
+      "reference_links": []
+    },
+
+    {
+      "_label": "Tue Apr 28 — today (matches Home mock)",
+      "daily_log": {
+        "id": "018f9d28-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "log_date": "2026-04-28",
+        "notepad_entry_id": "018f9e28-0001-7000-8000-000000000001",
+        "created_at": "2026-04-28T07:11:00.000Z",
+        "updated_at": "2026-04-28T09:34:18.000Z"
+      },
+      "notepad_entry": {
+        "id": "018f9e28-0001-7000-8000-000000000001",
+        "user_id": "018f5c9d-3a64-7b30-bf71-0f8a9c0b1d92",
+        "project_id": null,
+        "entry_date": "2026-04-28",
+        "title": "Today",
+        "notes": "Crisp morning. Heron at the pier again — perched on the third dock post for almost ten minutes before lifting off.\n\nCoffee at the little place. Calm.\n",
+        "todo_list": {
+          "enabled": true,
+          "hide_completed": false,
+          "items": [
+            { "id": "018f9f07-0001-7000-8000-000000000001", "content": "Stretch",                  "completed": true,  "position": 1024, "updated_at": "2026-04-28T07:30:00.000Z" },
+            { "id": "018f9f07-0002-7000-8000-000000000002", "content": "Refill bird feeder",       "completed": false, "position": 2048, "updated_at": "2026-04-28T08:00:00.000Z" },
+            { "id": "018f9f07-0003-7000-8000-000000000003", "content": "Call vet about bloodwork", "completed": false, "position": 3072, "updated_at": "2026-04-28T08:00:00.000Z" }
+          ]
+        },
+        "contacts": [],
+        "locations": [
+          {
+            "name": "Heron Point",
+            "address": "Harbor Park, Dock 3",
+            "latitude": 47.6101,
+            "longitude": -122.3421,
+            "label": "Walk start",
+            "maps_url": "https://maps.apple.com/?ll=47.6101,-122.3421",
+            "source": "apple-maps",
+            "secondary_line": null
+          }
+        ],
+        "tag_ids": ["018f8100-0003-7000-8000-000000000003"],
+        "allow_blank_content": false,
+        "conflict_stub": null,
+        "created_at": "2026-04-28T07:11:00.000Z",
+        "updated_at": "2026-04-28T09:34:18.000Z"
+      },
+      "captures": [
+        {
+          "id": "018fa028-0001-7000-8000-000000000001",
+          "kind": "photo",
+          "parent_notepad_entry_id": "018f9e28-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": null,
+          "position": 1024,
+          "media_filename": "018fa028-0001-7000-8000-000000000001.jpg",
+          "byte_size": 2148492,
+          "mime_type": "image/jpeg",
+          "photo_width": 2560,
+          "photo_height": 1920,
+          "caption": "Heron at the dock",
+          "extracted_text": null,
+          "tag_ids": ["018f8100-0003-7000-8000-000000000003"],
+          "created_at": "2026-04-28T08:14:03.000Z",
+          "updated_at": "2026-04-28T08:14:09.000Z"
+        },
+        {
+          "id": "018fa028-0002-7000-8000-000000000002",
+          "kind": "photo",
+          "parent_notepad_entry_id": "018f9e28-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": null,
+          "position": 2048,
+          "media_filename": "018fa028-0002-7000-8000-000000000002.jpg",
+          "byte_size": 1942110,
+          "mime_type": "image/jpeg",
+          "photo_width": 2560,
+          "photo_height": 1920,
+          "caption": "The boats, lined up",
+          "extracted_text": null,
+          "tag_ids": [],
+          "created_at": "2026-04-28T08:31:22.000Z",
+          "updated_at": "2026-04-28T08:31:27.000Z"
+        },
+        {
+          "id": "018fa028-0003-7000-8000-000000000003",
+          "kind": "photo",
+          "parent_notepad_entry_id": "018f9e28-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": null,
+          "position": 3072,
+          "media_filename": "018fa028-0003-7000-8000-000000000003.jpg",
+          "byte_size": 2412884,
+          "mime_type": "image/jpeg",
+          "photo_width": 2560,
+          "photo_height": 1920,
+          "caption": "Coffee, calm",
+          "extracted_text": null,
+          "tag_ids": [],
+          "created_at": "2026-04-28T08:48:10.000Z",
+          "updated_at": "2026-04-28T08:48:14.000Z"
+        },
+        {
+          "id": "018fa028-0004-7000-8000-000000000004",
+          "kind": "voice",
+          "parent_notepad_entry_id": "018f9e28-0001-7000-8000-000000000001",
+          "parent_page_id": null,
+          "parent_daily_log_id": null,
+          "project_id": null,
+          "position": 4096,
+          "media_filename": "018fa028-0004-7000-8000-000000000004.m4a",
+          "byte_size": 412088,
+          "mime_type": "audio/mp4",
+          "caption": null,
+          "extracted_text": "Heron held the pose for almost ten minutes, then lifted without warning. Same dock post as last week. Want to time how long it stays next time.",
+          "voice_duration_seconds": 38,
+          "voice_recorded_at": "2026-04-28T08:25:14.000Z",
+          "voice_language": "en-US",
+          "scan_title": null,
+          "scan_confidence": null,
+          "scan_pdf_filename": null,
+          "tag_ids": ["018f8100-0003-7000-8000-000000000003"],
+          "created_at": "2026-04-28T08:25:55.000Z",
+          "updated_at": "2026-04-28T08:25:59.000Z"
+        }
+      ],
+      "tasks": [],
+      "reference_links": []
+    }
+
+  ]
+}

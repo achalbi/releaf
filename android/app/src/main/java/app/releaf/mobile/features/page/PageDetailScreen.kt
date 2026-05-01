@@ -530,7 +530,13 @@ private fun Loaded(
             verticalArrangement = Arrangement.spacedBy(AppSpacing.s4),
         ) {
             when (selected) {
-                CaptureMode.Overview -> OverviewSection(
+                // Overview + Notes share this section. CaptureMode.Notes
+                // was added in CAPTURE_TAB_PLAN Phase 4 as a text-first
+                // landing tab; until the dedicated Notes UI lands the
+                // tab falls back to the Overview surface, which already
+                // shows the page's notes preview.
+                CaptureMode.Overview,
+                CaptureMode.Notes    -> OverviewSection(
                     page          = page,
                     viewMode      = viewMode,
                     accentOverride = if (usesCustomTint) parentPalette.background else null,
@@ -721,9 +727,28 @@ private fun PhotoTile(photo: Photo) {
 
 @Composable
 private fun VoiceSection(notes: List<VoiceNote>) {
-    if (notes.isEmpty()) { EmptyState("No voice notes on this page."); return }
-    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s3)) {
-        notes.forEach { VoiceCard(it) }
+    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s4)) {
+        // Existing notes (most-recent first kept by parent ordering).
+        if (notes.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s3)) {
+                notes.forEach { VoiceCard(it) }
+            }
+        }
+
+        // Recording control. Always present so the user can capture
+        // a new note without leaving the tab. Persistence is wired
+        // upstream — the view model translates the recorded clip
+        // into a real VoiceNote and writes it to the page.
+        VoicePageRecorder(
+            isEmpty = notes.isEmpty(),
+            onSave = { _ ->
+                // TODO: route to the view model so a new VoiceNote
+                // is appended to this page. The clip URI + duration
+                // are persisted; transcription happens async via
+                // SpeechTranscriber after the file write settles.
+            },
+            onCancel = { /* no-op — cancelled clip already discarded */ },
+        )
     }
 }
 

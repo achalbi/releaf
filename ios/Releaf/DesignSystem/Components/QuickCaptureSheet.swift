@@ -1,6 +1,13 @@
 /*
  * QuickCaptureSheet.swift
  *
+ * DEPRECATED — kept for one release cycle so any deep links still
+ * resolving through it don't break. The Capture flow is now a real
+ * top-level destination backed by `CaptureView` under
+ * `Features/Capture/`. Tap the lifted Leaf FAB to navigate to it
+ * instead of presenting this sheet. Remove this file in the next
+ * release. See docs/CAPTURE_TAB_PLAN.md.
+ *
  * Bottom sheet presenting the 7 capture modes as large tappable rows.
  * Triggered by the CaptureFAB or the center Leaf in the BottomNav.
  *

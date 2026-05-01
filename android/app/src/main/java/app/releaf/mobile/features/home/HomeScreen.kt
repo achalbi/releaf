@@ -314,6 +314,7 @@ internal fun HomeDrawerContent(
     onOpenTasks: () -> Unit,
     onOpenReminders: () -> Unit,
     onOpenContacts: () -> Unit,
+    onOpenCalendar: () -> Unit,
     onOpenSettings: () -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -367,6 +368,19 @@ internal fun HomeDrawerContent(
                     label     = "Contacts",
                     meta      = contactsSubtitle,
                     onClick   = onOpenContacts,
+                )
+                DashedStemSeparator()
+                DrawerItem(
+                    // Mysuru's Vontikoppal panchanga is published in
+                    // saffron / leaf-yellow — reusing LeafSettings'
+                    // tint here gives the Calendar leaf the same
+                    // visual identity as the festival cells in the
+                    // grid (which mark spillover-month holidays in
+                    // the same colour).
+                    leafColor = LeafSettings,
+                    label     = "Calendar",
+                    meta      = "panchanga · festivals",
+                    onClick   = onOpenCalendar,
                 )
                 DashedStemSeparator()
                 DrawerItem(

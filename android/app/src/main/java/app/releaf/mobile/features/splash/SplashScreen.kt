@@ -1,18 +1,9 @@
 /*
  * SplashScreen.kt
- * Full-bleed launch splash. Matches the Releaf Branding Figma spec (live
- * DOM extraction, April 2026):
- *   - Linear gradient background, theme-primary → theme-deep, top-left
- *     to bottom-right.
- *   - 120dp leaf (canonical 24-viewport SVG, filled + cream outline +
- *     vein) with a subtle pulse.
- *   - "Releaf" wordmark, sans-serif 48sp medium, letter-spacing -0.025em
- *     in OnAccent cream.
- *   - "The notebook that grows back." tagline, sans-serif 18sp,
- *     OnAccent @ 90% opacity.
- *   - Three bouncing 8dp cream loading dots.
- * Every color flows from design-tokens.json via AppAccent / AppColors,
- * so the splash re-tints with the active leaf theme.
+ * Full-bleed launch splash derived from the April 2026 Releaf marketing
+ * material: deep green, cream-filled diagonal leaf with deep-green
+ * vein, lowercase serif wordmark, and the "WRITE. ERASE. REPEAT." loop
+ * tagline.
  */
 
 package app.releaf.mobile.features.splash
@@ -24,6 +15,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,78 +35,109 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import app.releaf.mobile.ui.components.ReleafLogo
-import app.releaf.mobile.ui.theme.AppAccent
+import app.releaf.mobile.ui.components.ReleafLogoSolid
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppSpacing
-import app.releaf.mobile.ui.theme.LocalFontWeight
 
 @Composable
 fun SplashScreen(modifier: Modifier = Modifier) {
-    val start = AppAccent.primary
-    val end = AppAccent.deep
+    val start = Color(0xFF0F5A35)
+    val mid = Color(0xFF0B4328)
+    val end = Color(0xFF062F1D)
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(
                 Brush.linearGradient(
-                    colors = listOf(start, end),
+                    colors = listOf(start, mid, end),
                     start = Offset(0f, 0f),
                     end   = Offset.Infinite,
                 ),
             ),
         contentAlignment = Alignment.Center,
     ) {
+        SplashDotGrid()
+
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(horizontal = AppSpacing.s6),
         ) {
-            // Leaf — filled gradient body with cream outline + vein.
-            ReleafLogo(
-                size = 120.dp,
-                filled = true,
-                outlineColor = AppColors.OnAccent,
-                fillGradientStart = start,
-                fillGradientEnd = end,
-                strokeWidth = 2.dp,
+            ReleafLogoSolid(
+                size = 136.dp,
+                leafColor = AppColors.OnAccent,
+                veinColor = end,
+                veinWidth = 4.dp,
             )
 
-            Box(Modifier.height(AppSpacing.s8))
+            Box(Modifier.height(28.dp))
 
             Text(
-                text = "Releaf",
+                text = "releaf",
                 style = TextStyle(
-                    fontFamily = FontFamily.SansSerif,
-                    fontWeight = LocalFontWeight.current,
-                    fontSize = 48.sp,
-                    letterSpacing = (-0.025).em,
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 64.sp,
+                    letterSpacing = (-0.015).em,
                 ),
                 color = AppColors.OnAccent,
+            )
+
+            Box(Modifier.height(AppSpacing.s2))
+
+            Text(
+                text = "WRITE. ERASE. REPEAT.",
+                style = TextStyle(
+                    fontFamily = FontFamily.SansSerif,
+                    fontSize = 18.sp,
+                    letterSpacing = 0.13.em,
+                ),
+                color = AppColors.OnAccent,
+                textAlign = TextAlign.Center,
             )
 
             Box(Modifier.height(AppSpacing.s3))
 
             Text(
-                text = "The notebook that grows back.",
+                text = "Reusable notebook + smart app companion.",
                 style = TextStyle(
                     fontFamily = FontFamily.SansSerif,
-                    fontWeight = LocalFontWeight.current,
-                    fontSize = 18.sp,
+                    fontSize = 17.sp,
                 ),
-                color = AppColors.OnAccent.copy(alpha = 0.9f),
+                color = AppColors.OnAccent.copy(alpha = 0.82f),
                 textAlign = TextAlign.Center,
             )
 
-            Box(Modifier.height(64.dp))
+            Box(Modifier.height(72.dp))
 
             LoadingDots()
+        }
+    }
+}
+
+@Composable
+private fun SplashDotGrid() {
+    Canvas(Modifier.fillMaxSize()) {
+        val step = 18.dp.toPx()
+        val radius = 1.dp.toPx()
+        var y = 0f
+        while (y <= size.height) {
+            var x = 0f
+            while (x <= size.width) {
+                drawCircle(
+                    color = Color(0x12F5EEDF),
+                    radius = radius,
+                    center = Offset(x, y),
+                )
+                x += step
+            }
+            y += step
         }
     }
 }

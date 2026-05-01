@@ -1,8 +1,14 @@
 [versions]
-agp                   = "9.1.1"
+agp                   = "9.2.0"
 kotlin                = "2.2.10"
 ksp                   = "2.3.2"
-compose-bom           = "2024.09.03"
+# 2024.12.01 maps to compose-foundation 1.7.6+. Earlier 2024.09.03 (foundation
+# 1.7.3) shipped a `MutableWindowInsets` bug that, in nested-Scaffold trees,
+# could grow `UnionInsets` chains until `equals()` recursion blew the stack —
+# observed in production as `StackOverflowError: stack size 8188KB at
+# UnionInsets.equals(WindowInsets.kt:435)`. Bump as the lowest-risk mitigation;
+# revisit if the crash recurs on this version.
+compose-bom           = "2024.12.01"
 activity-compose      = "1.9.2"
 lifecycle             = "2.8.6"
 coroutines            = "1.8.1"
@@ -50,6 +56,12 @@ sherpa-onnx           = "v1.12.39"
 # model, which sherpa-onnx ships as `.tar.bz2`. Android's stdlib has
 # `ZipInputStream` but no tar or bzip2 support.
 commons-compress      = "1.28.0"
+# commons-suncalc — astronomical sunrise/sunset/twilight calculator.
+# Drives the precise Rahu Kala window in CalendarScreen (the
+# inauspicious 1/8th of daylight, anchored to actual sunrise +
+# sunset for Mysuru rather than the fixed 6 AM / 6 PM published
+# table). Pure JVM, no native libs, ~80 KB.
+commons-suncalc       = "3.11"
 # ML Kit GenAI Speech Recognition. AICore-backed on API 31+ devices
 # (Pixel 8+ / Samsung S24+ and friends); preferred over sherpa-onnx
 # when supported because there's no model bundle — AICore ships the
@@ -65,6 +77,9 @@ core-splashscreen     = "1.0.1"
 credentials           = "1.3.0"
 googleid              = "1.1.1"
 play-services-auth    = "21.3.0"
+firebase-crashlytics = "20.0.5"
+google-gms-google-services = "4.4.4"
+google-firebase-crashlytics = "3.0.7"
 
 [plugins]
 android-application  = { id = "com.android.application",                     version.ref = "agp" }
@@ -72,6 +87,8 @@ kotlin-android       = { id = "org.jetbrains.kotlin.android",                ver
 compose-compiler     = { id = "org.jetbrains.kotlin.plugin.compose",         version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization",   version.ref = "kotlin" }
 ksp                  = { id = "com.google.devtools.ksp",                     version.ref = "ksp" }
+google-gms-google-services = { id = "com.google.gms.google-services", version.ref = "google-gms-google-services" }
+google-firebase-crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "google-firebase-crashlytics" }
 
 [libraries]
 # Compose
@@ -140,6 +157,11 @@ sherpa-onnx               = { module = "com.github.k2-fsa:sherpa-onnx", version.
 # bzip2 + tar reader for the `.tar.bz2` model bundle that sherpa-onnx
 # ships for whisper-tiny.en. See SpeechTranscriber.extractModelTarBz2.
 commons-compress          = { module = "org.apache.commons:commons-compress", version.ref = "commons-compress" }
+# commons-suncalc — pure-JVM sunrise/sunset/twilight calculator.
+# CalendarScreen uses it to anchor the Rahu Kala window to actual
+# Mysuru sunrise/sunset on the selected date (more accurate than
+# the published fixed table that assumes 6 AM / 6 PM).
+commons-suncalc           = { module = "org.shredzone.commons:commons-suncalc", version.ref = "commons-suncalc" }
 
 # ML Kit GenAI Speech Recognition. On-device via AICore / Gemini Nano
 # on API 31+ supported devices. Exposes a Kotlin Flow API for streaming
@@ -162,3 +184,4 @@ credentials               = { module = "androidx.credentials:credentials", versi
 credentials-play-services-auth = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
 googleid                  = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
 play-services-auth        = { module = "com.google.android.gms:play-services-auth", version.ref = "play-services-auth" }
+firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashlytics", version.ref = "firebase-crashlytics" }

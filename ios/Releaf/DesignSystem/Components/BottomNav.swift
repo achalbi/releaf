@@ -86,7 +86,10 @@ public struct BottomNav: View {
                     .frame(maxWidth: .infinity)
 
                 case .brand:
-                    BrandTab(item: item) {
+                    BrandTab(
+                        item: item,
+                        isSelected: selection == item.id
+                    ) {
                         if let onBrandTap {
                             onBrandTap()
                         } else {
@@ -173,10 +176,12 @@ private struct RegularTab: View {
 
 private struct BrandTab: View {
     let item: BottomNavItem
+    let isSelected: Bool
     let onTap: () -> Void
 
     private let diameter: CGFloat = 56
     private let lift: CGFloat = 16
+    private let activeRing: CGFloat = 1.5
 
     /// Coral → coralDeep top-to-bottom gradient. Lighter at top, deeper at
     /// bottom — reads as a subtle 3D lift under ambient light.
@@ -191,12 +196,35 @@ private struct BrandTab: View {
     var body: some View {
         Button(action: onTap) {
             ZStack {
+                // Coral disc.
                 Circle()
                     .fill(coralGradient)
                     .frame(width: diameter, height: diameter)
-                Image(systemName: item.systemIcon)
-                    .font(.system(size: 22))
-                    .foregroundColor(AppColors.textOnAccent)
+
+                // Active-tab ring — thin coral outline at the outer
+                // edge of the disc when Capture is the current tab.
+                // Hidden otherwise. Mirrors Android's BottomNav.kt
+                // BrandTab per CAPTURE_TAB_PLAN.md Phase 3.
+                if isSelected {
+                    Circle()
+                        .strokeBorder(AppColors.coral, lineWidth: activeRing)
+                        .frame(
+                            width: diameter + 8,
+                            height: diameter + 8
+                        )
+                }
+
+                // Brand mark — cream Releaf leaf on the coral disc.
+                // Uses ReleafLogoSolid so the leaf silhouette matches the
+                // app icon, splash, and logo lockup. `item.systemIcon`
+                // is ignored for the .brand kind; it stays on the data
+                // model for parity with .regular but isn't rendered.
+                ReleafLogoSolid(
+                    size: 30,
+                    leafColor: AppColors.textOnAccent,
+                    veinColor: AppColors.coralDeep,
+                    veinWidth: 1.5
+                )
             }
             .appShadow(.fab)
             .offset(y: -lift)
@@ -205,7 +233,8 @@ private struct BrandTab: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Releaf")
-        .accessibilityHint("Opens quick capture")
+        .accessibilityHint(isSelected ? "Capture tab" : "Opens Capture tab")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }
 

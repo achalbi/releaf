@@ -511,12 +511,13 @@ fun NotebookTabScreen(
             onCreateShelf = { name, onCreated ->
                 viewModel.createShelf(name) { id -> onCreated(id) }
             },
-            onConfirm = { title, description, shelfId, colorToken ->
+            onConfirm = { title, description, shelfId, colorToken, flat ->
                 viewModel.createNotebook(
                     title       = title,
                     description = description,
                     shelfId     = shelfId,
                     colorToken  = colorToken,
+                    flat        = flat,
                 ) { newId -> onOpenNotebook(newId) }
                 showCreateDialog = false
             },
@@ -1352,7 +1353,7 @@ private fun CreateNotebookDialog(
     shelves: List<app.releaf.mobile.data.domain.Shelf>,
     onDismiss: () -> Unit,
     onCreateShelf: (String, (String) -> Unit) -> Unit,
-    onConfirm: (title: String, description: String, shelfId: String, colorToken: String) -> Unit,
+    onConfirm: (title: String, description: String, shelfId: String, colorToken: String, flat: Boolean) -> Unit,
 ) {
     var title by rememberSaveable { mutableStateOf("") }
     var description by rememberSaveable { mutableStateOf("") }
@@ -1360,6 +1361,7 @@ private fun CreateNotebookDialog(
         mutableStateOf(shelves.firstOrNull()?.id ?: "shelf-general")
     }
     var colorToken by rememberSaveable { mutableStateOf("coral") }
+    var flat by rememberSaveable { mutableStateOf(false) }
     var showShelfList by remember { mutableStateOf(false) }
     var showNewShelfPrompt by remember { mutableStateOf(false) }
     val canConfirm = title.isNotBlank()
@@ -1476,11 +1478,43 @@ private fun CreateNotebookDialog(
                         showPreview = true,
                     )
                 }
+
+                // Flat toggle — when on, the notebook skips the chapter
+                // level entirely and pages live directly under it. The
+                // schema still has a hidden "Default" chapter behind
+                // the scenes; the UI just doesn't show it.
+                Row(
+                    modifier              = Modifier
+                        .fillMaxWidth()
+                        .clickable { flat = !flat },
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+                ) {
+                    androidx.compose.material3.Checkbox(
+                        checked = flat,
+                        onCheckedChange = { flat = it },
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text  = "Skip chapters, just pages",
+                            style = AppTypography.Body,
+                            color = AppColors.TextPrimary,
+                        )
+                        Text(
+                            text  = "Pages live directly under the notebook.",
+                            style = AppTypography.Meta,
+                            color = AppColors.TextSecondary,
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { if (canConfirm) onConfirm(title, description, selectedShelfId, colorToken) },
+                onClick = { if (canConfirm) onConfirm(title, description, selectedShelfId, colorToken, flat) },
                 enabled = canConfirm,
             ) {
                 Text("Create", color = AppAccent.primary)

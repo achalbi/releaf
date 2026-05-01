@@ -554,6 +554,13 @@ struct VoiceSection: View {
     /// reason string. Successful transcriptions don't land here —
     /// their text goes onto the attachment via `onTranscribed`.
     @State private var attemptedTranscription: [String: String] = [:]
+    /// Recording sheet — when the user taps the Record pill we open
+    /// a modal sheet that hosts `VoicePageRecorder` (live waveform,
+    /// progress ring, slide-up-to-cancel) instead of running the
+    /// inline recorder. The sheet's `onSave` callback funnels back
+    /// into the existing `onAdd(uri, durationMs)` path so persistence,
+    /// transcription, and playback all stay wired the same way.
+    @State private var showRecordingSheet: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.s3) {
@@ -567,39 +574,23 @@ struct VoiceSection: View {
                     }
                 },
                 onRecordTap: {
+                    // Tapping Record now opens the modal-sheet recorder
+                    // (live waveform + progress ring + slide-up-to-
+                    // cancel). The legacy inline-recording state-machine
+                    // above stays in place so any code path that flips
+                    // `recorder.isRecording` directly still works, but
+                    // the user-facing trigger goes through the sheet.
                     if recorder.isRecording {
-                        // Stop + commit. Short-recording guard lives
-                        // in the recorder so the UI doesn't have to care.
+                        // Defensive: if for some reason the inline
+                        // recorder is still hot, finalise it before
+                        // surfacing the sheet so we don't end up with
+                        // two recordings in flight.
                         if let result = recorder.stop() {
                             onAdd(result.uri, result.durationMs)
-                            // Transcription is on-demand now — the user
-                            // taps the Transcribe button on the card
-                            // to kick it off. Keeps the permission
-                            // prompt off the capture path for users
-                            // who don't care about transcripts.
-                        } else {
-                            errorMessage = "Recording too short — try again."
-                        }
-                    } else {
-                        errorMessage = nil
-                        Task {
-                            let granted = await VoiceRecorder.requestPermission()
-                            if granted {
-                                // Kick off the speech-recognition
-                                // authorization prompt in parallel so
-                                // the first stop doesn't hit a second
-                                // permission sheet mid-flow. Fire and
-                                // forget — if denied, the transcript
-                                // path silently no-ops.
-                                Task { _ = await VoiceTranscriber.requestPermission() }
-                                if !recorder.start() {
-                                    errorMessage = "Couldn't start recording — try again."
-                                }
-                            } else {
-                                errorMessage = "Microphone permission is needed to record."
-                            }
                         }
                     }
+                    errorMessage = nil
+                    showRecordingSheet = true
                 }
             )
 
@@ -653,6 +644,27 @@ struct VoiceSection: View {
             }
         } message: {
             Text("The clip will be removed from this entry and the file in app storage is cleaned up.")
+        }
+        .sheet(isPresented: $showRecordingSheet) {
+            VoicePageRecorder(
+                isEmpty: notes.isEmpty,
+                onSave: { clip in
+                    // Funnel through the existing add path so
+                    // attachment storage, view-model state, and
+                    // downstream transcription wiring stay intact.
+                    onAdd(clip.uri, clip.durationMs)
+                    showRecordingSheet = false
+                },
+                onCancel: { showRecordingSheet = false }
+            )
+            .padding(.top, AppSpacing.s4)
+            // Use the .large detent only — the recording stage (eyebrow,
+            // waveform, counter, cancel-zone slot, stop button, hint
+            // copy) is taller than .medium, so the bottom hint and
+            // the "Swipe up to cancel" cue would clip out of view at
+            // the half-height detent.
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
     }
 

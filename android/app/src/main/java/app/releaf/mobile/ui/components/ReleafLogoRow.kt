@@ -3,7 +3,9 @@
  * Horizontal brand mark — leaf + "Releaf" serif wordmark. Matches the
  * four sizes in the Releaf Branding spec's "App Logo Variations" (xs /
  * sm / md / lg). Leaf color flows from the active accent palette; the
- * wordmark flows from text-primary.
+ * wordmark flows from text-primary. The marketing-sheet leaf path is
+ * already drawn diagonally, so callers do not (and should not) apply
+ * an additional rotation.
  */
 
 package app.releaf.mobile.ui.components
@@ -14,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -45,6 +48,7 @@ fun ReleafLogoRow(
     leafGradientStart: Color = AppAccent.primary,
     leafGradientEnd: Color = AppAccent.deep,
     wordmarkColor: Color = AppColors.TextPrimary,
+    leafRotationDegrees: Float = 0f,
 ) {
     Row(
         modifier = modifier,
@@ -52,6 +56,7 @@ fun ReleafLogoRow(
         horizontalArrangement = Arrangement.spacedBy(size.gap),
     ) {
         ReleafLogo(
+            modifier = Modifier.rotate(leafRotationDegrees),
             size = size.leaf,
             filled = true,
             fillGradientStart = leafGradientStart,

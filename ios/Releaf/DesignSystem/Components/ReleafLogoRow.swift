@@ -3,7 +3,9 @@
  * Horizontal brand mark — leaf + "Releaf" serif wordmark. Matches the
  * four sizes in the Releaf Branding spec's "App Logo Variations" (xs /
  * sm / md / lg). Leaf color flows from the active accent palette; the
- * wordmark flows from text-primary.
+ * wordmark flows from text-primary. The marketing-sheet leaf path is
+ * already drawn diagonally, so callers do not (and should not) apply
+ * an additional rotation.
  */
 
 import SwiftUI
@@ -54,17 +56,20 @@ public struct ReleafLogoRow: View {
     public let leafGradientStart: Color?
     public let leafGradientEnd: Color?
     public let wordmarkColor: Color
+    public let leafRotation: Angle
 
     public init(
         size: ReleafLogoSize = .md,
         leafGradientStart: Color? = nil,
         leafGradientEnd: Color? = nil,
-        wordmarkColor: Color = AppColors.textPrimary
+        wordmarkColor: Color = AppColors.textPrimary,
+        leafRotation: Angle = .zero
     ) {
         self.size = size
         self.leafGradientStart = leafGradientStart
         self.leafGradientEnd = leafGradientEnd
         self.wordmarkColor = wordmarkColor
+        self.leafRotation = leafRotation
     }
 
     public var body: some View {
@@ -76,6 +81,7 @@ public struct ReleafLogoRow: View {
                 fillGradientEnd: leafGradientEnd ?? accent.deep,
                 lineWidth: size.stroke
             )
+            .rotationEffect(leafRotation)
             Text("Releaf")
                 .font(.system(size: size.wordmarkSize, design: .serif))
                 .foregroundStyle(wordmarkColor)

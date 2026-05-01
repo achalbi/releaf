@@ -37,6 +37,13 @@ import kotlinx.coroutines.launch
 
 enum class ChapterMoveDirection { Up, Down }
 
+/**
+ * Spacing between chapter `position` values when the VM rewrites the
+ * full ordering. Mirrors the entity's 1024 default so a single, isolated
+ * insert (which gets the default) still slots after re-ordered peers.
+ */
+private const val CHAPTER_POSITION_STRIDE = 1024L
+
 data class NotebookLocalDetailUiState(
     val isLoading: Boolean = true,
     val notebook: NotebookEntity? = null,
@@ -55,6 +62,25 @@ data class NotebookLocalDetailUiState(
 
     val totalChapterCount: Int get() = chapters.size
     val totalPageCount: Int get() = pagesByChapter.values.sumOf { it.size }
+
+    /**
+     * Latest mutation timestamp anywhere under this notebook —
+     * folds notebook.updatedAt with chapter.updatedAt and
+     * page.updatedAt across the whole tree. ISO-8601 strings sort
+     * lexicographically so a string `max` gives the chronological
+     * latest. Drives the "Last edited X ago" footnote on the hero.
+     */
+    val lastEditedAt: String?
+        get() {
+            val candidates = sequence {
+                notebook?.updatedAt?.let { yield(it) }
+                chapters.forEach { yield(it.updatedAt) }
+                pagesByChapter.values.forEach { pages ->
+                    pages.forEach { yield(it.updatedAt) }
+                }
+            }
+            return candidates.maxOrNull()
+        }
 }
 
 class NotebookLocalDetailViewModel(
@@ -102,6 +128,20 @@ class NotebookLocalDetailViewModel(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = NotebookLocalDetailUiState(),
     )
+
+    /**
+     * Archived (soft-deleted) chapters under this notebook, newest-
+     * archived first. Drives the "View archived chapters" sheet —
+     * surfaced as a small footer link on the chapters card so the
+     * affordance only appears when there's something to recover.
+     */
+    val archivedChapters: StateFlow<List<ChapterEntity>> =
+        chapterRepository.observeArchivedForNotebook(notebookId)
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList(),
+            )
 
     /* ---------- notebook actions ---------- */
 
@@ -155,25 +195,33 @@ class NotebookLocalDetailViewModel(
     }
 
     /**
-     * Reorder a chapter up or down by swapping its `position` value with
-     * the immediate neighbor in the requested direction. No-ops at the
-     * list edges. The chapter list is already sorted by position in the
-     * UI, so swapping positions reflects instantly via the live Flow.
+     * Reorder a chapter up or down. Builds the desired post-move list
+     * locally, then assigns distinct, evenly-spaced positions
+     * (`(index + 1) * STRIDE`) to every chapter so the new ordering
+     * is unambiguous even when existing chapters share the default
+     * 1024 position (the entity's column default), which would
+     * otherwise leave a naive position-swap inert.
      */
     fun moveChapter(id: String, direction: ChapterMoveDirection) {
         val chapters = state.value.chapters
         val index    = chapters.indexOfFirst { it.id == id }
         if (index < 0) return
-        val neighborIndex = when (direction) {
+        val targetIndex = when (direction) {
             ChapterMoveDirection.Up   -> index - 1
             ChapterMoveDirection.Down -> index + 1
         }
-        if (neighborIndex !in chapters.indices) return
-        val current  = chapters[index]
-        val neighbor = chapters[neighborIndex]
+        if (targetIndex !in chapters.indices) return
+
+        val reordered = chapters.toMutableList().apply {
+            add(targetIndex, removeAt(index))
+        }
         viewModelScope.launch {
-            chapterRepository.saveChapter(current.copy(position = neighbor.position))
-            chapterRepository.saveChapter(neighbor.copy(position = current.position))
+            reordered.forEachIndexed { i, chapter ->
+                val newPosition = (i + 1) * CHAPTER_POSITION_STRIDE
+                if (chapter.position != newPosition) {
+                    chapterRepository.saveChapter(chapter.copy(position = newPosition))
+                }
+            }
         }
     }
 
@@ -210,6 +258,55 @@ class NotebookLocalDetailViewModel(
 
     fun undoDeletePage(id: String) {
         viewModelScope.launch { pageRepository.undoSoftDeletePage(id) }
+    }
+
+    /**
+     * Create a page directly under the notebook's default chapter — the
+     * "Default" sentinel that auto-created with a flat notebook.
+     * No-ops on a chaptered notebook (the user shouldn't see the
+     * affordance there). Returns the new id via [onCreated] so the
+     * screen can route into the editor.
+     */
+    fun createPageOnDefault(onCreated: (String) -> Unit = {}) {
+        val sentinel = state.value.chapters.firstOrNull() ?: return
+        viewModelScope.launch {
+            val created = pageRepository.createPage(
+                chapterId = sentinel.id,
+                title     = null,
+                notes     = "",
+            )
+            onCreated(created.id)
+        }
+    }
+
+    /**
+     * Reorder a page within a flat notebook's default chapter. Same
+     * shape as moveChapter — assigns evenly-spaced positions to every
+     * page in the new order so the swap is unambiguous even if pages
+     * share the default 1024 position.
+     */
+    fun movePage(id: String, direction: ChapterMoveDirection) {
+        val sentinel = state.value.chapters.firstOrNull() ?: return
+        val pages = state.value.pagesByChapter[sentinel.id].orEmpty()
+        val index = pages.indexOfFirst { it.id == id }
+        if (index < 0) return
+        val targetIndex = when (direction) {
+            ChapterMoveDirection.Up   -> index - 1
+            ChapterMoveDirection.Down -> index + 1
+        }
+        if (targetIndex !in pages.indices) return
+
+        val reordered = pages.toMutableList().apply {
+            add(targetIndex, removeAt(index))
+        }
+        viewModelScope.launch {
+            reordered.forEachIndexed { i, page ->
+                val newPosition = (i + 1) * CHAPTER_POSITION_STRIDE
+                if (page.position != newPosition) {
+                    pageRepository.savePage(page.copy(position = newPosition))
+                }
+            }
+        }
     }
 
     companion object {

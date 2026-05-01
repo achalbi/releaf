@@ -1,0 +1,1189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Releaf — Daily capture mocks (set 2)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --canvas:        #F5EEE3;
+    --card-solid:    #FFFAF4;
+    --card-90:       rgba(255, 250, 244, 0.9);
+    --subtle:        #EFE7DA;
+    --muted:         #EBE4D3;
+    --border-def:    rgba(80, 62, 45, 0.12);
+    --border-strong: rgba(80, 62, 45, 0.24);
+    --text-primary:   #241D17;
+    --text-secondary: #5F5245;
+    --text-tertiary:  #8A7C6D;
+    --coral:      #E77850;
+    --coral-soft: #FCEAE0;
+    --coral-deep: #C85A30;
+    --green:      #1E5943;
+    --green-soft: #D9EDE2;
+    --info:       #2E6FB5;
+    --info-soft:  #E1ECF8;
+    --warning:    #A87418;
+    --warning-soft:#FBEECD;
+    --danger:     #C8432E;
+    --dot:        rgba(80, 62, 45, 0.14);
+    --shadow-card:  0 2px 8px rgba(36, 29, 23, 0.06);
+    --shadow-float: 0 12px 28px rgba(36, 29, 23, 0.14), 0 2px 6px rgba(36, 29, 23, 0.08);
+    --shadow-fab:   0 8px 24px rgba(231, 120, 80, 0.38);
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --r-xl: 22px;
+    --pill: 9999px;
+
+    --font-sans: Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-serif: Newsreader, Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+    background: #E8DDC9;
+    background-image: radial-gradient(circle, rgba(80,62,45,0.08) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .page {
+    max-width: 1840px;
+    margin: 0 auto;
+    padding: 56px 32px 96px;
+  }
+
+  header.hero { margin-bottom: 40px; }
+
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--coral);
+    margin: 0 0 8px;
+  }
+
+  h1 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    font-size: 36px;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    margin: 0 0 12px;
+    color: var(--text-primary);
+  }
+
+  .lede {
+    font-size: 15px;
+    line-height: 1.55;
+    max-width: 72ch;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(340px, 1fr));
+    gap: 28px;
+    align-items: start;
+  }
+  @media (max-width: 1500px) { .grid { grid-template-columns: repeat(2, minmax(340px, 1fr)); max-width: 900px; margin: 0 auto; } }
+  @media (max-width: 760px)  { .grid { grid-template-columns: 1fr; max-width: 440px; } }
+
+  .panel { display: flex; flex-direction: column; gap: 14px; }
+
+  .panel .label {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+
+  .panel .desc {
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+  }
+
+  /* phone frame */
+  .phone {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 390 / 844;
+    border-radius: 44px;
+    background: #1B1610;
+    padding: 12px;
+    box-shadow: var(--shadow-float);
+    overflow: hidden;
+  }
+  .screen {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 32px;
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .statusbar {
+    height: 36px;
+    padding: 12px 20px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-primary);
+    flex-shrink: 0;
+  }
+  .statusbar .icons { display: flex; gap: 4px; align-items: center; }
+  .statusbar svg { width: 13px; height: 13px; }
+
+  .header {
+    padding: 14px 20px 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .header .title-block .day {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--coral);
+  }
+  .header .title-block .date {
+    font-family: var(--font-serif);
+    font-size: 22px;
+    line-height: 1.1;
+    margin-top: 2px;
+    color: var(--text-primary);
+  }
+  .header .actions { display: flex; gap: 10px; }
+  .icon-btn {
+    width: 36px; height: 36px;
+    border-radius: var(--pill);
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-primary);
+  }
+  .icon-btn svg { width: 16px; height: 16px; }
+  .icon-btn.ghost { background: transparent; border-color: transparent; color: var(--text-secondary); }
+
+  .daystrip {
+    display: flex;
+    gap: 8px;
+    padding: 6px 16px 14px;
+    overflow-x: auto;
+    flex-shrink: 0;
+  }
+  .daystrip::-webkit-scrollbar { display: none; }
+  .daycell {
+    min-width: 44px;
+    flex-shrink: 0;
+    border-radius: var(--r-md);
+    padding: 8px 6px 7px;
+    text-align: center;
+    background: transparent;
+    border: 1px solid transparent;
+  }
+  .daycell .dow { font-size: 10px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-tertiary); text-transform: uppercase; }
+  .daycell .dom { font-family: var(--font-serif); font-size: 18px; margin-top: 1px; color: var(--text-primary); }
+  .daycell .dots { margin-top: 4px; height: 4px; display: flex; gap: 2px; justify-content: center; }
+  .daycell .dots span { width: 4px; height: 4px; border-radius: 50%; background: var(--text-tertiary); }
+  .daycell .dots .photo { background: var(--coral); }
+  .daycell .dots .voice { background: var(--info); }
+  .daycell .dots .scan  { background: var(--warning); }
+  .daycell .dots .note  { background: var(--text-secondary); }
+  .daycell.today { background: var(--card-solid); border-color: var(--border-def); box-shadow: var(--shadow-card); }
+  .daycell.today .dom { color: var(--coral); font-weight: 600; }
+
+  .body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 16px 100px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .body::-webkit-scrollbar { display: none; }
+
+  .card {
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    padding: 16px 18px;
+    box-shadow: var(--shadow-card);
+  }
+  .card .card-head {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .card .card-head .pip { font-family: var(--font-serif); font-size: 14px; color: var(--coral); letter-spacing: 0; text-transform: none; font-weight: 500; }
+
+  /* bottom nav */
+  .bottomnav {
+    position: absolute;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    width: calc(100% - 32px);
+    background: var(--card-90);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border-def);
+    border-radius: var(--pill);
+    padding: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    box-shadow: var(--shadow-float);
+  }
+  .navitem {
+    width: 44px; height: 44px;
+    border-radius: var(--pill);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-tertiary);
+  }
+  .navitem.active { color: var(--text-primary); }
+  .navitem svg { width: 20px; height: 20px; }
+  .navitem.fab {
+    width: 56px; height: 56px;
+    background: var(--coral);
+    color: var(--canvas);
+    box-shadow: var(--shadow-fab);
+  }
+  .navitem.fab svg { width: 24px; height: 24px; }
+
+  /* ───── empty state pieces ───── */
+  .prompt-card {
+    background: var(--card-90);
+    border: 1.5px dashed var(--border-strong);
+    border-radius: var(--r-lg);
+    padding: 28px 22px;
+    text-align: center;
+  }
+  .prompt-card .leaf {
+    width: 44px; height: 44px;
+    border-radius: var(--pill);
+    background: var(--coral-soft);
+    color: var(--coral);
+    display: inline-flex; align-items: center; justify-content: center;
+    margin-bottom: 12px;
+  }
+  .prompt-card .leaf svg { width: 22px; height: 22px; }
+  .prompt-card h3 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    font-size: 22px;
+    line-height: 1.2;
+    margin: 0 0 8px;
+    color: var(--text-primary);
+  }
+  .prompt-card p {
+    font-size: 13.5px;
+    color: var(--text-secondary);
+    margin: 0 0 14px;
+    line-height: 1.5;
+  }
+  .quick-row {
+    display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+  }
+  .quick-pill {
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--pill);
+    padding: 8px 14px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-primary);
+    display: flex; align-items: center; gap: 6px;
+    box-shadow: var(--shadow-card);
+  }
+  .quick-pill svg { width: 13px; height: 13px; color: var(--coral); }
+
+  .hint-card {
+    padding: 12px 16px;
+    background: transparent;
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-md);
+    display: flex; align-items: center; gap: 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .hint-card .swatch {
+    width: 30px; height: 30px;
+    border-radius: var(--r-sm);
+    background: var(--coral-soft);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--coral);
+    flex-shrink: 0;
+  }
+  .hint-card .swatch svg { width: 14px; height: 14px; }
+  .hint-card .meta { flex: 1; min-width: 0; }
+  .hint-card .meta .t { font-weight: 600; color: var(--text-primary); margin-bottom: 1px; }
+  .hint-card .meta .s { font-size: 11.5px; color: var(--text-tertiary); }
+  .hint-card .arrow { color: var(--text-tertiary); }
+
+  /* ───── voice recording active ───── */
+  .voice-veil {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 50% 78%, rgba(231, 120, 80, 0.18), rgba(36, 29, 23, 0.55) 60%);
+    backdrop-filter: blur(2px);
+  }
+  .voice-stage {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 0 32px;
+    color: var(--canvas);
+  }
+  .voice-stage .label-up {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--coral-soft);
+    margin-bottom: 14px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  }
+  .voice-stage .timer {
+    font-family: var(--font-serif);
+    font-size: 56px;
+    line-height: 1;
+    color: var(--canvas);
+    letter-spacing: -0.02em;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  }
+  .voice-stage .target {
+    font-size: 12.5px;
+    color: rgba(245, 238, 227, 0.78);
+    margin: 12px 0 26px;
+  }
+  .voice-stage .target strong { color: var(--coral-soft); font-weight: 600; }
+  .voice-stage .wave {
+    width: 75%;
+    height: 64px;
+    display: flex; align-items: center; justify-content: center;
+    gap: 3px;
+    margin-bottom: 28px;
+  }
+  .voice-stage .wave span {
+    width: 3px;
+    background: var(--coral-soft);
+    border-radius: 2px;
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { transform: scaleY(0.4); opacity: 0.7; }
+    50% { transform: scaleY(1); opacity: 1; }
+  }
+  .voice-stage .release-hint {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(245, 238, 227, 0.85);
+    background: rgba(36, 29, 23, 0.55);
+    padding: 6px 14px;
+    border-radius: var(--pill);
+    margin-bottom: 18px;
+  }
+  .voice-stage .fab-active {
+    width: 88px; height: 88px;
+    border-radius: var(--pill);
+    background: var(--coral);
+    box-shadow: 0 0 0 12px rgba(231, 120, 80, 0.22), 0 0 0 28px rgba(231, 120, 80, 0.10), var(--shadow-fab);
+    color: var(--canvas);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .voice-stage .fab-active svg { width: 32px; height: 32px; }
+
+  /* ───── calendar ───── */
+  .cal-month {
+    text-align: center;
+    padding: 14px 0 10px;
+  }
+  .cal-month .yr {
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-tertiary); font-weight: 600;
+    margin-bottom: 2px;
+  }
+  .cal-month .mo {
+    font-family: var(--font-serif);
+    font-size: 26px;
+    color: var(--text-primary);
+  }
+  .cal-controls {
+    padding: 0 20px 8px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .cal-controls .ctl {
+    width: 32px; height: 32px;
+    border-radius: var(--pill);
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-secondary);
+  }
+  .cal-controls .ctl svg { width: 14px; height: 14px; }
+  .cal-controls .today-pill {
+    font-size: 11px; font-weight: 600;
+    color: var(--coral);
+    background: var(--coral-soft);
+    border-radius: var(--pill);
+    padding: 6px 12px;
+  }
+  .cal-grid {
+    margin: 0 16px;
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    padding: 12px 8px;
+    box-shadow: var(--shadow-card);
+  }
+  .cal-dows {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-def);
+    margin-bottom: 8px;
+  }
+  .cal-rows {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+  }
+  .cal-day {
+    aspect-ratio: 1;
+    border-radius: var(--r-sm);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    font-size: 12.5px;
+    color: var(--text-primary);
+    position: relative;
+  }
+  .cal-day.muted { color: var(--text-tertiary); opacity: 0.45; }
+  .cal-day .num { font-family: var(--font-serif); }
+  .cal-day .ddots {
+    height: 5px;
+    display: flex; gap: 2px;
+  }
+  .cal-day .ddots span { width: 4px; height: 4px; border-radius: 50%; }
+  .cal-day .ddots .p { background: var(--coral); }
+  .cal-day .ddots .v { background: var(--info); }
+  .cal-day .ddots .s { background: var(--warning); }
+  .cal-day .ddots .n { background: var(--text-secondary); }
+  .cal-day.today {
+    background: var(--coral-soft);
+    box-shadow: inset 0 0 0 1.5px var(--coral);
+  }
+  .cal-day.today .num { color: var(--coral-deep); font-weight: 600; }
+  .cal-day.busy { background: rgba(231, 120, 80, 0.06); }
+
+  .cal-legend {
+    display: flex; gap: 12px;
+    flex-wrap: wrap;
+    padding: 14px 20px 0;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    justify-content: center;
+  }
+  .cal-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .cal-legend i { width: 7px; height: 7px; border-radius: 50%; }
+
+  /* ───── search ───── */
+  .search-input {
+    margin: 4px 16px 10px;
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--pill);
+    padding: 10px 14px 10px 38px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+    box-shadow: var(--shadow-card);
+  }
+  .search-input .mag {
+    position: absolute;
+    left: 14px; top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-tertiary);
+  }
+  .search-input .mag svg { width: 16px; height: 16px; }
+  .search-input .q {
+    font-size: 15px;
+    color: var(--text-primary);
+    flex: 1;
+  }
+  .search-input .cursor {
+    display: inline-block;
+    width: 2px; height: 16px;
+    background: var(--coral);
+    vertical-align: text-top;
+    margin-left: 1px;
+    animation: blink 1s step-start infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .search-input .clr {
+    color: var(--text-tertiary);
+    font-size: 12px;
+    margin-left: auto;
+  }
+
+  .filter-chips {
+    display: flex; gap: 6px;
+    padding: 0 16px 12px;
+    overflow-x: auto;
+  }
+  .filter-chips::-webkit-scrollbar { display: none; }
+  .chip {
+    flex-shrink: 0;
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--pill);
+    padding: 5px 11px;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    font-weight: 500;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .chip.active {
+    background: var(--text-primary);
+    color: var(--canvas);
+    border-color: var(--text-primary);
+  }
+  .chip svg { width: 11px; height: 11px; }
+
+  .result-group { padding: 0 16px; }
+  .result-group .grp-head {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin: 16px 4px 8px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .result-group .grp-head .cnt {
+    background: var(--info-soft);
+    color: var(--info);
+    padding: 2px 8px;
+    border-radius: var(--pill);
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+    font-size: 10.5px;
+  }
+  .result {
+    background: var(--card-90);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-md);
+    padding: 12px 14px;
+    margin-bottom: 6px;
+    display: flex; gap: 10px; align-items: flex-start;
+  }
+  .result .ico {
+    width: 28px; height: 28px;
+    border-radius: var(--r-sm);
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--subtle);
+    color: var(--text-secondary);
+  }
+  .result .ico svg { width: 14px; height: 14px; }
+  .result .ico.coral { background: var(--coral-soft); color: var(--coral); }
+  .result .ico.info  { background: var(--info-soft); color: var(--info); }
+  .result .ico.warn  { background: var(--warning-soft); color: var(--warning); }
+  .result .body-r { flex: 1; min-width: 0; }
+  .result .body-r .t {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+  }
+  .result .body-r .snip {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    line-height: 1.45;
+  }
+  .result .body-r mark {
+    background: var(--warning-soft);
+    color: var(--warning);
+    border-radius: 3px;
+    padding: 0 2px;
+    font-weight: 600;
+  }
+  .result .body-r .meta {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-top: 4px;
+  }
+  .result .thumb-r {
+    width: 44px; height: 44px;
+    border-radius: var(--r-sm);
+    background: linear-gradient(135deg, #c8a37b, #8a6948);
+    flex-shrink: 0;
+  }
+
+  /* legend */
+  .legend {
+    margin-top: 56px;
+    padding: 28px 32px;
+    background: var(--card-solid);
+    border: 1px solid var(--border-def);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-card);
+  }
+  .legend h2 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    font-size: 22px;
+    margin: 0 0 12px;
+  }
+  .legend p {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    margin: 0 0 10px;
+    max-width: 80ch;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="eyebrow">Releaf · daily capture mocks · set 2</p>
+    <h1>The states the first set didn't cover.</h1>
+    <p class="lede">
+      Four more phone frames to round out the daily-capture loop:
+      what an empty day looks like before you've captured anything,
+      the live voice-recording state during a long-press,
+      the calendar view used for retrieval,
+      and the search results screen.
+      Companion to <code>daily-capture-mocks.html</code> and
+      <code>docs/DAILY_CAPTURE_UX.md</code>.
+    </p>
+  </header>
+
+  <div class="grid">
+
+    <!-- ───────────────────────────────────────────────── -->
+    <!-- 4. EMPTY TODAY                                    -->
+    <!-- ───────────────────────────────────────────────── -->
+    <section class="panel">
+      <div class="label">4 · Empty today — first open of the day</div>
+      <p class="desc">
+        Day strip shows today centered with no density dots; capture
+        pills are absent. The editor card becomes a soft prompt with
+        three quick-start tiles. Below the fold: a hint pointing at
+        yesterday so the user can jump back without thinking.
+      </p>
+      <div class="phone">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <div class="header">
+            <div class="title-block">
+              <div class="day">Wednesday</div>
+              <div class="date">April 29</div>
+            </div>
+            <div class="actions">
+              <div class="icon-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              </div>
+              <div class="icon-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="daystrip">
+            <div class="daycell"><div class="dow">Sun</div><div class="dom">26</div><div class="dots"><span class="note"></span></div></div>
+            <div class="daycell"><div class="dow">Mon</div><div class="dom">27</div><div class="dots"><span class="note"></span><span class="photo"></span></div></div>
+            <div class="daycell"><div class="dow">Tue</div><div class="dom">28</div><div class="dots"><span class="note"></span><span class="photo"></span><span class="voice"></span></div></div>
+            <div class="daycell today"><div class="dow">Wed</div><div class="dom">29</div><div class="dots"></div></div>
+            <div class="daycell"><div class="dow">Thu</div><div class="dom">30</div><div class="dots"></div></div>
+            <div class="daycell"><div class="dow">Fri</div><div class="dom">1</div><div class="dots"></div></div>
+            <div class="daycell"><div class="dow">Sat</div><div class="dom">2</div><div class="dots"></div></div>
+          </div>
+
+          <div class="body">
+            <div class="prompt-card">
+              <div class="leaf">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 4 13V8a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v5a7 7 0 0 1-7 7z"/><path d="M11 20v-9"/></svg>
+              </div>
+              <h3>What's worth keeping today?</h3>
+              <p>Tap to start writing, hold the green button for voice, or pick a quick capture below.</p>
+              <div class="quick-row">
+                <span class="quick-pill">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h12M4 18h8"/></svg>
+                  Note
+                </span>
+                <span class="quick-pill">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M9 6V4h6v2"/></svg>
+                  Photo
+                </span>
+                <span class="quick-pill">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="13" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+                  Voice
+                </span>
+              </div>
+            </div>
+
+            <div class="hint-card">
+              <div class="swatch">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg>
+              </div>
+              <div class="meta">
+                <div class="t">Yesterday</div>
+                <div class="s">3 photos · 1 voice · finished trail prep</div>
+              </div>
+              <span class="arrow">›</span>
+            </div>
+
+            <div class="hint-card">
+              <div class="swatch" style="background: var(--green-soft); color: var(--green);">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+              </div>
+              <div class="meta">
+                <div class="t">2 tasks due today</div>
+                <div class="s">Refill bird feeder · Call vet</div>
+              </div>
+              <span class="arrow">›</span>
+            </div>
+          </div>
+
+          <div class="bottomnav">
+            <div class="navitem active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg></div>
+            <div class="navitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4z"/><path d="M9 4v16"/></svg></div>
+            <div class="navitem fab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
+            <div class="navitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h12l4 4v12H4z"/><path d="M16 4v4h4M8 12h8M8 16h5"/></svg></div>
+            <div class="navitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19 12c0 1-.2 1.9-.5 2.7l1.7 1.3-2 3-2-.7c-.7.5-1.4.9-2.2 1.1L13.5 22h-3l-.5-2.6a7 7 0 0 1-2.2-1.1l-2 .7-2-3 1.7-1.3A8 8 0 0 1 5 12c0-1 .2-1.9.5-2.7L3.8 8l2-3 2 .7c.7-.5 1.4-.9 2.2-1.1L10.5 2h3l.5 2.6c.8.2 1.5.6 2.2 1.1l2-.7 2 3-1.7 1.3c.3.8.5 1.7.5 2.7z"/></svg></div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ───────────────────────────────────────────────── -->
+    <!-- 5. VOICE RECORDING (long-press hold)              -->
+    <!-- ───────────────────────────────────────────────── -->
+    <section class="panel">
+      <div class="label">5 · Voice — hold-to-record active</div>
+      <p class="desc">
+        While the user holds the Leaf button, the screen dims, the FAB
+        swells with a coral pulse, and a live timer + waveform appear.
+        Release saves and transcribes. No sheet, no review screen on
+        the happy path.
+      </p>
+      <div class="phone">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <!-- ghost of home behind veil -->
+          <div class="header" style="opacity: 0.6;">
+            <div class="title-block">
+              <div class="day">Tuesday</div>
+              <div class="date">April 28</div>
+            </div>
+          </div>
+          <div class="body" style="opacity: 0.4; pointer-events:none;">
+            <div class="card">
+              <div class="card-head">Today's notes</div>
+              <p style="font-family: var(--font-serif); margin: 0; line-height: 1.55; font-size: 16px;">Crisp morning. Heron at the pier again.</p>
+            </div>
+          </div>
+
+          <div class="voice-veil"></div>
+
+          <div class="voice-stage">
+            <div class="label-up">Recording</div>
+            <div class="timer">0:04</div>
+            <div class="target">→ <strong>today's log</strong> · release to save</div>
+            <div class="wave">
+              <span style="height: 30%; animation-delay: 0.0s;"></span>
+              <span style="height: 60%; animation-delay: 0.05s;"></span>
+              <span style="height: 90%; animation-delay: 0.10s;"></span>
+              <span style="height: 50%; animation-delay: 0.15s;"></span>
+              <span style="height: 80%; animation-delay: 0.20s;"></span>
+              <span style="height: 40%; animation-delay: 0.25s;"></span>
+              <span style="height: 70%; animation-delay: 0.30s;"></span>
+              <span style="height: 95%; animation-delay: 0.35s;"></span>
+              <span style="height: 55%; animation-delay: 0.40s;"></span>
+              <span style="height: 75%; animation-delay: 0.45s;"></span>
+              <span style="height: 35%; animation-delay: 0.50s;"></span>
+              <span style="height: 65%; animation-delay: 0.55s;"></span>
+              <span style="height: 85%; animation-delay: 0.60s;"></span>
+              <span style="height: 45%; animation-delay: 0.65s;"></span>
+              <span style="height: 70%; animation-delay: 0.70s;"></span>
+              <span style="height: 30%; animation-delay: 0.75s;"></span>
+              <span style="height: 90%; animation-delay: 0.80s;"></span>
+              <span style="height: 50%; animation-delay: 0.85s;"></span>
+              <span style="height: 60%; animation-delay: 0.90s;"></span>
+              <span style="height: 80%; animation-delay: 0.95s;"></span>
+              <span style="height: 40%; animation-delay: 1.00s;"></span>
+              <span style="height: 70%; animation-delay: 1.05s;"></span>
+              <span style="height: 30%; animation-delay: 1.10s;"></span>
+              <span style="height: 65%; animation-delay: 1.15s;"></span>
+            </div>
+            <div class="release-hint">slide up to cancel · release to save</div>
+            <div class="fab-active">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="13" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ───────────────────────────────────────────────── -->
+    <!-- 6. CALENDAR MONTH VIEW                            -->
+    <!-- ───────────────────────────────────────────────── -->
+    <section class="panel">
+      <div class="label">6 · Calendar — month grid w/ density dots</div>
+      <p class="desc">
+        Reached via the calendar icon in Home's header. Each cell shows
+        density dots per capture kind. Today has a coral ring; a "Today"
+        pill jumps you back. Tap any cell to drill into that day's log.
+      </p>
+      <div class="phone">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <div class="header">
+            <div class="actions">
+              <div class="icon-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg>
+              </div>
+            </div>
+            <div class="title-block" style="text-align:center; flex:1;">
+              <div class="day" style="color: var(--text-tertiary);">Calendar</div>
+              <div class="date" style="font-size: 18px;">April 2026</div>
+            </div>
+            <div class="actions">
+              <div class="icon-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="cal-controls">
+            <div class="ctl">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg>
+            </div>
+            <div class="today-pill">Jump to today</div>
+            <div class="ctl">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg>
+            </div>
+          </div>
+
+          <div class="cal-grid">
+            <div class="cal-dows">
+              <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+            </div>
+            <div class="cal-rows">
+              <!-- week 1 -->
+              <div class="cal-day muted"><span class="num">29</span><span class="ddots"></span></div>
+              <div class="cal-day muted"><span class="num">30</span><span class="ddots"></span></div>
+              <div class="cal-day muted"><span class="num">31</span><span class="ddots"></span></div>
+              <div class="cal-day"><span class="num">1</span><span class="ddots"><span class="n"></span></span></div>
+              <div class="cal-day busy"><span class="num">2</span><span class="ddots"><span class="n"></span><span class="p"></span></span></div>
+              <div class="cal-day"><span class="num">3</span><span class="ddots"><span class="n"></span></span></div>
+              <div class="cal-day"><span class="num">4</span><span class="ddots"></span></div>
+
+              <!-- week 2 -->
+              <div class="cal-day busy"><span class="num">5</span><span class="ddots"><span class="n"></span><span class="p"></span><span class="v"></span></span></div>
+              <div class="cal-day"><span class="num">6</span><span class="ddots"><span class="n"></span></span></div>
+              <div class="cal-day"><span class="num">7</span><span class="ddots"><span class="p"></span></span></div>
+              <div class="cal-day busy"><span class="num">8</span><span class="ddots"><span class="n"></span><span class="p"></span><span class="s"></span></span></div>
+              <div class="cal-day"><span class="num">9</span><span class="ddots"><span class="n"></span></span></div>
+              <div class="cal-day"><span class="num">10</span><span class="ddots"><span class="v"></span></span></div>
+              <div class="cal-day"><span class="num">11</span><span class="ddots"></span></div>
+
+              <!-- week 3 -->
+              <div class="cal-day"><span class="num">12</span><span class="ddots"><span class="n"></span></span></div>
+              <div class="cal-day"><span class="num">13</span><span class="ddots"><span class="p"></span><span class="n"></span></span></div>
+              <div class="cal-day busy"><span class="num">14</span><span class="ddots"><span class="n"></span><span class="p"></span><span class="v"></span><span class="s"></span></span></div>
+              <div class="cal-day"><span class="num">15</span><span class="ddots"><span class="n"></span></span></div>
+              <div class="cal-day"><span class="num">16</span><span class="ddots"><span class="v"></span></span></div>
+              <div class="cal-day"><span class="num">17</span><span class="ddots"></span></div>
+              <div class="cal-day"><span class="num">18</span><span class="ddots"><span class="p"></span></span></div>
+
+              <!-- week 4 -->
+              <div class="cal-day"><span class="num">19</span><span class="ddots"></span></div>
+              <div class="cal-day"><span class="num">20</span><span class="ddots"><span class="n"></span></span></div>
+              <div class="cal-day"><span class="num">21</span><span class="ddots"><span class="n"></span><span class="p"></span></span></div>
+              <div class="cal-day"><span class="num">22</span><span class="ddots"><span class="n"></span></span></div>
+              <div class="cal-day busy"><span class="num">23</span><span class="ddots"><span class="n"></span><span class="p"></span><span class="v"></span></span></div>
+              <div class="cal-day"><span class="num">24</span><span class="ddots"><span class="n"></span></span></div>
+              <div class="cal-day"><span class="num">25</span><span class="ddots"><span class="n"></span></span></div>
+
+              <!-- week 5 -->
+              <div class="cal-day"><span class="num">26</span><span class="ddots"><span class="n"></span></span></div>
+              <div class="cal-day busy"><span class="num">27</span><span class="ddots"><span class="n"></span><span class="p"></span><span class="v"></span></span></div>
+              <div class="cal-day"><span class="num">28</span><span class="ddots"><span class="n"></span><span class="p"></span><span class="v"></span></span></div>
+              <div class="cal-day today"><span class="num">29</span><span class="ddots"></span></div>
+              <div class="cal-day muted"><span class="num">30</span><span class="ddots"></span></div>
+              <div class="cal-day muted"><span class="num">1</span><span class="ddots"></span></div>
+              <div class="cal-day muted"><span class="num">2</span><span class="ddots"></span></div>
+            </div>
+          </div>
+
+          <div class="cal-legend">
+            <span><i style="background: var(--text-secondary);"></i>note</span>
+            <span><i style="background: var(--coral);"></i>photo</span>
+            <span><i style="background: var(--info);"></i>voice</span>
+            <span><i style="background: var(--warning);"></i>scan</span>
+          </div>
+
+          <div class="bottomnav">
+            <div class="navitem active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg></div>
+            <div class="navitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4z"/><path d="M9 4v16"/></svg></div>
+            <div class="navitem fab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
+            <div class="navitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h12l4 4v12H4z"/><path d="M16 4v4h4M8 12h8M8 16h5"/></svg></div>
+            <div class="navitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19 12c0 1-.2 1.9-.5 2.7l1.7 1.3-2 3-2-.7c-.7.5-1.4.9-2.2 1.1L13.5 22h-3l-.5-2.6a7 7 0 0 1-2.2-1.1l-2 .7-2-3 1.7-1.3A8 8 0 0 1 5 12c0-1 .2-1.9.5-2.7L3.8 8l2-3 2 .7c.7-.5 1.4-.9 2.2-1.1L10.5 2h3l.5 2.6c.8.2 1.5.6 2.2 1.1l2-.7 2 3-1.7 1.3c.3.8.5 1.7.5 2.7z"/></svg></div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ───────────────────────────────────────────────── -->
+    <!-- 7. SEARCH RESULTS                                 -->
+    <!-- ───────────────────────────────────────────────── -->
+    <section class="panel">
+      <div class="label">7 · Search — FTS5 across all kinds</div>
+      <p class="desc">
+        Header search opens this. Results group by kind (notes / photos /
+        voice / scans / tasks) with per-group counts. Voice transcripts
+        and scan OCR text are searchable. Tap a result to drill into it
+        with a rebuilt parent back stack.
+      </p>
+      <div class="phone">
+        <div class="screen">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="icons">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 11h2v3H1zM5 8h2v6H5zM9 5h2v9H9zM13 2h2v12h-2z"/></svg>
+              <svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="20" height="11" rx="3"/><rect x="2" y="2" width="17" height="8" rx="1.5" fill="currentColor"/></svg>
+            </span>
+          </div>
+
+          <div class="header">
+            <div class="actions">
+              <div class="icon-btn ghost">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg>
+              </div>
+            </div>
+            <div class="title-block" style="text-align:center; flex:1;">
+              <div class="day" style="color: var(--text-tertiary);">Search</div>
+            </div>
+            <div class="actions">
+              <div class="icon-btn ghost"></div>
+            </div>
+          </div>
+
+          <div class="search-input">
+            <span class="mag">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            </span>
+            <span class="q">heron<span class="cursor"></span></span>
+            <span class="clr">×</span>
+          </div>
+
+          <div class="filter-chips">
+            <span class="chip active">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M6 12h12M10 18h4"/></svg>
+              All kinds
+            </span>
+            <span class="chip">Notes</span>
+            <span class="chip">Photos</span>
+            <span class="chip">Voice</span>
+            <span class="chip">Scans</span>
+            <span class="chip">Last 30 days</span>
+            <span class="chip">+ Tag</span>
+          </div>
+
+          <div style="flex: 1; overflow-y: auto; padding-bottom: 100px;">
+
+            <div class="result-group">
+              <div class="grp-head">
+                Notes
+                <span class="cnt">3</span>
+              </div>
+              <div class="result">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h12M4 18h8"/></svg>
+                </div>
+                <div class="body-r">
+                  <div class="t">Today · Apr 28</div>
+                  <div class="snip">Crisp morning. <mark>Heron</mark> at the pier again — perched on the third dock post for almost ten minutes…</div>
+                  <div class="meta">Notepad · 12 min ago</div>
+                </div>
+              </div>
+              <div class="result">
+                <div class="ico">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h12M4 18h8"/></svg>
+                </div>
+                <div class="body-r">
+                  <div class="t">Tuesday morning walk</div>
+                  <div class="snip">Saw the <mark>heron</mark> again — same dock post. Stretch, then write…</div>
+                  <div class="meta">Sabbatical 2026 → Week 1 · Apr 20</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="result-group">
+              <div class="grp-head">
+                Photos
+                <span class="cnt">1</span>
+              </div>
+              <div class="result">
+                <div class="ico coral">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M9 6V4h6v2"/></svg>
+                </div>
+                <div class="thumb-r" style="background: linear-gradient(135deg, #b3c4a3, #5d7b56);"></div>
+                <div class="body-r">
+                  <div class="t">"<mark>Heron</mark> at the dock"</div>
+                  <div class="snip">Caption · 2560 × 1920 · Harbor Park</div>
+                  <div class="meta">Today · Apr 28 · 8:14 am</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="result-group">
+              <div class="grp-head">
+                Voice
+                <span class="cnt">1</span>
+              </div>
+              <div class="result">
+                <div class="ico info">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="13" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+                </div>
+                <div class="body-r">
+                  <div class="t">Voice memo · 0:42</div>
+                  <div class="snip">…the trail head parking is gated until May 15… and a <mark>heron</mark> was sitting on the post the whole time…</div>
+                  <div class="meta">Yesterday · Apr 27</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="result-group">
+              <div class="grp-head">
+                Scans
+                <span class="cnt">0</span>
+              </div>
+              <div style="font-size: 12px; color: var(--text-tertiary); padding: 6px 4px 0; text-align: center;">No scans contain "heron".</div>
+            </div>
+
+          </div>
+
+          <div class="bottomnav">
+            <div class="navitem active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg></div>
+            <div class="navitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4z"/><path d="M9 4v16"/></svg></div>
+            <div class="navitem fab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
+            <div class="navitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h12l4 4v12H4z"/><path d="M16 4v4h4M8 12h8M8 16h5"/></svg></div>
+            <div class="navitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19 12c0 1-.2 1.9-.5 2.7l1.7 1.3-2 3-2-.7c-.7.5-1.4.9-2.2 1.1L13.5 22h-3l-.5-2.6a7 7 0 0 1-2.2-1.1l-2 .7-2-3 1.7-1.3A8 8 0 0 1 5 12c0-1 .2-1.9.5-2.7L3.8 8l2-3 2 .7c.7-.5 1.4-.9 2.2-1.1L10.5 2h3l.5 2.6c.8.2 1.5.6 2.2 1.1l2-.7 2 3-1.7 1.3c.3.8.5 1.7.5 2.7z"/></svg></div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <section class="legend">
+    <h2>Where each mock lands in the spec</h2>
+    <p>
+      <strong>Empty Today (4)</strong> covers the cold-launch experience the first
+      mock didn't show — what the user sees before any capture exists for the day.
+      The dashed prompt card replaces the inline editor when there's nothing yet,
+      so the FAB and three quick-pills are the only things above the fold. This is
+      the state that makes the "first keystroke commits to a real row" decision
+      visible — there's no "creating entry…" intermediate.
+    </p>
+    <p>
+      <strong>Voice recording (5)</strong> is the most novel gesture in
+      <code>docs/DAILY_CAPTURE_UX.md</code> §2.4: long-press on the Leaf FAB starts
+      recording without opening the QuickCaptureSheet. The dim veil + pulsing FAB +
+      live waveform make the recording state unmistakable; "slide up to cancel"
+      gives a panic-out for accidental holds. Release transcribes and commits.
+    </p>
+    <p>
+      <strong>Calendar (6)</strong> is retrieval handle #1 from §4.1. Density dots
+      per day are color-coded by capture kind so a power user can scan a month and
+      spot the busy days at a glance. Today gets a coral ring even when empty (it
+      always exists thanks to <code>findOrCreate</code>). The "Jump to today" pill
+      makes long backward scrolls cheap to abandon.
+    </p>
+    <p>
+      <strong>Search (7)</strong> is retrieval handle #2 from §4.2. Results group
+      by FTS5 source table — <code>fts_notepad_notes</code>,
+      <code>fts_capture_text</code>, <code>fts_page_body</code>,
+      <code>fts_task_title</code> — so the user sees a "by-kind" mental model
+      instead of a flat list. Voice transcripts and scan OCR text both contribute
+      to <code>fts_capture_text</code>, which is why a 0:42 voice memo can hit on
+      the word "heron" without any explicit tagging.
+    </p>
+  </section>
+
+</div>
+</body>
+</html>

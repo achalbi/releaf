@@ -33,12 +33,22 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import app.releaf.mobile.data.domain.VoiceNote
+import app.releaf.mobile.ui.theme.AppAccent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -85,10 +95,13 @@ fun PageDetailScreenVariant1(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Loaded(page: Page, onBack: () -> Unit) {
     val palette = ShelfTheme.palette("green")
     val scroll  = rememberScrollState()
+    var showVoiceSheet by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -123,6 +136,14 @@ private fun Loaded(page: Page, onBack: () -> Unit) {
                 prose.forEach { ProseParagraph(it) }
                 if (quote != null) PullQuote(quote, palette = palette)
                 if (page.photos.isNotEmpty()) PhotoGrid(page.photos, palette)
+
+                // Voice-notes affordance — only entry point for voice
+                // recording / playback on Variant1 since the editorial
+                // layout has no capture-mode tab bar.
+                VoiceNotesAffordance(
+                    voiceNoteCount = page.voiceNotes.size,
+                    onOpen = { showVoiceSheet = true },
+                )
             }
         }
 
@@ -131,7 +152,159 @@ private fun Loaded(page: Page, onBack: () -> Unit) {
             pageCount = 6,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+
+        if (showVoiceSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showVoiceSheet = false },
+                sheetState = sheetState,
+                containerColor = AppColors.Canvas,
+            ) {
+                VoiceNotesSheetContent(page = page)
+            }
+        }
     }
+}
+
+@Composable
+private fun VoiceNotesAffordance(
+    voiceNoteCount: Int,
+    onOpen: () -> Unit,
+) {
+    val meta = when (voiceNoteCount) {
+        0    -> "Tap to record · 2 min max"
+        1    -> "1 recorded · tap to listen or record"
+        else -> "$voiceNoteCount recorded · tap to listen or record"
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppRadius.lg))
+            .background(AppColors.CardSolid)
+            .border(0.5.dp, AppColors.BorderDefault, RoundedCornerShape(AppRadius.lg))
+            .clickable { onOpen() }
+            .padding(AppSpacing.s4),
+    ) {
+        // Mic disc — accent-themed.
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(AppAccent.primary),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Mic,
+                contentDescription = "Voice notes",
+                tint = Color(0xFFFBF8EC),
+                modifier = Modifier.size(14.dp),
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Voice notes",
+                fontSize = 15.sp,
+                fontFamily = FontFamily.Serif,
+                color = AppColors.TextPrimary,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = meta,
+                style = AppTypography.Meta,
+                color = AppColors.TextTertiary,
+            )
+        }
+        Icon(
+            imageVector = Icons.Filled.ChevronRight,
+            contentDescription = null,
+            tint = AppColors.TextTertiary,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+@Composable
+private fun VoiceNotesSheetContent(page: Page) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = AppSpacing.s5)
+            .padding(bottom = AppSpacing.s6),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s4),
+    ) {
+        Text(
+            text = "VOICE NOTES",
+            style = AppTypography.Eyebrow,
+            color = AppColors.TextTertiary,
+        )
+
+        if (page.voiceNotes.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s3)) {
+                page.voiceNotes.forEach { VoiceNoteSheetCard(it) }
+            }
+        }
+
+        VoicePageRecorder(
+            isEmpty = page.voiceNotes.isEmpty(),
+            onSave = { _ ->
+                // TODO: route to the view model so a new VoiceNote
+                // is appended. Sheet stays open so the user can keep
+                // recording or replay the new note immediately.
+            },
+            onCancel = { /* no-op — clip discarded */ },
+        )
+    }
+}
+
+@Composable
+private fun VoiceNoteSheetCard(note: VoiceNote) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppRadius.md))
+            .background(AppColors.CardSolid)
+            .padding(AppSpacing.s3),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(AppAccent.primary),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Mic,
+                contentDescription = "Play",
+                tint = Color(0xFFFBF8EC),
+                modifier = Modifier.size(12.dp),
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = formatVoiceDuration(note.durationMs),
+                fontSize = 14.sp,
+                fontFamily = FontFamily.Serif,
+                color = AppColors.TextPrimary,
+            )
+            note.transcription?.takeIf { it.isNotEmpty() }?.let { transcript ->
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "“$transcript”",
+                    style = AppTypography.Meta.copy(fontStyle = FontStyle.Italic),
+                    color = AppColors.TextSecondary,
+                    maxLines = 2,
+                )
+            }
+        }
+    }
+}
+
+private fun formatVoiceDuration(ms: Long): String {
+    val total = ms / 1000
+    return "%d:%02d".format(total / 60, total % 60)
 }
 
 @Composable

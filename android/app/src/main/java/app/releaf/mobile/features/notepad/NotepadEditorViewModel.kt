@@ -681,6 +681,14 @@ class NotepadEditorViewModel(
         val seconds = (durationMs / 1000).toInt()
         val label = "%d:%02d".format(seconds / 60, seconds % 60)
         logCapture(app.releaf.mobile.data.activity.AuditEntity.Voice, label)
+        // Flush immediately so a recorded clip survives a process kill
+        // before the user navigates away. Other capture paths (photo,
+        // scan, todo) rely on the back-nav / onDispose save and have
+        // their own audit-log row, but a voice file on disk that
+        // isn't referenced by a persisted entry is wasted bytes — the
+        // m4a sitting in attachments storage with no DB row gets
+        // orphaned forever.
+        save()
     }
 
     /**

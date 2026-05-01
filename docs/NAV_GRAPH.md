@@ -2,6 +2,8 @@
 
 Deliverable 2 from `PROMPT.md`. Describes every route, its entry points, and how `releaf://` URLs map onto them. Mirrors the routing patterns already in place: iOS uses per-tab `NavigationStack` with `NavigationPath`; Android uses a single `NavHost` with `popUpTo(HOME) { saveState = true }` for tab switches.
 
+> **Read alongside [`docs/DAILY_CAPTURE_UX.md`](./DAILY_CAPTURE_UX.md).** That doc upgrades Today from a Home drill-in to Home's primary content (the NotepadEntry editor renders inline on Home; `daily_log/{date}` is reserved for *other* dates). The graph below still shows the route for completeness, but Home → Today's editor is **zero-tap**, not one-tap.
+
 ---
 
 ## Conventions
@@ -99,7 +101,7 @@ Names below match the route constants each platform will add.
 | `settings/export`          | Drill-in   | settings         | PDF sync toggle, bulk export                   |
 | `settings/drive`           | Drill-in   | settings         | Account, storage, manual sync now              |
 | `settings/about`           | Drill-in   | settings         | Version, OSS licenses                          |
-| `quick_capture`            | Modal      | —                | Already exists; stays modal                    |
+| `capture`                  | Top-level  | leaf             | The Capture page (was `quick_capture` modal pre-`CAPTURE_TAB_PLAN.md`). Center "Leaf" slot in BottomNav owns this route — taps the lifted FAB → navigate. BottomNav stays visible; the FAB shows a coral ring when active. |
 | `capture/{captureId}/edit` | Modal      | —                | Text capture edit / caption editor             |
 | `conflict_banner`          | Overlay    | —                | Batch count badge on Settings tab              |
 
@@ -111,7 +113,9 @@ Names below match the route constants each platform will add.
 
 ### Home → Daily Log
 
-Home is the dashboard (stats, recent activity, conflict badge). Tapping **Today** opens that day's log. The default `{date}` when entering via the Home card is `CURRENT_DATE` in the device's local timezone.
+**Home renders Today's NotepadEntry inline as its primary content** (per `docs/DAILY_CAPTURE_UX.md`). The dashboard zone — stats, recent shelves, conflict badge — sits below the editor and scrolls into view; it's no longer the loading state. Tapping a non-today day in the day strip pushes `daily_log/{date}` (i.e. the drill-in only fires for *other* dates). The default `{date}` when entering via deep link `releaf://today` is `CURRENT_DATE` in the device's local timezone.
+
+**`findOrCreate(today)` always returns a populated row.** On Home open: look up `daily_logs WHERE entry_date = CURRENT_DATE`; if absent, INSERT. Look up its `notepad_entry_id`; if null, INSERT a `notepad_entries` row with `allow_blank_content = true`, blank notes, and link it. Single transaction. The blank shell is what lets the first keystroke commit immediately to a real row — no "creating entry…" spinner.
 
 ```mermaid
 graph LR
@@ -253,7 +257,8 @@ graph TD
     Dispatch -- "today"                   --> OpenDaily["home → daily_log/{today}"]
     Dispatch -- "today/:date"             --> OpenDailyAny["home → daily_log/{date}"]
     Dispatch -- "search?q=..."            --> OpenSearch["home → search (prefilled)"]
-    Dispatch -- "capture?kind=photo"      --> OpenQuickCapture["home → QuickCaptureSheet(kind)"]
+    Dispatch -- "capture?kind=photo"      --> OpenCaptureTabKind["select Leaf tab → open Photo flow"]
+    Dispatch -- "capture"                 --> OpenCaptureTab["select Leaf tab"]
     Dispatch -- "conflicts"               --> OpenConflicts["settings → conflicts"]
     Dispatch -- "settings/:subpage"       --> OpenSettingsSub["settings → settings/{subpage}"]
     Dispatch -- "restore"                 --> OpenRestoreFlow["settings → drive → restore"]
@@ -274,7 +279,8 @@ graph TD
 | `releaf://task/:id`                      | TaskDetail + rebuilt back stack per parent     | Parent's own screen      |
 | `releaf://reference/:id`                 | ReferenceDetail + rebuilt back stack           | Parent's own screen      |
 | `releaf://search?q=meadow`               | Search with `q` prefilled under Home           | Home                     |
-| `releaf://capture?kind=photo`            | QuickCaptureSheet modal over current screen    | Current screen           |
+| `releaf://capture`                       | Capture tab (was `QuickCaptureSheet` modal pre-`CAPTURE_TAB_PLAN.md`) | Previously-active tab   |
+| `releaf://capture?kind=photo`            | Capture tab + opens Photo tile flow            | Capture tab              |
 | `releaf://conflicts`                     | Conflicts list under Settings                  | Settings                 |
 | `releaf://conflicts/:entryId`            | Conflict resolver                              | Conflicts list           |
 | `releaf://settings`                      | Settings                                       | —                        |
@@ -312,7 +318,7 @@ Entry points **other than** cold launch, backgrounding, and deep links.
 BottomNav shows iff the currently-visible screen's route matches one of:
 
 ```
-home | notebook | notepad | settings
+home | notebook | capture | notepad | settings
 ```
 
 Everything else is either a drill-in (hidden) or a modal (modal has no BottomNav by definition on either platform).
@@ -330,7 +336,7 @@ New drill-in routes need to opt in on iOS (`.hidesBottomBar()` modifier on the o
 
 Items I chose to encode a specific answer for in this graph but that could reasonably flex during build:
 
-1. **Daily Log as drill-in vs tab.** I'm treating `daily_log/{date}` as a drill-in under Home, not a sixth tab — the BottomNav already has five slots and adding one would destabilize the shell. If this feels wrong during the editor spike, the simplest alternative is a toggle inside Home header: **`Dashboard | Today`** segmented control that swaps the Home body, keeping Home as the stack owner.
+1. **Daily Log as drill-in vs tab vs Home hero.** ✅ **Resolved (2026-04-30):** Today renders inline as Home's primary content per `docs/DAILY_CAPTURE_UX.md`; `daily_log/{date}` remains a drill-in for non-today dates only. The fallback if this feels wrong during the editor spike is a `Dashboard | Today` segmented control in the Home header that swaps the body without changing the route. Both paths keep Home as the stack owner; not a sixth tab.
 2. **Search as drill-in vs tab.** Same reasoning: pulled in as a header-icon affordance rather than a tab. Accessible from Home and Notepad; a longer-term possibility is to surface it via `⌘F` on iPad and keyboard shortcuts.
 3. **Capture detail's back-stack rebuild on deep link.** Chose to rebuild the parent chain so the user lands with a meaningful back button. Cheap alternative: land on CaptureDetail with no back stack and a "Home" back button; proposed because breadcrumbs matter more than one extra DB hit.
 4. **New entry `{newId}` client-generated PK.** Consistent with the DDL — UUIDv7 generated client-side, not server-assigned. Means no "pending" state and no route rewrite on first save.

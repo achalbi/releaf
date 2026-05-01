@@ -11,29 +11,46 @@ public struct RootView: View {
     @EnvironmentObject private var authStore: AuthStore
     @EnvironmentObject private var uiPrefs: UiPreferences
 
+    /// Branded splash hold: the LaunchScreen storyboard hands off to
+    /// this view; we then keep the Compose-equivalent SwiftUI
+    /// `SplashScreen` — leaf + wordmark + WRITE. ERASE. REPEAT.
+    /// tagline + subtitle + animated loading dots — on screen for
+    /// `brandedSplashSeconds` so cold-launches show the full marketing
+    /// splash before falling through to the auth-state-driven UI.
+    @State private var brandedSplashVisible = true
+    private let brandedSplashSeconds: TimeInterval = 2.0
+
     public init() {}
 
     public var body: some View {
         ZStack {
             DotGridBackground().ignoresSafeArea()
-            switch authStore.state {
-            case .signedOut, .failed:
-                SignInScreen()
-            case .signingIn:
+            if brandedSplashVisible {
                 SplashScreen()
-            case .signedIn:
-                // Onboarding gates the main shell on first launch.
-                // Once dismissed (CTA on the onboarding view), the
-                // flag persists in UiPreferences so subsequent
-                // launches go straight to MainShell.
-                if !uiPrefs.state.hasSeenOnboarding {
-                    OnboardingView(onContinue: {
-                        uiPrefs.markOnboardingSeen()
-                    })
-                } else {
-                    MainShell()
+            } else {
+                switch authStore.state {
+                case .signedOut, .failed:
+                    SignInScreen()
+                case .signingIn:
+                    SplashScreen()
+                case .signedIn:
+                    // Onboarding gates the main shell on first launch.
+                    // Once dismissed (CTA on the onboarding view), the
+                    // flag persists in UiPreferences so subsequent
+                    // launches go straight to MainShell.
+                    if !uiPrefs.state.hasSeenOnboarding {
+                        OnboardingView(onContinue: {
+                            uiPrefs.markOnboardingSeen()
+                        })
+                    } else {
+                        MainShell()
+                    }
                 }
             }
+        }
+        .task {
+            try? await Task.sleep(nanoseconds: UInt64(brandedSplashSeconds * 1_000_000_000))
+            brandedSplashVisible = false
         }
     }
 }

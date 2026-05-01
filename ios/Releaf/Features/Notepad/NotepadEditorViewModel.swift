@@ -179,6 +179,13 @@ public final class NotepadEditorViewModel: ObservableObject {
     /// attachment so list rows can render "0:42" without re-probing the
     /// M4A on every render. Mirrors the Android twin on
     /// `NotepadEditorViewModel.addVoiceNote`.
+    ///
+    /// Persists immediately. Other capture paths rely on the back-nav
+    /// / onDisappear save, but a voice file on disk that isn't
+    /// referenced by a persisted entry is wasted bytes — the m4a
+    /// sitting in attachments storage with no row gets orphaned, and
+    /// users naturally expect "I just recorded a voice note" to mean
+    /// it's saved.
     public func addVoiceNote(uri: String, durationMs: Int) {
         attachments.append(Attachment(
             id: Uuidv7.generate(),
@@ -188,6 +195,7 @@ public final class NotepadEditorViewModel: ObservableObject {
             capturedAt: IsoClock.nowIso(),
             durationMs: durationMs
         ))
+        save()
     }
 
     /// Patch the transcript on an existing voice-note attachment.

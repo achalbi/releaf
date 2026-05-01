@@ -1,13 +1,12 @@
 /*
  * ChapterLocalDetailScreen.kt
  *
- * Chapter detail — reached from NotebookLocalDetailScreen. Shows the
- * chapter's overview card (title + description + order / page-count pills)
- * and a Pages card with the pages beneath it. Tapping a page routes into
- * the page editor; the "+ New page" button on the Pages card header
- * creates a fresh page and drops the user straight into the editor.
- *
- * Breadcrumbs: Home › Notebook › {notebook} › {chapter}.
+ * Chapter detail — reached from NotebookLocalDetailScreen. Shares the
+ * notebook detail's UI rhythm: tappable LeafEyebrow back-link, serif
+ * title with an Edit icon top-right, a stats hero card (ORDER / PAGES /
+ * CREATED + "Last edited" footnote), and a Pages list with reorder
+ * arrows + swipe-to-delete on each row. Edit dialog hosts rename plus
+ * archive (destructive button left of Save / Cancel).
  */
 
 package app.releaf.mobile.features.notebook
@@ -27,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -69,6 +69,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -77,21 +80,15 @@ import app.releaf.mobile.data.notebook.Attachment
 import app.releaf.mobile.data.notebook.PageEntity
 import app.releaf.mobile.data.notebook.parseAttachments
 import app.releaf.mobile.data.notebook.parseLocations
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
-import app.releaf.mobile.ui.components.BreadcrumbSegment
-import app.releaf.mobile.ui.components.Breadcrumbs
 import app.releaf.mobile.ui.components.CollapsibleCard
 import app.releaf.mobile.ui.components.DeleteConfirmationDialog
 import app.releaf.mobile.ui.components.HairlineDivider
-import app.releaf.mobile.ui.components.LeafDropdownDivider
 import app.releaf.mobile.ui.components.LeafEyebrow
 import app.releaf.mobile.ui.components.MetaPill
-import app.releaf.mobile.ui.components.PageOverflowButton
 import app.releaf.mobile.ui.components.RoundIconButton
-import app.releaf.mobile.ui.components.ScreenHeader
 import app.releaf.mobile.ui.components.absoluteDate
 import app.releaf.mobile.ui.components.relativeTimeAgo
 import app.releaf.mobile.ui.theme.AppAccent
@@ -116,8 +113,6 @@ fun ChapterLocalDetailScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var showEditDialog by rememberSaveable { mutableStateOf(false) }
-    var overviewExpanded by rememberSaveable { mutableStateOf(true) }
-    var pagesExpanded by rememberSaveable { mutableStateOf(true) }
     // Pending delete — holds the page the user swiped until they confirm
     // via the guard dialog.
     var pendingPageDelete by remember { mutableStateOf<PageEntity?>(null) }
@@ -146,108 +141,65 @@ fun ChapterLocalDetailScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            // Composed top zone — leaf eyebrow on the left, overflow
-            // menu on the right, big serif title (the chapter name)
-            // below. Breadcrumbs sit underneath as a thin row so the
-            // user still sees the full Home › Notebook › Chapter path.
+            // Header zone — mirrors the notebook detail screen:
+            // tappable LeafEyebrow links back to the parent notebook,
+            // serif title carries the chapter name, and an Edit icon
+            // sits in the screen's top-right corner. Breadcrumbs and
+            // the screen-level overflow have been dropped — the
+            // back gesture / eyebrow tap covers navigation; the edit
+            // modal hosts rename + archive.
+            val chapterTitle = state.chapter?.title?.trim().orEmpty()
+                .ifEmpty { "Untitled chapter" }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(
                         start = AppSpacing.s4, end = AppSpacing.s4,
-                        top = AppSpacing.s3, bottom = AppSpacing.s3,
+                        top = AppSpacing.s4, bottom = AppSpacing.s3,
                     ),
                 verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
             ) {
+                LeafEyebrow(
+                    label    = "notebook · chapter",
+                    modifier = Modifier.clickable(onClick = onBack),
+                )
                 Row(
                     verticalAlignment     = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
                     modifier              = Modifier.fillMaxWidth(),
                 ) {
-                    // Eyebrow tint follows the parent notebook's
-                    // color so the chapter screen reads as part of
-                    // the same visual family as the notebook it
-                    // lives in. Default green stays for notebooks
-                    // without a recognized color.
-                    val parentToken = chapterEyebrowToken(state.notebook?.colorHex)
-                    val parentPalette = app.releaf.mobile.ui.components.ShelfTheme
-                        .palette(parentToken)
-                    val usesCustomTint = parentToken != null
-                    LeafEyebrow(
-                        label     = "releaf · chapter",
-                        modifier  = Modifier
-                            .weight(1f)
-                            .clickable { onBack() },
-                        glyphTint = if (usesCustomTint) parentPalette.background else null,
-                        labelTint = if (usesCustomTint) parentPalette.background else null,
-                    )
-                    PageOverflowButton {
-                        DropdownMenuItem(
-                            text    = { Text("Rename chapter") },
-                            onClick = { showEditDialog = true },
-                        )
-                        LeafDropdownDivider()
-                        DropdownMenuItem(
-                            text    = { Text("New page") },
-                            onClick = {
-                                viewModel.createPage(onCreated = { id -> onOpenPage(id) })
-                            },
-                        )
-                        LeafDropdownDivider()
-                        DropdownMenuItem(
-                            text    = { Text("Archive chapter") },
-                            onClick = { viewModel.archiveChapter() },
-                        )
-                    }
-                }
-                // Chapter title — tappable shortcut to the rename
-                // dialog. Avoids forcing users through the
-                // overflow for the most common chapter edit; the
-                // overflow still hosts the full action set so
-                // discoverability isn't lost.
-                Text(
-                    text     = (state.chapter?.title?.ifBlank { "Untitled chapter" } ?: "Chapter").lowercase(),
-                    style    = TextStyle(
-                        fontFamily = FontFamily.Serif,
-                        fontSize   = 32.sp,
-                    ),
-                    color    = AppColors.TextPrimary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .clickable(enabled = state.chapter != null) {
-                            showEditDialog = true
-                        },
-                )
-                Breadcrumbs(
-                    segments = listOf(
-                        BreadcrumbSegment("Home", onTap = onHome),
-                        BreadcrumbSegment("Notebook", onTap = onBack),
-                        BreadcrumbSegment(
-                            label = state.notebook?.title?.ifBlank { "Notebook" } ?: "Notebook",
-                            onTap = onOpenNotebook,
+                    Text(
+                        text     = chapterTitle,
+                        style    = TextStyle(
+                            fontFamily = FontFamily.Serif,
+                            fontSize   = 32.sp,
                         ),
-                        BreadcrumbSegment(state.chapter?.title?.ifBlank { "Chapter" } ?: "Chapter"),
-                    ),
-                )
+                        color    = AppColors.TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    RoundIconButton(
+                        icon               = Icons.Filled.Edit,
+                        contentDescription = "Edit chapter",
+                        onClick            = { showEditDialog = true },
+                    )
+                }
             }
 
             when {
                 state.isLoading -> Spacer(Modifier.weight(1f))
                 state.notFound -> NotFoundState(onBack = onBack, modifier = Modifier.weight(1f))
                 else -> ChapterDetailBody(
-                    state = state,
-                    overviewExpanded = overviewExpanded,
-                    onToggleOverview = { overviewExpanded = !overviewExpanded },
-                    pagesExpanded = pagesExpanded,
-                    onTogglePages = { pagesExpanded = !pagesExpanded },
-                    onEditChapter = { showEditDialog = true },
-                    onAddPage = {
+                    state         = state,
+                    onAddPage     = {
                         viewModel.createPage(onCreated = { id -> onOpenPage(id) })
                     },
-                    onOpenPage = onOpenPage,
-                    onDeletePage = { page -> pendingPageDelete = page },
-                    modifier = Modifier.weight(1f, fill = true),
+                    onOpenPage    = onOpenPage,
+                    onMovePageUp  = { id -> viewModel.movePage(id, PageMoveDirection.Up) },
+                    onMovePageDown= { id -> viewModel.movePage(id, PageMoveDirection.Down) },
+                    onDeletePage  = { page -> pendingPageDelete = page },
+                    modifier      = Modifier.weight(1f, fill = true),
                 )
             }
         }
@@ -291,6 +243,14 @@ fun ChapterLocalDetailScreen(
                     viewModel.saveChapter(title, description)
                     showEditDialog = false
                 },
+                // Archive moves into the edit modal — same pattern as
+                // the notebook detail's "Delete notebook" destructive
+                // action. Closes the edit dialog and routes through
+                // the existing confirm flow on the VM.
+                onArchive = {
+                    showEditDialog = false
+                    viewModel.archiveChapter()
+                },
             )
         }
     }
@@ -325,13 +285,10 @@ fun ChapterLocalDetailScreen(
 @Composable
 private fun ChapterDetailBody(
     state: ChapterLocalDetailUiState,
-    overviewExpanded: Boolean,
-    onToggleOverview: () -> Unit,
-    pagesExpanded: Boolean,
-    onTogglePages: () -> Unit,
-    onEditChapter: () -> Unit,
     onAddPage: () -> Unit,
     onOpenPage: (String) -> Unit,
+    onMovePageUp: (String) -> Unit,
+    onMovePageDown: (String) -> Unit,
     onDeletePage: (PageEntity) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -346,78 +303,215 @@ private fun ChapterDetailBody(
         ),
         verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
     ) {
-        item(key = "overview") {
-            ChapterOverviewCard(
-                title = chapter.title.ifBlank { "Untitled chapter" },
-                description = chapter.description,
-                order = state.orderInNotebook,
-                pageCount = state.pages.size,
-                expanded = overviewExpanded,
-                onToggle = onToggleOverview,
-                onEdit = onEditChapter,
+        item(key = "hero") {
+            ChapterHeroCard(
+                chapter        = chapter,
+                order          = state.orderInNotebook,
+                pageCount      = state.pages.size,
+                lastEditedIso  = chapterLastEditedAt(chapter, state.pages),
             )
         }
         item(key = "pages_card") {
             PagesCard(
-                pages = state.pages,
-                expanded = pagesExpanded,
-                onToggle = onTogglePages,
-                onAdd = onAddPage,
-                onOpen = onOpenPage,
-                onDelete = onDeletePage,
+                pages         = state.pages,
+                onAdd         = onAddPage,
+                onOpen        = onOpenPage,
+                onMoveUp      = onMovePageUp,
+                onMoveDown    = onMovePageDown,
+                onDelete      = onDeletePage,
             )
         }
         item { Spacer(Modifier.height(AppSpacing.s6)) }
     }
 }
 
-/* ---------- overview card ---------- */
+private fun chapterLastEditedAt(
+    chapter: app.releaf.mobile.data.notebook.ChapterEntity,
+    pages: List<PageEntity>,
+): String {
+    val candidates = sequence {
+        yield(chapter.updatedAt)
+        pages.forEach { yield(it.updatedAt) }
+    }
+    return candidates.maxOrNull() ?: chapter.updatedAt
+}
 
+/* ---------- hero stats card ---------- */
+
+/**
+ * Stats hero — mirrors the notebook detail's hero. Three stats columns
+ * (ORDER / PAGES / CREATED) split by vertical rules; a horizontal
+ * hairline cuts the card; a coral-dot "Last edited" footnote rolls up
+ * activity across the chapter and its pages.
+ */
 @Composable
-private fun ChapterOverviewCard(
-    title: String,
-    description: String?,
+private fun ChapterHeroCard(
+    chapter: app.releaf.mobile.data.notebook.ChapterEntity,
     order: Int,
     pageCount: Int,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    onEdit: () -> Unit,
+    lastEditedIso: String,
 ) {
-    CollapsibleCard(
-        title = "Chapter overview",
-        expanded = expanded,
-        onToggle = onToggle,
-        trailing = {
-            RoundIconButton(
-                icon = Icons.Filled.Edit,
-                contentDescription = "Edit chapter",
-                onClick = onEdit,
-            )
-        },
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppRadius.lg))
+            .background(AppColors.CardSolid)
+            .border(1.dp, AppColors.BorderDefault, RoundedCornerShape(AppRadius.lg))
+            .padding(vertical = AppSpacing.s2),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
     ) {
-        Column(
-            modifier = Modifier
+        Row(
+            modifier              = Modifier
                 .fillMaxWidth()
-                .padding(AppSpacing.s4),
-            verticalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+                .padding(horizontal = AppSpacing.s4)
+                .padding(top = AppSpacing.s2),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+            verticalAlignment     = Alignment.Top,
         ) {
-            Text(
-                text = title,
-                style = AppTypography.EditorialTitleLight,
-                color = AppColors.TextPrimary,
+            ChapterStatCell(
+                value = order.toString(),
+                label = "ORDER",
+                modifier = Modifier.weight(1f),
             )
-            if (!description.isNullOrBlank()) {
-                Text(
-                    text = description,
-                    style = AppTypography.Body,
-                    color = AppColors.TextSecondary,
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
-                MetaPill(text = "Order: $order")
-                MetaPill(text = if (pageCount == 1) "1 page" else "$pageCount pages")
+            ChapterVerticalRule()
+            ChapterStatCell(
+                value = pageCount.toString(),
+                label = if (pageCount == 1) "PAGE" else "PAGES",
+                modifier = Modifier.weight(0.7f),
+            )
+            ChapterVerticalRule()
+            ChapterCreatedCell(
+                createdAtIso = chapter.createdAt,
+                modifier     = Modifier.weight(1f),
+            )
+        }
+        HairlineDivider()
+        ChapterLastEditedRow(
+            updatedAtIso = lastEditedIso,
+            modifier     = Modifier.padding(
+                horizontal = AppSpacing.s4,
+                vertical   = AppSpacing.s1,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun ChapterStatCell(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier            = modifier,
+        horizontalAlignment = Alignment.Start,
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+    ) {
+        Text(
+            text     = value,
+            style    = TextStyle(fontFamily = FontFamily.Serif, fontSize = 24.sp),
+            color    = AppColors.TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text  = label,
+            style = AppTypography.Eyebrow,
+            color = AppColors.Neutral,
+        )
+    }
+}
+
+@Composable
+private fun ChapterCreatedCell(
+    createdAtIso: String,
+    modifier: Modifier = Modifier,
+) {
+    val (dayMonth, yearTail) = remember(createdAtIso) { dayMonthYearTail(createdAtIso) }
+    val primary = AppColors.TextPrimary
+    val muted   = AppColors.Neutral
+    val display = remember(dayMonth, yearTail, primary, muted) {
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = primary)) { append(dayMonth) }
+            withStyle(SpanStyle(color = muted))   { append(" $yearTail") }
+        }
+    }
+    Column(
+        modifier            = modifier,
+        horizontalAlignment = Alignment.Start,
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+    ) {
+        Text(
+            text     = display,
+            style    = TextStyle(fontFamily = FontFamily.Serif, fontSize = 18.sp),
+            maxLines = 2,
+            softWrap = true,
+        )
+        Text(
+            text  = "CREATED",
+            style = AppTypography.Eyebrow,
+            color = AppColors.Neutral,
+        )
+    }
+}
+
+private fun dayMonthYearTail(iso: String): Pair<String, String> {
+    val instant = runCatching { java.time.Instant.parse(iso) }.getOrNull()
+        ?: return "" to ""
+    val date     = instant.atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+    val dayMonth = java.time.format.DateTimeFormatter
+        .ofPattern("d MMM", java.util.Locale.getDefault())
+        .format(date)
+    val yearTail = "'" + date.year.toString().takeLast(2)
+    return dayMonth to yearTail
+}
+
+@Composable
+private fun ChapterVerticalRule() {
+    Box(
+        modifier = Modifier
+            .width(1.dp)
+            .height(48.dp)
+            .background(AppColors.BorderDefault),
+    )
+}
+
+@Composable
+private fun ChapterLastEditedRow(
+    updatedAtIso: String,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier              = modifier.fillMaxWidth(),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(AppAccent.primary),
+        )
+        val secondary = AppColors.TextSecondary
+        val primary   = AppColors.TextPrimary
+        val rel       = relativeTimeAgo(updatedAtIso)
+        val display = remember(rel, primary, secondary) {
+            buildAnnotatedString {
+                withStyle(SpanStyle(color = secondary)) {
+                    append("Last edited ")
+                }
+                withStyle(
+                    SpanStyle(
+                        color      = primary,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    ),
+                ) { append(rel) }
             }
         }
+        Text(
+            text  = display,
+            style = AppTypography.Meta,
+        )
     }
 }
 
@@ -426,17 +520,28 @@ private fun ChapterOverviewCard(
 @Composable
 private fun PagesCard(
     pages: List<PageEntity>,
-    expanded: Boolean,
-    onToggle: () -> Unit,
     onAdd: () -> Unit,
     onOpen: (String) -> Unit,
+    onMoveUp: (String) -> Unit,
+    onMoveDown: (String) -> Unit,
     onDelete: (PageEntity) -> Unit,
 ) {
     CollapsibleCard(
         title = "Pages",
-        expanded = expanded,
-        onToggle = onToggle,
-        trailing = { NewPageButton(onClick = onAdd) },
+        subtitle = "Notes, photos, and scans in this chapter.",
+        expanded = true,
+        onToggle = {},
+        showCollapseToggle = false,
+        // Match the 16sp card header used by the notebook detail
+        // ChaptersCard so drill-in screens stay in the same rhythm.
+        titleStyle = AppTypography.SectionTitleLight.copy(fontSize = 16.sp),
+        trailing = {
+            RoundIconButton(
+                icon = Icons.Filled.Add,
+                contentDescription = "New page",
+                onClick = onAdd,
+            )
+        },
     ) {
         if (pages.isEmpty()) {
             EmptyPagesBody(onAdd = onAdd)
@@ -445,39 +550,18 @@ private fun PagesCard(
                 pages.forEachIndexed { index, page ->
                     if (index > 0) HairlineDivider()
                     SwipeablePageRow(
-                        page = page,
-                        order = index + 1,
-                        onOpen = { onOpen(page.id) },
-                        onDelete = { onDelete(page) },
+                        page         = page,
+                        order        = index + 1,
+                        canMoveUp    = index > 0,
+                        canMoveDown  = index < pages.lastIndex,
+                        onOpen       = { onOpen(page.id) },
+                        onMoveUp     = { onMoveUp(page.id) },
+                        onMoveDown   = { onMoveDown(page.id) },
+                        onDelete     = { onDelete(page) },
                     )
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun NewPageButton(onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(AppRadius.pill))
-            .background(AppColors.TextPrimary)
-            .clickable(onClick = onClick)
-            .padding(horizontal = AppSpacing.s3, vertical = AppSpacing.s2),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(AppSpacing.s1),
-    ) {
-        Icon(
-            Icons.Filled.Add,
-            contentDescription = null,
-            tint = AppColors.CardSolid,
-            modifier = Modifier.size(14.dp),
-        )
-        Text(
-            text = "New page",
-            style = AppTypography.Button,
-            color = AppColors.CardSolid,
-        )
     }
 }
 
@@ -516,7 +600,11 @@ private fun EmptyPagesBody(onAdd: () -> Unit) {
 private fun SwipeablePageRow(
     page: PageEntity,
     order: Int,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
     onOpen: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val dismissState = rememberSwipeToDismissBoxState(
@@ -537,12 +625,28 @@ private fun SwipeablePageRow(
         enableDismissFromEndToStart = true,
         backgroundContent = { SwipeDeleteBackground() },
     ) {
-        PageRow(page = page, order = order, onClick = onOpen)
+        PageRow(
+            page        = page,
+            order       = order,
+            canMoveUp   = canMoveUp,
+            canMoveDown = canMoveDown,
+            onClick     = onOpen,
+            onMoveUp    = onMoveUp,
+            onMoveDown  = onMoveDown,
+        )
     }
 }
 
 @Composable
-private fun PageRow(page: PageEntity, order: Int, onClick: () -> Unit) {
+private fun PageRow(
+    page: PageEntity,
+    order: Int,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onClick: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+) {
     val attachments = remember(page.attachments) { page.attachments.parseAttachments() }
     val locations = remember(page.locations) { page.locations.parseLocations() }
     val photoCount = attachments.count { it.type == Attachment.TYPE_PHOTO }
@@ -567,14 +671,42 @@ private fun PageRow(page: PageEntity, order: Int, onClick: () -> Unit) {
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.s1),
         ) {
-            Text(
-                text = titleText,
-                style = AppTypography.SectionTitleLight,
-                color = AppColors.TextPrimary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            MetaPill(text = "Pg. $order")
+            // Title row — title takes the lead, "Pg. N" pill rides
+            // the trailing edge so the page index sits next to the
+            // up-arrow column for an at-a-glance read.
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+            ) {
+                Text(
+                    text     = titleText,
+                    // Match the 16sp notebook-row title used elsewhere on
+                    // notebook + chapter list rows for visual rhythm.
+                    style    = AppTypography.SectionTitleLight.copy(fontSize = 16.sp),
+                    color    = AppColors.TextPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                MetaPill(text = "Pg. $order")
+            }
+            // Page description (italic serif subtitle from the plant
+            // seed, or whatever the user's typed). Mirrors the editor's
+            // DescriptionField so the list and the detail screen agree
+            // on what counts as the page's "subtitle".
+            page.description?.takeIf { it.isNotBlank() }?.let { desc ->
+                Text(
+                    text     = desc,
+                    style    = androidx.compose.ui.text.TextStyle(
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                        fontStyle  = androidx.compose.ui.text.font.FontStyle.Italic,
+                        fontSize   = 14.sp,
+                    ),
+                    color    = AppColors.TextSecondary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             pagePreviewBody(page)?.let { body ->
                 Text(
                     text = body,
@@ -599,35 +731,74 @@ private fun PageRow(page: PageEntity, order: Int, onClick: () -> Unit) {
                     )
                 }
             }
-            MetaRow(
-                icon = Icons.Filled.CalendarToday,
-                text = absoluteDate(page.createdAt),
-            )
             if (!firstLocation.isNullOrBlank()) {
                 MetaRow(icon = Icons.Filled.LocationOn, text = firstLocation)
             }
-            MetaRow(
-                icon = Icons.Filled.Schedule,
-                text = relativeTimeAgo(page.updatedAt),
-            )
+            // Created date + last-edited relative time on one line —
+            // separated by a thin middle dot so the row reads as a
+            // single timeline footnote instead of two stacked meta
+            // rows.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3),
+                verticalAlignment     = Alignment.CenterVertically,
+            ) {
+                MetaRow(
+                    icon = Icons.Filled.CalendarToday,
+                    text = absoluteDate(page.createdAt),
+                )
+                Text(
+                    text  = "·",
+                    style = AppTypography.Meta,
+                    color = AppColors.TextTertiary,
+                )
+                MetaRow(
+                    icon = Icons.Filled.Schedule,
+                    text = relativeTimeAgo(page.updatedAt),
+                )
+            }
         }
+        // Reorder arrows — same shape and disabled-edge behavior as
+        // the chapter rows on the notebook detail screen.
         Column(
             verticalArrangement = Arrangement.spacedBy(2.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(
-                Icons.Filled.KeyboardArrowUp,
-                contentDescription = null,
-                tint = AppColors.TextTertiary,
-                modifier = Modifier.size(18.dp),
+            PageReorderArrow(
+                icon        = Icons.Filled.KeyboardArrowUp,
+                description = "Move page up",
+                enabled     = canMoveUp,
+                onClick     = onMoveUp,
             )
-            Icon(
-                Icons.Filled.KeyboardArrowDown,
-                contentDescription = null,
-                tint = AppColors.TextTertiary,
-                modifier = Modifier.size(18.dp),
+            PageReorderArrow(
+                icon        = Icons.Filled.KeyboardArrowDown,
+                description = "Move page down",
+                enabled     = canMoveDown,
+                onClick     = onMoveDown,
             )
         }
+    }
+}
+
+@Composable
+private fun PageReorderArrow(
+    icon: ImageVector,
+    description: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val tint = if (enabled) AppColors.TextSecondary else AppColors.BorderDefault
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector        = icon,
+            contentDescription = description,
+            tint               = tint,
+            modifier           = Modifier.size(18.dp),
+        )
     }
 }
 
@@ -720,26 +891,6 @@ private fun NotFoundState(onBack: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-/**
- * Inverse of `themeHex` — maps the four leaf-theme primary hexes
- * back to their token name. Anything that doesn't match returns
- * null so the caller can fall through to the default chrome.
- *
- * Kept as a private file-local helper here (and mirrored on
- * NotebookTabScreen) rather than promoting to a shared util — the
- * mapping is tiny and only used in two places that already deal in
- * raw hex strings from the Room schema.
- */
-private fun chapterEyebrowToken(hex: String?): String? {
-    val normalized = hex?.uppercase()?.removePrefix("#") ?: return null
-    return when (normalized) {
-        "7AA874" -> "green"
-        "E07856" -> "coral"
-        "F4C430" -> "yellow"
-        "B8956A" -> "dry"
-        else     -> null
-    }
-}
 
 /* ---------- edit chapter dialog ---------- */
 
@@ -749,6 +900,7 @@ private fun EditChapterDialog(
     initialDescription: String,
     onDismiss: () -> Unit,
     onConfirm: (String, String) -> Unit,
+    onArchive: (() -> Unit)? = null,
 ) {
     var title by rememberSaveable { mutableStateOf(initialTitle) }
     var description by rememberSaveable { mutableStateOf(initialDescription) }
@@ -784,19 +936,36 @@ private fun EditChapterDialog(
                 )
             }
         },
+        // Single action row — Archive on the left (when provided),
+        // Cancel + Save on the right. Mirrors the notebook detail
+        // edit modal's three-button layout.
         confirmButton = {
-            TextButton(
-                onClick = { if (canConfirm) onConfirm(title, description) },
-                enabled = canConfirm,
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Save", color = AppAccent.primary)
+                if (onArchive != null) {
+                    TextButton(onClick = onArchive) {
+                        Text("Archive chapter", color = AppColors.Danger)
+                    }
+                } else {
+                    Spacer(Modifier.size(0.dp))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel", color = AppColors.TextSecondary)
+                    }
+                    TextButton(
+                        onClick = { if (canConfirm) onConfirm(title, description) },
+                        enabled = canConfirm,
+                    ) {
+                        Text("Save", color = AppAccent.primary)
+                    }
+                }
             }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = AppColors.TextSecondary)
-            }
-        },
+        dismissButton = null,
         containerColor = AppColors.CardSolid,
     )
 }

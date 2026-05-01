@@ -12,9 +12,23 @@ Sourced from the Figma Make "Releaf Branding" export (April 2026).
 | Field         | Value                                                                   |
 | ------------- | ----------------------------------------------------------------------- |
 | App name      | Releaf                                                                  |
-| Tagline       | Journal your journey                                                    |
-| Description   | The notebook that grows back                                            |
-| Keywords      | journaling, wellness, growth, mindfulness, reflection                   |
+| Tagline       | Write. Erase. Repeat.                                                   |
+| Description   | Reusable notebook + smart app companion                                 |
+| Keywords      | reusable notebook, scanning, sustainability, notes, organization        |
+
+## April 2026 mobile asset kit
+
+The mobile app now uses the attached April 24, 2026 marketing board as the
+source for launch and signed-out brand surfaces. Editable sources and PNG
+exports live in [`mobile-brand-assets/`](./mobile-brand-assets/):
+
+| Asset | Source |
+| --- | --- |
+| Logo lockup | `mobile-brand-assets/source/releaf-logo-lockup.svg` |
+| App icon | `mobile-brand-assets/source/releaf-app-icon.svg` |
+| Splash screen | `mobile-brand-assets/source/releaf-splash-screen.svg` |
+| Landing page | `mobile-brand-assets/source/releaf-landing-page.svg` |
+| Feature icons | `mobile-brand-assets/source/releaf-mobile-icons.svg` |
 
 ## App icons
 

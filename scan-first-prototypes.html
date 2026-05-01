@@ -1,0 +1,1061 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Releaf — Scan-first prototypes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* Tokens copied verbatim from ios/Releaf/Features/Notepad/Recents/Theme/Colors.swift */
+    --bgCanvas: #F4EDDC;
+    --bgSurface: #FBF5E2;
+    --bgSurfaceMuted: #EFE7CD;
+    --bgChip: #DDEACD;
+    --green900: #2C4520;
+    --green800: #3F5C2C;
+    --green600: #5B7A3F;
+    --green400: #7AA055;
+    --green200: #C0DD97;
+    --green100: #DDEACD;
+    --cream300: #EDE3CC;
+    --textPrimary: #1F1E18;
+    --textSecondary: #5C5C50;
+    --textMuted: #6B6B5E;
+    --textOnDark: #F4EDDC;
+    --accentImport: #BA7517;
+    --accentImportBg: #F0E0B8;
+    --borderFaint: rgba(63,92,44,0.10);
+    --borderDivider: rgba(63,92,44,0.20);
+
+    --serif: 'Fraunces', Georgia, serif;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--sans);
+    color: var(--textPrimary);
+    background: linear-gradient(180deg, #ECE3C7 0%, #DCD0AE 100%);
+    min-height: 100vh;
+    padding: 48px 24px 80px;
+  }
+  .page-head {
+    max-width: 1200px;
+    margin: 0 auto 40px;
+    text-align: center;
+  }
+  .page-head h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 38px;
+    color: var(--green900);
+    margin: 0 0 8px;
+    letter-spacing: -0.5px;
+  }
+  .page-head p {
+    color: var(--textSecondary);
+    font-size: 15px;
+    max-width: 640px;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+
+  .stage {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(320px, 360px));
+    gap: 32px;
+    justify-content: center;
+    align-items: start;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  @media (max-width: 1100px) {
+    .stage { grid-template-columns: 1fr; }
+  }
+
+  .variation { display: flex; flex-direction: column; align-items: center; }
+
+  .variation .label {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: var(--green800);
+    margin-bottom: 6px;
+  }
+  .variation h2 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 22px;
+    color: var(--textPrimary);
+    margin: 0 0 18px;
+    text-align: center;
+    letter-spacing: -0.3px;
+  }
+  .rationale {
+    margin-top: 18px;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--textSecondary);
+    max-width: 320px;
+    text-align: left;
+  }
+  .rationale strong { color: var(--green900); font-weight: 600; }
+
+  /* ========== PHONE FRAME ========== */
+  .phone {
+    width: 320px;
+    height: 680px;
+    border-radius: 38px;
+    background: #1a1a1a;
+    padding: 9px;
+    box-shadow:
+      0 30px 60px -20px rgba(44, 69, 32, 0.35),
+      0 12px 24px -12px rgba(0,0,0,0.25),
+      0 0 0 1px rgba(0,0,0,0.4);
+    position: relative;
+  }
+  .screen {
+    width: 100%;
+    height: 100%;
+    border-radius: 30px;
+    overflow: hidden;
+    position: relative;
+    background: var(--bgCanvas);
+  }
+  .notch {
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 92px;
+    height: 22px;
+    background: #000;
+    border-radius: 16px;
+    z-index: 30;
+  }
+  .status-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 22px;
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--textPrimary);
+    z-index: 20;
+  }
+  .status-bar.dark { color: var(--textOnDark); }
+  .status-bar .right-icons { display: flex; gap: 4px; align-items: center; opacity: 0.85; }
+  .status-bar svg { width: 12px; height: 12px; }
+
+  /* generic small icon container (icon tile in capture rows) */
+  .icon-tile {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    background: var(--bgChip);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--green800);
+    flex-shrink: 0;
+  }
+  .icon-tile svg { width: 18px; height: 18px; }
+
+  /* shared: Releaf wordmark */
+  .wordmark {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--sans);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: var(--green800);
+  }
+  .wordmark .leaf {
+    width: 9px; height: 9px;
+    border-radius: 50% 0;
+    background: var(--green800);
+    transform: rotate(-45deg);
+  }
+
+  /* ============================================================
+     VARIATION A — Scan-as-Home (full viewfinder)
+     ============================================================ */
+  .var-a .screen { background: #14110A; }
+  .var-a .viewfinder {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(circle at 30% 20%, rgba(255,255,255,0.06), transparent 60%),
+      radial-gradient(circle at 80% 70%, rgba(186,117,23,0.10), transparent 60%),
+      linear-gradient(180deg, #1f1c12 0%, #14110A 100%);
+  }
+  /* faux paper inside viewfinder */
+  .var-a .paper {
+    position: absolute;
+    top: 18%; left: 14%;
+    width: 72%; height: 52%;
+    background: var(--bgSurface);
+    border-radius: 6px;
+    box-shadow: 0 18px 30px rgba(0,0,0,0.45);
+    transform: perspective(700px) rotateX(8deg) rotateZ(-2deg);
+    padding: 14px 16px;
+  }
+  .var-a .paper .paper-line {
+    height: 4px;
+    background: rgba(31,30,24,0.18);
+    border-radius: 2px;
+    margin-bottom: 6px;
+  }
+  .var-a .paper .paper-line.short { width: 60%; }
+  .var-a .paper .paper-line.shorter { width: 38%; }
+  .var-a .paper .paper-title {
+    height: 10px;
+    width: 70%;
+    background: rgba(31,30,24,0.55);
+    border-radius: 2px;
+    margin-bottom: 12px;
+  }
+
+  /* Detection corner brackets */
+  .var-a .corners {
+    position: absolute;
+    top: 18%; left: 14%;
+    width: 72%; height: 52%;
+    transform: perspective(700px) rotateX(8deg) rotateZ(-2deg);
+  }
+  .var-a .corners::before,
+  .var-a .corners::after,
+  .var-a .corner-tr,
+  .var-a .corner-bl {
+    content: '';
+    position: absolute;
+    width: 22px; height: 22px;
+    border: 2px solid var(--accentImport);
+  }
+  .var-a .corners::before { top: -3px; left: -3px; border-right: none; border-bottom: none; border-radius: 4px 0 0 0; }
+  .var-a .corners::after { bottom: -3px; right: -3px; border-left: none; border-top: none; border-radius: 0 0 4px 0; }
+  .var-a .corner-tr { top: -3px; right: -3px; border-left: none; border-bottom: none; border-radius: 0 4px 0 0; }
+  .var-a .corner-bl { bottom: -3px; left: -3px; border-right: none; border-top: none; border-radius: 0 0 0 4px; }
+
+  .var-a .top-chrome {
+    position: absolute;
+    top: 38px; left: 0; right: 0;
+    padding: 0 20px;
+    display: flex; justify-content: space-between; align-items: center;
+    z-index: 10;
+  }
+  .var-a .top-chrome .wordmark { color: var(--cream300); }
+  .var-a .top-chrome .wordmark .leaf { background: var(--green200); }
+  .var-a .chip {
+    background: rgba(244,237,220,0.12);
+    backdrop-filter: blur(8px);
+    color: var(--cream300);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    padding: 6px 11px;
+    border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .var-a .detection-hint {
+    position: absolute;
+    top: 78px; left: 50%;
+    transform: translateX(-50%);
+    color: var(--cream300);
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 14px;
+    text-align: center;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    z-index: 10;
+  }
+  .var-a .detection-hint small {
+    display: block;
+    font-family: var(--sans);
+    font-style: normal;
+    font-size: 11px;
+    color: var(--green200);
+    margin-top: 2px;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+  }
+
+  .var-a .bottom-deck {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: linear-gradient(180deg, rgba(20,17,10,0) 0%, rgba(20,17,10,0.9) 30%, #14110A 60%);
+    padding: 28px 18px 20px;
+    z-index: 15;
+  }
+  .var-a .secondary-row {
+    display: flex; gap: 10px; justify-content: center;
+    margin-bottom: 22px;
+  }
+  .var-a .sec-chip {
+    background: rgba(244,237,220,0.10);
+    color: var(--cream300);
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 500;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .var-a .sec-chip svg { width: 13px; height: 13px; opacity: 0.85; }
+
+  .var-a .capture-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 14px;
+  }
+  .var-a .ghost-btn {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    background: rgba(244,237,220,0.10);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--cream300);
+  }
+  .var-a .ghost-btn svg { width: 20px; height: 20px; }
+  .var-a .shutter {
+    width: 76px; height: 76px;
+    border-radius: 50%;
+    background: var(--bgSurface);
+    border: 4px solid var(--accentImport);
+    box-shadow: 0 0 0 4px rgba(186,117,23,0.25), 0 8px 20px rgba(186,117,23,0.4);
+    position: relative;
+  }
+  .var-a .shutter::after {
+    content: '';
+    position: absolute; inset: 8px;
+    border-radius: 50%;
+    background: var(--accentImport);
+  }
+  .var-a .recent-thumbs {
+    position: relative;
+    width: 44px; height: 44px;
+  }
+  .var-a .recent-thumbs .thumb {
+    position: absolute;
+    width: 36px; height: 44px;
+    border-radius: 6px;
+    background: var(--bgSurface);
+    border: 1px solid rgba(244,237,220,0.4);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+  }
+  .var-a .recent-thumbs .thumb:nth-child(1) { right: 0; transform: rotate(8deg); background: var(--bgChip); }
+  .var-a .recent-thumbs .thumb:nth-child(2) { right: 4px; transform: rotate(-4deg); top: -2px; }
+
+  /* ============================================================
+     VARIATION B — Scan hero card + scrollable journal
+     ============================================================ */
+  .var-b .screen { background: var(--bgCanvas); }
+  .var-b .header {
+    padding: 44px 22px 0;
+  }
+  .var-b .header .wordmark { margin-bottom: 12px; }
+  .var-b .header h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 28px;
+    color: var(--textPrimary);
+    margin: 0 0 16px;
+    letter-spacing: -0.6px;
+    line-height: 1.05;
+  }
+  .var-b .toggle {
+    background: var(--bgSurfaceMuted);
+    border-radius: 999px;
+    padding: 4px;
+    display: inline-flex;
+    gap: 0;
+  }
+  .var-b .toggle button {
+    border: none;
+    background: transparent;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--textMuted);
+    padding: 7px 22px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .var-b .toggle button.active {
+    background: var(--green800);
+    color: var(--textOnDark);
+  }
+
+  .var-b .hero-scan {
+    margin: 18px 16px 0;
+    background: linear-gradient(135deg, #C98430 0%, var(--accentImport) 60%, #9B5F12 100%);
+    border-radius: 22px;
+    padding: 18px 18px 16px;
+    color: var(--bgSurface);
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 14px 24px -10px rgba(186,117,23,0.45);
+  }
+  .var-b .hero-scan::before {
+    content: '';
+    position: absolute;
+    top: -40px; right: -40px;
+    width: 160px; height: 160px;
+    background: radial-gradient(circle, rgba(244,237,220,0.18), transparent 70%);
+    border-radius: 50%;
+  }
+  .var-b .hero-scan .hero-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: var(--accentImportBg);
+    opacity: 0.95;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .var-b .hero-scan .hero-label .dot {
+    width: 6px; height: 6px; background: var(--accentImportBg); border-radius: 50%;
+  }
+  .var-b .hero-scan h2 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 26px;
+    margin: 8px 0 4px;
+    line-height: 1.1;
+    letter-spacing: -0.4px;
+  }
+  .var-b .hero-scan p {
+    font-size: 12.5px;
+    margin: 0 0 16px;
+    opacity: 0.92;
+    line-height: 1.4;
+    max-width: 78%;
+  }
+  .var-b .scan-mockup {
+    position: absolute;
+    right: 14px; bottom: 56px;
+    width: 78px; height: 96px;
+    background: var(--bgSurface);
+    border-radius: 6px;
+    transform: rotate(8deg);
+    box-shadow: 0 10px 18px rgba(0,0,0,0.25);
+    padding: 8px 8px 0;
+  }
+  .var-b .scan-mockup .ml { height: 2px; background: rgba(31,30,24,0.18); margin-bottom: 3px; border-radius: 1px; }
+  .var-b .scan-mockup .ml.t { height: 4px; width: 60%; background: rgba(31,30,24,0.5); margin-bottom: 6px; }
+  .var-b .scan-mockup .ml.s { width: 70%; }
+  .var-b .scan-mockup .ml.xs { width: 40%; }
+  .var-b .scan-corners {
+    position: absolute;
+    right: 8px; bottom: 50px;
+    width: 88px; height: 106px;
+    transform: rotate(8deg);
+    pointer-events: none;
+  }
+  .var-b .scan-corners > i {
+    position: absolute;
+    width: 12px; height: 12px;
+    border: 2px solid var(--bgSurface);
+    opacity: 0.8;
+  }
+  .var-b .scan-corners > i:nth-child(1) { top:-2px; left:-2px; border-right:none; border-bottom:none; }
+  .var-b .scan-corners > i:nth-child(2) { top:-2px; right:-2px; border-left:none; border-bottom:none; }
+  .var-b .scan-corners > i:nth-child(3) { bottom:-2px; left:-2px; border-right:none; border-top:none; }
+  .var-b .scan-corners > i:nth-child(4) { bottom:-2px; right:-2px; border-left:none; border-top:none; }
+
+  .var-b .hero-cta {
+    background: var(--bgSurface);
+    color: var(--accentImport);
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: 13px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    border: none;
+    display: inline-flex; align-items: center; gap: 8px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.18);
+    position: relative;
+    z-index: 2;
+  }
+  .var-b .hero-cta svg { width: 16px; height: 16px; }
+
+  .var-b .or-row {
+    margin: 18px 16px 8px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px;
+    color: var(--textMuted);
+    text-transform: uppercase;
+    letter-spacing: 1.3px;
+    font-weight: 500;
+  }
+  .var-b .or-row::before, .var-b .or-row::after {
+    content: ''; flex: 1; height: 1px; background: var(--borderFaint);
+  }
+  .var-b .chip-row {
+    margin: 0 16px;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+  }
+  .var-b .mini-chip {
+    background: var(--bgSurface);
+    border-radius: 12px;
+    padding: 10px 4px 8px;
+    text-align: center;
+    border: 1px solid var(--borderFaint);
+  }
+  .var-b .mini-chip .ico {
+    width: 26px; height: 26px;
+    margin: 0 auto 5px;
+    border-radius: 8px;
+    background: var(--bgChip);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--green800);
+  }
+  .var-b .mini-chip .ico svg { width: 14px; height: 14px; }
+  .var-b .mini-chip .lbl {
+    font-size: 9.5px;
+    font-weight: 500;
+    color: var(--textSecondary);
+    letter-spacing: 0.2px;
+  }
+
+  .var-b .grove {
+    margin: 22px 16px 0;
+  }
+  .var-b .grove-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .var-b .grove-head h3 {
+    font-family: var(--serif);
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0;
+    color: var(--textPrimary);
+    letter-spacing: -0.2px;
+  }
+  .var-b .grove-head .count {
+    font-size: 11px; color: var(--textMuted); font-weight: 500;
+  }
+  .var-b .doc-card {
+    background: var(--bgSurface);
+    border: 1px solid var(--borderFaint);
+    border-radius: 14px;
+    padding: 12px;
+    display: flex; gap: 12px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .var-b .doc-thumb {
+    width: 38px; height: 48px;
+    border-radius: 4px;
+    background: var(--cream300);
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+    box-shadow: inset 0 0 0 1px var(--borderFaint);
+  }
+  .var-b .doc-thumb::before, .var-b .doc-thumb::after {
+    content: ''; display: block;
+    height: 2px; background: rgba(31,30,24,0.18);
+    margin: 6px 5px 4px; border-radius: 1px;
+  }
+  .var-b .doc-thumb::after { width: 60%; height: 3px; background: rgba(31,30,24,0.4); margin-top: 0; }
+  .var-b .doc-thumb .lines {
+    position: absolute; bottom: 6px; left: 5px; right: 5px;
+  }
+  .var-b .doc-thumb .lines i {
+    display: block; height: 1.5px; background: rgba(31,30,24,0.15);
+    margin-bottom: 2px; border-radius: 1px;
+  }
+  .var-b .doc-thumb .lines i:last-child { width: 50%; }
+  .var-b .doc-meta { flex: 1; min-width: 0; }
+  .var-b .doc-meta .t { font-size: 13px; font-weight: 600; color: var(--textPrimary); margin-bottom: 2px; }
+  .var-b .doc-meta .s { font-size: 11px; color: var(--textMuted); }
+  .var-b .doc-tag {
+    font-size: 9.5px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    background: var(--accentImportBg);
+    color: var(--accentImport);
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+
+  /* ============================================================
+     VARIATION C — Scan-anchored bottom nav + FAB
+     ============================================================ */
+  .var-c .screen { background: var(--bgCanvas); padding-bottom: 0; }
+  .var-c .header { padding: 44px 22px 0; }
+  .var-c .header .wordmark { margin-bottom: 10px; }
+  .var-c .header h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 26px;
+    color: var(--textPrimary);
+    margin: 0 0 14px;
+    letter-spacing: -0.6px;
+    line-height: 1.05;
+  }
+  .var-c .filter-bar {
+    margin: 0 22px 14px;
+    display: flex; gap: 8px; align-items: center;
+  }
+  .var-c .pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    background: var(--bgSurfaceMuted);
+    color: var(--textMuted);
+  }
+  .var-c .pill.active { background: var(--green800); color: var(--textOnDark); }
+
+  .var-c .scan-banner {
+    margin: 4px 16px 14px;
+    background: var(--accentImportBg);
+    border-radius: 14px;
+    padding: 12px 14px;
+    display: flex; gap: 10px; align-items: center;
+    border: 1px dashed rgba(186,117,23,0.45);
+  }
+  .var-c .scan-banner .ico {
+    width: 32px; height: 32px;
+    border-radius: 9px;
+    background: var(--accentImport);
+    color: var(--bgSurface);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .var-c .scan-banner .ico svg { width: 16px; height: 16px; }
+  .var-c .scan-banner .txt { flex: 1; min-width: 0; }
+  .var-c .scan-banner .txt .t {
+    font-size: 12.5px; font-weight: 600; color: var(--green900);
+  }
+  .var-c .scan-banner .txt .s {
+    font-size: 10.5px; color: var(--textSecondary); margin-top: 1px;
+  }
+
+  .var-c .feed { padding: 0 16px 110px; }
+  .var-c .feed-card {
+    background: var(--bgSurface);
+    border-radius: 16px;
+    padding: 12px;
+    margin-bottom: 10px;
+    border: 1px solid var(--borderFaint);
+  }
+  .var-c .feed-card .top {
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .var-c .feed-card .doc-thumb {
+    width: 58px; height: 74px;
+    border-radius: 4px;
+    background: var(--cream300);
+    flex-shrink: 0;
+    position: relative;
+    box-shadow: inset 0 0 0 1px var(--borderFaint);
+    overflow: hidden;
+    padding: 8px 6px;
+  }
+  .var-c .feed-card .doc-thumb i {
+    display: block; height: 2px; background: rgba(31,30,24,0.18);
+    margin-bottom: 3px; border-radius: 1px;
+  }
+  .var-c .feed-card .doc-thumb i.title { height: 5px; width: 70%; background: rgba(31,30,24,0.5); margin-bottom: 6px; }
+  .var-c .feed-card .doc-thumb i.short { width: 50%; }
+  .var-c .feed-card .meta { flex: 1; min-width: 0; }
+  .var-c .feed-card .tag {
+    font-size: 9.5px; padding: 3px 7px;
+    background: var(--accentImportBg);
+    color: var(--accentImport);
+    border-radius: 5px; font-weight: 600;
+    letter-spacing: 0.5px; text-transform: uppercase;
+    display: inline-block; margin-bottom: 6px;
+  }
+  .var-c .feed-card .tag.green { background: var(--bgChip); color: var(--green800); }
+  .var-c .feed-card .meta .t {
+    font-size: 14px; font-weight: 600; line-height: 1.25;
+    color: var(--textPrimary); margin-bottom: 4px;
+  }
+  .var-c .feed-card .meta .s {
+    font-size: 11px; color: var(--textMuted); line-height: 1.4;
+  }
+  .var-c .feed-card .footer {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--borderFaint);
+    font-size: 10.5px;
+    color: var(--textMuted);
+  }
+  .var-c .feed-card .footer .when { font-weight: 500; }
+  .var-c .feed-card .footer .src { display: flex; align-items: center; gap: 5px; }
+
+  /* Bottom nav */
+  .var-c .nav {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 78px;
+    background: var(--bgSurface);
+    border-top: 1px solid var(--borderFaint);
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    padding: 0 14px 18px;
+  }
+  .var-c .nav .item {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    color: var(--textMuted);
+    font-size: 9.5px; font-weight: 500;
+  }
+  .var-c .nav .item.active { color: var(--green800); }
+  .var-c .nav .item svg { width: 20px; height: 20px; }
+  .var-c .fab {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #C98430, var(--accentImport));
+    color: var(--bgSurface);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow:
+      0 10px 18px -4px rgba(186,117,23,0.55),
+      0 0 0 5px var(--bgSurface);
+    margin: 0 6px;
+    transform: translateY(-22px);
+    flex-shrink: 0;
+    border: none;
+  }
+  .var-c .fab svg { width: 28px; height: 28px; }
+  .var-c .fab-label {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.3px;
+    text-transform: uppercase;
+    color: var(--accentImport);
+  }
+
+  /* footer note */
+  .footnote {
+    max-width: 1100px;
+    margin: 56px auto 0;
+    text-align: center;
+    color: var(--textSecondary);
+    font-size: 12px;
+  }
+  .footnote code {
+    font-family: ui-monospace, SF Mono, Menlo, monospace;
+    background: rgba(63,92,44,0.08);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--green900);
+  }
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <h1>Releaf — Scan-first prototypes</h1>
+  <p>Three directions for making <strong>Scan</strong> the gravitational center of the home experience, ranging from a complete IA rethink to a more conservative hero-card treatment. All mocks use real Releaf brand tokens (greens, cream, amber import accent) pulled from the iOS theme.</p>
+</header>
+
+<div class="stage">
+
+  <!-- ============================================================
+       VARIATION A
+       ============================================================ -->
+  <div class="variation var-a">
+    <span class="label">Variation A · Boldest</span>
+    <h2>Scan-as-Home</h2>
+    <div class="phone">
+      <div class="screen">
+        <div class="notch"></div>
+        <div class="status-bar dark">
+          <span>6:20</span>
+          <div class="right-icons">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4a8 8 0 1 0 0 16A8 8 0 0 0 12 4zm0 14a6 6 0 1 1 0-12 6 6 0 0 1 0 12z"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 22h20V10H2z"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="8" width="16" height="8" rx="2"/><rect x="20" y="11" width="2" height="2"/></svg>
+          </div>
+        </div>
+
+        <div class="viewfinder"></div>
+        <div class="paper">
+          <div class="paper-title"></div>
+          <div class="paper-line"></div>
+          <div class="paper-line"></div>
+          <div class="paper-line short"></div>
+          <div class="paper-line"></div>
+          <div class="paper-line shorter"></div>
+        </div>
+        <div class="corners"><i class="corner-tr"></i><i class="corner-bl"></i></div>
+
+        <div class="top-chrome">
+          <div class="wordmark"><span class="leaf"></span> Releaf · Capture</div>
+          <span class="chip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            Today
+          </span>
+        </div>
+
+        <div class="detection-hint">
+          page detected
+          <small>HOLD STEADY · TAP TO CAPTURE</small>
+        </div>
+
+        <div class="bottom-deck">
+          <div class="secondary-row">
+            <span class="sec-chip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/></svg>
+              Photo
+            </span>
+            <span class="sec-chip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+              Voice
+            </span>
+            <span class="sec-chip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l2 2 5-5"/><rect x="3" y="3" width="18" height="18" rx="3"/></svg>
+              To-do
+            </span>
+            <span class="sec-chip">…</span>
+          </div>
+          <div class="capture-row">
+            <div class="ghost-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            </div>
+            <div class="shutter"></div>
+            <div class="recent-thumbs">
+              <div class="thumb"></div>
+              <div class="thumb"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="rationale">
+      Camera <strong>is</strong> the home screen. App opens straight into the live viewfinder with edge detection already running. The amber shutter is the only loud control on screen; every other capture mode collapses into a translucent chip drawer. <strong>Zero taps to scan</strong>; one tap to switch modes.
+    </p>
+  </div>
+
+  <!-- ============================================================
+       VARIATION B
+       ============================================================ -->
+  <div class="variation var-b">
+    <span class="label">Variation B · Recommended</span>
+    <h2>Scan hero + grove</h2>
+    <div class="phone">
+      <div class="screen">
+        <div class="notch"></div>
+        <div class="status-bar">
+          <span>6:20</span>
+          <div class="right-icons">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4a8 8 0 1 0 0 16A8 8 0 0 0 12 4zm0 14a6 6 0 1 1 0-12 6 6 0 0 1 0 12z"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 22h20V10H2z"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="8" width="16" height="8" rx="2"/><rect x="20" y="11" width="2" height="2"/></svg>
+          </div>
+        </div>
+
+        <div class="header">
+          <div class="wordmark"><span class="leaf"></span> Releaf · Notepad</div>
+          <h1>A grove<br/>of days</h1>
+          <div class="toggle">
+            <button class="active">Day</button>
+            <button>Recents</button>
+          </div>
+        </div>
+
+        <div class="hero-scan">
+          <div class="hero-label"><span class="dot"></span> Today's first capture</div>
+          <h2>Scan a page</h2>
+          <p>Auto-crops, OCR's, and files it under today.</p>
+          <button class="hero-cta">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M9 6l1.5-2h3L15 6"/></svg>
+            Open scanner
+          </button>
+          <div class="scan-mockup">
+            <div class="ml t"></div>
+            <div class="ml"></div>
+            <div class="ml s"></div>
+            <div class="ml"></div>
+            <div class="ml xs"></div>
+          </div>
+          <div class="scan-corners"><i></i><i></i><i></i><i></i></div>
+        </div>
+
+        <div class="or-row">or capture differently</div>
+        <div class="chip-row">
+          <div class="mini-chip">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/></svg></div>
+            <div class="lbl">Photo</div>
+          </div>
+          <div class="mini-chip">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/></svg></div>
+            <div class="lbl">Voice</div>
+          </div>
+          <div class="mini-chip">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l2 2 5-5"/><rect x="3" y="3" width="18" height="18" rx="3"/></svg></div>
+            <div class="lbl">To-do</div>
+          </div>
+          <div class="mini-chip">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></div>
+            <div class="lbl">Contact</div>
+          </div>
+          <div class="mini-chip">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-7.5 7-13a7 7 0 1 0-14 0c0 5.5 7 13 7 13z"/><circle cx="12" cy="8" r="2.5"/></svg></div>
+            <div class="lbl">Place</div>
+          </div>
+        </div>
+
+        <div class="grove">
+          <div class="grove-head">
+            <h3>Today's grove</h3>
+            <span class="count">3 pages</span>
+          </div>
+          <div class="doc-card">
+            <div class="doc-thumb"><div class="lines"><i></i><i></i><i></i></div></div>
+            <div class="doc-meta">
+              <div class="t">Lab results — endocrinology</div>
+              <div class="s">2 pages · scanned 9:14 am</div>
+            </div>
+            <span class="doc-tag">Scan</span>
+          </div>
+          <div class="doc-card">
+            <div class="doc-thumb"><div class="lines"><i></i><i></i><i></i></div></div>
+            <div class="doc-meta">
+              <div class="t">Sourdough recipe card</div>
+              <div class="s">1 page · 7:48 am</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <p class="rationale">
+      Keeps the <em>"A grove of days"</em> ritual you've already established, but the entire upper half of the screen is a warm amber <strong>Scan hero</strong>. Other capture types live as small, equal-weight chips — present but quiet. <strong>Lowest disruption to existing IA, biggest jump in scan affordance.</strong>
+    </p>
+  </div>
+
+  <!-- ============================================================
+       VARIATION C
+       ============================================================ -->
+  <div class="variation var-c">
+    <span class="label">Variation C · Most familiar</span>
+    <h2>Scan FAB + feed</h2>
+    <div class="phone">
+      <div class="screen">
+        <div class="notch"></div>
+        <div class="status-bar">
+          <span>6:20</span>
+          <div class="right-icons">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4a8 8 0 1 0 0 16A8 8 0 0 0 12 4zm0 14a6 6 0 1 1 0-12 6 6 0 0 1 0 12z"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 22h20V10H2z"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="8" width="16" height="8" rx="2"/><rect x="20" y="11" width="2" height="2"/></svg>
+          </div>
+        </div>
+
+        <div class="header">
+          <div class="wordmark"><span class="leaf"></span> Releaf · Notepad</div>
+          <h1>A grove of days</h1>
+        </div>
+
+        <div class="filter-bar">
+          <span class="pill active">All</span>
+          <span class="pill">Scans</span>
+          <span class="pill">Notes</span>
+          <span class="pill">Photos</span>
+        </div>
+
+        <div class="scan-banner">
+          <div class="ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-2"/><path d="M3 12h18"/></svg>
+          </div>
+          <div class="txt">
+            <div class="t">Scan something quickly</div>
+            <div class="s">Hold the camera over a page · auto-crops</div>
+          </div>
+        </div>
+
+        <div class="feed">
+          <div class="feed-card">
+            <div class="top">
+              <div class="doc-thumb"><i class="title"></i><i></i><i class="short"></i><i></i><i class="short"></i></div>
+              <div class="meta">
+                <span class="tag">Scan · 2 pages</span>
+                <div class="t">Daycare permission slip</div>
+                <div class="s">Signed copy filed under today.</div>
+              </div>
+            </div>
+            <div class="footer">
+              <span class="when">9:14 am</span>
+              <span class="src">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3"/></svg>
+                Camera
+              </span>
+            </div>
+          </div>
+
+          <div class="feed-card">
+            <div class="top">
+              <div class="doc-thumb"><i class="title"></i><i></i><i></i><i class="short"></i></div>
+              <div class="meta">
+                <span class="tag green">Voice · 0:42</span>
+                <div class="t">Idea on the drive home</div>
+                <div class="s">"Releaf could auto-tag scans by location…"</div>
+              </div>
+            </div>
+            <div class="footer">
+              <span class="when">7:48 am</span>
+              <span class="src">Voice memo</span>
+            </div>
+          </div>
+        </div>
+
+        <nav class="nav">
+          <span class="fab-label">Scan</span>
+          <div class="item active">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            Today
+          </div>
+          <div class="item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+            Search
+          </div>
+          <button class="fab">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-2"/><path d="M7 12h10"/></svg>
+          </button>
+          <div class="item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h12l4 4v12H4z"/><path d="M8 12h8M8 16h6"/></svg>
+            Notes
+          </div>
+          <div class="item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+            You
+          </div>
+        </nav>
+
+      </div>
+    </div>
+    <p class="rationale">
+      Bottom-tab IA borrowed from Snap/Instagram patterns: an oversized amber <strong>Scan FAB</strong> sits dead-center in the thumb zone, always one tap away from any screen. The home feed itself becomes a <strong>scan-led journal</strong> — scans are first-class document cards, with notes and voice as peers. Most familiar to new users.
+    </p>
+  </div>
+
+</div>
+
+<p class="footnote">
+  Color tokens lifted from <code>ios/Releaf/Features/Notepad/Recents/Theme/Colors.swift</code> · Scan accent uses <code>--accentImport</code> (#BA7517) so it visually separates from the green-led journaling system.
+</p>
+
+</body>
+</html>

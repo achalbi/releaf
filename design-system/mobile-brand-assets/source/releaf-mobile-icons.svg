@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="title desc">
+  <title id="title">Releaf mobile feature icon sheet</title>
+  <desc id="desc">Six rounded feature icons for write, erase, scan, organize, share, and backup.</desc>
+  <defs>
+    <style>
+      .label{font:700 24px Avenir Next,Inter,Arial,sans-serif;fill:#0B3F26;letter-spacing:.5px}
+      .card{fill:#FFFAF4;stroke:#0B3F26;stroke-opacity:.16;stroke-width:3}
+      .ink{fill:none;stroke:#0B3F26;stroke-width:8;stroke-linecap:round;stroke-linejoin:round}
+      .fill{fill:#7AA874}
+      .soft{fill:#D9EDE2}
+    </style>
+  </defs>
+  <rect width="1200" height="640" fill="#F5EEDF"/>
+  <g transform="translate(72 72)">
+    <rect class="card" width="144" height="144" rx="32"/>
+    <path class="ink" d="M43 100l56-56 15 15-56 56H43z"/>
+    <path class="ink" d="M88 55l15 15"/>
+    <text class="label" x="72" y="194" text-anchor="middle">WRITE</text>
+  </g>
+  <g transform="translate(264 72)">
+    <rect class="card" width="144" height="144" rx="32"/>
+    <path class="soft" d="M39 89h67a14 14 0 0 1 14 14v0a14 14 0 0 1-14 14H39z"/>
+    <path class="ink" d="M39 89h67a14 14 0 0 1 14 14v0a14 14 0 0 1-14 14H39z"/>
+    <path class="ink" d="M42 54h60"/>
+    <path class="ink" d="M50 72h44"/>
+    <text class="label" x="72" y="194" text-anchor="middle">ERASE</text>
+  </g>
+  <g transform="translate(456 72)">
+    <rect class="card" width="144" height="144" rx="32"/>
+    <rect x="42" y="31" width="60" height="82" rx="10" fill="#FFFAF4" stroke="#0B3F26" stroke-width="8"/>
+    <path class="ink" d="M54 53h36M54 75h36M54 97h22"/>
+    <path class="fill" d="M107 101l24 12-24 12z"/>
+    <text class="label" x="72" y="194" text-anchor="middle">SCAN</text>
+  </g>
+  <g transform="translate(648 72)">
+    <rect class="card" width="144" height="144" rx="32"/>
+    <path class="ink" d="M39 46h66M39 72h66M39 98h66"/>
+    <circle cx="34" cy="46" r="6" class="fill"/>
+    <circle cx="34" cy="72" r="6" class="fill"/>
+    <circle cx="34" cy="98" r="6" class="fill"/>
+    <text class="label" x="72" y="194" text-anchor="middle">ORGANIZE</text>
+  </g>
+  <g transform="translate(840 72)">
+    <rect class="card" width="144" height="144" rx="32"/>
+    <circle cx="48" cy="72" r="13" class="fill"/>
+    <circle cx="98" cy="45" r="13" class="fill"/>
+    <circle cx="100" cy="101" r="13" class="fill"/>
+    <path class="ink" d="M59 66l28-15M59 78l30 18"/>
+    <text class="label" x="72" y="194" text-anchor="middle">SHARE</text>
+  </g>
+  <g transform="translate(1032 72)">
+    <rect class="card" width="144" height="144" rx="32"/>
+    <path class="soft" d="M41 91a28 28 0 0 1 53-14 22 22 0 1 1 8 43H45a16 16 0 0 1-4-29z"/>
+    <path class="ink" d="M41 91a28 28 0 0 1 53-14 22 22 0 1 1 8 43H45a16 16 0 0 1-4-29z"/>
+    <path class="ink" d="M72 102V66M56 82l16-16 16 16"/>
+    <text class="label" x="72" y="194" text-anchor="middle">BACKUP</text>
+  </g>
+</svg>
+

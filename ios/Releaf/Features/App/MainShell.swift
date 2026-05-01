@@ -7,7 +7,8 @@
  * Tabs:
  *   home      → HomeScreen          (pushes NotebookDetailView, PageDetailView)
  *   notebook  → NotebookTabView     (placeholder)
- *   leaf      → opens QuickCaptureSheet (no tab switch)
+ *   leaf      → CaptureView         (top-level Capture page, was a modal sheet
+ *                                    pre-CAPTURE_TAB_PLAN.md Phase 2)
  *   notepad   → NotepadView         (placeholder)
  *   settings  → SettingsView        (placeholder, hosts Sign Out)
  *
@@ -23,10 +24,10 @@ public struct MainShell: View {
     @EnvironmentObject private var uiPrefs: UiPreferences
     @EnvironmentObject private var authStore: AuthStore
     @State private var selection: String = "home"
-    @State private var showCapture: Bool = false
 
     @State private var homePath    = NavigationPath()
     @State private var notebookPath = NavigationPath()
+    @State private var capturePath  = NavigationPath()
     @State private var notepadPath  = NavigationPath()
     @State private var settingsPath = NavigationPath()
 
@@ -66,7 +67,17 @@ public struct MainShell: View {
                                     }
                                 }
                             ),
-                            onBrandTap: { showCapture = true }
+                            onBrandTap: {
+                                // Tap the lifted Leaf FAB → switch to
+                                // the Capture tab. Was a `.sheet`
+                                // presentation pre-CAPTURE_TAB_PLAN.md
+                                // Phase 2.
+                                if selection == "capture" {
+                                    capturePath = NavigationPath()
+                                } else {
+                                    selection = "capture"
+                                }
+                            }
                         )
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
@@ -95,18 +106,12 @@ public struct MainShell: View {
                 .zIndex(1)
             }
         }
-            .sheet(isPresented: $showCapture) {
-                QuickCaptureSheet { mode in
-                    // Hide the sheet first so the navigation push
-                    // animates over a clean canvas. Capture work
-                    // runs in a detached task — it talks to the
-                    // shared in-memory repo + a few ms of fake
-                    // latency, so we don't want to block the
-                    // sheet dismissal on it.
-                    showCapture = false
-                    Task { await beginQuickCapture(mode: mode) }
-                }
-            }
+            // The Capture flow was a `.sheet(isPresented: $showCapture)`
+            // pre-CAPTURE_TAB_PLAN.md Phase 2. Now Capture is a real
+            // top-level destination — see the "capture" case in
+            // `tabContent`. The sheet host (`QuickCaptureSheet.swift`)
+            // is kept for one release for any deep links that still
+            // resolve through it; remove next release.
             .sheet(
                 isPresented: $showOnboarding,
                 onDismiss: {
@@ -201,6 +206,23 @@ public struct MainShell: View {
                     }
             }
 
+        case "capture":
+            // Capture is a top-level destination. Tapping a tile or
+            // the Scan-now button creates a fresh page in the
+            // user's quick-capture chapter and pushes the page
+            // editor onto this tab's stack — same flow that lived
+            // inside the old QuickCaptureSheet's onSelect callback.
+            NavigationStack(path: $capturePath) {
+                CaptureView(
+                    onSelectTile: { tile in
+                        Task { await beginQuickCapture(mode: tile.toCaptureMode()) }
+                    },
+                    onScanNow:      { Task { await beginQuickCapture(mode: .scans) } },
+                    onOpenSearch:   { /* TODO: route to releaf://search once SearchView exists. */ },
+                    onOpenCalendar: { /* TODO: push CalendarRoute when added to navigationDestination. */ }
+                )
+            }
+
         case "notepad":
             NavigationStack(path: $notepadPath) {
                 NotepadView(
@@ -265,6 +287,7 @@ public struct MainShell: View {
         switch tabId {
         case "home":     homePath     = NavigationPath()
         case "notebook": notebookPath = NavigationPath()
+        case "capture":  capturePath  = NavigationPath()
         case "notepad":  notepadPath  = NavigationPath()
         case "settings": settingsPath = NavigationPath()
         default: break

@@ -38,6 +38,16 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+enum class PageMoveDirection { Up, Down }
+
+/**
+ * Spacing between page `position` values when the VM rewrites the
+ * full ordering. Mirrors the entity's 1024 default so a single,
+ * isolated insert (which gets the default) still slots after re-
+ * ordered peers.
+ */
+private const val PAGE_POSITION_STRIDE = 1024L
+
 data class ChapterLocalDetailUiState(
     val isLoading: Boolean = true,
     val chapter: ChapterEntity? = null,
@@ -126,6 +136,36 @@ class ChapterLocalDetailViewModel(
 
     fun undoDeletePage(id: String) {
         viewModelScope.launch { pageRepository.undoSoftDeletePage(id) }
+    }
+
+    /**
+     * Reorder a page up or down. Same shape as
+     * NotebookLocalDetailViewModel.moveChapter — builds the desired
+     * post-move list, then assigns evenly-spaced positions so the new
+     * ordering is unambiguous even when existing pages share the
+     * default 1024 position.
+     */
+    fun movePage(id: String, direction: PageMoveDirection) {
+        val pages = state.value.pages
+        val index = pages.indexOfFirst { it.id == id }
+        if (index < 0) return
+        val targetIndex = when (direction) {
+            PageMoveDirection.Up   -> index - 1
+            PageMoveDirection.Down -> index + 1
+        }
+        if (targetIndex !in pages.indices) return
+
+        val reordered = pages.toMutableList().apply {
+            add(targetIndex, removeAt(index))
+        }
+        viewModelScope.launch {
+            reordered.forEachIndexed { i, page ->
+                val newPosition = (i + 1) * PAGE_POSITION_STRIDE
+                if (page.position != newPosition) {
+                    pageRepository.savePage(page.copy(position = newPosition))
+                }
+            }
+        }
     }
 
     /* ---------- chapter archive flow ---------- */

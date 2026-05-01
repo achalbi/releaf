@@ -49,6 +49,7 @@ class NotebookRepository(
         colorHex: String? = null,
         description: String? = null,
         shelfId: String = "shelf-general",
+        flat: Boolean = false,
     ): NotebookEntity {
         val now = IsoClock.nowIso()
         val entity = NotebookEntity(
@@ -63,8 +64,26 @@ class NotebookRepository(
             createdAt    = now,
             updatedAt    = now,
             dirty        = true,
+            flat         = flat,
         )
         notebookDao.upsert(entity)
+        // Flat notebooks get an auto-created "Default" chapter so
+        // pages still have a parent in the schema. The chapter row is
+        // created here (not the screen) so it's always there before
+        // the first page write — keeps the createPage path simple.
+        if (flat) {
+            chapterDao.upsert(
+                ChapterEntity(
+                    id          = Uuidv7.generate(),
+                    notebookId  = entity.id,
+                    title       = SENTINEL_DEFAULT_CHAPTER_TITLE,
+                    description = null,
+                    createdAt   = now,
+                    updatedAt   = now,
+                    dirty       = true,
+                ),
+            )
+        }
         auditLogger?.log(
             action     = app.releaf.mobile.data.activity.AuditAction.Created,
             entityType = app.releaf.mobile.data.activity.AuditEntity.Notebook,
@@ -72,6 +91,16 @@ class NotebookRepository(
             title      = entity.title.ifBlank { "Untitled notebook" },
         )
         return entity
+    }
+
+    companion object {
+        /**
+         * Title given to the auto-created chapter inside a flat notebook.
+         * Anything sitting on a chapter with this title (and being the
+         * notebook's only chapter) is treated as the "default" parent
+         * for pages — the UI hides the chapter level entirely.
+         */
+        const val SENTINEL_DEFAULT_CHAPTER_TITLE = "Default"
     }
 
     /**

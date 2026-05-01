@@ -20,6 +20,9 @@ class ChapterRepository(
     fun observeForNotebook(notebookId: String): Flow<List<ChapterEntity>> =
         chapterDao.observeForNotebook(notebookId)
 
+    fun observeArchivedForNotebook(notebookId: String): Flow<List<ChapterEntity>> =
+        chapterDao.observeArchivedForNotebook(notebookId)
+
     fun observeById(id: String): Flow<ChapterEntity?> = chapterDao.observeById(id)
 
     suspend fun findById(id: String): ChapterEntity? = chapterDao.findById(id)

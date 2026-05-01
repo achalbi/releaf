@@ -8,6 +8,7 @@
 
 package app.releaf.mobile.data.notebook
 
+import androidx.room.RoomRawQuery
 import app.releaf.mobile.data.common.FtsQuery
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
@@ -52,12 +53,15 @@ class PageRepository(
      * Global FTS search across all live pages. Empty or all-noise queries
      * short-circuit to an empty flow so we don't pass a bad MATCH expression
      * into SQLite.
+     *
+     * `RoomRawQuery` is required by the DAO because `fts_page_notes` isn't
+     * a Room-managed entity; see `PageDao.searchAllActive` for the rationale.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     fun searchAll(rawQuery: String): Flow<List<PageEntity>> {
         val match = FtsQuery.build(rawQuery) ?: return flowOf(emptyList())
         return pageDao.observeAllActive()
-            .mapLatest { pageDao.searchAllActive(match) }
+            .mapLatest { pageDao.searchAllActive(buildSearchAllActiveQuery(match)) }
             .distinctUntilChanged()
     }
 
@@ -66,7 +70,7 @@ class PageRepository(
     fun searchAllWithContext(rawQuery: String): Flow<List<PageSearchHit>> {
         val match = FtsQuery.build(rawQuery) ?: return flowOf(emptyList())
         return pageDao.observeSearchScope()
-            .mapLatest { pageDao.searchAllActiveWithContext(match) }
+            .mapLatest { pageDao.searchAllActiveWithContext(buildSearchAllWithContextQuery(match)) }
             .distinctUntilChanged()
     }
 
@@ -75,9 +79,62 @@ class PageRepository(
     fun searchInNotebook(notebookId: String, rawQuery: String): Flow<List<PageEntity>> {
         val match = FtsQuery.build(rawQuery) ?: return flowOf(emptyList())
         return pageDao.observeForNotebook(notebookId)
-            .mapLatest { pageDao.searchInNotebook(notebookId, match) }
+            .mapLatest { pageDao.searchInNotebook(buildSearchInNotebookQuery(notebookId, match)) }
             .distinctUntilChanged()
     }
+
+    private fun buildSearchAllActiveQuery(match: String): RoomRawQuery =
+        RoomRawQuery(
+            sql = """
+                SELECT p.* FROM pages p
+                JOIN fts_page_notes fts ON fts.page_id = p.id
+                WHERE p.deleted_at IS NULL
+                  AND fts_page_notes MATCH ?
+                ORDER BY rank
+            """.trimIndent(),
+            onBindStatement = { it.bindText(1, match) },
+        )
+
+    private fun buildSearchAllWithContextQuery(match: String): RoomRawQuery =
+        RoomRawQuery(
+            sql = """
+                SELECT
+                    p.id AS id,
+                    p.title AS title,
+                    p.notes AS notes,
+                    p.updated_at AS updatedAt,
+                    n.title AS notebookTitle,
+                    c.title AS chapterTitle
+                FROM pages p
+                JOIN chapters c ON c.id = p.chapter_id
+                JOIN notebooks n ON n.id = c.notebook_id
+                JOIN fts_page_notes fts ON fts.page_id = p.id
+                WHERE p.deleted_at IS NULL
+                  AND c.deleted_at IS NULL
+                  AND n.deleted_at IS NULL
+                  AND fts_page_notes MATCH ?
+                ORDER BY rank
+            """.trimIndent(),
+            onBindStatement = { it.bindText(1, match) },
+        )
+
+    private fun buildSearchInNotebookQuery(notebookId: String, match: String): RoomRawQuery =
+        RoomRawQuery(
+            sql = """
+                SELECT p.* FROM pages p
+                JOIN chapters c ON c.id = p.chapter_id
+                JOIN fts_page_notes fts ON fts.page_id = p.id
+                WHERE c.notebook_id = ?
+                  AND p.deleted_at IS NULL
+                  AND c.deleted_at IS NULL
+                  AND fts_page_notes MATCH ?
+                ORDER BY rank
+            """.trimIndent(),
+            onBindStatement = {
+                it.bindText(1, notebookId)
+                it.bindText(2, match)
+            },
+        )
 
     suspend fun createPage(
         chapterId: String,

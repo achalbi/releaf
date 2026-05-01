@@ -25,11 +25,21 @@ package app.releaf.mobile.data.notepad
 object NotepadCategory {
 
     /**
+     * Default category applied to new entries when the caller doesn't
+     * pass an explicit one. Surfaces first in the picker so it reads
+     * as the canonical "this is a daily log page" affordance, and
+     * keeps Quick Capture pages sortable by category without the
+     * user manually tagging each one.
+     */
+    const val DailyLog: String = "Daily log"
+
+    /**
      * Predefined categories shown in the picker before any custom
      * chips. Order is the picker's display order; don't sort
      * alphabetically here.
      */
     val Predefined: List<String> = listOf(
+        DailyLog,
         "Home",
         "Work",
         "Personal",

@@ -8,6 +8,7 @@
 
 package app.releaf.mobile.data.notepad
 
+import androidx.room.RoomRawQuery
 import app.releaf.mobile.data.common.FtsQuery
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
@@ -42,6 +43,14 @@ class NotepadRepository(
     suspend fun findById(id: String): NotepadEntry? = dao.findById(id)
 
     /**
+     * Most recently updated active entry filed under [date] for
+     * [userId], or null if the day has no entries yet. Quick Capture
+     * uses this to land tile taps on today's latest notepad page.
+     */
+    suspend fun findLatestForDate(userId: String, date: String): NotepadEntry? =
+        dao.findLatestForDate(userId, date)
+
+    /**
      * Free-form search. The raw user query is sanitized into FTS5 MATCH
      * syntax here so the DAO stays simple and the UI layer doesn't leak
      * search-language details.
@@ -61,9 +70,25 @@ class NotepadRepository(
     fun search(userId: String, rawQuery: String): Flow<List<NotepadEntry>> {
         val match = FtsQuery.build(rawQuery) ?: return flowOf(emptyList())
         return dao.observeActive(userId)
-            .mapLatest { dao.searchActive(userId, match) }
+            .mapLatest { dao.searchActive(buildSearchActiveQuery(userId, match)) }
             .distinctUntilChanged()
     }
+
+    private fun buildSearchActiveQuery(userId: String, match: String): RoomRawQuery =
+        RoomRawQuery(
+            sql = """
+                SELECT n.* FROM notepad_entries n
+                JOIN fts_notepad_notes fts ON fts.notepad_entry_id = n.id
+                WHERE n.user_id = ?
+                  AND n.deleted_at IS NULL
+                  AND fts_notepad_notes MATCH ?
+                ORDER BY rank
+            """.trimIndent(),
+            onBindStatement = {
+                it.bindText(1, userId)
+                it.bindText(2, match)
+            },
+        )
 
     /**
      * Create a fresh entry. Caller supplies user + initial content; id,
@@ -117,13 +142,21 @@ class NotepadRepository(
             seededDescription = cleanedDescription
         }
 
+        // Default to the "Daily log" category when the caller didn't
+        // specify one — keeps Quick Capture pages and other un-tagged
+        // entries sortable by default without the user manually
+        // assigning a category. Callers that want an uncategorised
+        // row are vanishingly rare; if that need ever lands we'll
+        // grow an explicit nullable override on the signature.
+        val resolvedCategory = category?.trim()?.ifEmpty { null }
+            ?: NotepadCategory.DailyLog
         val entry = NotepadEntry(
             id            = newId,
             userId        = userId,
             entryDate     = entryDate,
             title         = seededTitle,
             description   = seededDescription,
-            category      = category?.trim()?.ifEmpty { null },
+            category      = resolvedCategory,
             notes         = notes,
             contacts      = contacts,
             locations     = locations,

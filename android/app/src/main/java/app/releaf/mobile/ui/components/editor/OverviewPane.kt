@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -174,6 +175,13 @@ fun OverviewPane(
      * switching tabs afterward is purely local.
      */
     initialCaptureMode: CaptureMode? = null,
+    /** When non-null, the matching section auto-fires its primary
+     *  action on first composition. Drives the Capture-page tile
+     *  flows: tapping a tile lands here on the section's tab AND
+     *  kicks off the section's action (scan, record, GPS, open
+     *  add-contact sheet, focus todo input, open notes sheet) so
+     *  the user doesn't take a second tap inside the section. */
+    autoLaunch: CaptureMode? = null,
     /** Optional right-aligned slot rendered on the same row as the
      *  "AT A GLANCE" eyebrow. Lets callers (the notepad editor) drop
      *  context-specific affordances (e.g. the category chip) into the
@@ -215,6 +223,14 @@ fun OverviewPane(
 
     var notesSheetOpen by rememberSaveable { mutableStateOf(false) }
 
+    // Auto-open the fullscreen NotesEditorSheet when the caller asked
+    // for a Notes auto-launch (Capture page's Notes tile). Keyed by
+    // Unit so it fires once per pane instance — config changes don't
+    // re-pop the sheet after the user dismisses it.
+    if (autoLaunch == CaptureMode.Notes) {
+        LaunchedEffect(Unit) { notesSheetOpen = true }
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         // --- CaptureTabBar ---
         CaptureTabBar(
@@ -237,7 +253,17 @@ fun OverviewPane(
                 verticalArrangement = Arrangement.spacedBy(AppSpacing.s4),
             ) {
                 when (mode) {
-                    CaptureMode.Overview -> OverviewTab(
+                    // Overview + Notes share this tab for now —
+                    // CaptureMode.Notes was added in CAPTURE_TAB_PLAN
+                    // Phase 4 to give the editor a "type a quick
+                    // note" landing tab; the dedicated text-first
+                    // surface (DAILY_CAPTURE_UX §2.3) is a separate
+                    // follow-up. Falling through to OverviewTab
+                    // means the Notes tab shows the same preview
+                    // until that lands, with `onEditNotes` already
+                    // wired to open the full editor sheet.
+                    CaptureMode.Overview,
+                    CaptureMode.Notes -> OverviewTab(
                         richTextState  = richTextState,
                         contacts       = contacts,
                         todos          = todos,
@@ -254,6 +280,7 @@ fun OverviewPane(
                         onRemove        = onRemoveAttachment,
                         onCombineToPdf  = onCombinePhotosToPdf,
                         onImportToNotes = onImportPhotoToNotes,
+                        autoLaunch      = autoLaunch == CaptureMode.Photos,
                     )
                     CaptureMode.Scans -> ScansSection(
                         scans    = attachments.filter { it.type == Attachment.TYPE_SCAN },
@@ -261,6 +288,7 @@ fun OverviewPane(
                         onRemove = onRemoveAttachment,
                         onImportPageToNotes = onImportPageToNotes,
                         onEditScan = onEditScan,
+                        autoLaunch = autoLaunch == CaptureMode.Scans,
                     )
                     CaptureMode.Voice -> VoiceSection(
                         notes                  = attachments.filter { it.type == Attachment.TYPE_VOICE },
@@ -268,6 +296,7 @@ fun OverviewPane(
                         onTranscribed          = onTranscribeVoiceNote,
                         onAddTranscriptToNotes = onAddVoiceNoteTranscriptToNotes,
                         onRemove               = onRemoveAttachment,
+                        autoLaunch             = autoLaunch == CaptureMode.Voice,
                     )
                     CaptureMode.Todo -> TodosSection(
                         todos            = todos,
@@ -276,18 +305,21 @@ fun OverviewPane(
                         onRemove         = onRemoveTodo,
                         onUpdatePriority = onUpdateTodoPriority,
                         onReorder        = onReorderTodos,
+                        autoLaunch       = autoLaunch == CaptureMode.Todo,
                     )
                     CaptureMode.Contacts -> ContactsSection(
-                        contacts = contacts,
-                        onAdd    = onAddContact,
-                        onEdit   = onEditContact,
-                        onRemove = onRemoveContact,
+                        contacts   = contacts,
+                        onAdd      = onAddContact,
+                        onEdit     = onEditContact,
+                        onRemove   = onRemoveContact,
+                        autoLaunch = autoLaunch == CaptureMode.Contacts,
                     )
                     CaptureMode.Location -> LocationSection(
                         locations      = locations,
                         onAdd          = onAddLocation,
                         onUpdateCoords = onUpdateLocationCoords,
                         onRemove       = onRemoveLocation,
+                        autoLaunch     = autoLaunch == CaptureMode.Location,
                     )
                 }
                 Spacer(Modifier.height(AppSpacing.s10))

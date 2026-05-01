@@ -27,6 +27,21 @@ interface ChapterDao {
     fun observeForNotebook(notebookId: String): Flow<List<ChapterEntity>>
 
     /**
+     * Archived (soft-deleted) chapters in a notebook, newest-archived
+     * first. Drives the "View archived chapters" sheet on the notebook
+     * detail — lets the user restore a chapter without having to dig
+     * through tombstones manually.
+     */
+    @Query(
+        """
+        SELECT * FROM chapters
+        WHERE notebook_id = :notebookId AND deleted_at IS NOT NULL
+        ORDER BY deleted_at DESC
+        """
+    )
+    fun observeArchivedForNotebook(notebookId: String): Flow<List<ChapterEntity>>
+
+    /**
      * All active chapters across every notebook, newest-edited first.
      * Powers the activity-feed roll-up — the home timeline + the
      * full-screen activity log read this to surface chapter-level
