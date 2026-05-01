@@ -73,3 +73,6 @@ project(":shared:sync").projectDir = file("shared/sync")
 
 include(":shared:drive")
 project(":shared:drive").projectDir = file("shared/drive")
+
+include(":shared:data")
+project(":shared:data").projectDir = file("shared/data")

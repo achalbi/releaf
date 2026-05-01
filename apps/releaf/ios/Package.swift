@@ -81,6 +81,12 @@ let package = Package(
                 // Releaf/Data/ReleafCoreReexports.swift so existing
                 // `import ReleafData` callers don't need to update.
                 .product(name: "ReleafCoreData",  package: "ReleafCore"),
+                // PR #4c — GoogleAuthClient, AuthStore, KeychainTokenStore,
+                // RealGoogleAuthClient, GoogleSignInBinding moved into
+                // ReleafCoreAuth. Same @_exported re-export pattern; the
+                // ~15 Releaf callers of AuthStore keep their
+                // `import ReleafData` unchanged.
+                .product(name: "ReleafCoreAuth",  package: "ReleafCore"),
             ],
             path: "Releaf/Data",
             resources: [

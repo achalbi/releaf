@@ -11,6 +11,9 @@
  * degenerates to nothing usable; callers should treat that as "empty result
  * set" rather than passing the empty string to SQLite (which would raise
  * a MATCH error).
+ *
+ * PR #4b moved this from `apps/releaf/android/.../data/common/FtsQuery.kt`
+ * into :shared:data. Behavior unchanged.
  */
 
 package app.releaf.mobile.data.common

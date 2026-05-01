@@ -18,6 +18,11 @@
  *   bits 66-127 : rand_b         (62 bits)
  *
  * Canonical string form: 8-4-4-4-12 hex chars, lowercase.
+ *
+ * PR #4b moved this from `apps/releaf/android/.../data/common/Uuidv7.kt`
+ * into :shared:data. Behavior unchanged. Existing
+ * `import app.releaf.mobile.data.common.Uuidv7` callers keep working —
+ * same Kotlin package, just lives in a different Gradle module now.
  */
 
 package app.releaf.mobile.data.common

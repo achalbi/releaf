@@ -28,16 +28,13 @@
 
 package app.releaf.mobile.data.sync
 
+import app.releaf.mobile.data.common.IsoClock  // PR #4b — was inline nowIsoUtc()
 import app.releaf.mobile.data.drive.DriveClient
 import app.releaf.mobile.data.drive.DriveError
 import app.releaf.mobile.data.drive.downloadBytesAtPath
 import app.releaf.mobile.data.drive.uploadJsonAtPath
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 
 // ─── Result types ──────────────────────────────────────────────────────
 
@@ -221,7 +218,7 @@ class SyncRepository(
         // Payloads are durable on Drive before the index points at them.
         // A failure mid-loop leaves the previous manifest authoritative;
         // nothing is permanently broken.
-        val nowIso = nowIsoUtc()
+        val nowIso = IsoClock.nowIso()
         val manifest = ManifestV2(
             appVersion = appVersion,
             deviceId = deviceId,
@@ -335,19 +332,6 @@ class SyncRepository(
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────
-
-    /**
-     * ISO-8601 UTC with millisecond precision, matching IsoClock.nowIso().
-     * Inlined here in PR #3c because IsoClock is still in the Releaf
-     * module (apps/releaf/android/.../data/common/IsoClock.kt). PR #4
-     * moves it into a shared :shared:data module and replaces this with
-     * `IsoClock.nowIso()`.
-     */
-    private fun nowIsoUtc(date: Date = Date()): String {
-        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
-        sdf.timeZone = TimeZone.getTimeZone("UTC")
-        return sdf.format(date)
-    }
 
     companion object {
         /**

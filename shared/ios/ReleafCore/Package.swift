@@ -57,9 +57,11 @@ let package = Package(
         .library(name: "ReleafCoreFeatures",     targets: ["ReleafCoreFeatures"]),
     ],
     dependencies: [
-        // No external deps in PR #3a — placeholders don't need them.
-        // PR #3b adds GRDB (for the sync data path), and PR #4 adds
-        // GoogleSignIn-iOS for ReleafCoreAuth.
+        // Google Sign-In SDK. Required by ReleafCoreAuth's
+        // RealGoogleAuthClient. Both Releaf and QuickInk consume the
+        // same SDK transitively through ReleafCoreAuth — keeps a
+        // single OAuth surface across the two apps.
+        .package(url: "https://github.com/google/GoogleSignIn-iOS.git", from: "7.1.0"),
     ],
     targets: [
         // ─── Foundation layer ───────────────────────────────────────
@@ -77,7 +79,10 @@ let package = Package(
         // ─── Auth / Drive / Sync ────────────────────────────────────
         .target(
             name: "ReleafCoreAuth",
-            dependencies: ["ReleafCoreData"],
+            dependencies: [
+                "ReleafCoreData",
+                .product(name: "GoogleSignIn", package: "GoogleSignIn-iOS"),
+            ],
             path: "Sources/ReleafCoreAuth"
         ),
         .target(

@@ -73,6 +73,7 @@ dependencies {
     // :shared:sync's SyncDataSource interface.
     implementation(project(":shared:sync"))
     implementation(project(":shared:drive"))
+    implementation(project(":shared:data"))  // PR #4b — Uuidv7, IsoClock, FtsQuery, AttachmentStorage
 
     // Compose
     implementation(platform(libs.compose.bom))

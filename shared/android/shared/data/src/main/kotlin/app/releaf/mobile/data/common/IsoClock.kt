@@ -9,6 +9,9 @@
  * the fallback when a row is inserted without the app-layer setting the
  * column. Keeping a single helper avoids subtle drift (some call sites
  * emitting nanos, others seconds, etc.).
+ *
+ * PR #4b moved this from `apps/releaf/android/.../data/common/IsoClock.kt`
+ * into :shared:data. Behavior unchanged.
  */
 
 package app.releaf.mobile.data.common

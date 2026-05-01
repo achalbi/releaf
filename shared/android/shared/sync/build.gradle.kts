@@ -55,6 +55,7 @@ kotlin {
 
 dependencies {
     implementation(project(":shared:drive"))
+    implementation(project(":shared:data"))  // PR #4b — IsoClock
 
     // Coroutines for suspend-based sync flow.
     implementation(libs.coroutines.android)
