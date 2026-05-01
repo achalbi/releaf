@@ -183,12 +183,17 @@ sed -i.bak \
 rm "$GENERATOR.bak"
 
 # check-tokens.sh:
+# NOTE: anchor the second design-system/scripts/... rewrite to "node "
+# prefix only — the GENERATOR= line is already handled by the
+# /-prefixed pattern above; without anchoring, the unanchored pattern
+# matches inside the ALREADY-rewritten "shared/design-system/scripts/..."
+# string and produces "shared/shared/design-system/...".
 sed -i.bak \
     -e 's|cd "$SCRIPT_DIR/../.."|cd "$SCRIPT_DIR/../../.."|' \
     -e 's|/design-system/scripts/generate-tokens.mjs|/shared/design-system/scripts/generate-tokens.mjs|' \
     -e 's|^IOS_REL="ios/Releaf|IOS_REL="apps/releaf/ios/Releaf|' \
     -e 's|^ANDROID_REL="android/app|ANDROID_REL="apps/releaf/android/app|' \
-    -e 's|design-system/scripts/generate-tokens.mjs|shared/design-system/scripts/generate-tokens.mjs|g' \
+    -e 's|node design-system/scripts/generate-tokens.mjs|node shared/design-system/scripts/generate-tokens.mjs|g' \
     "$CHECK_TOKENS"
 rm "$CHECK_TOKENS.bak"
 
