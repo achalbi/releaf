@@ -75,6 +75,7 @@ dependencies {
     implementation(project(":shared:drive"))
     implementation(project(":shared:data"))  // PR #4b — Uuidv7, IsoClock, FtsQuery, AttachmentStorage
     implementation(project(":shared:auth"))  // PR #4d — AuthStore, GoogleAuthClient, RealGoogleAuthClient
+    implementation(project(":shared:notes")) // PR #4f — NotepadEntry, NotepadDao, NotepadCategory
 
     // Compose
     implementation(platform(libs.compose.bom))

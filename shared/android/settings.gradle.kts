@@ -79,3 +79,6 @@ project(":shared:data").projectDir = file("shared/data")
 
 include(":shared:auth")
 project(":shared:auth").projectDir = file("shared/auth")
+
+include(":shared:notes")
+project(":shared:notes").projectDir = file("shared/notes")
