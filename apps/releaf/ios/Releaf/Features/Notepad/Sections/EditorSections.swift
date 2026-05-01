@@ -1626,7 +1626,11 @@ struct ScansSection: View {
         }
         .fullScreenCover(isPresented: $showScanner) {
             DocumentScannerView(
-                onComplete: { pdfURL, previewURL in
+                // Per-page URLs (third arg) are new in Phase 3 for
+                // QuickInk's OCR pipeline; Releaf's flow only
+                // needs the PDF + preview, so the third param
+                // gets ignored.
+                onComplete: { pdfURL, previewURL, _ in
                     onAdd(pdfURL.absoluteString, previewURL?.absoluteString)
                     showScanner = false
                 },

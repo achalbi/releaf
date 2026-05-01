@@ -24,6 +24,7 @@ public enum DrivePath {
     public static let kindNotepadEntry   = "notepad_entry"
     public static let kindDailyLog       = "daily_log"
     public static let kindCapture        = "capture"
+    public static let kindOcrResult      = "ocr_result"
     public static let kindTask           = "task"
     public static let kindTag            = "tag"
     public static let kindProject        = "project"
@@ -37,6 +38,8 @@ public enum DrivePath {
     public static let folderNotepadEntries  = "notepad_entries"
     public static let folderDailyLogs       = "daily_logs"
     public static let folderCaptures        = "captures"
+    /// QuickInk's OCR-result tree — `ocr/{captureId}/page-{N}.json`.
+    public static let folderOcr             = "ocr"
     public static let folderTasks           = "tasks"
     public static let folderTombstones      = "tombstones"
 
@@ -64,6 +67,16 @@ public enum DrivePath {
     }
 
     public static func task(id: String) -> String { "\(folderTasks)/\(id).json" }
+
+    /// QuickInk's per-capture file — `captures/{id}.json`.
+    public static func capture(id: String) -> String { "\(folderCaptures)/\(id).json" }
+
+    /// QuickInk's per-page OCR-result file —
+    /// `ocr/{captureId}/page-{pageIndex}.json`. Page index is 0-based,
+    /// matching `ocr_results.page_index`.
+    public static func ocrResult(captureId: String, pageIndex: Int) -> String {
+        "\(folderOcr)/\(captureId)/page-\(pageIndex).json"
+    }
 
     public static func tombstone(id: String) -> String { "\(folderTombstones)/\(id).json" }
 

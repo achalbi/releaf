@@ -31,6 +31,12 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.compose.compiler)
+    // Phase 3 — `OcrResult` / `OcrBlock` / `OcrBbox` get
+    // `@Serializable` so QuickInk can encode them into the
+    // `ocr_results.blocks_json` TEXT column without rolling its
+    // own JSON encoder. Non-breaking on consumers that don't
+    // serialize.
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -81,4 +87,10 @@ dependencies {
     // VNRecognizeTextRequest; the cross-platform contract lives in
     // OcrEngine.kt / OcrEngine.swift.
     implementation(libs.mlkit.text.recognition)
+
+    // kotlinx.serialization — runtime support for the @Serializable
+    // annotations on OcrResult / OcrBlock / OcrBbox. Consumers
+    // (QuickInk) call `Json.encodeToString(ocrResult.blocks)` to
+    // produce the `blocks_json` payload.
+    implementation(libs.kotlinx.serialization.json)
 }

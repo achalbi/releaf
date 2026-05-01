@@ -40,6 +40,7 @@ object DrivePath {
     const val KIND_NOTEPAD_ENTRY  = "notepad_entry"
     const val KIND_DAILY_LOG      = "daily_log"
     const val KIND_CAPTURE        = "capture"
+    const val KIND_OCR_RESULT     = "ocr_result"
     const val KIND_TASK           = "task"
     const val KIND_TAG            = "tag"
     const val KIND_PROJECT        = "project"
@@ -53,6 +54,8 @@ object DrivePath {
     const val FOLDER_NOTEPAD_ENTRIES = "notepad_entries"
     const val FOLDER_DAILY_LOGS      = "daily_logs"
     const val FOLDER_CAPTURES        = "captures"
+    /** QuickInk's OCR-result tree — `ocr/{captureId}/page-{N}.json`. */
+    const val FOLDER_OCR             = "ocr"
     const val FOLDER_TASKS           = "tasks"
     const val FOLDER_TOMBSTONES      = "tombstones"
 
@@ -80,6 +83,17 @@ object DrivePath {
     }
 
     fun task(id: String): String = "$FOLDER_TASKS/$id.json"
+
+    /** QuickInk's per-capture file — `captures/{id}.json`. */
+    fun capture(id: String): String = "$FOLDER_CAPTURES/$id.json"
+
+    /**
+     * QuickInk's per-page OCR-result file —
+     * `ocr/{captureId}/page-{pageIndex}.json`. Page index is 0-based,
+     * matching `ocr_results.page_index`.
+     */
+    fun ocrResult(captureId: String, pageIndex: Int): String =
+        "$FOLDER_OCR/$captureId/page-$pageIndex.json"
 
     fun tombstone(id: String): String = "$FOLDER_TOMBSTONES/$id.json"
 

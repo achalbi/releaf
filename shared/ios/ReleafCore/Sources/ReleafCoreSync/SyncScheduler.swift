@@ -6,15 +6,24 @@
  *   1. scheduleBackgroundRefresh — register a `BGAppRefreshTask` so iOS
  *      fires the sync pass opportunistically in the background. Must be
  *      paired with an Info.plist entry
- *      (`BGTaskSchedulerPermittedIdentifiers` → `app.releaf.mobile.sync`)
- *      and a matching `register(forTaskWithIdentifier:...)` call in the
- *      app's `AppDelegate` or `@main App` at launch.
+ *      (`BGTaskSchedulerPermittedIdentifiers` → the `backgroundTaskId`
+ *      this scheduler instance was constructed with) and a matching
+ *      `register(forTaskWithIdentifier:...)` call in the app's
+ *      `AppDelegate` or `@main App` at launch.
  *
  *   2. requestImmediate — fire-and-forget one-shot. Called from
  *      repositories right after a mutation so user edits show up on
  *      Drive without waiting for the next refresh window.
  *
  *   3. cancel — tear everything down on sign-out.
+ *
+ * Cross-app reuse: each consumer (Releaf, QuickInk) owns its own
+ * scheduler instance constructed with its own background task
+ * identifier. Releaf keeps `SyncScheduler.shared` (defaulting to
+ * `app.releaf.mobile.sync`); QuickInk's `QuickInkSyncEnvironment`
+ * builds a separate instance with `app.quickink.mobile.sync` so the
+ * two apps' BGTaskScheduler registrations don't collide. Per-app
+ * `.shared`-equivalents live in each app's environment file.
  *
  * BGTaskScheduler registration is only a stub for now — wiring it up
  * needs an Xcode app target with the BGTaskSchedulerPermittedIdentifiers
@@ -30,10 +39,23 @@ import BackgroundTasks
 
 public final class SyncScheduler: @unchecked Sendable {
 
-    /// Matches the value the app target must list under
-    /// `BGTaskSchedulerPermittedIdentifiers` in Info.plist.
-    public static let backgroundTaskId = "app.releaf.mobile.sync"
+    /// Default identifier used by Releaf's `SyncEnvironment.shared`
+    /// — the one-arg `init()` falls back to this so Releaf wiring
+    /// doesn't change. QuickInk passes its own identifier to the
+    /// two-arg `init(backgroundTaskId:)`.
+    public static let defaultBackgroundTaskId = "app.releaf.mobile.sync"
 
+    /// Matches the value this scheduler's app target must list
+    /// under `BGTaskSchedulerPermittedIdentifiers` in Info.plist.
+    /// Per-instance so Releaf and QuickInk can register distinct
+    /// identifiers from the same shared module.
+    public let backgroundTaskId: String
+
+    /// Releaf keeps `SyncScheduler.shared` for backwards compat;
+    /// callers that still reach for the singleton get the
+    /// Releaf-flavored instance. QuickInk builds its own through
+    /// `init(backgroundTaskId:)` and stashes it in
+    /// `QuickInkSyncEnvironment`.
     public static let shared = SyncScheduler()
 
     private let queue = DispatchQueue(label: "releaf.sync.scheduler")
@@ -44,7 +66,12 @@ public final class SyncScheduler: @unchecked Sendable {
     /// for previews + tests.
     public var runOnce: (() async -> Void)?
 
-    private init() {}
+    /// Public so per-app environments (Releaf's `SyncEnvironment`,
+    /// QuickInk's `QuickInkSyncEnvironment`) can construct their own
+    /// scheduler with the right background task identifier.
+    public init(backgroundTaskId: String = SyncScheduler.defaultBackgroundTaskId) {
+        self.backgroundTaskId = backgroundTaskId
+    }
 
     // MARK: - One-shot
 
@@ -69,7 +96,7 @@ public final class SyncScheduler: @unchecked Sendable {
     #if os(iOS)
     public func registerBackgroundRefreshHandler() {
         BGTaskScheduler.shared.register(
-            forTaskWithIdentifier: Self.backgroundTaskId,
+            forTaskWithIdentifier: backgroundTaskId,
             using: nil
         ) { [weak self] task in
             guard let appRefresh = task as? BGAppRefreshTask else {
@@ -92,7 +119,7 @@ public final class SyncScheduler: @unchecked Sendable {
     /// Ask iOS to fire a background refresh at its discretion, no
     /// sooner than ~15 minutes from now.
     public func scheduleBackgroundRefresh() {
-        let request = BGAppRefreshTaskRequest(identifier: Self.backgroundTaskId)
+        let request = BGAppRefreshTaskRequest(identifier: backgroundTaskId)
         request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
         try? BGTaskScheduler.shared.submit(request)
     }
@@ -102,7 +129,7 @@ public final class SyncScheduler: @unchecked Sendable {
             self?.currentTask?.cancel()
             self?.currentTask = nil
         }
-        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.backgroundTaskId)
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: backgroundTaskId)
     }
     #else
     public func registerBackgroundRefreshHandler() {}

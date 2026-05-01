@@ -43,6 +43,12 @@ let package = Package(
         // walks from `apps/quickink/ios/` up to repo root and into
         // `shared/ios/ReleafCore`. Matches Releaf's path math.
         .package(path: "../../../shared/ios/ReleafCore"),
+        // GRDB — local SQLite. ReleafCoreNotes already pulls this
+        // in transitively, but `import GRDB` from a QuickInk
+        // source file requires GRDB on this target's own dep list
+        // (SwiftPM doesn't re-export). Same version pin as Releaf
+        // and ReleafCore — SwiftPM dedupes through resolution.
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
     ],
     targets: [
         .target(
@@ -58,8 +64,22 @@ let package = Package(
                 .product(name: "ReleafCoreSync",         package: "ReleafCore"),
                 .product(name: "ReleafCoreNotes",        package: "ReleafCore"),
                 .product(name: "ReleafCoreScan",         package: "ReleafCore"),
+                // GRDB — used by QuickInkDatabase to open the
+                // SQLite file + run migrations.
+                .product(name: "GRDB", package: "GRDB.swift"),
             ],
             path: "QuickInk"
+        ),
+        // Phase 4 Slice 4.4 — cross-platform interop tests for the
+        // shared `notepad_entries` payload. Mirror of Releaf's
+        // `ReleafDataTests` target; QuickInk's first test surface,
+        // so we add it now alongside the test it hosts.
+        // Run via `xcodebuild test -scheme QuickInk` or from the
+        // Xcode Test Navigator once the app target hosts it.
+        .testTarget(
+            name: "QuickInkFeaturesTests",
+            dependencies: ["QuickInkFeatures"],
+            path: "Tests/QuickInkFeaturesTests"
         ),
     ]
 )

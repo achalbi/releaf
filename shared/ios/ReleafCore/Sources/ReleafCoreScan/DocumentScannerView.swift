@@ -29,16 +29,24 @@ import VisionKit
 
 public struct DocumentScannerView: UIViewControllerRepresentable {
 
-    /// Called with the stored PDF + first-page preview JPEG URLs on a
-    /// successful scan. Both file:// URLs in the app's attachments dir.
-    let onComplete: (_ pdfURL: URL, _ previewURL: URL?) -> Void
+    /// Called with the stored PDF + first-page preview JPEG URLs +
+    /// per-page JPEG URLs on a successful scan. All file:// URLs in
+    /// the app's attachments dir.
+    ///
+    /// `pageURLs` is one JPEG per scanned page (same byte sequence
+    /// as the first-page preview for page index 0; subsequent
+    /// indices are written individually). QuickInk's OCR pipeline
+    /// consumes these. Releaf's existing call sites can ignore the
+    /// param via `_` — the PDF + preview were the only outputs the
+    /// pre-Phase-3 flow needed.
+    let onComplete: (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void
 
     /// Called when the user dismisses the scanner or it fails for any
     /// reason. No bytes written in that case.
     let onCancel: () -> Void
 
     public init(
-        onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?) -> Void,
+        onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.onComplete = onComplete
@@ -58,11 +66,11 @@ public struct DocumentScannerView: UIViewControllerRepresentable {
     }
 
     public final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
-        private let onComplete: (_ pdfURL: URL, _ previewURL: URL?) -> Void
+        private let onComplete: (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void
         private let onCancel: () -> Void
 
         init(
-            onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?) -> Void,
+            onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void,
             onCancel: @escaping () -> Void
         ) {
             self.onComplete = onComplete
@@ -75,15 +83,18 @@ public struct DocumentScannerView: UIViewControllerRepresentable {
         ) {
             let pages = (0..<scan.pageCount).map { scan.imageOfPage(at: $0) }
 
-            // PDF is the canonical artifact. Preview JPEG is optional —
-            // it's just the first page rendered at reduced quality, used
-            // as the thumbnail in the ScansSection grid.
+            // PDF is the canonical artifact. Per-page JPEGs are
+            // written so QuickInk's OCR pipeline can address each
+            // page individually; first-page preview JPEG is just
+            // a back-compat alias for `pageURLs.first` so existing
+            // Releaf code paths that read `previewURL` keep working.
             let pdfURL = Self.writePDF(pages: pages)
-            let previewURL = pages.first.flatMap { Self.writeJPEG($0) }
+            let pageURLs = pages.compactMap { Self.writeJPEG($0) }
+            let previewURL = pageURLs.first
 
             controller.dismiss(animated: true) { [onComplete, onCancel] in
                 if let pdfURL {
-                    onComplete(pdfURL, previewURL)
+                    onComplete(pdfURL, previewURL, pageURLs)
                 } else {
                     onCancel()
                 }
@@ -143,11 +154,11 @@ public struct DocumentScannerView: UIViewControllerRepresentable {
 // view hierarchy still compiles; an actual scan obviously can't run
 // here.
 public struct DocumentScannerView: View {
-    let onComplete: (_ pdfURL: URL, _ previewURL: URL?) -> Void
+    let onComplete: (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void
     let onCancel: () -> Void
 
     public init(
-        onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?) -> Void,
+        onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.onComplete = onComplete

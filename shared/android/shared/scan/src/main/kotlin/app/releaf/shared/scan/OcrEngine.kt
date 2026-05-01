@@ -38,6 +38,7 @@
 package app.releaf.shared.scan
 
 import android.net.Uri
+import kotlinx.serialization.Serializable
 
 /**
  * Engine-agnostic OCR contract. Implementors are expected to be safe
@@ -71,6 +72,7 @@ interface OcrEngine {
  * searchable-PDF prototype's invisible text layer (and any future
  * "tap word to highlight" UX).
  */
+@Serializable
 data class OcrResult(
     /**
      * Full recognized text. Paragraph breaks preserved as `\n\n`;
@@ -121,6 +123,7 @@ data class OcrResult(
  * One recognized region — line, paragraph, or word — with its
  * bounding box and confidence.
  */
+@Serializable
 data class OcrBlock(
     /**
      * The recognized text, with line breaks within multi-line
@@ -171,10 +174,12 @@ data class OcrBlock(
      * on both platforms — matters for cross-platform readers of
      * `ocr_results.blocks_json` exported via Drive sync.
      */
+    @Serializable
     enum class Kind { Line, Paragraph, Word }
 }
 
 /** Normalized bounding box, 0..1 in image space, origin top-left. */
+@Serializable
 data class OcrBbox(
     val x: Double,
     val y: Double,
