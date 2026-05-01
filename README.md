@@ -15,18 +15,24 @@ them on the web, copy them elsewhere, or walk away at any time.
 releaf/
 ├── docs/
 │   ├── ARCHITECTURE.md      System design, MVVM, Drive-backed storage
-│   └── DRIVE_SCHEMA.md      Exact folder + JSON layout in Google Drive
-├── design-system/
-│   ├── design-tokens.json   Tokens Studio schema — colors / type / spacing
-│   └── DESIGN_SYSTEM.md     Human-readable design system doc
-├── ios/
-│   ├── Package.swift        SwiftPM manifest — previews render from here
-│   └── Releaf/              Swift sources (DesignSystem, Data, Features)
-└── android/
-    ├── settings.gradle.kts  Root + app project
-    ├── build.gradle.kts
-    ├── gradle/              Gradle wrapper + version catalog
-    └── app/                 Android app module
+│   ├── DRIVE_SCHEMA.md      Exact folder + JSON layout in Google Drive
+│   ├── QUICKINK_PROPOSAL.md QuickInk spinoff — repo restructure plan
+│   ├── QUICKINK_DESIGN.md   QuickInk engineering design (sync, OCR, CI)
+│   └── QUICKINK_BRAND_BRIEF.md   Brand brief for the QuickInk sibling app
+├── apps/
+│   └── releaf/
+│       ├── ios/
+│       │   ├── Package.swift  SwiftPM manifest — previews render from here
+│       │   └── Releaf/        Swift sources (DesignSystem, Data, Features)
+│       └── android/
+│           ├── settings.gradle.kts  Root + app project
+│           ├── build.gradle.kts
+│           ├── gradle/        Gradle wrapper + version catalog
+│           └── app/           Android app module
+└── shared/
+    └── design-system/
+        ├── design-tokens.json   Tokens Studio schema — colors / type / spacing
+        └── DESIGN_SYSTEM.md     Human-readable design system doc
 ```
 
 ## What's in this skeleton
@@ -54,7 +60,7 @@ These come in follow-up phases — the skeleton is sized so each is a bounded dr
 ### iOS
 
 ```bash
-cd ios
+cd apps/releaf/ios
 open Package.swift          # opens in Xcode; previews work immediately
 ```
 
@@ -67,13 +73,13 @@ Bundle ID: `app.releaf.mobile`.
 ### Android
 
 ```bash
-cd android
+cd apps/releaf/android
 ./gradlew :app:assembleDebug
 ```
 
 Application ID: `app.releaf.mobile`.
 
-Open `android/` in Android Studio — it imports as a Gradle project.
+Open `apps/releaf/android/` in Android Studio — it imports as a Gradle project.
 
 ## Philosophy
 

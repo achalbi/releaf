@@ -21,13 +21,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-GENERATOR="$REPO_ROOT/design-system/scripts/generate-tokens.mjs"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+GENERATOR="$REPO_ROOT/shared/shared/design-system/scripts/generate-tokens.mjs"
 
 # Platform target paths — must match the generator. When these diverge, both
 # files live in one place (the generator), so the fix is localized.
-IOS_REL="ios/Releaf/DesignSystem/AppColors.generated.swift"
-ANDROID_REL="android/app/src/main/java/app/releaf/mobile/ui/theme/AppColors.generated.kt"
+IOS_REL="apps/releaf/ios/Releaf/DesignSystem/AppColors.generated.swift"
+ANDROID_REL="apps/releaf/android/app/src/main/java/app/releaf/mobile/ui/theme/AppColors.generated.kt"
 
 # --- preflight ---
 
@@ -75,7 +75,7 @@ done
 if [[ "$drift" -ne 0 ]]; then
     echo "" >&2
     echo "check-tokens.sh: generated token output is out of date." >&2
-    echo "Run: node design-system/scripts/generate-tokens.mjs" >&2
+    echo "Run: node shared/design-system/scripts/generate-tokens.mjs" >&2
     echo "Then commit the regenerated AppColors.generated.* files." >&2
     exit 1
 fi
