@@ -13,7 +13,7 @@
  */
 
 import SwiftUI
-import ReleafCoreDesignSystem  // PR #4g — was ReleafDesignSystem before file moved here
+import ReleafDesignSystem
 
 struct NotesEditorSheet: View {
     @Binding var notes: String

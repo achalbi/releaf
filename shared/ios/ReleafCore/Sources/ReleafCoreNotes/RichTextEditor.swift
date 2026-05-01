@@ -37,12 +37,19 @@ import UIKit
 // MARK: - Controller
 
 @MainActor
-final class RichTextEditorController: ObservableObject {
+public final class RichTextEditorController: ObservableObject {
+
+    /// Public init so the app target (which owns the controller via
+    /// `@StateObject`) can instantiate it; the controller's mutator
+    /// surface stays internal because only the in-package format bar
+    /// drives those.
+    public init() {}
 
     /// Set by the RichTextEditor's `makeUIView`. We keep it weak so the
     /// controller can live longer than the view without preventing
-    /// deallocation.
-    weak var textView: UITextView?
+    /// deallocation. Public read so the editor screen can reach the
+    /// underlying UITextView (e.g. for keyboard-focus management).
+    public weak var textView: UITextView?
 
     @Published private(set) var isBoldActive: Bool = false
     @Published private(set) var isItalicActive: Bool = false
@@ -263,7 +270,9 @@ enum MarkdownBridge {
 // rest of the Notepad feature compiles and previews can render.
 
 @MainActor
-final class RichTextEditorController: ObservableObject {
+public final class RichTextEditorController: ObservableObject {
+    public init() {}
+
     @Published private(set) var isBoldActive: Bool = false
     @Published private(set) var isItalicActive: Bool = false
     @Published private(set) var isUnderlineActive: Bool = false

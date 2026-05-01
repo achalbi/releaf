@@ -17,7 +17,10 @@
 
 import Foundation
 import Combine
-import ReleafData
+// PR #4g: was `import ReleafData` while this file lived in Releaf's
+// tree. Now in ReleafCoreNotes — depends on ReleafCoreData directly
+// (which holds IsoClock/Uuidv7), not on the Releaf-side umbrella.
+import ReleafCoreData
 
 @MainActor
 public final class NotepadListViewModel: ObservableObject {

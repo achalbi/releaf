@@ -10,9 +10,9 @@
  */
 
 import SwiftUI
-import ReleafCoreDesignSystem  // PR #4g — was ReleafDesignSystem before file moved here
+import ReleafDesignSystem
 
-public enum EditorMode: String, Hashable, Sendable {
+enum EditorMode: String, Hashable {
     case edit, overview
 }
 

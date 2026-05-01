@@ -12,7 +12,7 @@
  */
 
 import SwiftUI
-import ReleafCoreDesignSystem  // PR #4g — was ReleafDesignSystem before file moved here
+import ReleafDesignSystem
 
 struct EntryDateRow: View {
     @Binding var entryDate: String

@@ -111,6 +111,10 @@ let package = Package(
             dependencies: [
                 "ReleafCoreData",
                 "ReleafCoreSync",
+                // PR #4g — editor views (RichTextFormatBar,
+                // EditorModeToggle, EntryDateRow, NotesEditorSheet)
+                // moved into this target use AppColors / AppText etc.
+                "ReleafCoreDesignSystem",
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
             path: "Sources/ReleafCoreNotes"

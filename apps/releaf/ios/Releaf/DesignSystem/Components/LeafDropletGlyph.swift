@@ -1,9 +1,12 @@
 /*
- * LeafDropletGlyph.swift
+ * LeafDropletGlyph.swift  (app target)
  *
- * The tiny leaf/droplet glyph that sits in the corner of every stat
- * tile in the page Overview. Drawn as a pointed-top oval — a stylized
- * leaf seen from the side, not a literal water droplet.
+ * The `LeafDropletGlyph` view itself moved into ReleafCoreDesignSystem
+ * during PR #4g so that PageHeaderControls (which uses it for the
+ * eyebrow) could be shared. What stays here is the CaptureMode-aware
+ * tint lookup — the design-system package has no business knowing
+ * about Releaf's 8 capture modes, so that mapping is layered on as an
+ * app-target extension.
  *
  * Color is keyed to the capture mode so the six tiles in the AT A
  * GLANCE grid read as a small palette rather than uniform decoration:
@@ -20,18 +23,11 @@
  */
 
 import SwiftUI
+import ReleafCoreDesignSystem
 
-public struct LeafDropletGlyph: View {
-    public let tint: Color
-    public let size: CGFloat
-
-    public init(tint: Color, size: CGFloat = 11) {
-        self.tint = tint
-        self.size = size
-    }
-
+extension LeafDropletGlyph {
     /// Lookup helper — call sites just pass the CaptureMode the tile
-    /// represents and get the right tint back. Kept on the glyph so a
+    /// represents and get the right tint back. Lives on the glyph so a
     /// single import covers the whole pattern.
     public static func tint(for mode: CaptureMode) -> Color {
         switch mode {
@@ -45,43 +41,4 @@ public struct LeafDropletGlyph: View {
         case .overview: return AppColors.themeGreenPrimary
         }
     }
-
-    public var body: some View {
-        // The droplet shape: a circle pinched to a point at the top.
-        // Built as a quadratic-curve path so it scales cleanly.
-        Canvas { context, canvasSize in
-            let w = canvasSize.width
-            let h = canvasSize.height
-            var path = Path()
-            path.move(to: CGPoint(x: w / 2, y: 0))
-            path.addQuadCurve(
-                to: CGPoint(x: w / 2, y: h),
-                control: CGPoint(x: w * 1.15, y: h * 0.45)
-            )
-            path.addQuadCurve(
-                to: CGPoint(x: w / 2, y: 0),
-                control: CGPoint(x: -w * 0.15, y: h * 0.45)
-            )
-            context.fill(path, with: .color(tint))
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
-    }
 }
-
-#if DEBUG
-struct LeafDropletGlyph_Previews: PreviewProvider {
-    static var previews: some View {
-        HStack(spacing: AppSpacing.s3) {
-            LeafDropletGlyph(tint: AppColors.green)
-            LeafDropletGlyph(tint: AppColors.themeGreenPrimary)
-            LeafDropletGlyph(tint: AppColors.themeGreenPrimary.opacity(0.55))
-            LeafDropletGlyph(tint: AppColors.info)
-            LeafDropletGlyph(tint: AppColors.coralDeep)
-            LeafDropletGlyph(tint: AppColors.warning)
-        }
-        .padding()
-        .background(AppColors.canvas)
-    }
-}
-#endif

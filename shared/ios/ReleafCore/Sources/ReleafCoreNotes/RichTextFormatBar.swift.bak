@@ -14,7 +14,7 @@
  */
 
 import SwiftUI
-import ReleafCoreDesignSystem  // PR #4g — was ReleafDesignSystem before file moved here
+import ReleafDesignSystem
 
 struct RichTextFormatBar: View {
     @ObservedObject var controller: RichTextEditorController

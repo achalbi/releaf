@@ -19,7 +19,9 @@
 
 import Foundation
 import Combine
-import ReleafData
+// PR #4g: was `import ReleafData`. Now in ReleafCoreNotes — depends
+// on ReleafCoreData directly.
+import ReleafCoreData
 
 @MainActor
 public final class NotepadEditorViewModel: ObservableObject {

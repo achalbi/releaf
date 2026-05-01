@@ -22,13 +22,35 @@
 
 import Foundation
 import GRDB
+import ReleafCoreData
+
+/// Seeds a freshly-created notepad entry's `title` + `description`
+/// pair when the caller leaves both blank. Shipped as a closure so the
+/// shared module stays free of app-specific catalogs (Releaf's
+/// AyurvedicCatalog, QuickInk's TBD equivalent, etc.). The shared
+/// default returns `(nil, nil)` — i.e. no auto-seed; Releaf wires its
+/// own seeder through the app-target convenience init.
+public typealias NotepadEntrySeed = (title: String?, description: String?)
+public typealias NotepadEntrySeeder = @Sendable (_ entryId: String) -> NotepadEntrySeed
 
 public final class NotepadRepository: @unchecked Sendable {
 
     private let dbQueue: DatabaseQueue
+    private let seeder: NotepadEntrySeeder
 
-    public init(database: ReleafDatabase = .shared) {
-        self.dbQueue = database.dbQueue
+    /// Designated initializer. Takes the shared GRDB `DatabaseQueue`
+    /// directly so the repository has no knowledge of the app-side
+    /// `ReleafDatabase` wrapper — that wrapper lives in the Releaf app
+    /// target and provides a convenience init via an extension. The
+    /// optional `seeder` lets the host app inject auto-fill logic for
+    /// new entries (Releaf uses Ayurvedic plant names); the default
+    /// no-op seeder leaves both fields blank.
+    public init(
+        dbQueue: DatabaseQueue,
+        seeder: @escaping NotepadEntrySeeder = { _ in (nil, nil) }
+    ) {
+        self.dbQueue = dbQueue
+        self.seeder = seeder
     }
 
     // MARK: - Observation
@@ -121,20 +143,23 @@ public final class NotepadRepository: @unchecked Sendable {
         let now = IsoClock.nowIso()
         let newId = Uuidv7.generate()
 
-        // Auto-seed title + description as a *pair* from the same
-        // Ayurvedic plant — title gets the Sanskrit/Hindi name, the
-        // description gets "(commonName), epithet, Used for usedFor".
-        // We only seed when BOTH fields were left blank: mixing an
-        // authored title with an unrelated auto-description (or
-        // vice-versa) would produce internally mismatched rows.
+        // Auto-seed title + description as a *pair* from the injected
+        // `seeder` (Releaf wires this to Ayurvedic plants — title gets
+        // the Sanskrit/Hindi name, description gets
+        // "(commonName), epithet · usedFor"). We only seed when BOTH
+        // fields were left blank: mixing an authored title with an
+        // unrelated auto-description (or vice-versa) would produce
+        // internally mismatched rows. The default no-op seeder simply
+        // returns `(nil, nil)`, so an unwired host (or QuickInk) just
+        // creates entries with whatever the caller passed.
         let cleanedTitle       = title?.cleanedTitle
         let cleanedDescription = description?.cleanedTitle
         let seededTitle: String?
         let seededDescription: String?
         if cleanedTitle == nil && cleanedDescription == nil {
-            let plant = AyurvedicCatalog.plant(forId: newId)
-            seededTitle       = plant.name
-            seededDescription = AyurvedicCatalog.description(for: plant)
+            let seed = seeder(newId)
+            seededTitle       = seed.title
+            seededDescription = seed.description
         } else {
             seededTitle       = cleanedTitle
             seededDescription = cleanedDescription
