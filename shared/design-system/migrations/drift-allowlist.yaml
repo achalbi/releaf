@@ -1,0 +1,33 @@
+# drift-allowlist.yaml
+#
+# Intentional, justified divergence between the Releaf and QuickInk
+# SQLite schemas on tables that exist in both.
+#
+# Format:
+#
+#   <table_name>:
+#     releaf_only_columns:
+#       - col_a
+#       - col_b
+#     quickink_only_columns:
+#       - col_c
+#     reason: "Free-form text explaining why these columns can't be shared.
+#              Reviewed by code-owners on the PR that adds the entry."
+#
+# All three keys are optional EXCEPT `reason:`. An entry without a reason
+# fails the drift check — keeps allowlisting honest.
+#
+# Code-owner approval is required to add or modify entries here. The point
+# of the allowlist is to make divergence visible and intentional, not to
+# silence the check.
+#
+# Tables that exist in only one schema (e.g. notebooks/chapters/pages
+# in Releaf, ocr_results in QuickInk) DO NOT need allowlist entries —
+# they're trivially app-specific.
+#
+# ─────────────────────────────────────────────────────────────────────
+# Active entries
+# ─────────────────────────────────────────────────────────────────────
+
+# (none yet — both schemas align fully on the tables they share. This
+#  file exists so the first divergence has somewhere to land.)

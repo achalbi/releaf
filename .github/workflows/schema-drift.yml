@@ -1,0 +1,49 @@
+# schema-drift.yml
+#
+# Runs the schema-drift check on every PR and push that touches the
+# shared SQLite migrations or the check script itself. Hard-blocks
+# merge if drift is detected on shared tables.
+#
+# What "drift" means: tables that exist in BOTH the Releaf and QuickInk
+# v1_initial.sql migrations must have identical columns (in order),
+# constraints, and indexes — except where allow-listed in
+# shared/design-system/migrations/drift-allowlist.yaml.
+#
+# Tables that only exist in one schema are app-specific and don't
+# trigger the check.
+#
+# Safe to land before QuickInk's schema exists — the script no-ops
+# (exit 0) when shared/design-system/migrations/quickink/v1_initial.sql
+# is absent.
+
+name: schema-drift
+
+on:
+  pull_request:
+    paths:
+      - 'shared/design-system/migrations/**'
+      - 'shared/design-system/scripts/check-schema-drift.mjs'
+      - '.github/workflows/schema-drift.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'shared/design-system/migrations/**'
+      - 'shared/design-system/scripts/check-schema-drift.mjs'
+      - '.github/workflows/schema-drift.yml'
+
+jobs:
+  check:
+    name: Check shared-table column drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run schema-drift check
+        run: node shared/design-system/scripts/check-schema-drift.mjs
