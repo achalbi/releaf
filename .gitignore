@@ -38,6 +38,14 @@ captures/
 # Google services JSON — do not commit real creds
 google-services.json
 
+# Android release-signing secrets — keystores + props files. The
+# keystore.properties pattern is read by app/build.gradle.kts to
+# wire the upload key for AAB signing; never check in either the
+# props file or the keystore itself.
+*.jks
+*.keystore
+keystore.properties
+
 # ─── Tooling ────────────────────────────────────────────
 .vscode/
 .fleet/

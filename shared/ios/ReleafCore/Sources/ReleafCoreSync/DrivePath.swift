@@ -30,6 +30,8 @@ public enum DrivePath {
     public static let kindProject        = "project"
     public static let kindReferenceLink  = "reference_link"
     public static let kindPageTemplate   = "page_template"
+    /// QuickInk-only — user-configurable category for `captures.category`.
+    public static let kindCategory       = "category"
 
     // ---- folder names ----
     public static let folderNotebooks       = "notebooks"
@@ -40,6 +42,8 @@ public enum DrivePath {
     public static let folderCaptures        = "captures"
     /// QuickInk's OCR-result tree — `ocr/{captureId}/page-{N}.json`.
     public static let folderOcr             = "ocr"
+    /// QuickInk's category list — `categories/{id}.json`.
+    public static let folderCategories      = "categories"
     public static let folderTasks           = "tasks"
     public static let folderTombstones      = "tombstones"
 
@@ -71,12 +75,45 @@ public enum DrivePath {
     /// QuickInk's per-capture file — `captures/{id}.json`.
     public static func capture(id: String) -> String { "\(folderCaptures)/\(id).json" }
 
+    /// Date-bucketed QuickInk capture path — `{yyyy}/{mm}/{dd}/{id}.json`,
+    /// relative to the data source's drive root. Used by the
+    /// QuickInk sync data source so scans land under year/month/day
+    /// folders inside `Thoughtbasics/QuickInk/...`. The bucket is
+    /// derived from the first 10 chars of `createdAt` (ISO-8601 date
+    /// prefix); a malformed timestamp falls back to `0000/00/00`
+    /// rather than crashing.
+    public static func quickInkCapture(createdAt: String, id: String) -> String {
+        "\(quickInkDateBucket(from: createdAt))/\(id).json"
+    }
+
     /// QuickInk's per-page OCR-result file —
     /// `ocr/{captureId}/page-{pageIndex}.json`. Page index is 0-based,
     /// matching `ocr_results.page_index`.
     public static func ocrResult(captureId: String, pageIndex: Int) -> String {
         "\(folderOcr)/\(captureId)/page-\(pageIndex).json"
     }
+
+    /// Date-bucketed QuickInk OCR-result path —
+    /// `{yyyy}/{mm}/{dd}/{captureId}/page-{N}.json`. Co-locates the
+    /// OCR rows with their parent capture's day folder.
+    public static func quickInkOcrResult(createdAt: String, captureId: String, pageIndex: Int) -> String {
+        "\(quickInkDateBucket(from: createdAt))/\(captureId)/page-\(pageIndex).json"
+    }
+
+    /// `YYYY/MM/DD` triplet derived from an ISO-8601 timestamp's
+    /// date prefix. Falls back to `0000/00/00` for malformed input
+    /// so the sync layer never crashes on a single bad row — those
+    /// rows just pile up in the same legacy bucket.
+    private static func quickInkDateBucket(from iso: String) -> String {
+        guard iso.count >= 10 else { return "0000/00/00" }
+        let yyyy = String(iso.prefix(4))
+        let mm   = String(iso.dropFirst(5).prefix(2))
+        let dd   = String(iso.dropFirst(8).prefix(2))
+        return "\(yyyy)/\(mm)/\(dd)"
+    }
+
+    /// QuickInk's per-category file — `categories/{id}.json`.
+    public static func category(id: String) -> String { "\(folderCategories)/\(id).json" }
 
     public static func tombstone(id: String) -> String { "\(folderTombstones)/\(id).json" }
 

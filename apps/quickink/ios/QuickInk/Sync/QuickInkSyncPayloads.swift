@@ -240,24 +240,91 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
     public let pdfUri: String
     public let previewUri: String?
     public let pageCount: Int
+    /// Pre-tagged category name (Phase 5 — Categories). `nil` for
+    /// captures created before v2 / by clients that haven't picked
+    /// a category. Round-trips through Drive verbatim — captures
+    /// don't FK into categories, so a deleted category name still
+    /// reads back unchanged.
+    public let category: String?
+    /// Drive file id of the per-row PDF binary upload (Phase 6 —
+    /// Drive backup). Restore-on-fresh-device fetches the binary
+    /// from this id and rewrites `pdf_uri` to point at the new
+    /// local copy. `nil` when the writer hadn't uploaded the PDF
+    /// yet.
+    public let pdfDriveFileId: String?
+    /// Drive file id of the per-row preview-JPEG binary upload.
+    /// Same restore semantics as [pdfDriveFileId].
+    public let previewDriveFileId: String?
     public let createdAt: String
     public let updatedAt: String
 
+    public init(
+        id: String,
+        userId: String,
+        title: String?,
+        pdfUri: String,
+        previewUri: String?,
+        pageCount: Int,
+        category: String?,
+        pdfDriveFileId: String? = nil,
+        previewDriveFileId: String? = nil,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id = id
+        self.userId = userId
+        self.title = title
+        self.pdfUri = pdfUri
+        self.previewUri = previewUri
+        self.pageCount = pageCount
+        self.category = category
+        self.pdfDriveFileId = pdfDriveFileId
+        self.previewDriveFileId = previewDriveFileId
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
     public enum CodingKeys: String, CodingKey {
         case id
-        case userId     = "user_id"
+        case userId             = "user_id"
         case title
-        case pdfUri     = "pdf_uri"
-        case previewUri = "preview_uri"
-        case pageCount  = "page_count"
-        case createdAt  = "created_at"
-        case updatedAt  = "updated_at"
+        case pdfUri             = "pdf_uri"
+        case previewUri         = "preview_uri"
+        case pageCount          = "page_count"
+        case category
+        case pdfDriveFileId     = "pdf_drive_file_id"
+        case previewDriveFileId = "preview_drive_file_id"
+        case createdAt          = "created_at"
+        case updatedAt          = "updated_at"
     }
 }
 
 // =====================================================================
 // ocr_results — QuickInk-only. One row per scanned page.
 // =====================================================================
+
+// =====================================================================
+// categories — QuickInk-only. User-configurable list, synced so
+// the same chip set follows the user across devices.
+// =====================================================================
+
+public struct CategoryPayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let userId: String
+    public let name: String
+    public let position: Int
+    public let createdAt: String
+    public let updatedAt: String
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case userId    = "user_id"
+        case name
+        case position
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
 
 public struct OcrResultPayloadV2: Codable, Equatable, Sendable {
     public let id: String

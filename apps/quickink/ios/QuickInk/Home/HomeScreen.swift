@@ -41,9 +41,18 @@ struct HomeScreen: View {
     var onOpenSearch: (() -> Void)? = nil
     var onTapCategory: ((String) -> Void)? = nil
     var onOpenEntry: ((String) -> Void)? = nil
+    /// Tap-on-thumbnail handler for the Recent rail. Routes to the
+    /// scan-detail viewer (preview image + on-demand OCR text).
+    /// `nil` keeps the rail rendering but disables navigation —
+    /// useful for previews / tests.
+    var onOpenScan: ((String) -> Void)? = nil
+    /// Resolved display name shown on the greeting. Already
+    /// reconciled at the parent (Settings override > Google session
+    /// displayName > nil). `nil` falls through to "QuickInk".
+    var displayName: String? = nil
 
     @State private var showQuickCapture = false
-    @StateObject private var notesVM: NotepadListViewModel
+    @StateObject private var capturesVM: CaptureListViewModel
     @ObservedObject private var syncState = SyncStateStore.shared
 
     init(
@@ -53,7 +62,9 @@ struct HomeScreen: View {
         onOpenSettings: @escaping () -> Void,
         onOpenSearch: (() -> Void)? = nil,
         onTapCategory: ((String) -> Void)? = nil,
-        onOpenEntry: ((String) -> Void)? = nil
+        onOpenEntry: ((String) -> Void)? = nil,
+        onOpenScan: ((String) -> Void)? = nil,
+        displayName: String? = nil
     ) {
         self.controller = controller
         self.userId = userId
@@ -62,38 +73,55 @@ struct HomeScreen: View {
         self.onOpenSearch = onOpenSearch
         self.onTapCategory = onTapCategory
         self.onOpenEntry = onOpenEntry
+        self.onOpenScan = onOpenScan
+        self.displayName = displayName
 
-        let repository = NotepadRepository(dbQueue: QuickInkDatabase.shared.dbQueue)
-        _notesVM = StateObject(
-            wrappedValue: NotepadListViewModel(
-                repository: repository,
-                userId:     userId
-            )
+        _capturesVM = StateObject(
+            wrappedValue: CaptureListViewModel(userId: userId)
         )
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
-                    headerBlock
-                    searchBar
+        // `.safeAreaInset(edge: .bottom)` hosts the bar (mirror of
+        // Releaf's MainShell pattern). Critical: a `ZStack(alignment:
+        // .bottom)` here would give the bar the ZStack's full height,
+        // and the Zap FAB's `.frame(maxHeight: .infinity)` would then
+        // stretch the HStack to fill the entire screen vertically —
+        // bar reads as a full-screen card with the cells floating in
+        // its visual center. safeAreaInset bounds the bar to its
+        // intrinsic content height (~80pt incl. the lifted FAB) and
+        // automatically extends the ScrollView's safe area so content
+        // never sits behind the bar — no manual `Spacer` needed.
+        ScrollView {
+            VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
+                headerBlock
+                recentRail
+                categoryGrid
+                // Sync pill at the bottom of the scroll content —
+                // scrolls with the page, no floating over content,
+                // centered horizontally. Extra top padding so it
+                // doesn't sit too close to the category grid above.
+                HStack {
+                    Spacer()
                     syncStatusPill
-                    recentRail
-                    categoryGrid
-                    Spacer(minLength: 100) // Reserve space behind nav bar.
+                    Spacer()
                 }
-                .padding(.horizontal, QuickInkSpacing.s5)
-                .padding(.top, QuickInkSpacing.s4)
+                .padding(.top, QuickInkSpacing.s3)
             }
-            .background(QuickInkColors.bg.ignoresSafeArea())
-
-            bottomNavBar
+            .padding(.horizontal, QuickInkSpacing.s5)
+            .padding(.top, QuickInkSpacing.s4)
+            // Extra breathing room at the bottom so the sync pill
+            // doesn't bump into the nav bar's safe-area inset when
+            // scrolled to the end.
+            .padding(.bottom, QuickInkSpacing.s5)
         }
         .background(QuickInkColors.bg.ignoresSafeArea())
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            bottomNavBar
+        }
         .task {
-            // Open the FTS observation stream backing `entries`.
-            notesVM.start()
+            // Open the live captures observation backing the rail.
+            capturesVM.start()
         }
         .fullScreenCover(isPresented: $showQuickCapture) {
             // Mode-picker surface (the dark, branded scan UI).
@@ -112,19 +140,67 @@ struct HomeScreen: View {
 
     @ViewBuilder
     private var headerBlock: some View {
-        VStack(alignment: .leading, spacing: QuickInkSpacing.s1) {
-            Text(greeting)
-                .font(QuickInkText.body)
-                .foregroundStyle(QuickInkColors.muted)
-            Text("Quickink")
-                .font(QuickInkText.display)
-                .foregroundStyle(QuickInkColors.ink)
+        HStack(alignment: .top, spacing: QuickInkSpacing.s3) {
+            VStack(alignment: .leading, spacing: QuickInkSpacing.s1) {
+                Text(greeting)
+                    .font(QuickInkText.body)
+                    .foregroundStyle(QuickInkColors.muted)
+                // Replaces the static "Quickink" title — shows the
+                // user's name (Settings override > Google session
+                // displayName > "QuickInk" fallback). Editable on
+                // Settings → Account so the user can pick what the
+                // app calls them without changing their Google
+                // profile name.
+                Text(resolvedDisplayName)
+                    .font(QuickInkText.display)
+                    .foregroundStyle(QuickInkColors.ink)
+                    .lineLimit(1)
+            }
+            Spacer()
+            profileIconButton
         }
     }
 
+    /// "Settings override > Google session > QuickInk fallback".
+    private var resolvedDisplayName: String {
+        let trimmed = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "QuickInk" : trimmed
+    }
+
+    /// Top-right profile pill — coral disc with the user's initial
+    /// (when we have a name) or a SF Symbol person icon. Tap routes
+    /// to Settings, mirroring how Google's consumer apps use the
+    /// avatar as the entry to account/preferences.
+    @ViewBuilder
+    private var profileIconButton: some View {
+        Button(action: onOpenSettings) {
+            ZStack {
+                Circle()
+                    .fill(QuickInkColors.accentSoft)
+                    .frame(width: 44, height: 44)
+                if let initial = displayNameInitial {
+                    Text(initial)
+                        .font(QuickInkText.heading)
+                        .foregroundStyle(QuickInkColors.accent)
+                } else {
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(QuickInkColors.accent)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Profile and settings")
+    }
+
+    private var displayNameInitial: String? {
+        let trimmed = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let first = trimmed.first else { return nil }
+        return String(first).uppercased()
+    }
+
     /// Time-of-day-aware greeting. Pure UI — independent of any
-    /// signed-in display name (we don't promise a "Hi Achal" because
-    /// onboarding doesn't capture a friendly name).
+    /// signed-in display name.
     private var greeting: String {
         let hour = Calendar.current.component(.hour, from: Date())
         switch hour {
@@ -132,28 +208,6 @@ struct HomeScreen: View {
         case 12..<18: return "Good afternoon"
         default:      return "Good evening"
         }
-    }
-
-    // MARK: - Search bar
-
-    @ViewBuilder
-    private var searchBar: some View {
-        Button(action: { onOpenSearch?() }) {
-            HStack(spacing: QuickInkSpacing.s2) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(QuickInkColors.muted)
-                Text("Search notes & OCR text")
-                    .font(QuickInkText.body)
-                    .foregroundStyle(QuickInkColors.muted)
-                Spacer()
-            }
-            .padding(.horizontal, QuickInkSpacing.s4)
-            .padding(.vertical, QuickInkSpacing.s3)
-            .background(QuickInkColors.borderSoft)
-            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Sync status pill
@@ -171,7 +225,34 @@ struct HomeScreen: View {
         if syncState.state.pendingCount > 0 {
             return .pending(count: syncState.state.pendingCount)
         }
-        return .synced(lastSyncAt: syncState.state.lastFullSyncAt)
+        return .synced(lastSyncAt: relativeSyncTimestamp(syncState.state.lastFullSyncAt))
+    }
+
+    /// Turn an ISO-8601 timestamp into "moments ago" / "5m ago" /
+    /// "2h ago" / "yesterday" / "3d ago" / "Apr 28". Nil / unparsable
+    /// returns nil so the pill renders the "Not yet synced" branch
+    /// instead of a misleading bare date.
+    private func relativeSyncTimestamp(_ iso: String?) -> String? {
+        guard let iso else { return nil }
+        let isoFractional = ISO8601DateFormatter()
+        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoBasic = ISO8601DateFormatter()
+        isoBasic.formatOptions = [.withInternetDateTime]
+        guard let date = isoFractional.date(from: iso) ?? isoBasic.date(from: iso) else {
+            return nil
+        }
+        let seconds = max(0, Int(Date().timeIntervalSince(date)))
+        switch seconds {
+        case 0..<60:           return "moments ago"
+        case 60..<3600:        return "\(seconds / 60)m ago"
+        case 3600..<86_400:    return "\(seconds / 3600)h ago"
+        case 86_400..<172_800: return "yesterday"
+        case 172_800..<604_800:return "\(seconds / 86_400)d ago"
+        default:
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMM d"
+            return formatter.string(from: date)
+        }
     }
 
     // MARK: - Recent rail
@@ -193,14 +274,14 @@ struct HomeScreen: View {
                 .buttonStyle(.plain)
             }
 
-            if notesVM.entries.isEmpty {
+            if capturesVM.captures.isEmpty {
                 emptyRecentRail
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: QuickInkSpacing.s3) {
-                        ForEach(Array(notesVM.entries.prefix(8).enumerated()), id: \.element.id) { index, entry in
-                            RecentNoteThumb(entry: entry, seed: index)
-                                .onTapGesture { onOpenEntry?(entry.id) }
+                        ForEach(capturesVM.captures.prefix(12)) { capture in
+                            RecentScanThumb(capture: capture)
+                                .onTapGesture { onOpenScan?(capture.id) }
                         }
                     }
                     .padding(.vertical, 2) // Avoid shadow clipping at top.
@@ -259,98 +340,285 @@ struct HomeScreen: View {
                 spacing: QuickInkSpacing.s3
             ) {
                 ForEach(Self.categories, id: \.name) { cat in
-                    CategoryTile(name: cat.name, icon: cat.icon, count: 0)
-                        .onTapGesture { onTapCategory?(cat.name) }
+                    let stats = categoryStats(for: cat.name)
+                    CategoryTile(
+                        name:         cat.name,
+                        icon:         cat.icon,
+                        count:        stats.count,
+                        recencyBadge: stats.recencyBadge
+                    )
+                    .onTapGesture { onTapCategory?(cat.name) }
                 }
             }
         }
     }
 
+    /// Per-category aggregate computed from the captures we already
+    /// have loaded (`capturesVM.captures`, capped at 30 by the VM).
+    /// Returns the match count plus an optional "Today" / "Yesterday"
+    /// recency hint for the tile's top-right badge.
+    ///
+    /// At 30 captures the count saturates — fine for the home tile
+    /// (UI still reads "30 scans"); a dedicated `SELECT COUNT(*)
+    /// GROUP BY category` query would lift that ceiling but isn't
+    /// worth the extra observation while the typical user library
+    /// stays well under 30.
+    private func categoryStats(for name: String) -> (count: Int, recencyBadge: String?) {
+        let needle = name.lowercased()
+        let matching = capturesVM.captures.filter {
+            ($0.category ?? "").lowercased() == needle
+        }
+        let count = matching.count
+
+        // ISO8601 createdAt → calendar bucket. Two parsers because
+        // older rows may not carry fractional seconds.
+        let isoFractional = ISO8601DateFormatter()
+        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoBasic = ISO8601DateFormatter()
+        isoBasic.formatOptions = [.withInternetDateTime]
+        let calendar = Calendar.current
+
+        var hasToday = false
+        var hasYesterday = false
+        for capture in matching {
+            let date = isoFractional.date(from: capture.createdAt)
+                ?? isoBasic.date(from: capture.createdAt)
+            guard let date else { continue }
+            if calendar.isDateInToday(date) {
+                hasToday = true
+                break // Today wins; no point scanning further.
+            }
+            if calendar.isDateInYesterday(date) {
+                hasYesterday = true
+            }
+        }
+        let badge: String? = hasToday ? "Today" : (hasYesterday ? "Yesterday" : nil)
+        return (count, badge)
+    }
+
     // MARK: - Bottom nav with Zap FAB
 
+    /// Floating glass-morphism bottom nav — frosted card hovering over
+    /// the canvas with the Zap FAB lifted in the center. Mirror of
+    /// Releaf's `BottomNav` layout, restyled with a `.regularMaterial`
+    /// backdrop blur + warm cream tint so the editorial palette reads
+    /// through the frost. The bar's silhouette is identical on Android
+    /// (HomeScreen.kt → BottomNavBar) — Compose has no built-in
+    /// backdrop blur without a third-party lib, so the Android side
+    /// approximates with a translucent surface + bright top-edge.
     @ViewBuilder
     private var bottomNavBar: some View {
-        HStack(spacing: 0) {
-            navIcon(systemName: "house.fill", label: "Home", active: true) { /* current screen */ }
-            navIcon(systemName: "list.bullet.rectangle", label: "Library", active: false, action: onOpenNotes)
+        let cardShape = RoundedRectangle(cornerRadius: QuickInkRadius.lg, style: .continuous)
+
+        // ZStack(.top) so the FAB renders as a SIBLING of the bar,
+        // AFTER the bar's `.overlay(border)` modifier. With the FAB
+        // inside the HStack, the bar's `.overlay` was painting the
+        // hairline border on top of the lifted FAB at the
+        // intersection along the bar's top edge — visually the FAB
+        // had a stripe through it. Lifting the FAB out of the HStack
+        // and rendering it as the ZStack's second (top) child fixes
+        // the z-order without changing the FAB's visual position.
+        ZStack(alignment: .top) {
+            HStack(spacing: 0) {
+                navIcon(systemName: "house.fill", label: "Home", active: true) { /* current screen */ }
+                    .frame(maxWidth: .infinity)
+                navIconAsset(assetName: "IconNote", label: "Library", active: false, action: onOpenNotes)
+                    .frame(maxWidth: .infinity)
+                // Placeholder for the FAB column — keeps the HStack at
+                // 5 equal cells so the flanking cells stay symmetric.
+                // Fixed `.frame(height: 64)` so the bar's intrinsic
+                // height doesn't collapse when the actual FAB moves
+                // out of this slot.
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 64)
+                navIconAsset(assetName: "IconSearch", label: "Search", active: false) { onOpenSearch?() }
+                    .frame(maxWidth: .infinity)
+                navIcon(systemName: "gearshape", label: "Settings", active: false, action: onOpenSettings)
+                    .frame(maxWidth: .infinity)
+            }
+            .padding(.horizontal, QuickInkSpacing.s1)
+            .padding(.vertical, QuickInkSpacing.s1)
+            // Canonical SwiftUI material API: `.background(material,
+            // in: shape)` clips the backdrop blur to the rounded rect
+            // cleanly. Stacking matters — first `.background` sits
+            // closest to the content, subsequent calls go further
+            // behind. Tint at 0.32 lets the material's gray show
+            // through warmed by QuickInk cream.
+            .background(QuickInkColors.surface.opacity(0.32), in: cardShape)
+            .background(.thinMaterial, in: cardShape)
+            .overlay(
+                // Top-bright glass border — frosted-glass cue.
+                cardShape.strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.55),
+                            QuickInkColors.border.opacity(0.40),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
+            )
+            // Shadows lightened from the previous pass — border halo
+            // 0.32→0.18 (radius 5→4) and card lift 0.20→0.12. The bar
+            // now reads as a softer hovering glass tile instead of a
+            // chip with a heavy stroke.
+            .shadow(color: QuickInkColors.ink.opacity(0.18), radius: 4, x: 0, y: 2)
+            .shadow(color: QuickInkColors.ink.opacity(0.12), radius: 18, x: 0, y: 10)
+
+            // FAB sibling — drawn AFTER the bar in the ZStack so it
+            // sits on top of the border + glass surface.
             zapFab
-            navIcon(systemName: "magnifyingglass", label: "Search", active: false) { onOpenSearch?() }
-            navIcon(systemName: "gearshape", label: "Settings", active: false, action: onOpenSettings)
         }
         .padding(.horizontal, QuickInkSpacing.s4)
-        .padding(.top, QuickInkSpacing.s3)
-        .padding(.bottom, QuickInkSpacing.s5)
-        .background(
-            QuickInkColors.surface
-                .clipShape(
-                    UnevenRoundedRectangle(
-                        cornerRadii: .init(
-                            topLeading: QuickInkRadius.lg,
-                            bottomLeading: 0,
-                            bottomTrailing: 0,
-                            topTrailing: QuickInkRadius.lg
-                        ),
-                        style: .continuous
-                    )
-                )
-                .shadow(color: QuickInkColors.ink.opacity(0.06), radius: 12, x: 0, y: -4)
-        )
+        .padding(.bottom, QuickInkSpacing.s3)
     }
 
     @ViewBuilder
     private func navIcon(systemName: String, label: String, active: Bool, action: @escaping () -> Void) -> some View {
+        // Active cells render the icon + label inside an accentSoft
+        // rounded-rect pill, tinted with the accent. Inactive cells
+        // render flat in `ink` — same posture as Releaf's BottomNav
+        // RegularTab.
+        let tint = active ? QuickInkColors.accent : QuickInkColors.ink
+        let bg   = active ? QuickInkColors.accentSoft : Color.clear
         Button(action: action) {
             VStack(spacing: 2) {
                 Image(systemName: systemName)
-                    .font(.system(size: 18, weight: active ? .semibold : .regular))
-                    .foregroundStyle(active ? QuickInkColors.accent : QuickInkColors.muted)
+                    .font(.system(size: 20))
+                    .foregroundStyle(tint)
                 Text(label)
                     .font(QuickInkText.caption)
-                    .foregroundStyle(active ? QuickInkColors.accent : QuickInkColors.muted)
+                    .foregroundStyle(tint)
             }
+            .padding(.horizontal, QuickInkSpacing.s2)
+            .padding(.vertical, QuickInkSpacing.s2)
+            .background(
+                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                    .fill(bg)
+            )
             .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(Text(label))
+        .accessibilityAddTraits(active ? [.isSelected] : [])
     }
 
-    /// The signature ⚡ Zap FAB — center of the nav bar, raised.
+    /// Asset-backed nav icon — same shape as `navIcon` but renders a
+    /// QuickInk vector asset (template-rendered, tinted via
+    /// foregroundStyle). Used for the Library / Search tabs which
+    /// have brand-specific icons in `Assets.xcassets`.
     @ViewBuilder
-    private var zapFab: some View {
-        Button(action: { showQuickCapture = true }) {
-            Image(systemName: "bolt.fill")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(QuickInkColors.textOnAccent)
-                .frame(width: 56, height: 56)
-                .background(
-                    Circle().fill(QuickInkColors.accent)
-                )
-                .shadow(color: QuickInkColors.accent.opacity(0.4), radius: 10, x: 0, y: 4)
+    private func navIconAsset(assetName: String, label: String, active: Bool, action: @escaping () -> Void) -> some View {
+        let tint = active ? QuickInkColors.accent : QuickInkColors.ink
+        let bg   = active ? QuickInkColors.accentSoft : Color.clear
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(assetName, bundle: .module)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
+                    .foregroundStyle(tint)
+                Text(label)
+                    .font(QuickInkText.caption)
+                    .foregroundStyle(tint)
+            }
+            .padding(.horizontal, QuickInkSpacing.s2)
+            .padding(.vertical, QuickInkSpacing.s2)
+            .background(
+                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                    .fill(bg)
+            )
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
-        .offset(y: -16) // Raised above the bar.
+        .accessibilityLabel(Text(label))
+        .accessibilityAddTraits(active ? [.isSelected] : [])
+    }
+
+    /// The signature ⚡ Zap FAB — coral disc with a top→bottom
+    /// gradient, lifted ~16pt above the card's top edge so it reads
+    /// as a hovering brand mark. Counterpart to Releaf's BrandTab.
+    ///
+    /// Three layers, bottom up:
+    ///   1. Canvas ring — bg-coloured disc 8pt larger than the FAB
+    ///      with its own drop shadow. Punches through the frosted
+    ///      glass bar so the lifted brand mark sits on a canvas moat
+    ///      instead of looking pasted onto the bar surface.
+    ///   2. Coral gradient disc with its accent halo shadow.
+    ///   3. Bolt glyph.
+    @ViewBuilder
+    private var zapFab: some View {
+        let gradient = LinearGradient(
+            colors: [QuickInkColors.accent, QuickInkColors.accentDeep],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        Button(action: { showQuickCapture = true }) {
+            ZStack {
+                // Canvas ring shadow lightened (0.38→0.22, radius
+                // 14→10, y 7→5) — moat still reads but no longer
+                // dominates the bar's softer glass.
+                Circle()
+                    .fill(QuickInkColors.bg)
+                    .frame(width: 64, height: 64)
+                    .shadow(color: QuickInkColors.ink.opacity(0.22), radius: 10, x: 0, y: 5)
+                // Gradient FAB disc + its own coral halo. Halo
+                // lightened 0.55→0.38, radius 22→16, y 12→8. Shadow
+                // attached HERE rather than on the outer ZStack so it
+                // doesn't bleed through the canvas ring below.
+                Circle()
+                    .fill(gradient)
+                    .frame(width: 56, height: 56)
+                    .shadow(color: QuickInkColors.accent.opacity(0.38), radius: 16, x: 0, y: 8)
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(QuickInkColors.textOnAccent)
+            }
+            .offset(y: -16)
+            // No `.frame(maxWidth: .infinity)` here — the FAB now
+            // lives as a ZStack sibling of the bar (not an HStack
+            // cell), so it should size intrinsically to its 64pt
+            // canvas ring. ZStack(alignment: .top) centers it
+            // horizontally and aligns its top to the bar's top edge.
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Quick capture")
     }
 }
 
-// MARK: - Component: RecentNoteThumb
+// MARK: - Component: RecentScanThumb
 
-/// Small note thumbnail used in the home "Recent" horizontal rail.
-/// Paper-toned background with lined-paper rule lines and a brief
-/// handwritten preview (Caveat). Tap routes to the editor — wired
-/// up at QuickInkRoot in a follow-up.
-struct RecentNoteThumb: View {
-    let entry: NotepadEntry
-    let seed: Int
+/// Recent-scan thumbnail used in the home rail. Renders the actual
+/// preview JPEG produced by the document scanner (`captures.preview_uri`).
+/// Falls back to a paper-toned placeholder while the file loads or
+/// when the URI is missing — same look as the empty-state card.
+/// Tapping opens `ScanDetailScreen` (full preview + OCR-on-demand).
+struct RecentScanThumb: View {
+    let capture: CaptureSummary
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .topLeading) {
-                QuickInkLinedPaper(tone: QuickInkColors.paper(for: seed.hashValue), lineSpacing: 12, lineOpacity: 0.14)
-                Text(handwrittenPreview)
-                    .font(QuickInkFont.handwritten(16))
-                    .foregroundStyle(QuickInkColors.ink.opacity(0.75))
-                    .padding(QuickInkSpacing.s3)
-                    .lineLimit(4)
+                if let image = loadedPreview {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    placeholder
+                }
+
+                // Page-count chip — only when the capture has more
+                // than one page, so single-page scans stay clean.
+                if capture.pageCount > 1 {
+                    pageCountChip
+                        .padding(QuickInkSpacing.s2)
+                }
             }
             .frame(width: 140, height: 120)
             .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
@@ -364,7 +632,7 @@ struct RecentNoteThumb: View {
                     .font(QuickInkText.label)
                     .foregroundStyle(QuickInkColors.ink)
                     .lineLimit(1)
-                Text(entry.entryDate)
+                Text(displayDate)
                     .font(QuickInkText.caption)
                     .foregroundStyle(QuickInkColors.muted)
             }
@@ -373,16 +641,57 @@ struct RecentNoteThumb: View {
         .frame(width: 140)
     }
 
-    private var displayTitle: String {
-        if let t = entry.title, !t.isEmpty { return t }
-        return "Untitled"
+    /// Resolves `previewUri` (a `file://` URL string written by the
+    /// scanner) to a `UIImage`. Returns `nil` if the file is missing
+    /// or the URI is empty — the placeholder kicks in.
+    private var loadedPreview: UIImage? {
+        guard let raw = capture.previewUri, !raw.isEmpty else { return nil }
+        let path: String? = {
+            if let url = URL(string: raw), url.isFileURL { return url.path }
+            return raw
+        }()
+        guard let path else { return nil }
+        return UIImage(contentsOfFile: path)
     }
 
-    private var handwrittenPreview: String {
-        if !entry.notes.isEmpty {
-            return String(entry.notes.prefix(50))
+    @ViewBuilder
+    private var placeholder: some View {
+        ZStack {
+            QuickInkColors.paper2
+            Image(systemName: "doc.text.fill")
+                .font(.system(size: 28))
+                .foregroundStyle(QuickInkColors.muted)
         }
-        return displayTitle
+    }
+
+    @ViewBuilder
+    private var pageCountChip: some View {
+        Text("\(capture.pageCount) pages")
+            .font(QuickInkText.caption)
+            .foregroundStyle(QuickInkColors.textOnAccent)
+            .padding(.horizontal, QuickInkSpacing.s2)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
+                    .fill(QuickInkColors.ink.opacity(0.55))
+            )
+    }
+
+    private var displayTitle: String {
+        capture.category ?? "Scan"
+    }
+
+    /// Friendly date — `2026-05-02T14:30:00.000Z` → `May 2`. Falls
+    /// back to the raw timestamp's date prefix if parsing fails.
+    private var displayDate: String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: capture.createdAt) {
+            let f = DateFormatter()
+            f.dateFormat = "MMM d"
+            return f.string(from: date)
+        }
+        return String(capture.createdAt.prefix(10))
     }
 }
 
@@ -392,23 +701,47 @@ struct CategoryTile: View {
     let name: String
     let icon: String
     let count: Int
+    /// "Today" / "Yesterday" when the category has at least one
+    /// capture within that window; nil otherwise. Drawn as a small
+    /// accent chip in the tile's top-right.
+    let recencyBadge: String?
+
+    init(name: String, icon: String, count: Int, recencyBadge: String? = nil) {
+        self.name = name
+        self.icon = icon
+        self.count = count
+        self.recencyBadge = recencyBadge
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
-            ZStack {
-                Circle()
-                    .fill(QuickInkColors.accentSoft)
-                    .frame(width: 36, height: 36)
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(QuickInkColors.accent)
+            HStack(alignment: .top) {
+                ZStack {
+                    Circle()
+                        .fill(QuickInkColors.accentSoft)
+                        .frame(width: 36, height: 36)
+                    Image(systemName: icon)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(QuickInkColors.accent)
+                }
+                Spacer()
+                if let badge = recencyBadge {
+                    Text(badge.uppercased())
+                        .font(QuickInkText.caption)
+                        .tracking(QuickInkLetterSpacing.eyebrow)
+                        .foregroundStyle(QuickInkColors.accent)
+                        .padding(.horizontal, QuickInkSpacing.s2)
+                        .padding(.vertical, 4)
+                        .background(QuickInkColors.accentSoft)
+                        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous))
+                }
             }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
                     .font(QuickInkText.heading)
                     .foregroundStyle(QuickInkColors.ink)
-                Text(count == 0 ? "No notes yet" : "\(count) note\(count == 1 ? "" : "s")")
+                Text(countLabel)
                     .font(QuickInkText.caption)
                     .foregroundStyle(QuickInkColors.muted)
             }
@@ -421,5 +754,10 @@ struct CategoryTile: View {
             RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
                 .stroke(QuickInkColors.border, lineWidth: 1)
         )
+    }
+
+    private var countLabel: String {
+        if count == 0 { return "No scans yet" }
+        return "\(count) scan\(count == 1 ? "" : "s")"
     }
 }

@@ -17,6 +17,17 @@ struct SettingsScreen: View {
 
     let onBack: () -> Void
     @ObservedObject var authStore: AuthStore
+    let onManageCategories: (() -> Void)?
+
+    init(
+        onBack: @escaping () -> Void,
+        authStore: AuthStore,
+        onManageCategories: (() -> Void)? = nil
+    ) {
+        self.onBack = onBack
+        self.authStore = authStore
+        self.onManageCategories = onManageCategories
+    }
 
     @StateObject private var settings = SettingsState()
 
@@ -26,6 +37,16 @@ struct SettingsScreen: View {
     /// fresh `lastFullSyncAt` (via `SyncRepository.recordSuccess`).
     @ObservedObject private var syncState = SyncStateStore.shared
 
+    /// Transient "Syncing now…" feedback while a manual Sync now /
+    /// Restore from Drive pass is in flight. The underlying
+    /// `requestImmediate` / `requestRestore` are fire-and-forget,
+    /// and `SyncRepository.sync` swallows errors via `try?`, so
+    /// without this the user has no visible signal that anything
+    /// happened on tap. Held for ~2.5s — long enough to read,
+    /// short enough that a slow sync still resolves to the real
+    /// state via the published `syncState` re-render.
+    @State private var isSyncingFlash = false
+
     var body: some View {
         VStack(spacing: 0) {
             topBar
@@ -34,6 +55,14 @@ struct SettingsScreen: View {
                 VStack(spacing: QuickInkSpacing.s5) {
                     section(title: "Account") {
                         accountRow
+                        // Display-name override row — what the Home
+                        // greeting shows. Empty value falls back to
+                        // the Google session's name (see
+                        // `MainShell.resolvedDisplayName`). Bound
+                        // directly to the published settings field so
+                        // edits land in UserDefaults on every keystroke
+                        // — no Save button needed.
+                        displayNameRow
                     }
 
                     section(title: "Sync") {
@@ -80,6 +109,13 @@ struct SettingsScreen: View {
                         // the scheduler's `runOnce` closure
                         // short-circuits without a session.
                         syncControlsRow
+                        driveFolderRow
+                    }
+
+                    if let onManageCategories {
+                        section(title: "Categories") {
+                            categoriesRow(onTap: onManageCategories)
+                        }
                     }
 
                     section(title: "Experimental") {
@@ -89,6 +125,10 @@ struct SettingsScreen: View {
                             isOn:  $settings.searchablePdfExportEnabled
                         )
                     }
+
+                    section(title: "About") {
+                        aboutRow
+                    }
                 }
                 .padding(.horizontal, QuickInkSpacing.s5)
                 .padding(.top, QuickInkSpacing.s4)
@@ -97,6 +137,34 @@ struct SettingsScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(QuickInkColors.bg.ignoresSafeArea())
+    }
+
+    /// Inline TextField for the user's preferred display name. Edits
+    /// flow into `SettingsState.customDisplayName`, which `MainShell`
+    /// observes for the Home greeting. Placeholder cues the fallback
+    /// behaviour — empty here means the Google session's name wins.
+    @ViewBuilder
+    private var displayNameRow: some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s1) {
+            Text("Display name")
+                .font(QuickInkText.body)
+                .foregroundStyle(QuickInkColors.ink)
+            TextField(
+                "Use Google account name",
+                text: $settings.customDisplayName
+            )
+            .font(QuickInkText.body)
+            .foregroundStyle(QuickInkColors.ink)
+            .textFieldStyle(.plain)
+            .padding(.horizontal, QuickInkSpacing.s3)
+            .padding(.vertical, QuickInkSpacing.s2)
+            .background(QuickInkColors.borderSoft)
+            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+            Text("Shown on the home screen. Leave blank to use your Google account name.")
+                .font(QuickInkText.meta)
+                .foregroundStyle(QuickInkColors.inkSoft)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Account section content — shows the signed-in display
@@ -186,6 +254,32 @@ struct SettingsScreen: View {
         }
     }
 
+    /// Row that pushes the Manage Categories screen. Mirrors the
+    /// "Sync now / Restore" row's flat-button pattern but with a
+    /// disclosure chevron to signal navigation.
+    @ViewBuilder
+    private func categoriesRow(onTap: @escaping () -> Void) -> some View {
+        Button(action: onTap) {
+            HStack {
+                VStack(alignment: .leading, spacing: QuickInkSpacing.s1) {
+                    Text("Manage categories")
+                        .font(QuickInkText.body)
+                        .foregroundStyle(QuickInkColors.ink)
+                    Text("Add, rename, or remove the tags shown when you scan.")
+                        .font(QuickInkText.meta)
+                        .foregroundStyle(QuickInkColors.inkSoft)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(QuickInkColors.muted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private func toggleRow(label: String, help: String, isOn: Binding<Bool>) -> some View {
         VStack(alignment: .leading, spacing: QuickInkSpacing.s1) {
@@ -208,20 +302,70 @@ struct SettingsScreen: View {
     /// and will retry on the next tick.
     @ViewBuilder
     private var lastSyncedRow: some View {
-        HStack {
+        HStack(spacing: QuickInkSpacing.s2) {
             Text("Last synced")
                 .font(QuickInkText.body)
                 .foregroundStyle(QuickInkColors.ink)
             Spacer()
-            if syncState.state.pendingCount > 0 {
-                Text("\(syncState.state.pendingCount) pending")
+            if isSyncingFlash {
+                // Inline progress + label so the user sees something
+                // happen the instant they tap Sync now / Restore.
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(QuickInkColors.accent)
+                Text("Syncing now…")
                     .font(QuickInkText.meta)
                     .foregroundStyle(QuickInkColors.accent)
-                    .padding(.trailing, QuickInkSpacing.s2)
+            } else {
+                if syncState.state.pendingCount > 0 {
+                    Text("\(syncState.state.pendingCount) pending")
+                        .font(QuickInkText.meta)
+                        .foregroundStyle(QuickInkColors.accent)
+                        .padding(.trailing, QuickInkSpacing.s2)
+                }
+                Text(relativeSyncTimestamp(syncState.state.lastFullSyncAt) ?? "Never")
+                    .font(QuickInkText.meta)
+                    .foregroundStyle(QuickInkColors.inkSoft)
             }
-            Text(syncState.state.lastFullSyncAt ?? "Never")
-                .font(QuickInkText.meta)
-                .foregroundStyle(QuickInkColors.inkSoft)
+        }
+    }
+
+    /// Optimistic "we're working on it" flash — kicks immediately on
+    /// every Sync now / Restore tap so the user gets feedback even
+    /// when the underlying pass throws silently (e.g. stub Drive
+    /// client without a configured GIDClientID). Auto-reverts so the
+    /// real `syncState`-driven row takes back over.
+    private func flashSyncing() {
+        isSyncingFlash = true
+        Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            isSyncingFlash = false
+        }
+    }
+
+    /// Mirror of HomeScreen's relative-time formatter: "moments ago"
+    /// / "5m ago" / "2h ago" / "yesterday" / "3d ago" / "Apr 28".
+    /// Nil / unparsable returns nil so the row falls back to "Never".
+    private func relativeSyncTimestamp(_ iso: String?) -> String? {
+        guard let iso else { return nil }
+        let isoFractional = ISO8601DateFormatter()
+        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoBasic = ISO8601DateFormatter()
+        isoBasic.formatOptions = [.withInternetDateTime]
+        guard let date = isoFractional.date(from: iso) ?? isoBasic.date(from: iso) else {
+            return nil
+        }
+        let seconds = max(0, Int(Date().timeIntervalSince(date)))
+        switch seconds {
+        case 0..<60:           return "moments ago"
+        case 60..<3600:        return "\(seconds / 60)m ago"
+        case 3600..<86_400:    return "\(seconds / 3600)h ago"
+        case 86_400..<172_800: return "yesterday"
+        case 172_800..<604_800:return "\(seconds / 86_400)d ago"
+        default:
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMM d"
+            return formatter.string(from: date)
         }
     }
 
@@ -243,16 +387,82 @@ struct SettingsScreen: View {
             AppButton("Sync now", variant: .secondary) {
                 if isSignedIn {
                     QuickInkSyncEnvironment.shared.scheduler.requestImmediate()
+                    flashSyncing()
                 }
             }
             .frame(maxWidth: .infinity)
 
             AppButton("Restore from Drive", variant: .secondary) {
+                // Distinct path from "Sync now" — kicks the
+                // pull-only restore worker via SyncRepository.restore
+                // instead of the bidirectional sync. Same
+                // signed-in gate.
                 if isSignedIn {
-                    QuickInkSyncEnvironment.shared.scheduler.requestImmediate()
+                    QuickInkSyncEnvironment.shared.requestRestore()
+                    flashSyncing()
                 }
             }
             .frame(maxWidth: .infinity)
+        }
+    }
+
+    /// Drive folder link — opens the user's Drive in the system
+    /// browser at a search query for "QuickInk", which lands them on
+    /// the per-app folder created by `SyncRepository.ensureRootFolder`.
+    /// Direct deep-link to a specific folder ID would need the ID
+    /// from the manifest; until that round-trips through the UI,
+    /// the search-based link is a low-friction stand-in.
+    @ViewBuilder
+    private var driveFolderRow: some View {
+        Link(destination: driveFolderURL) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Open Drive folder")
+                        .font(QuickInkText.body)
+                        .foregroundStyle(QuickInkColors.ink)
+                    Text("Browse your scans + notes on Google Drive.")
+                        .font(QuickInkText.meta)
+                        .foregroundStyle(QuickInkColors.inkSoft)
+                }
+                Spacer()
+                Image(systemName: "arrow.up.right.square")
+                    .font(.system(size: 16))
+                    .foregroundStyle(QuickInkColors.accent)
+            }
+            .contentShape(Rectangle())
+        }
+    }
+
+    private var driveFolderURL: URL {
+        // `?q=QuickInk` lands the user on a Drive search results
+        // page filtered to items with "QuickInk" in the name —
+        // close enough to "open the QuickInk folder" without
+        // needing the actual folder ID. Authenticated users see
+        // their own folder; signed-out users see Drive's sign-in
+        // page first.
+        URL(string: "https://drive.google.com/drive/u/0/search?q=QuickInk")!
+    }
+
+    /// "About" section content — app version + a brief blurb. The
+    /// version string comes from `CFBundleShortVersionString` so it
+    /// reflects whatever the Xcode app target's MARKETING_VERSION is.
+    @ViewBuilder
+    private var aboutRow: some View {
+        let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "—"
+        let build   = (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "—"
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s1) {
+            HStack {
+                Text("App version")
+                    .font(QuickInkText.body)
+                    .foregroundStyle(QuickInkColors.ink)
+                Spacer()
+                Text("\(version) (\(build))")
+                    .font(QuickInkText.meta)
+                    .foregroundStyle(QuickInkColors.inkSoft)
+            }
+            Text("QuickInk by Releaf — scans go to your own Google Drive folder. Nothing leaves the device until you sign in and turn Drive backup on.")
+                .font(QuickInkText.meta)
+                .foregroundStyle(QuickInkColors.inkSoft)
         }
     }
 }

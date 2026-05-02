@@ -44,13 +44,13 @@ struct SignInScreen: View {
             Spacer(minLength: QuickInkSpacing.s4)
 
             VStack(spacing: QuickInkSpacing.s3) {
-                Text("Sign in to back up")
+                Text("Synced privately\nto your Drive")
                     .font(QuickInkText.display)
                     .foregroundStyle(QuickInkColors.ink)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, QuickInkSpacing.s5)
 
-                Text("Sign in with Google so your notes sync to Drive and follow you across devices.")
+                Text("Your notebook follows you across devices. We never see your pages.")
                     .font(QuickInkText.body)
                     .foregroundStyle(QuickInkColors.inkSoft)
                     .multilineTextAlignment(.center)
@@ -166,7 +166,15 @@ struct SignInScreen: View {
     }
 
     private func signIn() {
-        Task { await authStore.signIn() }
+        // `GoogleSignInBinding.signInAction(authStore:)` returns a
+        // closure that runs the real Google flow when `GIDClientID`
+        // is present in Info.plist (production / dev builds with the
+        // Xcode app target) and falls through to `authStore.signIn()`
+        // (stub) otherwise — keeping SwiftUI previews and CLI builds
+        // working. This swap is the third of the three steps listed
+        // in `QuickInkAuthBinding.swift`'s file header.
+        let action = GoogleSignInBinding.signInAction(authStore: authStore)
+        Task { await action() }
     }
 
     private func commitChoices() {

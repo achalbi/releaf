@@ -87,6 +87,7 @@ class QuickInkSyncWorker(
             notepadDao    = app.database.notepadDao(),
             captureDao    = app.database.captureDao(),
             ocrResultDao  = app.database.ocrResultDao(),
+            categoryDao   = app.database.categoryDao(),
             userId        = session.userId,
         )
         val syncRepository = SyncRepository(
@@ -101,6 +102,24 @@ class QuickInkSyncWorker(
                 deviceId    = DeviceIdentity.get(applicationContext),
                 accessToken = session.accessToken,
             )
+
+            // Phase 6 — back up the actual scanned PDFs + preview
+            // JPEGs to Drive. Runs after the JSON metadata pass so
+            // the capture rows already exist in the manifest; a
+            // fresh-device restore can then find binaries via the
+            // row's `pdf_drive_file_id`. Best-effort: per-row errors
+            // are swallowed inside the helper. Mirror
+            // `QuickInkBinarySync.swift` on iOS.
+            val binarySync = QuickInkBinarySync(
+                context     = applicationContext,
+                captureDao  = app.database.captureDao(),
+                driveClient = app.driveClient,
+            )
+            runCatching {
+                binarySync.uploadAndCascade(session.userId, session.accessToken)
+                binarySync.restorePending(session.userId, session.accessToken)
+            }
+
             when {
                 // Remote manifest is on a newer major schema than
                 // this build. Retrying won't help — the user has to

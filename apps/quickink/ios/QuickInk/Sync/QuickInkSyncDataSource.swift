@@ -48,7 +48,13 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
 
     // MARK: - Identity
 
-    public let driveRootFolderName: String = "QuickInk"
+    /// Drive folder layout — `Thoughtbasics/QuickInk/...`. The
+    /// "Thoughtbasics" wrapper holds future thoughts-line apps; the
+    /// QuickInk subfolder is the actual app root that all paths
+    /// (captures, ocr_results, notepad_entries, categories,
+    /// tombstones, manifest.json) hang off. `ensureRootFolder` on
+    /// the Drive client walks slash-separated paths automatically.
+    public let driveRootFolderName: String = "Thoughtbasics/QuickInk"
 
     public let schemaVersion: SchemaVersion = .current
 
@@ -87,20 +93,50 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 """, arguments: [userId])
             for row in captureRows where (row["deleted_at"] as String?) == nil {
                 let payload = CapturePayloadV2(
-                    id:         row["id"],
-                    userId:     row["user_id"],
-                    title:      row["title"] as String?,
-                    pdfUri:     row["pdf_uri"],
-                    previewUri: row["preview_uri"] as String?,
-                    pageCount:  row["page_count"],
-                    createdAt:  row["created_at"],
-                    updatedAt:  row["updated_at"]
+                    id:                 row["id"],
+                    userId:             row["user_id"],
+                    title:              row["title"] as String?,
+                    pdfUri:             row["pdf_uri"],
+                    previewUri:         row["preview_uri"] as String?,
+                    pageCount:          row["page_count"],
+                    category:           row["category"] as String?,
+                    pdfDriveFileId:     row["pdf_drive_file_id"] as String?,
+                    previewDriveFileId: row["preview_drive_file_id"] as String?,
+                    createdAt:          row["created_at"],
+                    updatedAt:          row["updated_at"]
                 )
                 if let entry = try Self.makeEntry(
                     id: row["id"],
                     kind: DrivePath.kindCapture,
-                    drivePath: DrivePath.capture(id: row["id"]),
+                    drivePath: DrivePath.quickInkCapture(
+                        createdAt: row["created_at"],
+                        id:        row["id"]
+                    ),
                     updatedAt: row["updated_at"],
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
+            // ---- categories (typed record) ----
+            let categoryRows = try CategoryEntity
+                .filter(Column("user_id") == userId)
+                .filter(Column("dirty") == true)
+                .filter(Column("deleted_at") == nil)
+                .fetchAll(db)
+            for row in categoryRows {
+                let payload = CategoryPayloadV1(
+                    id:        row.id,
+                    userId:    row.userId,
+                    name:      row.name,
+                    position:  row.position,
+                    createdAt: row.createdAt,
+                    updatedAt: row.updatedAt
+                )
+                if let entry = try Self.makeEntry(
+                    id: row.id,
+                    kind: DrivePath.kindCategory,
+                    drivePath: DrivePath.category(id: row.id),
+                    updatedAt: row.updatedAt,
                     encodable: payload
                 ) { out.append(entry) }
             }
@@ -127,7 +163,11 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 if let entry = try Self.makeEntry(
                     id: row["id"],
                     kind: DrivePath.kindOcrResult,
-                    drivePath: DrivePath.ocrResult(captureId: row["capture_id"], pageIndex: row["page_index"]),
+                    drivePath: DrivePath.quickInkOcrResult(
+                        createdAt:  row["created_at"],
+                        captureId:  row["capture_id"],
+                        pageIndex:  row["page_index"]
+                    ),
                     updatedAt: row["updated_at"],
                     encodable: payload
                 ) { out.append(entry) }
@@ -174,6 +214,19 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 ))
             }
 
+            // categories — user-scoped.
+            let categoryTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM categories
+                WHERE user_id = ? AND deleted_at IS NOT NULL AND dirty = 1
+                """, arguments: [userId])
+            for row in categoryTombstones {
+                out.append(PendingTombstone(
+                    kind: DrivePath.kindCategory,
+                    id: row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+
             // ocr_results — not user-scoped at the row level.
             let ocrRows = try Row.fetchAll(db, sql: """
                 SELECT id, deleted_at, updated_at FROM ocr_results
@@ -214,6 +267,10 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             case DrivePath.kindOcrResult:
                 let p = try decoder.decode(OcrResultPayloadV2.self, from: change.payload)
                 try Self.upsertOcrResultRow(db, payload: p, driveFileId: driveFileId)
+
+            case DrivePath.kindCategory:
+                let p = try decoder.decode(CategoryPayloadV1.self, from: change.payload)
+                try Self.upsertCategoryRow(db, payload: p, driveFileId: driveFileId)
 
             default:
                 // Forward-compat: unknown kind, skip.
@@ -282,6 +339,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
         case DrivePath.kindNotepadEntry: return "notepad_entries"
         case DrivePath.kindCapture:      return "captures"
         case DrivePath.kindOcrResult:    return "ocr_results"
+        case DrivePath.kindCategory:     return "categories"
         default: return ""
         }
     }
@@ -304,28 +362,56 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
         )
     }
 
+    /// Upsert a categories row from a remote payload. Last-write-wins
+    /// on `updated_at`. Mirror of `upsertCaptureRow` shape.
+    private static func upsertCategoryRow(_ db: Database, payload: CategoryPayloadV1, driveFileId: String?) throws {
+        try db.execute(sql: """
+            INSERT INTO categories (
+                id, user_id, name, position,
+                drive_file_id, created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                user_id       = excluded.user_id,
+                name          = excluded.name,
+                position      = excluded.position,
+                drive_file_id = excluded.drive_file_id,
+                updated_at    = excluded.updated_at,
+                dirty         = 0
+            WHERE categories.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.userId, payload.name, payload.position,
+                driveFileId, payload.createdAt, payload.updatedAt,
+            ])
+    }
+
     /// Upsert a captures row from a remote payload. Raw SQL because we
     /// don't have a typed `CaptureRow` GRDB record yet — see file header.
     private static func upsertCaptureRow(_ db: Database, payload: CapturePayloadV2, driveFileId: String?) throws {
         try db.execute(sql: """
             INSERT INTO captures (
                 id, user_id, title, pdf_uri, preview_uri, page_count,
-                drive_file_id, created_at, updated_at, dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                category, drive_file_id, pdf_drive_file_id, preview_drive_file_id,
+                created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ON CONFLICT(id) DO UPDATE SET
-                user_id       = excluded.user_id,
-                title         = excluded.title,
-                pdf_uri       = excluded.pdf_uri,
-                preview_uri   = excluded.preview_uri,
-                page_count    = excluded.page_count,
-                drive_file_id = excluded.drive_file_id,
-                updated_at    = excluded.updated_at,
-                dirty         = 0
+                user_id               = excluded.user_id,
+                title                 = excluded.title,
+                pdf_uri               = excluded.pdf_uri,
+                preview_uri           = excluded.preview_uri,
+                page_count            = excluded.page_count,
+                category              = excluded.category,
+                drive_file_id         = excluded.drive_file_id,
+                pdf_drive_file_id     = excluded.pdf_drive_file_id,
+                preview_drive_file_id = excluded.preview_drive_file_id,
+                updated_at            = excluded.updated_at,
+                dirty                 = 0
             WHERE captures.updated_at < excluded.updated_at
             """, arguments: [
                 payload.id, payload.userId, payload.title,
                 payload.pdfUri, payload.previewUri, payload.pageCount,
-                driveFileId, payload.createdAt, payload.updatedAt,
+                payload.category, driveFileId,
+                payload.pdfDriveFileId, payload.previewDriveFileId,
+                payload.createdAt, payload.updatedAt,
             ])
     }
 

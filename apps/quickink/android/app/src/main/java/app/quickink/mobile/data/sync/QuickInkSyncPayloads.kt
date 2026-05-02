@@ -31,6 +31,7 @@
 package app.quickink.mobile.data.sync
 
 import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.category.CategoryEntity
 import app.quickink.mobile.data.ocr.OcrResultEntity
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.sync.SyncJson
@@ -115,35 +116,95 @@ fun NotepadEntryPayloadV2.toEntity(driveFileId: String?): NotepadEntry = Notepad
 
 @Serializable
 data class CapturePayloadV2(
+    @SerialName("id")                    val id: String,
+    @SerialName("user_id")               val userId: String,
+    @SerialName("title")                 val title: String? = null,
+    @SerialName("pdf_uri")               val pdfUri: String,
+    @SerialName("preview_uri")           val previewUri: String? = null,
+    @SerialName("page_count")            val pageCount: Int,
+    /**
+     * Pre-tagged category name (Phase 5 — Categories). `null` for
+     * captures created before v2 / by clients that haven't picked
+     * a category. Round-trips through Drive verbatim — captures
+     * don't FK into categories, so a deleted category name still
+     * reads back unchanged.
+     */
+    @SerialName("category")              val category: String? = null,
+    /**
+     * Drive file id of the per-row PDF binary upload (Phase 6 —
+     * Drive backup). Restore-on-fresh-device fetches the binary
+     * from this id and rewrites `pdf_uri` to point at the new
+     * local copy. `null` when the writer hadn't uploaded the PDF
+     * yet.
+     */
+    @SerialName("pdf_drive_file_id")     val pdfDriveFileId: String? = null,
+    /** Drive file id of the per-row preview-JPEG binary upload. */
+    @SerialName("preview_drive_file_id") val previewDriveFileId: String? = null,
+    @SerialName("created_at")            val createdAt: String,
+    @SerialName("updated_at")            val updatedAt: String,
+)
+
+fun CaptureEntity.toV2Payload(): CapturePayloadV2 = CapturePayloadV2(
+    id                 = id,
+    userId             = userId,
+    title              = title,
+    pdfUri             = pdfUri,
+    previewUri         = previewUri,
+    pageCount          = pageCount,
+    category           = category,
+    pdfDriveFileId     = pdfDriveFileId,
+    previewDriveFileId = previewDriveFileId,
+    createdAt          = createdAt,
+    updatedAt          = updatedAt,
+)
+
+fun CapturePayloadV2.toEntity(driveFileId: String?): CaptureEntity = CaptureEntity(
+    id                 = id,
+    userId             = userId,
+    title              = title,
+    pdfUri             = pdfUri,
+    previewUri         = previewUri,
+    pageCount          = pageCount,
+    category           = category,
+    conflictStub       = null,
+    driveFileId        = driveFileId,
+    pdfDriveFileId     = pdfDriveFileId,
+    previewDriveFileId = previewDriveFileId,
+    createdAt          = createdAt,
+    updatedAt          = updatedAt,
+    dirty              = false,
+    deletedAt          = null,
+)
+
+// =====================================================================
+// categories — QuickInk-only. User-configurable list, synced so
+// the same chip set follows the user across devices.
+// =====================================================================
+
+@Serializable
+data class CategoryPayloadV1(
     @SerialName("id")           val id: String,
     @SerialName("user_id")      val userId: String,
-    @SerialName("title")        val title: String? = null,
-    @SerialName("pdf_uri")      val pdfUri: String,
-    @SerialName("preview_uri")  val previewUri: String? = null,
-    @SerialName("page_count")   val pageCount: Int,
+    @SerialName("name")         val name: String,
+    @SerialName("position")     val position: Int,
     @SerialName("created_at")   val createdAt: String,
     @SerialName("updated_at")   val updatedAt: String,
 )
 
-fun CaptureEntity.toV2Payload(): CapturePayloadV2 = CapturePayloadV2(
-    id         = id,
-    userId     = userId,
-    title      = title,
-    pdfUri     = pdfUri,
-    previewUri = previewUri,
-    pageCount  = pageCount,
-    createdAt  = createdAt,
-    updatedAt  = updatedAt,
+fun CategoryEntity.toV1Payload(): CategoryPayloadV1 = CategoryPayloadV1(
+    id        = id,
+    userId    = userId,
+    name      = name,
+    position  = position,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
 )
 
-fun CapturePayloadV2.toEntity(driveFileId: String?): CaptureEntity = CaptureEntity(
+fun CategoryPayloadV1.toEntity(driveFileId: String?): CategoryEntity = CategoryEntity(
     id           = id,
     userId       = userId,
-    title        = title,
-    pdfUri       = pdfUri,
-    previewUri   = previewUri,
-    pageCount    = pageCount,
-    conflictStub = null,
+    name         = name,
+    position     = position,
     driveFileId  = driveFileId,
     createdAt    = createdAt,
     updatedAt    = updatedAt,

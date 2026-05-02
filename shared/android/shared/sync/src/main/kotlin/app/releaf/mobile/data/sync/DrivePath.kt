@@ -46,6 +46,8 @@ object DrivePath {
     const val KIND_PROJECT        = "project"
     const val KIND_REFERENCE_LINK = "reference_link"
     const val KIND_PAGE_TEMPLATE  = "page_template"
+    /** QuickInk-only — user-configurable category for [`captures.category`]. */
+    const val KIND_CATEGORY       = "category"
 
     // ---- folder names (no trailing slash; join with `/`) ----
     const val FOLDER_NOTEBOOKS       = "notebooks"
@@ -56,6 +58,8 @@ object DrivePath {
     const val FOLDER_CAPTURES        = "captures"
     /** QuickInk's OCR-result tree — `ocr/{captureId}/page-{N}.json`. */
     const val FOLDER_OCR             = "ocr"
+    /** QuickInk's category list — `categories/{id}.json`. */
+    const val FOLDER_CATEGORIES      = "categories"
     const val FOLDER_TASKS           = "tasks"
     const val FOLDER_TOMBSTONES      = "tombstones"
 
@@ -88,12 +92,42 @@ object DrivePath {
     fun capture(id: String): String = "$FOLDER_CAPTURES/$id.json"
 
     /**
+     * Date-bucketed QuickInk capture path —
+     * `{yyyy}/{mm}/{dd}/{id}.json`, relative to the data source's
+     * drive root. Used by the QuickInk sync data source so scans land
+     * under year/month/day folders inside `Thoughtbasics/QuickInk/...`.
+     */
+    fun quickInkCapture(createdAt: String, id: String): String =
+        "${quickInkDateBucket(createdAt)}/$id.json"
+
+    /**
      * QuickInk's per-page OCR-result file —
      * `ocr/{captureId}/page-{pageIndex}.json`. Page index is 0-based,
      * matching `ocr_results.page_index`.
      */
     fun ocrResult(captureId: String, pageIndex: Int): String =
         "$FOLDER_OCR/$captureId/page-$pageIndex.json"
+
+    /**
+     * Date-bucketed QuickInk OCR-result path —
+     * `{yyyy}/{mm}/{dd}/{captureId}/page-{N}.json`. Co-locates the
+     * OCR rows with their parent capture's day folder.
+     */
+    fun quickInkOcrResult(createdAt: String, captureId: String, pageIndex: Int): String =
+        "${quickInkDateBucket(createdAt)}/$captureId/page-$pageIndex.json"
+
+    /** QuickInk's per-category file — `categories/{id}.json`. */
+    fun category(id: String): String = "$FOLDER_CATEGORIES/$id.json"
+
+    /**
+     * `YYYY/MM/DD` triplet derived from an ISO-8601 timestamp's date
+     * prefix. Falls back to `0000/00/00` for malformed input so the
+     * sync layer never crashes on a single bad row.
+     */
+    private fun quickInkDateBucket(iso: String): String {
+        if (iso.length < 10) return "0000/00/00"
+        return "${iso.substring(0, 4)}/${iso.substring(5, 7)}/${iso.substring(8, 10)}"
+    }
 
     fun tombstone(id: String): String = "$FOLDER_TOMBSTONES/$id.json"
 

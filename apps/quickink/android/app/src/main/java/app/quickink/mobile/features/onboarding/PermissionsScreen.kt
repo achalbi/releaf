@@ -18,8 +18,8 @@ import androidx.compose.runtime.Composable
 @Composable
 fun PermissionsScreen(onContinue: () -> Unit) {
     OnboardingScaffold(
-        title      = "Camera access",
-        subtitle   = "QuickInk needs the camera to scan pages. We'll ask the first time you tap a scan — you can change this anytime in Settings.",
+        title      = "One tap.\nOne page.",
+        subtitle   = "We'll ask for camera access the first time you scan. Change it anytime in Settings.",
         ctaLabel   = "Continue",
         stepIndex  = 1,
         onContinue = onContinue,

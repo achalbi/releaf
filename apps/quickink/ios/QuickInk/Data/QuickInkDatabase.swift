@@ -263,6 +263,47 @@ public final class QuickInkDatabase: @unchecked Sendable {
                 """)
         }
 
+        // ─── v2_capture_categories ──────────────────────────────
+        //
+        // Adds `captures.category` and the `categories` table per
+        // `shared/design-system/migrations/quickink/v2_capture_categories.sql`.
+        // Default seed values live in app code (Settings + first-
+        // launch seeding) — migrations don't know `userId`.
+        migrator.registerMigration("v2_capture_categories") { db in
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN category TEXT")
+
+            try db.execute(sql: """
+                CREATE TABLE categories (
+                    id              TEXT PRIMARY KEY NOT NULL,
+                    user_id         TEXT NOT NULL,
+                    name            TEXT NOT NULL,
+                    position        INTEGER NOT NULL DEFAULT 0,
+                    drive_file_id   TEXT,
+                    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty           INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at      TEXT,
+                    UNIQUE (user_id, name)
+                )
+                """)
+
+            try db.execute(sql: "CREATE INDEX idx_categories_user_position ON categories (user_id, position)")
+            try db.execute(sql: "CREATE INDEX idx_categories_dirty         ON categories (dirty)      WHERE dirty = 1")
+            try db.execute(sql: "CREATE INDEX idx_categories_tombstone     ON categories (deleted_at) WHERE deleted_at IS NOT NULL")
+        }
+
+        // ─── v3_capture_drive_binaries ──────────────────────────
+        //
+        // Adds two columns to `captures` so each row tracks the
+        // Drive file id of its uploaded PDF + preview JPEG. NULL =
+        // not uploaded yet; populated by `markPdfSynced` /
+        // `markPreviewSynced` after `SyncRepository` pushes the
+        // binaries via `DriveClient.uploadBinary`.
+        migrator.registerMigration("v3_capture_drive_binaries") { db in
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN pdf_drive_file_id TEXT")
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN preview_drive_file_id TEXT")
+        }
+
         return migrator
     }
 }

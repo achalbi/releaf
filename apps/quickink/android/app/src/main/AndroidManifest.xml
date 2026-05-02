@@ -1,21 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  QuickInk — minimal scaffold manifest.
+  QuickInk Android manifest.
 
-  Permissions added incrementally as MVP features land:
-    - INTERNET                               for Drive REST + ML Kit module download
-    - CAMERA / READ_EXTERNAL_STORAGE         for the camera-first scan home (§6.4)
-    - POST_NOTIFICATIONS                     once we ship a sync foreground service
+  Permissions: just INTERNET. The document scanner is launched via
+  ML Kit's `GmsDocumentScanning` system activity (see
+  `:shared:scan/DocumentScannerLauncher.kt`), which manages its own
+  camera / storage permission UX in-process — we do not need to
+  declare CAMERA, READ_EXTERNAL_STORAGE, or READ_MEDIA_IMAGES.
+  Sync runs as a WorkManager periodic worker, not a foreground
+  service, so POST_NOTIFICATIONS is not required either.
 
-  The QuickInkApp Application + MainActivity declarations below match
-  Releaf's shape (`android:name=".QuickInkApp"` resolves against the
-  package declared in `applicationId`); everything else (icon, theme,
-  custom splash, FileProvider, etc.) lands with the brand pass per
-  QUICKINK_PROPOSAL.md §4.7.
+  Drive REST traffic + the ML Kit module download both need
+  INTERNET; that's why it's the single declared permission.
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      Camera is required by the document scanner the app launches,
+      but the camera is owned by GMS, not by us. `required="false"`
+      keeps the app installable on cameraless tablets where users
+      can still view and edit synced scans.
+    -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
 
     <application
         android:name=".QuickInkApp"
@@ -24,7 +35,9 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.QuickInk"
         android:allowBackup="false"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:enableOnBackInvokedCallback="true"
+        tools:targetApi="33">
 
         <activity
             android:name=".MainActivity"

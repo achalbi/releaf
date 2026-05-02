@@ -67,29 +67,66 @@ class OkHttpDriveClient(
 
     override suspend fun ensureRootFolder(name: String, accessToken: String): DriveFile =
         withContext(Dispatchers.IO) {
-            // 1) Try by appProperties stamp first — survives user renames.
-            val byStamp = queryFirst(
-                q = "appProperties has { key='releaf_root' and value='true' } " +
-                    "and mimeType = '$FOLDER_MIME' and trashed = false",
-                accessToken = accessToken,
-            )
-            if (byStamp != null) return@withContext byStamp
+            val segments = name
+                .split('/')
+                .filter { it.isNotBlank() }
+            require(segments.isNotEmpty()) { "Empty root folder name" }
 
-            // 2) Try by name at root.
-            val byName = queryFirst(
-                q = "name = '${name.escapeForDrive()}' and mimeType = '$FOLDER_MIME' " +
-                    "and 'root' in parents and trashed = false",
-                accessToken = accessToken,
-            )
-            if (byName != null) return@withContext byName
+            // Single-segment name → preserve existing Releaf behaviour
+            // (appProperties stamp survives user renames, etc.).
+            if (segments.size == 1) {
+                val single = segments[0]
+                val byStamp = queryFirst(
+                    q = "appProperties has { key='releaf_root' and value='true' } " +
+                        "and mimeType = '$FOLDER_MIME' and trashed = false",
+                    accessToken = accessToken,
+                )
+                if (byStamp != null) return@withContext byStamp
 
-            // 3) Create, stamped with appProperties.releaf_root=true.
-            createFolder(
-                name = name,
-                parentId = null,
-                accessToken = accessToken,
-                extraAppProperties = mapOf("releaf_root" to "true"),
-            )
+                val byName = queryFirst(
+                    q = "name = '${single.escapeForDrive()}' and mimeType = '$FOLDER_MIME' " +
+                        "and 'root' in parents and trashed = false",
+                    accessToken = accessToken,
+                )
+                if (byName != null) return@withContext byName
+
+                return@withContext createFolder(
+                    name = single,
+                    parentId = null,
+                    accessToken = accessToken,
+                    extraAppProperties = mapOf("releaf_root" to "true"),
+                )
+            }
+
+            // Nested slash-separated path (e.g. "Thoughtbasics/QuickInk").
+            // Walk by name, no appProperties stamp — multi-app namespaces
+            // share the outer folder, so a Releaf-specific stamp would
+            // wrongly match.
+            var current: DriveFile? = null
+            segments.forEachIndexed { index, segment ->
+                current = if (index == 0) {
+                    val byName = queryFirst(
+                        q = "name = '${segment.escapeForDrive()}' and mimeType = '$FOLDER_MIME' " +
+                            "and 'root' in parents and trashed = false",
+                        accessToken = accessToken,
+                    )
+                    byName ?: createFolder(
+                        name = segment,
+                        parentId = null,
+                        accessToken = accessToken,
+                        extraAppProperties = null,
+                    )
+                } else {
+                    val parentId = current?.id
+                        ?: error("Path walk lost parent at segment $index")
+                    ensureFolder(
+                        name = segment,
+                        parentId = parentId,
+                        accessToken = accessToken,
+                    )
+                }
+            }
+            current ?: error("Unreachable: empty path walk")
         }
 
     override suspend fun ensureFolder(
@@ -154,6 +191,38 @@ class OkHttpDriveClient(
                 contentType = "application/json",
                 accessToken = accessToken,
                 appProperties = if (filename == "manifest.json") mapOf("releaf_root" to "true") else null,
+            )
+        }
+    }
+
+    override suspend fun uploadBinary(
+        data: ByteArray,
+        filename: String,
+        contentType: String,
+        parentId: String,
+        accessToken: String,
+    ): DriveFile = withContext(Dispatchers.IO) {
+        val existing = queryFirst(
+            q = "name = '${filename.escapeForDrive()}' " +
+                "and '${parentId.escapeForDrive()}' in parents and trashed = false",
+            accessToken = accessToken,
+        )
+        if (existing != null) {
+            updateFile(
+                fileId = existing.id,
+                data = data,
+                contentType = contentType,
+                accessToken = accessToken,
+                appProperties = null,
+            )
+        } else {
+            createFile(
+                name = filename,
+                parentId = parentId,
+                data = data,
+                contentType = contentType,
+                accessToken = accessToken,
+                appProperties = null,
             )
         }
     }

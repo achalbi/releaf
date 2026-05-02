@@ -33,6 +33,19 @@ interface DriveClient {
     suspend fun ensureFolder(name: String, parentId: String, accessToken: String): DriveFile
     suspend fun listChildren(folderId: String, accessToken: String): List<DriveFile>
     suspend fun uploadJson(data: ByteArray, filename: String, parentId: String, accessToken: String): DriveFile
+
+    /**
+     * Upload / overwrite a binary file (PDF, JPEG, etc.) with caller-
+     * supplied MIME type. PATCHes an existing same-name child if
+     * present so re-uploads don't fork into duplicates.
+     */
+    suspend fun uploadBinary(
+        data: ByteArray,
+        filename: String,
+        contentType: String,
+        parentId: String,
+        accessToken: String,
+    ): DriveFile
     suspend fun downloadBytes(fileId: String, accessToken: String): ByteArray
     suspend fun trash(fileId: String, accessToken: String)
 }
@@ -59,13 +72,22 @@ class InMemoryDriveClient : DriveClient {
         files.values.filter { folderId in it.parents }
     }
 
-    override suspend fun uploadJson(data: ByteArray, filename: String, parentId: String, accessToken: String): DriveFile = mutex.withLock {
+    override suspend fun uploadJson(data: ByteArray, filename: String, parentId: String, accessToken: String): DriveFile =
+        uploadBinary(data, filename, "application/json", parentId, accessToken)
+
+    override suspend fun uploadBinary(
+        data: ByteArray,
+        filename: String,
+        contentType: String,
+        parentId: String,
+        accessToken: String,
+    ): DriveFile = mutex.withLock {
         val existing = files.values.firstOrNull { it.name == filename && it.parents == listOf(parentId) }
         if (existing != null) {
             blobs[existing.id] = data
             return@withLock existing
         }
-        val file = DriveFile(UUID.randomUUID().toString(), filename, "application/json", listOf(parentId))
+        val file = DriveFile(UUID.randomUUID().toString(), filename, contentType, listOf(parentId))
         files[file.id] = file
         blobs[file.id] = data
         file

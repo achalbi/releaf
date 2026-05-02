@@ -37,6 +37,16 @@ public final class SettingsState: ObservableObject {
         didSet { UserDefaults.standard.set(searchablePdfExportEnabled, forKey: Keys.searchablePdfExport) }
     }
 
+    /// User-overridden display name shown on the Home greeting. Empty
+    /// string means "fall back to the Google account's display name"
+    /// — the resolver lives in the Home screen's `resolvedDisplayName`
+    /// computed property. Editable from the Settings → Account
+    /// section so the user can pick what the app calls them without
+    /// rewriting their Google profile.
+    @Published public var customDisplayName: String {
+        didSet { UserDefaults.standard.set(customDisplayName, forKey: Keys.customDisplayName) }
+    }
+
     public init() {
         let defaults = UserDefaults.standard
         // Drive backup defaults to true — Drive sync is the value
@@ -53,6 +63,10 @@ public final class SettingsState: ObservableObject {
         // user toggles it — that gate isn't wired yet; this is a
         // pure runtime flag for Slice 5.
         self.searchablePdfExportEnabled = defaults.bool(forKey: Keys.searchablePdfExport)
+        // Custom display name defaults to "" (empty = use the Google
+        // session's name). Read as a plain string so SwiftUI bindings
+        // bind cleanly to a TextField.
+        self.customDisplayName = defaults.string(forKey: Keys.customDisplayName) ?? ""
     }
 
     /// Called from the onboarding sign-in screen after
@@ -67,5 +81,6 @@ public final class SettingsState: ObservableObject {
     private enum Keys {
         static let driveBackup         = "quickink.settings.drive_backup_enabled"
         static let searchablePdfExport = "quickink.settings.searchable_pdf_export_enabled"
+        static let customDisplayName   = "quickink.settings.custom_display_name"
     }
 }

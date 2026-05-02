@@ -87,6 +87,7 @@ import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
+import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import app.quickink.mobile.ui.theme.quickInkLinedPaper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -126,7 +127,7 @@ fun NoteEditorScreen(
         SettingsPreferences(context).searchablePdfExportEnabled
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(colors.bg)) {
+    Box(modifier = Modifier.fillMaxSize().quickInkDotGridBackground()) {
         Column(modifier = Modifier.fillMaxSize()) {
             DetailTopBar(
                 title    = controller.title,

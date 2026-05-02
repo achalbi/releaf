@@ -50,9 +50,23 @@ class SettingsPreferences(context: Context) {
             prefs.edit().putBoolean(KEY_SEARCHABLE_PDF, value).apply()
         }
 
+    /**
+     * User-overridden display name shown on the Home greeting. Empty
+     * string means "fall back to the Google account's display name" —
+     * resolved at the Home screen call site. Editable from the
+     * Settings → Account section so the user can pick what the app
+     * calls them without rewriting their Google profile.
+     */
+    var customDisplayName: String
+        get() = prefs.getString(KEY_CUSTOM_DISPLAY_NAME, "") ?: ""
+        set(value) {
+            prefs.edit().putString(KEY_CUSTOM_DISPLAY_NAME, value).apply()
+        }
+
     companion object {
-        private const val PREFS_NAME        = "quickink.settings"
-        private const val KEY_DRIVE_BACKUP  = "drive_backup_enabled"
-        private const val KEY_SEARCHABLE_PDF = "searchable_pdf_export_enabled"
+        private const val PREFS_NAME             = "quickink.settings"
+        private const val KEY_DRIVE_BACKUP       = "drive_backup_enabled"
+        private const val KEY_SEARCHABLE_PDF     = "searchable_pdf_export_enabled"
+        private const val KEY_CUSTOM_DISPLAY_NAME = "custom_display_name"
     }
 }

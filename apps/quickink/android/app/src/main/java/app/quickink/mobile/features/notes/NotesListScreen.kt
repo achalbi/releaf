@@ -1,25 +1,22 @@
 /*
  * NotesListScreen.kt
  *
- * QuickInk's Library — upgraded from the simple list per the
- * mockup brief:
+ * QuickInk's Library — the user's full scan gallery, sorted /
+ * filterable / grouped. Same data source as the home rail
+ * (`captures` via `CaptureDao.observeActive`) but unbounded and
+ * with day-bucket grouping + chip filters off the live `categories`
+ * table.
  *
- *   - Top bar: title + sort menu + grid/list toggle + new note
- *   - Filter chips by category (All, Ideas, Projects, ...)
- *   - Time-grouped notes (Today / This week / Earlier)
- *   - Grid view: handwritten Caveat preview on lined paper with
- *     paper-tone backgrounds
- *   - List view: dense rows with title + meta + handwritten preview
- *
- * Reads `NotepadDao.observeActive(userId)` directly via Compose
- * state — same pattern as before. The grouping and filter state
- * live in this view (UI-only).
+ * Tap → `ScanDetailScreen` for the selected capture (preview +
+ * OCR-on-demand). The notepad-entries-driven editor is no longer
+ * the destination — captures are the canonical artifact.
  *
  * Mirror of iOS `NotesListScreen.swift`.
  */
 
 package app.quickink.mobile.features.notes
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,21 +25,24 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.SwapVert
@@ -60,42 +60,81 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.quickink.mobile.QuickInkApp
+import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
-import app.quickink.mobile.ui.theme.quickInkLinedPaper
-import app.releaf.mobile.data.notepad.NotepadDao
-import app.releaf.mobile.data.notepad.NotepadEntry
-
-private val CATEGORIES = listOf("All", "Ideas", "Projects", "Brainstorm", "Meetings", "Journal", "Study")
+import app.quickink.mobile.ui.theme.quickInkDotGridBackground
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 private enum class ViewMode { Grid, List }
-private enum class SortOrder(val label: String) { Newest("Newest first"), Oldest("Oldest first"), Alphabetical("Alphabetical") }
+/**
+ * Library always sorts on `capture.created_at` — only the direction
+ * is user-selectable. Category remains a filter (chips), not a sort
+ * key.
+ */
+private enum class SortOrder(val label: String) { Newest("Newest first"), Oldest("Oldest first") }
 
 @Composable
 fun NotesListScreen(
-    dao: NotepadDao,
     userId: String,
     onBack: () -> Unit,
-    onOpenEntry: (entryId: String) -> Unit,
+    onOpenScan: (captureId: String) -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
-    val entries by dao.observeActive(userId).collectAsState(initial = emptyList())
+    val context = LocalContext.current
+    val app = context.applicationContext as QuickInkApp
+    val captureDao = remember(app) { app.database.captureDao() }
+    val categoryDao = remember(app) { app.database.categoryDao() }
+
+    val captures by remember(userId, captureDao) {
+        captureDao.observeActive(userId)
+    }.collectAsState(initial = emptyList())
+
+    val categories by remember(userId, categoryDao) {
+        categoryDao.observeActive(userId)
+    }.collectAsState(initial = emptyList())
 
     var viewMode by remember { mutableStateOf(ViewMode.Grid) }
     var sort by remember { mutableStateOf(SortOrder.Newest) }
     var activeCategory by remember { mutableStateOf("All") }
     var sortMenuOpen by remember { mutableStateOf(false) }
 
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+
+    val filteredSorted = remember(captures, activeCategory, sort) {
+        val filtered = if (activeCategory == "All") {
+            captures
+        } else {
+            val needle = activeCategory.lowercase()
+            captures.filter { (it.category ?: "").lowercase() == needle }
+        }
+        when (sort) {
+            SortOrder.Newest -> filtered // DAO already returns newest-first.
+            SortOrder.Oldest -> filtered.reversed()
+        }
+    }
+
+    val grouped = remember(filteredSorted) { groupByDay(filteredSorted) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.bg),
+            .quickInkDotGridBackground()
+            .padding(top = statusBarTop + QuickInkSpacing.s4),
     ) {
         // Top bar
         Row(
@@ -111,10 +150,8 @@ fun NotesListScreen(
                     tint              = colors.ink,
                 )
             }
-            Text(text = "Library", style = type.pageTitle, color = colors.ink)
-            Spacer(Modifier.weight(1f))
+            Text(text = "Library", style = type.pageTitle, color = colors.ink, modifier = Modifier.weight(1f))
 
-            // Sort dropdown.
             Box {
                 IconButton(onClick = { sortMenuOpen = true }) {
                     Icon(
@@ -126,14 +163,16 @@ fun NotesListScreen(
                 DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
                     SortOrder.values().forEach { option ->
                         DropdownMenuItem(
-                            text     = { Text(option.label, style = type.body, color = colors.ink) },
-                            onClick  = { sort = option; sortMenuOpen = false },
+                            text = { Text(option.label, color = colors.ink, style = type.body) },
+                            onClick = {
+                                sort = option
+                                sortMenuOpen = false
+                            },
                         )
                     }
                 }
             }
 
-            // Grid / list toggle.
             IconButton(onClick = {
                 viewMode = if (viewMode == ViewMode.Grid) ViewMode.List else ViewMode.Grid
             }) {
@@ -143,129 +182,115 @@ fun NotesListScreen(
                     tint              = colors.ink,
                 )
             }
+        }
 
-            IconButton(onClick = { onOpenEntry(NoteEditorController.NEW_ENTRY_ID) }) {
-                Icon(
-                    imageVector       = Icons.Filled.Add,
-                    contentDescription = "New note",
-                    tint              = colors.accent,
+        // Filter chips
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = QuickInkSpacing.s5, vertical = QuickInkSpacing.s2),
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+            val names = listOf("All") + categories.map { it.name }
+            names.forEach { cat ->
+                FilterChip(
+                    label    = cat,
+                    selected = cat == activeCategory,
+                    onClick  = { activeCategory = cat },
                 )
             }
         }
 
-        // Filter chips
-        LazyRow(
-            modifier             = Modifier.padding(top = QuickInkSpacing.s2, bottom = QuickInkSpacing.s3),
-            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
-            contentPadding       = androidx.compose.foundation.layout.PaddingValues(horizontal = QuickInkSpacing.s5),
-        ) {
-            items(CATEGORIES) { cat ->
-                val active = (cat == activeCategory)
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(QuickInkRadius.pill))
-                        .background(if (active) colors.accent else colors.borderSoft)
-                        .clickable { activeCategory = cat }
-                        .padding(horizontal = QuickInkSpacing.s4, vertical = QuickInkSpacing.s2),
-                ) {
-                    Text(
-                        text  = cat,
-                        style = type.label,
-                        color = if (active) colors.textOnAccent else colors.ink,
-                    )
-                }
-            }
-        }
-
-        if (entries.isEmpty()) {
-            EmptyState()
+        if (filteredSorted.isEmpty()) {
+            EmptyState(activeCategory)
         } else {
-            val groups = remember(entries, sort, activeCategory) {
-                groupEntries(entries, sort, activeCategory)
-            }
-
-            Column(
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = QuickInkSpacing.s5)
-                    .padding(bottom = QuickInkSpacing.s7),
+                    .padding(horizontal = QuickInkSpacing.s5),
                 verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s5),
             ) {
-                groups.forEach { (label, list) ->
-                    Column {
+                grouped.forEach { (label, list) ->
+                    item(key = "header-$label") {
                         Text(
                             text  = label.uppercase(),
                             style = type.eyebrow,
                             color = colors.muted,
+                            modifier = Modifier.padding(top = QuickInkSpacing.s4),
                         )
-                        Spacer(Modifier.size(QuickInkSpacing.s3))
-                        if (viewMode == ViewMode.Grid) {
-                            // 2-col grid via LazyVerticalGrid would
-                            // conflict with parent vertical scroll;
-                            // hand-roll a 2-col flow.
-                            list.chunked(2).forEachIndexed { i, pair ->
-                                if (i > 0) Spacer(Modifier.size(QuickInkSpacing.s3))
+                    }
+                    if (viewMode == ViewMode.Grid) {
+                        // Two-column grid laid out as paired rows so we
+                        // can keep using LazyColumn (mixing LazyColumn +
+                        // LazyVerticalGrid in the same scroll surface
+                        // is awkward). Each row holds up to 2 cards.
+                        list.chunked(2).forEachIndexed { idx, pair ->
+                            item(key = "grid-$label-$idx-${pair.first().id}") {
                                 Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
-                                    pair.forEachIndexed { idx, entry ->
-                                        LibraryGridCard(
-                                            entry    = entry,
-                                            seed     = (i * 2 + idx),
-                                            onTap    = { onOpenEntry(entry.id) },
-                                            modifier = Modifier.weight(1f),
-                                        )
+                                    pair.forEach { capture ->
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            LibraryScanGridCard(
+                                                capture = capture,
+                                                onTap   = { onOpenScan(capture.id) },
+                                            )
+                                        }
                                     }
-                                    // Right-pad with spacer if list size is odd.
-                                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                                    if (pair.size == 1) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
                                 }
                             }
-                        } else {
-                            list.forEachIndexed { idx, entry ->
-                                if (idx > 0) Spacer(Modifier.size(QuickInkSpacing.s3))
-                                LibraryListRow(entry = entry, onTap = { onOpenEntry(entry.id) })
-                            }
+                        }
+                    } else {
+                        items(list, key = { "list-${it.id}" }) { capture ->
+                            LibraryScanListRow(
+                                capture = capture,
+                                onTap   = { onOpenScan(capture.id) },
+                            )
                         }
                     }
                 }
+                item(key = "bottom-pad") { Spacer(Modifier.size(QuickInkSpacing.s7)) }
             }
         }
     }
 }
 
-private fun groupEntries(
-    entries: List<NotepadEntry>,
-    sort: SortOrder,
-    @Suppress("UNUSED_PARAMETER") category: String,
-): List<Pair<String, List<NotepadEntry>>> {
-    // Category filter — NotepadEntry doesn't yet expose a category
-    // field; pass-through. When the shared model adds it, filter
-    // by entry.category here.
-    val filtered = entries
-    val sorted = when (sort) {
-        SortOrder.Newest       -> filtered                       // DAO default is newest-first.
-        SortOrder.Oldest       -> filtered.reversed()
-        SortOrder.Alphabetical -> filtered.sortedBy { it.title.orEmpty() }
+@Composable
+private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(QuickInkRadius.pill))
+            .background(if (selected) colors.accent else colors.borderSoft)
+            .clickable(onClick = onClick)
+            .padding(horizontal = QuickInkSpacing.s4, vertical = QuickInkSpacing.s2),
+    ) {
+        Text(
+            text  = label,
+            style = type.label,
+            color = if (selected) colors.textOnAccent else colors.ink,
+        )
     }
-    // Time bucketing — we have entry.entryDate as String; without
-    // a parseable date we conservatively bucket everything into
-    // "All". When the shared model exposes `updatedAt: Instant`,
-    // implement Today / This week / Earlier with a real comparison.
-    return listOf("All" to sorted)
 }
 
 @Composable
-private fun EmptyState() {
+private fun EmptyState(activeCategory: String) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     Column(
-        modifier             = Modifier.fillMaxSize(),
-        horizontalAlignment  = Alignment.CenterHorizontally,
-        verticalArrangement  = Arrangement.Center,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(QuickInkSpacing.s7),
+        verticalArrangement   = Arrangement.Center,
+        horizontalAlignment   = Alignment.CenterHorizontally,
     ) {
         Box(
             modifier = Modifier
                 .size(80.dp)
-                .clip(CircleShape)
+                .clip(RoundedCornerShape(50))
                 .background(colors.accentSoft),
             contentAlignment = Alignment.Center,
         ) {
@@ -277,73 +302,106 @@ private fun EmptyState() {
             )
         }
         Spacer(Modifier.size(QuickInkSpacing.s3))
-        Text(text = "Your library is empty", style = type.heading, color = colors.ink)
         Text(
-            text     = "Tap the ⚡ on Home to capture your first page.",
-            style    = type.body,
-            color    = colors.inkSoft,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = QuickInkSpacing.s7),
+            text  = if (activeCategory == "All") "Your library is empty" else "No $activeCategory scans yet",
+            style = type.heading,
+            color = colors.ink,
+        )
+        Spacer(Modifier.size(QuickInkSpacing.s2))
+        Text(
+            text  = if (activeCategory == "All")
+                "Tap the ⚡ on Home to capture your first page."
+            else
+                "Scans you tag $activeCategory on the review screen will collect here.",
+            style = type.body,
+            color = colors.inkSoft,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }
 }
 
 @Composable
-private fun LibraryGridCard(
-    entry: NotepadEntry,
-    seed: Int,
-    onTap: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+private fun LibraryScanGridCard(capture: CaptureEntity, onTap: () -> Unit) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
-    val title = entry.title?.takeIf { it.isNotBlank() } ?: "Untitled"
-    val preview = entry.notes.take(120).ifEmpty { title }
+    val context = LocalContext.current
 
     Column(
-        modifier             = modifier.clickable(onClick = onTap),
-        verticalArrangement  = Arrangement.spacedBy(QuickInkSpacing.s2),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onTap),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(180.dp)
                 .clip(RoundedCornerShape(QuickInkRadius.md))
-                .quickInkLinedPaper(seed = seed.hashCode())
-                .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
-                .padding(QuickInkSpacing.s3),
+                .background(colors.borderSoft)
+                .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md)),
         ) {
-            Text(
-                text     = preview,
-                style    = type.handwritten,
-                color    = colors.ink.copy(alpha = 0.78f),
-                maxLines = 6,
-                overflow = TextOverflow.Ellipsis,
-            )
+            val previewUri = capture.previewUri
+            if (previewUri.isNullOrBlank()) {
+                Box(
+                    modifier         = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector       = Icons.Filled.Description,
+                        contentDescription = null,
+                        tint              = colors.muted,
+                        modifier          = Modifier.size(36.dp),
+                    )
+                }
+            } else {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(Uri.parse(previewUri))
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = capture.category ?: "Scan",
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.fillMaxSize(),
+                )
+            }
+            if (capture.pageCount > 1) {
+                Text(
+                    text  = "${capture.pageCount} pages",
+                    style = type.caption,
+                    color = colors.textOnAccent,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(QuickInkSpacing.s2)
+                        .background(
+                            color = colors.ink.copy(alpha = 0.55f),
+                            shape = RoundedCornerShape(QuickInkRadius.sm),
+                        )
+                        .padding(horizontal = QuickInkSpacing.s2, vertical = 2.dp),
+                )
+            }
         }
 
-        Column {
-            Text(
-                text     = title,
-                style    = type.label,
-                color    = colors.ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text  = entry.entryDate,
-                style = type.caption,
-                color = colors.muted,
-            )
-        }
+        Spacer(Modifier.size(QuickInkSpacing.s2))
+
+        Text(
+            text     = capture.category ?: "Scan",
+            style    = type.label,
+            color    = colors.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text  = friendlyMonthDay(capture.createdAt),
+            style = type.caption,
+            color = colors.muted,
+        )
     }
 }
 
 @Composable
-private fun LibraryListRow(entry: NotepadEntry, onTap: () -> Unit) {
+private fun LibraryScanListRow(capture: CaptureEntity, onTap: () -> Unit) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
-    val title = entry.title?.takeIf { it.isNotBlank() } ?: "Untitled"
+    val context = LocalContext.current
 
     Row(
         modifier = Modifier
@@ -353,46 +411,108 @@ private fun LibraryListRow(entry: NotepadEntry, onTap: () -> Unit) {
             .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
             .clickable(onClick = onTap)
             .padding(QuickInkSpacing.s3),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .size(width = 48.dp, height = 60.dp)
+                .size(width = 56.dp, height = 72.dp)
                 .clip(RoundedCornerShape(QuickInkRadius.sm))
-                .quickInkLinedPaper(seed = entry.id.hashCode(), lineSpacing = 6.dp, lineOpacity = 0.18f)
                 .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.sm)),
-            contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector       = Icons.Filled.Description,
-                contentDescription = null,
-                tint              = colors.accent.copy(alpha = 0.7f),
-                modifier          = Modifier.size(14.dp),
-            )
+            val previewUri = capture.previewUri
+            if (previewUri.isNullOrBlank()) {
+                Box(
+                    modifier         = Modifier.fillMaxSize().background(colors.borderSoft),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector       = Icons.Filled.Description,
+                        contentDescription = null,
+                        tint              = colors.muted,
+                        modifier          = Modifier.size(16.dp),
+                    )
+                }
+            } else {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(Uri.parse(previewUri))
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.fillMaxSize(),
+                )
+            }
         }
 
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
+        Spacer(Modifier.size(QuickInkSpacing.s3))
+
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text     = title,
+                text     = capture.category ?: "Scan",
                 style    = type.label,
                 color    = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (entry.notes.isNotBlank()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
                 Text(
-                    text     = entry.notes,
-                    style    = type.body,
-                    color    = colors.inkSoft,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    text  = friendlyMonthDay(capture.createdAt),
+                    style = type.caption,
+                    color = colors.muted,
                 )
+                if (capture.pageCount > 1) {
+                    Text(
+                        text  = "• ${capture.pageCount} pages",
+                        style = type.caption,
+                        color = colors.muted,
+                    )
+                }
             }
-            Text(text = entry.entryDate, style = type.caption, color = colors.muted)
         }
     }
 }
+
+/**
+ * Group captures into Today / This week / Earlier buckets keyed off
+ * the capture's `createdAt` ISO timestamp (parsed in the device's
+ * local timezone). Falls back to one "All" bucket if every input
+ * fails to parse — defensive but rarely hit in practice.
+ */
+private fun groupByDay(captures: List<CaptureEntity>): List<Pair<String, List<CaptureEntity>>> {
+    val today = mutableListOf<CaptureEntity>()
+    val week  = mutableListOf<CaptureEntity>()
+    val earlier = mutableListOf<CaptureEntity>()
+    val now = LocalDate.now(ZoneId.systemDefault())
+    val weekAgo = now.minusDays(6) // Today + previous 6 days = "this week".
+
+    for (c in captures) {
+        val date = try {
+            Instant.parse(c.createdAt).atZone(ZoneId.systemDefault()).toLocalDate()
+        } catch (_: Exception) {
+            null
+        }
+        when {
+            date == null         -> earlier += c
+            date == now          -> today   += c
+            !date.isBefore(weekAgo) -> week  += c
+            else                 -> earlier += c
+        }
+    }
+
+    val out = mutableListOf<Pair<String, List<CaptureEntity>>>()
+    if (today.isNotEmpty())   out += "Today"     to today
+    if (week.isNotEmpty())    out += "This week" to week
+    if (earlier.isNotEmpty()) out += "Earlier"   to earlier
+    if (out.isEmpty())        out += "All"       to captures
+    return out
+}
+
+private fun friendlyMonthDay(iso: String): String =
+    try {
+        val instant = Instant.parse(iso)
+        val date    = instant.atZone(ZoneId.systemDefault()).toLocalDate()
+        date.format(DateTimeFormatter.ofPattern("MMM d"))
+    } catch (_: Exception) {
+        iso.take(10)
+    }

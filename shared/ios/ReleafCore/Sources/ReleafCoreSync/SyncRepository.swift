@@ -320,6 +320,87 @@ public final class SyncRepository: @unchecked Sendable {
         )
     }
 
+    /// Pull-only pass — no push, no manifest write. Applies every
+    /// remote upsert + tombstone in the current Drive manifest to the
+    /// local store via the data source. Used by Settings → "Restore
+    /// from Drive" to recover after an uninstall / device swap, where
+    /// the user wants the local DB rehydrated from the cloud copy
+    /// without the worker's bidirectional reconciliation.
+    ///
+    /// Last-write-wins still applies inside `applyRemoteUpsert` (the
+    /// data source's responsibility) — this isn't a force-overwrite.
+    /// True force-restore (clobber everything regardless of
+    /// updatedAt) needs a separate `applyRemoteUpsert(force: true)`
+    /// flavour on the data source; out of scope for this slice.
+    @discardableResult
+    public func restore(
+        deviceId: String,
+        accessToken: String
+    ) async throws -> SyncResult {
+        // 1. Ensure the root folder exists. If the user really did
+        // start from a fresh install, this creates an empty Drive
+        // folder; the manifest fetch then comes back nil and we
+        // return an empty result — same behaviour as the very first
+        // sync pass on a new device.
+        let root = try await driveClient.ensureRootFolder(
+            named: dataSource.driveRootFolderName,
+            accessToken: accessToken
+        )
+
+        // 2. Fetch the remote manifest. Nil = no Drive backup yet,
+        // nothing to restore.
+        guard let remoteManifest = try await fetchRemoteManifest(
+            rootFolderId: root.id,
+            accessToken: accessToken
+        ) else {
+            let nowIso = IsoClock.nowIso()
+            await MainActor.run {
+                stateStore.recordSuccess(
+                    lastFullSyncAt: nowIso,
+                    manifestChecksum: "",
+                    pendingCount: 0
+                )
+            }
+            return SyncResult()
+        }
+
+        // 3. Version gate — same posture as `sync(...)`. Refuse to
+        // restore from a manifest written by a future major version.
+        if remoteManifest.schemaVersion.major > dataSource.schemaVersion.major {
+            await MainActor.run { stateStore.recordVersionBlocked() }
+            return SyncResult(versionBlocked: true)
+        }
+
+        // 4. Pull every remote upsert + tombstone via the existing
+        // `pullDelta` path.
+        let downloaded = try await pullDelta(
+            remoteManifest: remoteManifest,
+            rootFolderId:   root.id,
+            accessToken:    accessToken
+        )
+
+        // 5. Persist sync state. We deliberately stamp `lastFullSyncAt`
+        // with the restore timestamp so the Home pill / Settings row
+        // reflect the activity — the user just got fresh data from
+        // Drive, and surfacing it as "Synced moments ago" matches
+        // their mental model. `pendingCount` is left unchanged.
+        let nowIso = IsoClock.utc()
+        await MainActor.run {
+            stateStore.recordSuccess(
+                lastFullSyncAt: nowIso,
+                manifestChecksum: "",
+                pendingCount: 0
+            )
+        }
+
+        return SyncResult(
+            uploaded: 0,
+            tombstoned: 0,
+            downloaded: downloaded,
+            failed: 0
+        )
+    }
+
     // MARK: - Manifest fetch
 
     private func fetchRemoteManifest(

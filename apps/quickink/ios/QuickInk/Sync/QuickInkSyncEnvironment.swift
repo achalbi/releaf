@@ -89,6 +89,11 @@ public final class QuickInkSyncEnvironment {
     public func install(authStore: AuthStore) {
         if installed { return }
         installed = true
+        // Cache so `requestRestore()` can resolve the active session
+        // without needing the authStore threaded through every call
+        // site. Held weakly; the AuthStore singleton outlives the
+        // process anyway.
+        installedAuthStore = authStore
 
         scheduler.runOnce = { [weak self] in
             guard let self else { return }
@@ -115,6 +120,23 @@ public final class QuickInkSyncEnvironment {
                 deviceId:    DeviceIdentity.get(),
                 accessToken: session.accessToken
             )
+
+            // Phase 6 — back up the actual scanned PDFs + preview
+            // JPEGs to Drive. Runs after the JSON metadata pass so
+            // the captures rows already exist in the manifest, and
+            // a fresh-device restore can find them via the row's
+            // `pdf_drive_file_id`. Best-effort: errors per row are
+            // swallowed so a single bad upload doesn't block the
+            // rest. Mirror `QuickInkBinarySync.kt` on Android.
+            let binarySync = QuickInkBinarySync(driveClient: self.driveClient)
+            try? await binarySync.uploadAndCascade(
+                userId:      session.userId,
+                accessToken: session.accessToken
+            )
+            try? await binarySync.restorePending(
+                userId:      session.userId,
+                accessToken: session.accessToken
+            )
         }
 
         scheduler.registerBackgroundRefreshHandler()
@@ -134,7 +156,60 @@ public final class QuickInkSyncEnvironment {
         }
     }
 
+    /// Kick a one-shot PULL-ONLY pass against Drive — the iOS
+    /// counterpart to Android's `QuickInkRestoreWorker`. Hits
+    /// `SyncRepository.restore(...)` so local rows get rehydrated
+    /// from the cloud copy without the bidirectional reconciliation
+    /// the periodic worker does. Used by Settings → "Restore from
+    /// Drive". No-ops gracefully when signed out.
+    ///
+    /// Drive-backup toggle is intentionally NOT consulted here:
+    /// restore is an explicit user action, distinct from the
+    /// background sync the toggle gates.
+    public func requestRestore() {
+        // `install(...)` may not have been called yet (e.g. preview /
+        // test path) — `currentSession` would still resolve, so we
+        // can run standalone. Fire-and-forget; errors swallowed
+        // because the UI doesn't surface restore-specific failures
+        // yet (Settings just shows the Last-synced row updating).
+        Task { [weak self] in
+            guard let self else { return }
+            // Pulling the AuthStore through the install hook would
+            // require an extra @Stored ref. Read fresh from the
+            // shared store via the same KeychainTokenStore the auth
+            // layer uses; SyncRepository.sync goes through the same
+            // path, so the call site doesn't need an authStore arg.
+            // For now, require `install(...)` to have been called so
+            // we can reuse the cached AuthStore via the `authObserver`
+            // closure context. If not installed, no-op cleanly.
+            guard self.installed,
+                  let session = await self.lastInstalledSession()
+            else { return }
+
+            let dataSource = QuickInkSyncDataSource(userId: session.userId)
+            let repo = SyncRepository(
+                dataSource:  dataSource,
+                driveClient: self.driveClient,
+                stateStore:  self.stateStore
+            )
+            _ = try? await repo.restore(
+                deviceId:    DeviceIdentity.get(),
+                accessToken: session.accessToken
+            )
+        }
+    }
+
     private func currentSession(authStore: AuthStore) async -> GoogleAuthSession? {
         await MainActor.run { authStore.session }
+    }
+
+    /// Cached AuthStore reference established by `install(...)` so
+    /// `requestRestore()` doesn't need an authStore arg from each
+    /// call site. Set inside `install` and read here.
+    private weak var installedAuthStore: AuthStore?
+
+    private func lastInstalledSession() async -> GoogleAuthSession? {
+        guard let store = installedAuthStore else { return nil }
+        return await currentSession(authStore: store)
     }
 }

@@ -57,6 +57,7 @@ import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
+import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
 
@@ -86,7 +87,7 @@ fun SignInScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.bg),
+            .quickInkDotGridBackground(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.weight(1f))
@@ -103,7 +104,7 @@ fun SignInScreen(
         Spacer(Modifier.size(QuickInkSpacing.s4))
 
         Text(
-            text     = "Sign in to back up",
+            text     = "Synced privately\nto your Drive",
             style    = type.display,
             color    = colors.ink,
             textAlign = TextAlign.Center,
@@ -113,7 +114,7 @@ fun SignInScreen(
         Spacer(Modifier.size(QuickInkSpacing.s3))
 
         Text(
-            text     = "Sign in with Google so your notes sync to Drive and follow you across devices.",
+            text     = "Your notebook follows you across devices. We never see your pages.",
             style    = type.body,
             color    = colors.inkSoft,
             textAlign = TextAlign.Center,

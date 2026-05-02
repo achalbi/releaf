@@ -20,15 +20,27 @@
                              before setContent so the splash doesn't
                              bleed into app chrome.
 
-  Uses Material3.NoActionBar as the parent because the app is
-  Compose-only — no XML ActionBar / Toolbar. Status bar color is set
-  to cream and statusBarContents (icons + clock) are darkened so
-  they're visible on the warm canvas. Same treatment for the
-  navigation bar.
+  Why the framework `android:Theme.Material.Light.NoActionBar` parent
+  instead of an AppCompat / Material Components flavor: the project
+  is Compose-only (no `com.google.android.material:material`,
+  no `androidx.appcompat`) so the `Theme.Material3.*` and
+  `Theme.AppCompat.*` style families aren't on the resource path.
+  The framework Material theme has been shipping in Android since
+  API 21, has no library dependency, and supplies everything the
+  splash window needs (windowBackground, statusBar, navigationBar
+  attributes). Compose itself doesn't read from this theme — the
+  in-app look is owned by `QuickInkTheme { ... }` — so the parent's
+  default colors don't leak into screens.
+
+  Light variant only: the splash is always cream. If/when QuickInk
+  picks up `androidx.core:core-splashscreen` for the modern
+  Android 12+ animated splash, swap this parent for
+  `Theme.SplashScreen` and follow the upgrade notes in
+  design/SPLASH_INTEGRATION.md.
 -->
 <resources xmlns:tools="http://schemas.android.com/tools">
 
-    <style name="Theme.QuickInk" parent="Theme.Material3.DayNight.NoActionBar">
+    <style name="Theme.QuickInk" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/quickink_canvas</item>
         <item name="android:statusBarColor">@color/quickink_canvas</item>
         <item name="android:windowLightStatusBar">true</item>
@@ -36,8 +48,58 @@
         <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
     </style>
 
-    <style name="Theme.QuickInk.Splash" parent="Theme.QuickInk">
+    <!--
+      Splash theme — uses the modern SplashScreen API from
+      androidx.core:core-splashscreen for unified behavior across
+      Android versions.
+
+      On Android 12+: the system splash window reads
+      `windowSplashScreenBackground` (cream) and
+      `windowSplashScreenAnimatedIcon` (the calligraphic Q on its
+      coral disc) and renders them with the platform's built-in
+      cold-launch animation. `postSplashScreenTheme` is what the
+      activity transitions into once `installSplashScreen()` calls
+      its hide animation — Theme.QuickInk for the cream window
+      background.
+
+      On Android 6–11: the compat library falls back to a simple
+      icon-on-color render. `android:windowBackground` is kept as
+      `splash_background` so that the legacy mark-plus-wordmark
+      composition still shows during the brief window before the
+      compat library takes over.
+    -->
+    <style name="Theme.QuickInk.Splash" parent="Theme.SplashScreen">
+        <!-- Modern SplashScreen API (Android 12+ system splash;
+             compat backport applies the same values on older OS).
+
+             `windowSplashScreenAnimatedIcon` MUST resolve to a drawable
+             whose intrinsic size is approximately 288dp × 288dp — the
+             system splash icon area. We provide the icon as
+             density-specific PNGs (`drawable-{m,h,xh,xxh,xxxh}dpi/
+             splash_app_icon.png`, sized 288/432/576/864/1152 px) so
+             the resolved drawable lands at the right dp dimensions on
+             every device. The earlier `@drawable/splash_icon` was a
+             layer-list pointing at a `drawable-nodpi/` PNG with
+             intrinsic size 1024dp; that was outside the system's
+             expected range and the icon failed to render. -->
+        <item name="windowSplashScreenBackground">@color/quickink_canvas</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_app_icon</item>
+        <item name="postSplashScreenTheme">@style/Theme.QuickInk</item>
+
+        <!-- Legacy `windowBackground` — used by very early frames
+             on older Android before the compat library installs the
+             system splash. Same `splash_background.xml` (cream + mark
+             + wordmark layer-list) we shipped before adding the
+             SplashScreen API. -->
         <item name="android:windowBackground">@drawable/splash_background</item>
+
+        <!-- Carry the system-bar tints from Theme.QuickInk so the
+             splash window's status/nav bars match the cream canvas
+             instead of inheriting Theme.SplashScreen's defaults. -->
+        <item name="android:statusBarColor">@color/quickink_canvas</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/quickink_canvas</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
     </style>
 
 </resources>

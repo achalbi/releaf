@@ -1,66 +1,72 @@
 /*
  * SearchScreen.kt
  *
- * Full-screen search surface — focused query input, grouped
- * results (Titles vs OCR Content), and a recent-searches chip
- * rail when the query is empty.
+ * QuickInk's Search surface — captures-first search:
+ *   - Empty query → timeline of all the user's captures, newest
+ *     first, grouped under "28TH APR, 2026" day headers.
+ *   - Non-empty query → a list of capture cards. Each card surfaces
+ *     either a category-substring match or the OCR snippet (with
+ *     the matched span emphasised) that pulled it in.
  *
- * Reads from `NotepadDao.searchActive(userId, query)` (FTS5)
- * directly via Compose state. Title-vs-content partitioning is
- * client-side over the union of FTS5 hits — the round-trip
- * already happened, so two passes here is free.
+ * Tap → `ScanDetailScreen`. The notepad-entries-driven timeline
+ * was retired alongside Library — captures are the canonical
+ * artifact users browse and search.
  *
- * Recent searches persist in SharedPreferences under
- * `quickink.search.recent` (JSON-encoded list, max 8 entries).
+ * OCR text matches go through `fts_ocr_text` MATCH via
+ * `CaptureRepository.search`. Searching debounces ~250ms while
+ * typing so we don't spam the FTS engine on every keystroke.
  *
  * Mirror of iOS `SearchScreen.swift`.
  */
 
 package app.quickink.mobile.features.search
 
-import android.content.Context
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -72,66 +78,79 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import app.quickink.mobile.QuickInkApp
+import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.capture.CaptureRepository
+import app.quickink.mobile.data.capture.SearchHit
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
-import app.releaf.mobile.data.notepad.NotepadEntry
-import androidx.compose.runtime.LaunchedEffect
-
-private const val RECENTS_KEY    = "quickink.search.recent"
-private const val RECENTS_LIMIT  = 8
-private const val RECENTS_DELIM  = "" // Unit Separator — safe in user-typed strings
+import app.quickink.mobile.ui.theme.quickInkDotGridBackground
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import kotlinx.coroutines.delay
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 fun SearchScreen(
     userId: String,
     onBack: () -> Unit,
-    onOpenEntry: (entryId: String) -> Unit,
+    onOpenScan: (captureId: String) -> Unit,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as QuickInkApp
-    val scope = rememberCoroutineScope()
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
-    val prefs = remember {
-        context.getSharedPreferences("quickink.search", Context.MODE_PRIVATE)
-    }
 
-    var query by remember { mutableStateOf("") }
-    var recents by remember { mutableStateOf(loadRecents(prefs)) }
-    val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focusRequester.requestFocus() }
-
-    // Search — observe all active entries via the DAO Flow and
-    // filter client-side. The DAO does expose `searchActive` for
-    // FTS5, but it takes a `RoomRawQuery` (not a (userId, query)
-    // pair) and the FTS5 query construction is non-obvious without
-    // direct access to the table+column names. For a personal-
-    // notes app this client-side path is sub-millisecond on any
-    // realistic dataset (a few thousand rows). Switch to the FTS5
-    // path in a follow-up once the RoomRawQuery shape is settled.
-    val dao = remember(app) { app.database.notepadDao() }
-    val allEntries by dao.observeActive(userId).collectAsState(initial = emptyList())
-    val hits by remember(query, allEntries) {
-        mutableStateOf(
-            run {
-                val q = query.trim().lowercase()
-                if (q.isEmpty()) emptyList()
-                else allEntries.filter { entry ->
-                    (entry.title?.lowercase()?.contains(q) == true) ||
-                            entry.notes.lowercase().contains(q)
-                }
-            }
+    val captureDao = remember(app) { app.database.captureDao() }
+    val repository = remember(app) {
+        CaptureRepository(
+            captureDao   = captureDao,
+            ocrResultDao = app.database.ocrResultDao(),
         )
     }
+
+    val captures by captureDao.observeActive(userId).collectAsState(initial = emptyList())
+
+    var queryDraft by remember { mutableStateOf("") }
+    var liveQuery by remember { mutableStateOf("") }
+    var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(false) }
+
+    // Debounced search runner.
+    LaunchedEffect(queryDraft) {
+        val draft = queryDraft.trim()
+        if (draft.isEmpty()) {
+            liveQuery = ""
+            hits = emptyList()
+            isSearching = false
+            return@LaunchedEffect
+        }
+        delay(250)
+        if (queryDraft.trim() != draft) return@LaunchedEffect
+        liveQuery = draft
+        isSearching = true
+        try {
+            hits = repository.search(userId, draft)
+        } catch (_: Exception) {
+            hits = emptyList()
+        } finally {
+            isSearching = false
+        }
+    }
+
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.bg),
+            .quickInkDotGridBackground()
+            .padding(top = statusBarTop + QuickInkSpacing.s4),
     ) {
-        // Search bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -145,197 +164,89 @@ fun SearchScreen(
                     tint              = colors.ink,
                 )
             }
-
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(QuickInkRadius.pill))
-                    .background(colors.borderSoft)
-                    .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector       = Icons.Filled.Search,
-                    contentDescription = null,
-                    tint              = colors.muted,
-                    modifier          = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.size(QuickInkSpacing.s2))
-                BasicTextField(
-                    value         = query,
-                    onValueChange = { query = it },
-                    textStyle     = type.body.copy(color = colors.ink),
-                    cursorBrush   = SolidColor(colors.accent),
-                    singleLine    = true,
-                    modifier      = Modifier
-                        .weight(1f)
-                        .focusRequester(focusRequester),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = {
-                        recents = commitRecent(prefs, query, recents)
-                    }),
-                    decorationBox = { inner ->
-                        if (query.isEmpty()) {
-                            Text(
-                                text  = "Search notes & OCR text",
-                                style = type.body,
-                                color = colors.muted,
+            OutlinedTextField(
+                value         = queryDraft,
+                onValueChange = { queryDraft = it },
+                modifier      = Modifier.weight(1f),
+                placeholder   = { Text("Search scans & OCR text", style = type.body, color = colors.muted) },
+                leadingIcon   = {
+                    Icon(
+                        imageVector       = Icons.Filled.Search,
+                        contentDescription = null,
+                        tint              = colors.muted,
+                        modifier          = Modifier.size(18.dp),
+                    )
+                },
+                trailingIcon  = {
+                    if (queryDraft.isNotEmpty()) {
+                        IconButton(onClick = { queryDraft = "" }) {
+                            Icon(
+                                imageVector       = Icons.Filled.Close,
+                                contentDescription = "Clear",
+                                tint              = colors.muted,
+                                modifier          = Modifier.size(16.dp),
                             )
                         }
-                        inner()
-                    },
-                )
-                if (query.isNotEmpty()) {
-                    Icon(
-                        imageVector       = Icons.Filled.Cancel,
-                        contentDescription = "Clear",
-                        tint              = colors.muted,
-                        modifier          = Modifier
-                            .size(18.dp)
-                            .clickable { query = "" },
-                    )
-                }
-            }
-            Spacer(Modifier.size(QuickInkSpacing.s3))
+                    }
+                },
+                singleLine    = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                shape         = RoundedCornerShape(QuickInkRadius.pill),
+                colors        = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = colors.border,
+                    unfocusedBorderColor = colors.border,
+                ),
+            )
         }
 
         Divider(color = colors.border, thickness = 1.dp)
 
         when {
-            query.trim().isEmpty() -> RecentChipsView(
-                recents  = recents,
-                onTap    = { term -> query = term },
-                onClear  = {
-                    prefs.edit().remove(RECENTS_KEY).apply()
-                    recents = emptyList()
-                },
-            )
-            hits.isEmpty() -> EmptyResults()
-            else -> ResultsList(
-                query    = query,
-                entries  = hits,
-                onOpen   = { entryId ->
-                    recents = commitRecent(prefs, query, recents)
-                    onOpenEntry(entryId)
-                },
-            )
+            liveQuery.isEmpty() -> TimelineView(captures = captures, onOpen = onOpenScan)
+            isSearching && hits.isEmpty() -> LoadingState()
+            hits.isEmpty()      -> NoMatchesState()
+            else                -> ResultsView(hits = hits, query = liveQuery, onOpen = onOpenScan)
         }
     }
 }
 
-// MARK: - Recent chips (empty query state)
-
 @Composable
-private fun RecentChipsView(
-    recents: List<String>,
-    onTap: (String) -> Unit,
-    onClear: () -> Unit,
-) {
+private fun TimelineView(captures: List<CaptureEntity>, onOpen: (String) -> Unit) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
 
-    if (recents.isEmpty()) {
+    if (captures.isEmpty()) {
         Column(
-            modifier             = Modifier.fillMaxSize(),
-            horizontalAlignment  = Alignment.CenterHorizontally,
+            modifier             = Modifier.fillMaxSize().padding(QuickInkSpacing.s7),
             verticalArrangement  = Arrangement.Center,
+            horizontalAlignment  = Alignment.CenterHorizontally,
         ) {
             Icon(
                 imageVector       = Icons.Filled.Search,
                 contentDescription = null,
                 tint              = colors.muted,
-                modifier          = Modifier.size(36.dp),
+                modifier          = Modifier.size(32.dp),
             )
             Spacer(Modifier.size(QuickInkSpacing.s3))
-            Text(text = "Search your notes", style = type.heading, color = colors.ink)
-            Spacer(Modifier.size(QuickInkSpacing.s1))
+            Text("Nothing to search yet", style = type.heading, color = colors.ink)
+            Spacer(Modifier.size(QuickInkSpacing.s2))
             Text(
-                text     = "Find pages by title or anything inside the OCR text.",
-                style    = type.body,
-                color    = colors.inkSoft,
+                text  = "Capture a scan from Home and search by category or OCR text.",
+                style = type.body,
+                color = colors.inkSoft,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = QuickInkSpacing.s7),
             )
         }
-    } else {
-        Column(
-            modifier            = Modifier
-                .padding(horizontal = QuickInkSpacing.s5, vertical = QuickInkSpacing.s4),
-            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "RECENT", style = type.eyebrow, color = colors.muted)
-                Spacer(Modifier.weight(1f))
-                Text(
-                    text     = "Clear",
-                    style    = type.caption,
-                    color    = colors.accent,
-                    modifier = Modifier.clickable(onClick = onClear),
-                )
-            }
-            // FlowRow available in foundation; for portability,
-            // wrap with a custom row-flow using Compose layout.
-            ChipFlow(
-                items = recents,
-                onTap = onTap,
-            )
-        }
+        return
     }
-}
 
-@Composable
-private fun ChipFlow(items: List<String>, onTap: (String) -> Unit) {
-    val colors = LocalQuickInkColors.current
-    val type = LocalQuickInkTypography.current
-    // Simplified vertical-of-rows fallback (true flow layout
-    // requires foundation FlowRow which is API-stable from
-    // Compose 1.5+; using a vertical column of horizontal rows
-    // here keeps minimum churn).
-    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
-        items.chunked(3).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
-                row.forEach { term ->
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(QuickInkRadius.pill))
-                            .background(colors.borderSoft)
-                            .clickable { onTap(term) }
-                            .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector       = Icons.Filled.History,
-                            contentDescription = null,
-                            tint              = colors.ink,
-                            modifier          = Modifier.size(11.dp),
-                        )
-                        Spacer(Modifier.size(6.dp))
-                        Text(text = term, style = type.label, color = colors.ink)
-                    }
-                }
-            }
-        }
+    val grouped = remember(captures) {
+        captures.sortedByDescending { it.createdAt }.groupBy { dayKey(it.createdAt) }
     }
-}
-
-// MARK: - Results
-
-@Composable
-private fun ResultsList(
-    query: String,
-    entries: List<NotepadEntry>,
-    onOpen: (String) -> Unit,
-) {
-    val colors = LocalQuickInkColors.current
-    val type = LocalQuickInkTypography.current
-    val q = query.lowercase()
-
-    val titleHits   = entries.filter { it.title?.lowercase()?.contains(q) == true }
-    val contentHits = entries.filter { it.notes.lowercase().contains(q) }
 
     LazyColumn(
         modifier            = Modifier.fillMaxSize(),
-        contentPadding      = androidx.compose.foundation.layout.PaddingValues(
+        contentPadding      = PaddingValues(
             start  = QuickInkSpacing.s5,
             end    = QuickInkSpacing.s5,
             top    = QuickInkSpacing.s4,
@@ -343,29 +254,26 @@ private fun ResultsList(
         ),
         verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s5),
     ) {
-        if (titleHits.isNotEmpty()) {
-            item {
-                Text(text = "TITLES", style = type.eyebrow, color = colors.muted)
+        grouped.forEach { (day, dayCaptures) ->
+            item(key = "day-$day") {
+                Text(
+                    text  = formatDayHeader(day),
+                    style = type.eyebrow,
+                    color = colors.muted,
+                )
             }
-            items(titleHits, key = { "t-${it.id}" }) { entry ->
-                TitleHitRow(entry = entry, query = query, onClick = { onOpen(entry.id) })
-            }
-        }
-        if (contentHits.isNotEmpty()) {
-            item {
-                Text(text = "OCR CONTENT", style = type.eyebrow, color = colors.muted)
-            }
-            items(contentHits, key = { "c-${it.id}" }) { entry ->
-                OcrHitRow(entry = entry, query = query, onClick = { onOpen(entry.id) })
+            items(dayCaptures, key = { "tl-${it.id}" }) { capture ->
+                TimelineRow(capture = capture, onClick = { onOpen(capture.id) })
             }
         }
     }
 }
 
 @Composable
-private fun TitleHitRow(entry: NotepadEntry, query: String, onClick: () -> Unit) {
+private fun TimelineRow(capture: CaptureEntity, onClick: () -> Unit) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
+    val context = LocalContext.current
 
     Row(
         modifier = Modifier
@@ -375,42 +283,50 @@ private fun TitleHitRow(entry: NotepadEntry, query: String, onClick: () -> Unit)
             .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
             .clickable(onClick = onClick)
             .padding(QuickInkSpacing.s3),
-        verticalAlignment     = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(colors.accentSoft),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector       = Icons.Filled.Description,
-                contentDescription = null,
-                tint              = colors.accent,
-                modifier          = Modifier.size(16.dp),
-            )
-        }
+        ThumbnailBox(previewUri = capture.previewUri)
+        Spacer(Modifier.size(QuickInkSpacing.s3))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text     = highlight(entry.title ?: "Untitled", query, colors.accent),
+                text     = capture.category ?: "Scan",
                 style    = type.label,
                 color    = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(text = entry.entryDate, style = type.caption, color = colors.muted)
+            Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+                Text(text = formatTime(capture.createdAt), style = type.caption, color = colors.muted)
+                if (capture.pageCount > 1) {
+                    Text("• ${capture.pageCount} pages", style = type.caption, color = colors.muted)
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun OcrHitRow(entry: NotepadEntry, query: String, onClick: () -> Unit) {
+private fun ResultsView(hits: List<SearchHit>, query: String, onOpen: (String) -> Unit) {
+    LazyColumn(
+        modifier            = Modifier.fillMaxSize(),
+        contentPadding      = PaddingValues(
+            start  = QuickInkSpacing.s5,
+            end    = QuickInkSpacing.s5,
+            top    = QuickInkSpacing.s4,
+            bottom = QuickInkSpacing.s7,
+        ),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        items(hits, key = { "hit-${it.capture.id}" }) { hit ->
+            SearchResultCard(hit = hit, query = query, onClick = { onOpen(hit.capture.id) })
+        }
+    }
+}
+
+@Composable
+private fun SearchResultCard(hit: SearchHit, query: String, onClick: () -> Unit) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
-    val title = entry.title?.takeIf { it.isNotEmpty() } ?: "Untitled"
-    val snippet = makeSnippet(entry.notes, query, contextChars = 60)
 
     Column(
         modifier = Modifier
@@ -419,104 +335,177 @@ private fun OcrHitRow(entry: NotepadEntry, query: String, onClick: () -> Unit) {
             .background(colors.surface)
             .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
             .clickable(onClick = onClick)
-            .padding(QuickInkSpacing.s4),
+            .padding(QuickInkSpacing.s3),
         verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            ThumbnailBox(previewUri = hit.capture.previewUri)
+            Spacer(Modifier.size(QuickInkSpacing.s3))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text     = hit.capture.category ?: "Scan",
+                    style    = type.label,
+                    color    = colors.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text  = if (hit.ocrSnippet.isNullOrBlank()) "Category match" else "OCR match",
+                    style = type.caption,
+                    color = colors.muted,
+                )
+            }
+        }
+        if (!hit.ocrSnippet.isNullOrBlank()) {
             Text(
-                text     = title,
-                style    = type.label,
-                color    = colors.ink,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
+                text     = highlightedSnippet(hit.ocrSnippet, query, colors.accent),
+                style    = type.body,
+                color    = colors.inkSoft,
+                modifier = Modifier.padding(horizontal = QuickInkSpacing.s2),
+                maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(text = entry.entryDate, style = type.caption, color = colors.muted)
         }
-        Text(
-            text     = highlight(snippet, query, colors.accent),
-            style    = type.body,
-            color    = colors.inkSoft,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
 @Composable
-private fun EmptyResults() {
+private fun ThumbnailBox(previewUri: String?) {
+    val colors = LocalQuickInkColors.current
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .size(width = 56.dp, height = 72.dp)
+            .clip(RoundedCornerShape(QuickInkRadius.sm))
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.sm)),
+    ) {
+        if (previewUri.isNullOrBlank()) {
+            Box(
+                modifier         = Modifier.fillMaxSize().background(colors.borderSoft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector       = Icons.Filled.Description,
+                    contentDescription = null,
+                    tint              = colors.muted,
+                    modifier          = Modifier.size(14.dp),
+                )
+            }
+        } else {
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(Uri.parse(previewUri))
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                contentScale       = ContentScale.Crop,
+                modifier           = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LoadingState() {
+    val colors = LocalQuickInkColors.current
+    Column(
+        modifier             = Modifier.fillMaxSize(),
+        verticalArrangement  = Arrangement.Center,
+        horizontalAlignment  = Alignment.CenterHorizontally,
+    ) {
+        CircularProgressIndicator(color = colors.accent)
+    }
+}
+
+@Composable
+private fun NoMatchesState() {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     Column(
-        modifier             = Modifier.fillMaxSize(),
-        horizontalAlignment  = Alignment.CenterHorizontally,
+        modifier             = Modifier.fillMaxSize().padding(QuickInkSpacing.s7),
         verticalArrangement  = Arrangement.Center,
+        horizontalAlignment  = Alignment.CenterHorizontally,
     ) {
         Icon(
             imageVector       = Icons.Filled.Search,
             contentDescription = null,
             tint              = colors.muted,
-            modifier          = Modifier.size(36.dp),
+            modifier          = Modifier.size(32.dp),
         )
         Spacer(Modifier.size(QuickInkSpacing.s3))
-        Text(text = "No matches", style = type.heading, color = colors.ink)
-        Spacer(Modifier.size(QuickInkSpacing.s1))
+        Text("No matches", style = type.heading, color = colors.ink)
+        Spacer(Modifier.size(QuickInkSpacing.s2))
         Text(
-            text     = "Try a different word, or check your spelling.",
-            style    = type.body,
-            color    = colors.inkSoft,
+            text  = "Try a different word or check the spelling.",
+            style = type.body,
+            color = colors.inkSoft,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = QuickInkSpacing.s7),
         )
     }
 }
 
-// MARK: - Highlight + snippet
+// MARK: - Helpers
 
-private fun highlight(text: String, query: String, accent: androidx.compose.ui.graphics.Color): AnnotatedString {
-    if (query.isEmpty()) return AnnotatedString(text)
-    val lower = text.lowercase()
-    val q = query.lowercase()
-    val idx = lower.indexOf(q)
-    if (idx < 0) return AnnotatedString(text)
+/// Render `snippet` with each whitespace-delimited query token
+/// highlighted in accent + bold. Case-insensitive matching.
+private fun highlightedSnippet(snippet: String, query: String, accent: Color): AnnotatedString {
+    val terms = query.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (terms.isEmpty()) return AnnotatedString(snippet)
+
     return buildAnnotatedString {
-        append(text.substring(0, idx))
-        withStyle(SpanStyle(color = accent, fontWeight = FontWeight.SemiBold)) {
-            append(text.substring(idx, idx + q.length))
+        var index = 0
+        while (index < snippet.length) {
+            val match = terms
+                .mapNotNull { term ->
+                    val pos = snippet.indexOf(term, startIndex = index, ignoreCase = true)
+                    if (pos >= 0) pos to term else null
+                }
+                .minByOrNull { it.first }
+            if (match == null) {
+                append(snippet.substring(index))
+                break
+            }
+            val (start, term) = match
+            append(snippet.substring(index, start))
+            withStyle(SpanStyle(color = accent, fontWeight = FontWeight.Bold)) {
+                append(snippet.substring(start, start + term.length))
+            }
+            index = start + term.length
         }
-        append(text.substring(idx + q.length))
     }
 }
 
-private fun makeSnippet(text: String, query: String, contextChars: Int): String {
-    if (query.isEmpty()) return text.take(contextChars * 2)
-    val lower = text.lowercase()
-    val idx = lower.indexOf(query.lowercase())
-    if (idx < 0) return text.take(contextChars * 2)
-    val start = (idx - contextChars).coerceAtLeast(0)
-    val end   = (idx + query.length + contextChars).coerceAtMost(text.length)
-    val prefix = if (start > 0) "…" else ""
-    val suffix = if (end < text.length) "…" else ""
-    return "$prefix${text.substring(start, end)}$suffix"
+private fun dayKey(iso: String): String = try {
+    Instant.parse(iso).atZone(ZoneId.systemDefault()).toLocalDate()
+        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+} catch (_: Exception) {
+    iso.take(10)
 }
 
-// MARK: - Recent searches persistence
+private fun formatDayHeader(yyyymmdd: String): String = try {
+    val date = LocalDate.parse(yyyymmdd)
+    val day = date.dayOfMonth
+    val suffix = ordinalSuffix(day)
+    val monthYear = date.format(DateTimeFormatter.ofPattern("MMM, yyyy")).uppercase(Locale.getDefault())
+    "$day$suffix $monthYear"
+} catch (_: Exception) {
+    yyyymmdd
+}
 
-private fun loadRecents(prefs: android.content.SharedPreferences): List<String> =
-    prefs.getString(RECENTS_KEY, null)
-        ?.split(RECENTS_DELIM)
-        ?.filter { it.isNotEmpty() }
-        ?: emptyList()
+private fun ordinalSuffix(day: Int): String {
+    val mod100 = day % 100
+    if (mod100 in 11..13) return "TH"
+    return when (day % 10) {
+        1    -> "ST"
+        2    -> "ND"
+        3    -> "RD"
+        else -> "TH"
+    }
+}
 
-private fun commitRecent(
-    prefs: android.content.SharedPreferences,
-    query: String,
-    current: List<String>,
-): List<String> {
-    val trimmed = query.trim()
-    if (trimmed.isEmpty()) return current
-    val deduped = listOf(trimmed) + current.filter { it.lowercase() != trimmed.lowercase() }
-    val capped  = deduped.take(RECENTS_LIMIT)
-    prefs.edit().putString(RECENTS_KEY, capped.joinToString(RECENTS_DELIM)).apply()
-    return capped
+private fun formatTime(iso: String): String = try {
+    Instant.parse(iso).atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("h:mm a"))
+} catch (_: Exception) {
+    ""
 }

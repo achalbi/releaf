@@ -68,7 +68,18 @@ let package = Package(
                 // SQLite file + run migrations.
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
-            path: "QuickInk"
+            path: "QuickInk",
+            resources: [
+                // Bundle Cormorant Garamond + (eventually) Caveat so
+                // QuickInkFont.registerAll() can register them at app
+                // launch via CTFontManager — see the header note in
+                // QuickInkTheme.swift. Until the Xcode app target is
+                // created and calls registerAll() in its @main init,
+                // SwiftUI text falls back to system serif; the splash
+                // screen sidesteps this by using the pre-rendered
+                // QuickInkWordmark imageset.
+                .process("DesignSystem/Fonts"),
+            ]
         ),
         // Phase 4 Slice 4.4 — cross-platform interop tests for the
         // shared `notepad_entries` payload. Mirror of Releaf's

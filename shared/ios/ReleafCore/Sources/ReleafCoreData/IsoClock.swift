@@ -35,6 +35,12 @@ public enum IsoClock {
         formatter.string(from: date)
     }
 
+    /// Alias for [nowIso]. Some call sites read more naturally as
+    /// `IsoClock.utc()` — the formatter is already UTC-anchored.
+    public static func utc(date: Date = Date()) -> String {
+        nowIso(date: date)
+    }
+
     /// Today's date in the device's local zone as YYYY-MM-DD — the shape
     /// the `entry_date` column's CHECK constraint enforces.
     public static func todayLocalDate(date: Date = Date(), calendar: Calendar = .current) -> String {

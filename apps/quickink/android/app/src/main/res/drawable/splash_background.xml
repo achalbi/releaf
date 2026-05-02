@@ -23,16 +23,28 @@
     <!-- Cream canvas, edge-to-edge. -->
     <item android:drawable="@color/quickink_canvas" />
 
-    <!-- Centered calligraphic Q. Uses a tight-cropped variant so the
-         mark renders at full visual weight at the chosen dp size —
-         the adaptive-icon foreground has padding for the launcher
-         mask, which would make the splash mark look small. -->
+    <!-- Calligraphic Q, sitting above the visual center. The bottom
+         inset shrinks the item's drawing area so center-gravity ends
+         up biased toward the upper half. -->
     <item
         android:gravity="center"
-        android:width="140dp"
-        android:height="130dp">
+        android:width="130dp"
+        android:height="120dp"
+        android:bottom="100dp">
         <bitmap
             android:src="@drawable/splash_mark"
+            android:gravity="center" />
+    </item>
+
+    <!-- "QuickInk" wordmark in Cormorant Garamond Medium, pre-rendered.
+         Positioned just below the mark via a symmetric top inset. -->
+    <item
+        android:gravity="center"
+        android:width="180dp"
+        android:height="48dp"
+        android:top="100dp">
+        <bitmap
+            android:src="@drawable/splash_wordmark"
             android:gravity="center" />
     </item>
 

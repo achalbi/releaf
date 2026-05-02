@@ -22,7 +22,10 @@
 package app.quickink.mobile.features.scan
 
 import app.quickink.mobile.data.capture.CaptureRepository
+import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
+import app.releaf.mobile.data.notepad.NotepadDao
+import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.shared.scan.DocumentScanResult
 import app.releaf.shared.scan.OcrPipeline
 import app.releaf.shared.scan.PageOcr
@@ -32,11 +35,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 class ScanFlowController(
     private val userId: String,
     private val repository: CaptureRepository,
     private val pipeline: OcrPipeline,
+    private val notepadDao: NotepadDao,
     private val scope: CoroutineScope,
     /**
      * Slice 4.2c — fired when a scan pass finishes and at least
@@ -79,13 +84,32 @@ class ScanFlowController(
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
 
+    /**
+     * User-selected category for the in-flight capture. Bound to
+     * the chip picker in `ScanReviewScreen`. Persisted to
+     * `captures.category` via [setCategory] whenever the user
+     * taps a chip; held here too so the chip's selected state
+     * survives state-machine transitions.
+     */
+    private val _selectedCategory = MutableStateFlow<String?>(null)
+    val selectedCategory: StateFlow<String?> = _selectedCategory.asStateFlow()
+
+    /**
+     * First-page preview JPEG of the in-flight capture (a
+     * `content://` or `file://` URI string). Surfaced to
+     * `ScanReviewScreen` so it can render the saved image below
+     * the category picker. `null` outside an active scan pass.
+     */
+    private val _previewImageUri = MutableStateFlow<String?>(null)
+    val previewImageUri: StateFlow<String?> = _previewImageUri.asStateFlow()
+
     private var activeJob: Job? = null
 
     /**
      * Called by the Home screen after `rememberDocumentScannerLauncher`'s
      * `onResult` fires.
      */
-    fun onScanComplete(result: DocumentScanResult) {
+    fun onScanComplete(result: DocumentScanResult, category: String? = null) {
         // Cancel any previous in-flight pass before starting a new
         // one. The user could conceivably tap Scan twice in quick
         // succession; we don't dedupe at the launcher layer so
@@ -94,6 +118,11 @@ class ScanFlowController(
 
         val captureId  = Uuidv7.generate()
         val totalPages = result.pageUris.size
+        // Reset the picker selection so a fresh capture starts with
+        // no category. The previous capture's choice was already
+        // persisted to its own row.
+        _selectedCategory.value = category
+        _previewImageUri.value  = result.previewUri?.toString()
         _state.value = State.Recognizing(
             captureId      = captureId,
             totalPages     = totalPages,
@@ -111,6 +140,7 @@ class ScanFlowController(
                     pdfUri     = result.pdfUri?.toString().orEmpty(),
                     previewUri = result.previewUri?.toString(),
                     pageCount  = totalPages,
+                    category   = category,
                 )
             } catch (e: Exception) {
                 _state.value = State.Failed("Couldn't save scan: ${e.message.orEmpty()}")
@@ -123,6 +153,11 @@ class ScanFlowController(
             //    keep ordering stable for later reads.
             var successCount = 0
             var completed    = 0
+            // Page-ordered OCR text accumulator — drives the
+            // append-to-today-entry pass after the OCR loop.
+            // Indexed by `pageIndex` so out-of-order completion
+            // stays correct in the final paste.
+            val pageTexts = mutableMapOf<Int, String>()
             pipeline.recognizePages(result.pageUris).collect { page ->
                 completed += 1
                 when (page) {
@@ -134,6 +169,7 @@ class ScanFlowController(
                                 result    = page.result,
                             )
                             successCount += 1
+                            pageTexts[page.pageIndex] = page.result.text
                         } catch (e: Exception) {
                             // Persistence error on a single page — log,
                             // continue. Capture row + other pages still
@@ -151,6 +187,18 @@ class ScanFlowController(
                     captureId      = captureId,
                     totalPages     = totalPages,
                     completedPages = completed,
+                )
+            }
+
+            // 3. Append the recognized text into today's
+            //    `notepad_entries` row so the home recents rail
+            //    surfaces it immediately. One entry per (user, day);
+            //    multiple captures append to the same row. The
+            //    row's category mirrors the latest capture's pick.
+            if (pageTexts.isNotEmpty()) {
+                appendOcrToTodayEntry(
+                    pageTexts = pageTexts,
+                    category  = _selectedCategory.value,
                 )
             }
 
@@ -176,5 +224,95 @@ class ScanFlowController(
         activeJob?.cancel()
         activeJob = null
         _state.value = State.Idle
+        _selectedCategory.value = null
+        _previewImageUri.value  = null
     }
+
+    /**
+     * Picked-category persistence hook for the review screen's
+     * chip row. Updates [selectedCategory] so the UI redraws, then
+     * fires-and-forgets the SQL update against the in-flight
+     * capture's row. No-ops when there's no active capture
+     * (Idle / Failed).
+     */
+    fun setCategory(name: String?) {
+        _selectedCategory.value = name
+        val captureId = currentCaptureId() ?: return
+        scope.launch {
+            try {
+                repository.setCategory(captureId, name)
+            } catch (_: Exception) {
+                // Best-effort: a transient SQL failure shouldn't
+                // crash the review flow. The user can retap the
+                // chip to re-issue the UPDATE.
+            }
+        }
+    }
+
+    private fun currentCaptureId(): String? = when (val current = _state.value) {
+        is State.Recognizing -> current.captureId
+        is State.Complete    -> current.captureId
+        is State.Idle, is State.Failed -> null
+    }
+
+    // ─── Append-to-today's-entry ──────────────────────────────────
+
+    /**
+     * Append a freshly-recognized capture's OCR text to today's
+     * `notepad_entries` row (creating it if missing). One entry
+     * per (userId, entryDate); multiple captures of the same day
+     * concatenate into the same row's `notes` column. The row's
+     * `category` is overwritten with the latest capture's pick —
+     * derived data, cheap to refresh, matches the design note in
+     * `CategoryRepository`'s header.
+     */
+    private suspend fun appendOcrToTodayEntry(
+        pageTexts: Map<Int, String>,
+        category: String?,
+    ) {
+        val snippet = formatSnippet(pageTexts)
+        if (snippet.isEmpty()) return
+        val today = LocalDate.now().toString() // YYYY-MM-DD, local TZ
+        val now   = IsoClock.nowIso()
+
+        try {
+            val existing = notepadDao.findLatestForDate(userId, today)
+            if (existing != null) {
+                val combined = if (existing.notes.isEmpty()) {
+                    snippet
+                } else {
+                    existing.notes + "\n\n" + snippet
+                }
+                notepadDao.upsert(
+                    existing.copy(
+                        notes     = combined,
+                        category  = category,
+                        updatedAt = now,
+                        dirty     = true,
+                    ),
+                )
+            } else {
+                notepadDao.upsert(
+                    NotepadEntry(
+                        id         = Uuidv7.generate(),
+                        userId     = userId,
+                        entryDate  = today,
+                        category   = category,
+                        notes      = snippet,
+                        createdAt  = now,
+                        updatedAt  = now,
+                        dirty      = true,
+                    ),
+                )
+            }
+        } catch (e: Exception) {
+            println("Append OCR to today entry failed: $e")
+        }
+    }
+
+    private fun formatSnippet(pageTexts: Map<Int, String>): String =
+        pageTexts.keys.sorted().mapNotNull { idx ->
+            val text = pageTexts[idx]?.trim().orEmpty()
+            if (text.isEmpty()) null else "## Page ${idx + 1}\n\n$text"
+        }.joinToString(separator = "\n\n")
 }

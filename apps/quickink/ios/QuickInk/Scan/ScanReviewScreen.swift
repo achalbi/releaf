@@ -1,19 +1,21 @@
 /*
  * ScanReviewScreen.swift
  *
- * Shown while OCR runs on a fresh capture, then while the user
- * acknowledges the completed result. Reads `ScanFlowController`'s
- * state and renders accordingly:
+ * Shown after the user finishes a scan. Layout (top → bottom):
  *
- *   - .recognizing  → progress UI ("Recognizing page X of Y")
- *   - .complete     → summary + "Done" CTA returning to Home
- *   - .failed       → error + "Done" returning to Home
+ *   1. Big category-button grid  — the user picks a category
+ *      (or none) for the in-flight capture. Tap-to-toggle
+ *      persists immediately via `controller.setCategory(name)`.
+ *   2. Saved page preview        — the first-page JPEG the
+ *      scanner produced, so the user can confirm what was saved
+ *      while still on this surface.
+ *   3. Status indicator          — small progress / saved /
+ *      failed badge. The hero used to be the progress UI; now
+ *      it sits beneath the actionable affordances.
+ *   4. Done button                — terminal-state-only.
  *
- * Per-page editable text review (the user can edit the
- * recognized text before save) lands in Slice 4 alongside the
- * notes editor wrappers. For Slice 3 the screen is review-only —
- * the OCR result is auto-persisted as it lands; this screen just
- * surfaces progress and the final summary.
+ * `captures.category` is per-capture, so the user can change
+ * their mind any number of times during review.
  */
 
 import SwiftUI
@@ -21,32 +23,36 @@ import ReleafCoreDesignSystem
 
 struct ScanReviewScreen: View {
     @ObservedObject var controller: ScanFlowController
+    let userId: String
+
+    @StateObject private var categoriesVM: CategoryListViewModel
+
+    init(controller: ScanFlowController, userId: String) {
+        self.controller = controller
+        self.userId = userId
+        _categoriesVM = StateObject(
+            wrappedValue: CategoryListViewModel(userId: userId)
+        )
+    }
 
     var body: some View {
-        VStack(spacing: AppSpacing.s5) {
-            Spacer()
-
-            switch controller.state {
-            case .idle:
-                // Shouldn't render — `QuickInkRoot` swaps to
-                // HomeScreen on `.idle`. Defensive empty body.
-                EmptyView()
-
-            case .recognizing(_, let totalPages, let completedPages):
-                recognizingBody(completed: completedPages, total: totalPages)
-
-            case .complete(_, let totalPages, let successCount):
-                completeBody(success: successCount, total: totalPages)
-
-            case .failed(let message):
-                failedBody(message: message)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: QuickInkSpacing.s5) {
+                    if !categoriesVM.categories.isEmpty,
+                       !isFailed {
+                        categoryButtonsGrid
+                    }
+                    if !isFailed {
+                        savedImagePreview
+                    }
+                    statusIndicator
+                }
+                .padding(.horizontal, QuickInkSpacing.s5)
+                .padding(.top, QuickInkSpacing.s8)
+                .padding(.bottom, QuickInkSpacing.s5)
             }
 
-            Spacer()
-
-            // Done button — visible only on terminal states. Blocks
-            // dismissal mid-OCR so a half-recognized capture isn't
-            // left dangling on Home; users wait for the pipeline.
             if !isRecognizing {
                 Button(action: { controller.dismiss() }) {
                     Text("Done")
@@ -63,6 +69,7 @@ struct ScanReviewScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.canvas.ignoresSafeArea())
+        .task { categoriesVM.start() }
     }
 
     private var isRecognizing: Bool {
@@ -70,58 +77,155 @@ struct ScanReviewScreen: View {
         return false
     }
 
+    private var isFailed: Bool {
+        if case .failed = controller.state { return true }
+        return false
+    }
+
+    // MARK: - Category buttons
+
+    /// Two-column grid of bigger category buttons. Replaces the
+    /// previous compact chip row — the picker is now the primary
+    /// affordance on this screen, so it gets full-width buttons
+    /// with serif headings instead of small pills.
     @ViewBuilder
-    private func recognizingBody(completed: Int, total: Int) -> some View {
-        ProgressView()
-            .scaleEffect(1.5)
-            .tint(AppColors.themeGreenPrimary)
+    private var categoryButtonsGrid: some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
+            Text("CATEGORY")
+                .font(QuickInkText.eyebrow)
+                .tracking(QuickInkLetterSpacing.eyebrow)
+                .foregroundStyle(QuickInkColors.muted)
 
-        VStack(spacing: AppSpacing.s2) {
-            Text("Recognizing text")
-                .font(AppText.pageTitle)
-                .foregroundStyle(AppColors.textPrimary)
-
-            Text("Page \(completed) of \(total)")
-                .font(AppText.meta)
-                .foregroundStyle(AppColors.textSecondary)
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: QuickInkSpacing.s3),
+                    GridItem(.flexible(), spacing: QuickInkSpacing.s3),
+                ],
+                spacing: QuickInkSpacing.s3
+            ) {
+                ForEach(categoriesVM.categories, id: \.id) { cat in
+                    categoryButton(
+                        name: cat.name,
+                        selected: cat.name == controller.selectedCategory
+                    )
+                }
+            }
         }
     }
 
     @ViewBuilder
-    private func completeBody(success: Int, total: Int) -> some View {
-        Image(systemName: "checkmark.circle.fill")
-            .font(.system(size: 64))
-            .foregroundStyle(AppColors.themeGreenPrimary)
-
-        VStack(spacing: AppSpacing.s2) {
-            Text("Saved")
-                .font(AppText.pageTitle)
-                .foregroundStyle(AppColors.textPrimary)
-
-            Text("Recognized text on \(success) of \(total) pages.")
-                .font(AppText.meta)
-                .foregroundStyle(AppColors.textSecondary)
+    private func categoryButton(name: String, selected: Bool) -> some View {
+        Button(action: {
+            // Tap-to-toggle: tapping the active button clears the
+            // selection so the user can leave the capture
+            // un-categorised. Tapping a different one switches.
+            controller.setCategory(selected ? nil : name)
+        }) {
+            Text(name)
+                .font(QuickInkText.heading)
+                .foregroundStyle(selected ? QuickInkColors.textOnAccent : QuickInkColors.ink)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, AppSpacing.s5)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, minHeight: 64)
+                .padding(.horizontal, QuickInkSpacing.s3)
+                .padding(.vertical, QuickInkSpacing.s3)
+                .background(
+                    RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                        .fill(selected ? QuickInkColors.accent : QuickInkColors.surface)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                        .strokeBorder(selected ? QuickInkColors.accent : QuickInkColors.border, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(name)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
+    // MARK: - Saved image
+
+    /// The first-page JPEG from the just-captured scan. Loaded
+    /// from the local `file://` URL the scanner produced; falls
+    /// back to a paper placeholder if the file isn't readable.
+    @ViewBuilder
+    private var savedImagePreview: some View {
+        if let image = loadedPreview {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity)
+                .frame(maxHeight: 360)
+                .background(QuickInkColors.surface)
+                .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                        .stroke(QuickInkColors.border, lineWidth: 1)
+                )
+        } else {
+            ZStack {
+                QuickInkColors.paper2
+                Image(systemName: "doc.text.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(QuickInkColors.muted)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 240)
+            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
         }
     }
 
+    private var loadedPreview: UIImage? {
+        guard let url = controller.previewImageURL else { return nil }
+        let path = url.isFileURL ? url.path : url.absoluteString
+        return UIImage(contentsOfFile: path)
+    }
+
+    // MARK: - Status
+
     @ViewBuilder
-    private func failedBody(message: String) -> some View {
-        Image(systemName: "exclamationmark.triangle.fill")
-            .font(.system(size: 64))
-            .foregroundStyle(AppColors.warning)
+    private var statusIndicator: some View {
+        switch controller.state {
+        case .idle:
+            EmptyView()
 
-        VStack(spacing: AppSpacing.s2) {
-            Text("Couldn't save")
-                .font(AppText.pageTitle)
-                .foregroundStyle(AppColors.textPrimary)
+        case .recognizing(_, let total, let completed):
+            HStack(spacing: QuickInkSpacing.s2) {
+                ProgressView()
+                    .tint(QuickInkColors.accent)
+                Text("Recognizing page \(completed) of \(total)")
+                    .font(QuickInkText.body)
+                    .foregroundStyle(QuickInkColors.inkSoft)
+            }
+            .frame(maxWidth: .infinity)
 
-            Text(message)
-                .font(AppText.meta)
-                .foregroundStyle(AppColors.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, AppSpacing.s5)
+        case .complete(_, let total, let success):
+            HStack(spacing: QuickInkSpacing.s2) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(QuickInkColors.success)
+                Text("Saved — text on \(success) of \(total) pages")
+                    .font(QuickInkText.body)
+                    .foregroundStyle(QuickInkColors.inkSoft)
+            }
+            .frame(maxWidth: .infinity)
+
+        case .failed(let message):
+            VStack(spacing: QuickInkSpacing.s2) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 32))
+                    .foregroundStyle(QuickInkColors.warning)
+                Text("Couldn't save")
+                    .font(QuickInkText.heading)
+                    .foregroundStyle(QuickInkColors.ink)
+                Text(message)
+                    .font(QuickInkText.body)
+                    .foregroundStyle(QuickInkColors.inkSoft)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, QuickInkSpacing.s5)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, QuickInkSpacing.s5)
         }
     }
 }

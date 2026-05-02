@@ -40,12 +40,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -116,17 +119,34 @@ fun QuickCaptureScreen(
         label = "scan-sweep-y",
     )
 
+    // System status-bar inset — without this, the close button sits
+    // under the notch on edge-to-edge devices (target SDK 35+). Added
+    // to the top bar's top padding so the page mock + shutter row stay
+    // where they were.
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF0F0E0D)),
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            // Centers the pagePreview Box (240dp wide) inside the
+            // full-width Column. Spacing rows above + below already
+            // use fillMaxWidth, so this only affects the page mock.
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             // Top bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = QuickInkSpacing.s5, vertical = QuickInkSpacing.s4),
+                    .padding(
+                        start  = QuickInkSpacing.s5,
+                        end    = QuickInkSpacing.s5,
+                        top    = statusBarTop + QuickInkSpacing.s6,
+                        bottom = QuickInkSpacing.s4,
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 CircleIconButton(icon = Icons.Filled.Close, onClick = onDismiss)

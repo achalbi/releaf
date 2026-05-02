@@ -19,8 +19,8 @@ import androidx.compose.runtime.Composable
 @Composable
 fun WelcomeScreen(onContinue: () -> Unit) {
     OnboardingScaffold(
-        title      = "Your notebook,\ndigitised.",
-        subtitle   = "Snap any page. Get auto-cropped, OCR'd, categorized, and synced — no fuss.",
+        title      = "A pocket notebook\nthat remembers.",
+        subtitle   = "Scan a page, jot a thought, find it later by any word.",
         ctaLabel   = "Continue",
         stepIndex  = 0,
         onContinue = onContinue,

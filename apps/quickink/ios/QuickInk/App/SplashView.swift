@@ -43,21 +43,33 @@ public struct SplashView: View {
             QuickInkColors.bg
                 .ignoresSafeArea()
 
-            // The mark. SVG-backed asset preserves its vector
-            // representation (see QuickInkMark.imageset/Contents.json),
-            // so this scales crisply at any size.
+            // Mark + wordmark, both SVG-backed (preserve vector
+            // representation flag is on in their Contents.json), so
+            // they scale crisply at any device size.
             GeometryReader { proxy in
                 let shorter = min(proxy.size.width, proxy.size.height)
-                let markSize = shorter * 0.36
+                let markSize = shorter * 0.28
+                // Wordmark width matches the mark width visually —
+                // the source PNG aspect is ~3.73:1, so its rendered
+                // height is markSize * 1.5 / 3.73 ≈ 0.4 × markSize.
+                let wordmarkWidth = shorter * 0.42
 
-                Image("QuickInkMark", bundle: .module)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: markSize, height: markSize)
-                    .position(x: proxy.size.width / 2,
-                              y: proxy.size.height / 2)
-                    .accessibilityLabel("QuickInk")
-                    .accessibilityAddTraits(.isHeader)
+                VStack(spacing: 18) {
+                    Image("QuickInkMark", bundle: .module)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: markSize, height: markSize)
+
+                    Image("QuickInkWordmark", bundle: .module)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: wordmarkWidth)
+                }
+                .position(x: proxy.size.width / 2,
+                          y: proxy.size.height / 2)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("QuickInk")
+                .accessibilityAddTraits(.isHeader)
             }
         }
     }

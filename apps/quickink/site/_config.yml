@@ -1,0 +1,10 @@
+title: QuickInk
+description: Privacy policy and terms of service for the QuickInk Android app.
+theme: jekyll-theme-cayman
+permalink: /:title/
+
+# Drop noise from the rendered site.
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock

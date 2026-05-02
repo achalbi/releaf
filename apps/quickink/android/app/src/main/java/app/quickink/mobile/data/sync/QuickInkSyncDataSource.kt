@@ -30,6 +30,7 @@
 package app.quickink.mobile.data.sync
 
 import app.quickink.mobile.data.capture.CaptureDao
+import app.quickink.mobile.data.category.CategoryDao
 import app.quickink.mobile.data.ocr.OcrResultDao
 import app.releaf.mobile.data.notepad.NotepadDao
 import app.releaf.mobile.data.sync.CanonicalJson
@@ -52,13 +53,22 @@ class QuickInkSyncDataSource(
     private val notepadDao: NotepadDao,
     private val captureDao: CaptureDao,
     private val ocrResultDao: OcrResultDao,
+    private val categoryDao: CategoryDao,
     private val userId: String,
     private val json: Json = SyncJson,
 ) : SyncDataSource {
 
     // ─── Identity ──────────────────────────────────────────────────────
 
-    override val driveRootFolderName: String = "QuickInk"
+    /**
+     * Drive folder layout — `Thoughtbasics/QuickInk/...`. The
+     * "Thoughtbasics" wrapper holds future thoughts-line apps; the
+     * QuickInk subfolder is the actual app root that all paths
+     * (captures, ocr_results, notepad_entries, categories,
+     * tombstones, manifest.json) hang off. `ensureRootFolder` on
+     * the Drive client walks slash-separated paths automatically.
+     */
+    override val driveRootFolderName: String = "Thoughtbasics/QuickInk"
 
     override val schemaVersion: SchemaVersion = SchemaVersion.CURRENT
 
@@ -101,7 +111,23 @@ class QuickInkSyncDataSource(
             entries += DirtyEntry(
                 kind          = DrivePath.KIND_CAPTURE,
                 id            = row.id,
-                drivePath     = DrivePath.capture(row.id),
+                drivePath     = DrivePath.quickInkCapture(row.createdAt, row.id),
+                payload       = bytes,
+                payloadSha256 = sha256Hex(bytes),
+                updatedAt     = row.updatedAt,
+            )
+        }
+
+        // ---- categories (user-scoped) ----
+        for (row in categoryDao.dirtyRows()
+            .filter { it.deletedAt == null && it.userId == userId }) {
+            val payload = row.toV1Payload()
+            val elem = json.encodeToJsonElement(CategoryPayloadV1.serializer(), payload)
+            val bytes = CanonicalJson.encodeToBytes(elem)
+            entries += DirtyEntry(
+                kind          = DrivePath.KIND_CATEGORY,
+                id            = row.id,
+                drivePath     = DrivePath.category(row.id),
                 payload       = bytes,
                 payloadSha256 = sha256Hex(bytes),
                 updatedAt     = row.updatedAt,
@@ -121,7 +147,11 @@ class QuickInkSyncDataSource(
             entries += DirtyEntry(
                 kind          = DrivePath.KIND_OCR_RESULT,
                 id            = row.id,
-                drivePath     = DrivePath.ocrResult(row.captureId, row.pageIndex),
+                drivePath     = DrivePath.quickInkOcrResult(
+                    createdAt = row.createdAt,
+                    captureId = row.captureId,
+                    pageIndex = row.pageIndex,
+                ),
                 payload       = bytes,
                 payloadSha256 = sha256Hex(bytes),
                 updatedAt     = row.updatedAt,
@@ -146,6 +176,13 @@ class QuickInkSyncDataSource(
         for (row in captureDao.dirtyRows().filter { it.deletedAt != null && it.userId == userId }) {
             entries += PendingTombstone(
                 kind      = DrivePath.KIND_CAPTURE,
+                id        = row.id,
+                deletedAt = row.deletedAt ?: row.updatedAt,
+            )
+        }
+        for (row in categoryDao.dirtyRows().filter { it.deletedAt != null && it.userId == userId }) {
+            entries += PendingTombstone(
+                kind      = DrivePath.KIND_CATEGORY,
                 id        = row.id,
                 deletedAt = row.deletedAt ?: row.updatedAt,
             )
@@ -179,6 +216,10 @@ class QuickInkSyncDataSource(
                 val p = json.decodeFromString(OcrResultPayloadV2.serializer(), text)
                 ocrResultDao.insert(p.toEntity(driveFileId = driveFileId))
             }
+            DrivePath.KIND_CATEGORY -> {
+                val p = json.decodeFromString(CategoryPayloadV1.serializer(), text)
+                categoryDao.insert(p.toEntity(driveFileId = driveFileId))
+            }
             else -> {
                 // Forward-compat: kind we don't recognize, skip.
             }
@@ -202,6 +243,7 @@ class QuickInkSyncDataSource(
             // handling complete for the search-from-trash / undo
             // flows that may surface single-page tombstones later.
             DrivePath.KIND_OCR_RESULT    -> ocrResultDao.softDelete(tombstone.id, nowIso)
+            DrivePath.KIND_CATEGORY      -> categoryDao.softDelete(tombstone.id, nowIso)
         }
     }
 
@@ -224,6 +266,10 @@ class QuickInkSyncDataSource(
                 DrivePath.KIND_OCR_RESULT -> {
                     ocrResultDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
                     ocrResultDao.markTombstoneSynced(ack.id)
+                }
+                DrivePath.KIND_CATEGORY -> {
+                    categoryDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
+                    categoryDao.markTombstoneSynced(ack.id)
                 }
                 // else: forward-compat — unknown kind, skip silently.
             }

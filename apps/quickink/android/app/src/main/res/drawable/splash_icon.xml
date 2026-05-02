@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Splash icon — referenced by `windowSplashScreenAnimatedIcon` on
+  Theme.QuickInk.Splash for the Android 12+ system splash.
+
+  How the system splash sizes this drawable:
+    - Container: 288dp × 288dp
+    - Visible after circular mask: 240dp diameter
+    - Safe content zone (no icon background set): 192dp
+
+  The bitmap (`splash_icon_bitmap.png`) is a 1024×1024 transparent
+  canvas with the Q content at ~59% width and bbox-centered. When the
+  system scales the 1024 drawable to 288dp, the Q renders at ~170dp —
+  comfortably inside the 192dp safe zone with breathing room on every
+  side.
+
+  We deliberately don't set `windowSplashScreenIconBackgroundColor`
+  on the parent theme: the screen-wide cream from
+  `windowSplashScreenBackground` is the icon's background, so adding
+  a separate icon background would draw a visible coral/cream ring
+  around the Q and break the minimalist editorial feel.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:gravity="center">
+        <bitmap
+            android:src="@drawable/splash_icon_bitmap"
+            android:gravity="center" />
+    </item>
+</layer-list>

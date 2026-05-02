@@ -21,6 +21,7 @@ package app.quickink.mobile
 
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,7 +35,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.quickink.mobile.data.capture.CaptureRepository
+import app.quickink.mobile.data.category.CategoryRepository
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
+import app.quickink.mobile.features.home.CategoryEntriesScreen
 import app.quickink.mobile.features.home.HomeScreen
 import app.quickink.mobile.features.notes.NoteEditorScreen
 import app.quickink.mobile.features.notes.NotesListScreen
@@ -42,9 +45,12 @@ import app.quickink.mobile.features.onboarding.OnboardingFlow
 import app.quickink.mobile.features.onboarding.OnboardingPreferences
 import app.quickink.mobile.features.onboarding.OnboardingState
 import app.quickink.mobile.features.onboarding.SignInScreen
+import app.quickink.mobile.features.scan.ScanDetailScreen
 import app.quickink.mobile.features.scan.ScanFlowController
 import app.quickink.mobile.features.scan.ScanReviewScreen
 import app.quickink.mobile.features.search.SearchScreen
+import app.quickink.mobile.features.settings.CategoriesSettingsScreen
+import app.quickink.mobile.features.settings.SettingsPreferences
 import app.quickink.mobile.features.settings.SettingsScreen
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
@@ -122,14 +128,26 @@ private fun ReSignInGate(authStore: AuthStore) {
  * but worth a follow-up sweep to type-check the entryId arg.
  */
 private object Routes {
-    const val HOME        = "home"
-    const val NOTES_LIST  = "notes_list"
-    const val SETTINGS    = "settings"
-    const val SEARCH      = "search"
-    const val NOTE_EDITOR = "note_editor/{entryId}"
+    const val HOME              = "home"
+    const val NOTES_LIST        = "notes_list"
+    const val SETTINGS          = "settings"
+    const val SEARCH            = "search"
+    const val NOTE_EDITOR       = "note_editor/{entryId}"
+    const val CATEGORIES        = "categories"
+    const val SCAN_DETAIL       = "scan_detail/{captureId}"
+    // Per-category browse — pushed from the Home category grid.
+    // `name` is encoded so categories with spaces ("Manage Categories")
+    // round-trip cleanly through the nav arg.
+    const val CATEGORY_ENTRIES  = "category_entries/{name}"
 
     fun noteEditor(entryId: String): String =
         "note_editor/${Uri.encode(entryId)}"
+
+    fun scanDetail(captureId: String): String =
+        "scan_detail/${Uri.encode(captureId)}"
+
+    fun categoryEntries(name: String): String =
+        "category_entries/${Uri.encode(name)}"
 }
 
 /**
@@ -150,6 +168,23 @@ private fun MainShell(userId: String) {
     val app     = context.applicationContext as QuickInkApp
     val scope   = rememberCoroutineScope()
 
+    // Resolved Home greeting name (Settings override > Google
+    // session displayName > null fallback). Held as a Compose state
+    // so a Settings edit triggers a recomposition without round-
+    // tripping through SharedPreferences observers — SettingsScreen
+    // pushes the new value through `onCustomDisplayNameChange`.
+    val settingsPrefs = remember { SettingsPreferences(context) }
+    var customDisplayName by remember { mutableStateOf(settingsPrefs.customDisplayName) }
+    val authStateForName by app.authStore.state.collectAsState()
+    val resolvedDisplayName: String? = run {
+        val custom = customDisplayName.trim()
+        if (custom.isNotEmpty()) custom
+        else (authStateForName as? AuthState.SignedIn)
+            ?.session?.displayName
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+    }
+
     val controller = remember(userId) {
         ScanFlowController(
             userId     = userId,
@@ -158,6 +193,7 @@ private fun MainShell(userId: String) {
                 ocrResultDao = app.database.ocrResultDao(),
             ),
             pipeline       = OcrPipeline(MlKitTextRecognizer(app)),
+            notepadDao     = app.database.notepadDao(),
             scope          = scope,
             // Slice 4.2c — kick a one-shot sync at the end of
             // each scan pass. WorkManager's KEEP policy coalesces
@@ -168,9 +204,19 @@ private fun MainShell(userId: String) {
         )
     }
 
+    // Idempotent first-launch / first-sign-in seed of the default 6
+    // categories. `LaunchedEffect(userId)` fires once per signed-in
+    // user; the repository skips work when rows already exist.
+    LaunchedEffect(userId) {
+        try {
+            CategoryRepository(app.database.categoryDao())
+                .seedDefaultsIfEmpty(userId)
+        } catch (_: Exception) { /* best-effort */ }
+    }
+
     val scanState by controller.state.collectAsState()
     if (scanState !is ScanFlowController.State.Idle) {
-        ScanReviewScreen(controller)
+        ScanReviewScreen(controller, userId = userId)
         return
     }
 
@@ -180,34 +226,40 @@ private fun MainShell(userId: String) {
         composable(Routes.HOME) {
             HomeScreen(
                 controller     = controller,
+                userId         = userId,
                 onOpenNotes    = { navController.navigate(Routes.NOTES_LIST) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onOpenSearch   = { navController.navigate(Routes.SEARCH) },
-                onTapCategory  = null, // Wired in a follow-up.
+                onTapCategory  = { name ->
+                    navController.navigate(Routes.categoryEntries(name))
+                },
                 onOpenEntry    = { entryId ->
                     navController.navigate(Routes.noteEditor(entryId))
                 },
+                onOpenScan     = { captureId ->
+                    navController.navigate(Routes.scanDetail(captureId))
+                },
+                displayName    = resolvedDisplayName,
             )
         }
         composable(Routes.SEARCH) {
             SearchScreen(
-                userId      = userId,
-                onBack      = { navController.popBackStack() },
-                onOpenEntry = { entryId ->
-                    // Replace the search step with the editor so popping
-                    // back from the editor returns to Home, not Search.
+                userId     = userId,
+                onBack     = { navController.popBackStack() },
+                onOpenScan = { captureId ->
+                    // Replace the search step with the detail so popping
+                    // back from the detail returns to Home, not Search.
                     navController.popBackStack()
-                    navController.navigate(Routes.noteEditor(entryId))
+                    navController.navigate(Routes.scanDetail(captureId))
                 },
             )
         }
         composable(Routes.NOTES_LIST) {
             NotesListScreen(
-                dao         = app.database.notepadDao(),
-                userId      = userId,
-                onBack      = { navController.popBackStack() },
-                onOpenEntry = { entryId ->
-                    navController.navigate(Routes.noteEditor(entryId))
+                userId     = userId,
+                onBack     = { navController.popBackStack() },
+                onOpenScan = { captureId ->
+                    navController.navigate(Routes.scanDetail(captureId))
                 },
             )
         }
@@ -224,8 +276,40 @@ private fun MainShell(userId: String) {
         }
         composable(Routes.SETTINGS) {
             SettingsScreen(
+                onBack                     = { navController.popBackStack() },
+                authStore                  = app.authStore,
+                onManageCategories         = { navController.navigate(Routes.CATEGORIES) },
+                onCustomDisplayNameChange  = { customDisplayName = it },
+            )
+        }
+        composable(Routes.CATEGORIES) {
+            CategoriesSettingsScreen(
+                userId = userId,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(
+            route     = Routes.SCAN_DETAIL,
+            arguments = listOf(navArgument("captureId") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val captureId = backStackEntry.arguments?.getString("captureId").orEmpty()
+            ScanDetailScreen(
+                captureId = captureId,
                 onBack    = { navController.popBackStack() },
-                authStore = app.authStore,
+            )
+        }
+        composable(
+            route     = Routes.CATEGORY_ENTRIES,
+            arguments = listOf(navArgument("name") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val name = backStackEntry.arguments?.getString("name").orEmpty()
+            CategoryEntriesScreen(
+                userId       = userId,
+                categoryName = name,
+                onBack       = { navController.popBackStack() },
+                onOpenScan   = { captureId ->
+                    navController.navigate(Routes.scanDetail(captureId))
+                },
             )
         }
     }

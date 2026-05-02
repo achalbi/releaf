@@ -62,6 +62,7 @@ import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
+import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 
 private enum class EditorTool { Crop, Rotate, Retake }
 
@@ -81,7 +82,7 @@ fun PageEditorScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.bg),
+            .quickInkDotGridBackground(),
     ) {
         // Top bar
         Row(

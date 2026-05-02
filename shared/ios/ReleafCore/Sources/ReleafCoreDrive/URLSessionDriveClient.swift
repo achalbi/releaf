@@ -39,29 +39,84 @@ public final class URLSessionDriveClient: DriveClient, @unchecked Sendable {
         named name: String,
         accessToken: String
     ) async throws -> DriveFile {
-        // 1) Try by appProperties stamp first — survives user renames.
-        if let byStamp = try await queryFirst(
-            q: "appProperties has { key='releaf_root' and value='true' } " +
-               "and mimeType = '\(Self.folderMime)' and trashed = false",
-            accessToken: accessToken
-        ) {
-            return byStamp
+        let segments = name
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map(String.init)
+        guard !segments.isEmpty else {
+            throw NSError(
+                domain: "DriveClient", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Empty root folder name"]
+            )
         }
-        // 2) Try by name at root.
-        if let byName = try await queryFirst(
-            q: "name = '\(escapeForDrive(name))' and mimeType = '\(Self.folderMime)' " +
-               "and 'root' in parents and trashed = false",
-            accessToken: accessToken
-        ) {
-            return byName
+
+        // Single-segment name → preserve existing Releaf behaviour
+        // (appProperties stamp survives user renames, etc.).
+        if segments.count == 1 {
+            let single = segments[0]
+            if let byStamp = try await queryFirst(
+                q: "appProperties has { key='releaf_root' and value='true' } " +
+                   "and mimeType = '\(Self.folderMime)' and trashed = false",
+                accessToken: accessToken
+            ) {
+                return byStamp
+            }
+            if let byName = try await queryFirst(
+                q: "name = '\(escapeForDrive(single))' and mimeType = '\(Self.folderMime)' " +
+                   "and 'root' in parents and trashed = false",
+                accessToken: accessToken
+            ) {
+                return byName
+            }
+            return try await createFolder(
+                name: single,
+                parentId: nil,
+                accessToken: accessToken,
+                appProperties: ["releaf_root": "true"]
+            )
         }
-        // 3) Create, stamped.
-        return try await createFolder(
-            name: name,
-            parentId: nil,
-            accessToken: accessToken,
-            appProperties: ["releaf_root": "true"]
-        )
+
+        // Nested slash-separated path (e.g. "Thoughtbasics/QuickInk").
+        // Walk by name, no appProperties stamp — multi-app namespaces
+        // share the outer folder, so a Releaf-specific stamp would
+        // wrongly match.
+        var current: DriveFile? = nil
+        for (index, segment) in segments.enumerated() {
+            if index == 0 {
+                if let byName = try await queryFirst(
+                    q: "name = '\(escapeForDrive(segment))' and mimeType = '\(Self.folderMime)' " +
+                       "and 'root' in parents and trashed = false",
+                    accessToken: accessToken
+                ) {
+                    current = byName
+                } else {
+                    current = try await createFolder(
+                        name: segment,
+                        parentId: nil,
+                        accessToken: accessToken,
+                        appProperties: nil
+                    )
+                }
+            } else {
+                guard let parentId = current?.id else {
+                    throw NSError(
+                        domain: "DriveClient", code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Path walk lost parent"]
+                    )
+                }
+                current = try await ensureFolder(
+                    named: segment,
+                    parentId: parentId,
+                    accessToken: accessToken
+                )
+            }
+        }
+        guard let result = current else {
+            throw NSError(
+                domain: "DriveClient", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Unreachable: empty path walk"]
+            )
+        }
+        return result
     }
 
     public func ensureFolder(
@@ -121,6 +176,41 @@ public final class URLSessionDriveClient: DriveClient, @unchecked Sendable {
             contentType: "application/json",
             accessToken: accessToken,
             appProperties: filename == "manifest.json" ? ["releaf_root": "true"] : nil
+        )
+    }
+
+    /// Upload arbitrary bytes (PDF, JPEG, etc.) under the given
+    /// parent folder. Mirror of `uploadJSON` but with caller-supplied
+    /// `contentType` so the same code path serves binary attachments.
+    /// PATCHes an existing same-name child if present so re-uploads
+    /// don't fork into duplicates.
+    public func uploadBinary(
+        _ data: Data,
+        filename: String,
+        contentType: String,
+        parentId: String,
+        accessToken: String
+    ) async throws -> DriveFile {
+        if let existing = try await queryFirst(
+            q: "name = '\(escapeForDrive(filename))' " +
+               "and '\(escapeForDrive(parentId))' in parents and trashed = false",
+            accessToken: accessToken
+        ) {
+            return try await updateFile(
+                fileId: existing.id,
+                data: data,
+                contentType: contentType,
+                accessToken: accessToken,
+                appProperties: nil
+            )
+        }
+        return try await createFile(
+            name: filename,
+            parentId: parentId,
+            data: data,
+            contentType: contentType,
+            accessToken: accessToken,
+            appProperties: nil
         )
     }
 

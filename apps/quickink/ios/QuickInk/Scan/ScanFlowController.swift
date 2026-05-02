@@ -18,6 +18,8 @@
  */
 
 import Foundation
+import GRDB
+import ReleafCoreData
 import ReleafCoreScan
 
 @MainActor
@@ -32,6 +34,18 @@ public final class ScanFlowController: ObservableObject {
     }
 
     @Published public private(set) var state: State = .idle
+
+    /// User-selected category for the in-flight capture. Bound to
+    /// the chip picker in `ScanReviewScreen`. Persisted to
+    /// `captures.category` via `setCategory(_:)` whenever the user
+    /// taps a chip; held here too so the chip's selected state
+    /// survives state-machine transitions (recognizing → complete).
+    @Published public var selectedCategory: String? = nil
+
+    /// First-page preview JPEG of the in-flight capture. Surfaced
+    /// to `ScanReviewScreen` so it can render the saved image below
+    /// the category picker. `nil` outside of an active scan pass.
+    @Published public var previewImageURL: URL? = nil
 
     private let userId: String
     private let repository: CaptureRepository
@@ -71,7 +85,8 @@ public final class ScanFlowController: ObservableObject {
     public func onScanComplete(
         pdfURL: URL?,
         previewURL: URL?,
-        pageURLs: [URL]
+        pageURLs: [URL],
+        category: String? = nil
     ) {
         // Cancel any previous in-flight pass before starting a new
         // one. The user could conceivably tap Scan twice in quick
@@ -81,6 +96,11 @@ public final class ScanFlowController: ObservableObject {
 
         let captureId = UUID().uuidString.lowercased()
         let totalPages = pageURLs.count
+        // Reset the picker selection so a fresh capture starts with
+        // no category. The previous capture's choice was already
+        // persisted to its own row.
+        selectedCategory = category
+        previewImageURL  = previewURL
         state = .recognizing(captureId: captureId, totalPages: totalPages, completedPages: 0)
 
         let userId = self.userId
@@ -97,7 +117,8 @@ public final class ScanFlowController: ObservableObject {
                     title:      nil,
                     pdfURL:     pdfURL,
                     previewURL: previewURL,
-                    pageCount:  totalPages
+                    pageCount:  totalPages,
+                    category:   category
                 )
             } catch {
                 self?.state = .failed(message: "Couldn't save scan: \(error.localizedDescription)")
@@ -111,6 +132,11 @@ public final class ScanFlowController: ObservableObject {
             //    later reads.
             var successCount = 0
             var completed    = 0
+            // Page-ordered OCR text accumulator — used to build the
+            // single appended snippet after the OCR loop completes.
+            // Indexed by `pageIndex` so out-of-order completion stays
+            // correct in the final paste.
+            var pageTexts: [Int: String] = [:]
             for await page in pipeline.recognizePages(pageURLs) {
                 completed += 1
                 switch page {
@@ -122,6 +148,7 @@ public final class ScanFlowController: ObservableObject {
                             result:    result
                         )
                         successCount += 1
+                        pageTexts[pageIndex] = result.text
                     } catch {
                         // Persistence error on a single page — log,
                         // continue. The capture row + other pages
@@ -138,6 +165,19 @@ public final class ScanFlowController: ObservableObject {
                     captureId:      captureId,
                     totalPages:     totalPages,
                     completedPages: completed
+                )
+            }
+
+            // 3. Append the recognized text into today's
+            //    `notepad_entries` row so the home recents rail
+            //    surfaces it immediately. One entry per (user, day);
+            //    multiple captures append to the same row. The
+            //    row's category mirrors the latest capture's pick.
+            if !pageTexts.isEmpty {
+                let category: String? = self?.selectedCategory ?? nil
+                await self?.appendOcrToTodayEntry(
+                    pageTexts: pageTexts,
+                    category:  category
                 )
             }
 
@@ -158,11 +198,112 @@ public final class ScanFlowController: ObservableObject {
         }
     }
 
+    // MARK: - Append-to-today's-entry
+
+    /// Append a freshly-recognized capture's OCR text to today's
+    /// `notepad_entries` row (creating it if missing). One entry
+    /// per (userId, entryDate); multiple captures of the same day
+    /// concatenate into the same row's `notes` column. The
+    /// row's `category` is overwritten with the latest capture's
+    /// pick — derived data, cheap to refresh, matches the design
+    /// note in CategoryRepository's header.
+    private func appendOcrToTodayEntry(
+        pageTexts: [Int: String],
+        category: String?
+    ) async {
+        let snippet = Self.formatSnippet(pageTexts: pageTexts)
+        guard !snippet.isEmpty else { return }
+        let today = Self.todayLocalDate()
+        let now = IsoClock.nowIso()
+        let userId = self.userId
+        let dbQueue = QuickInkDatabase.shared.dbQueue
+
+        do {
+            try await dbQueue.write { db in
+                if let row = try Row.fetchOne(db, sql: """
+                    SELECT id, notes FROM notepad_entries
+                    WHERE user_id = ? AND entry_date = ? AND deleted_at IS NULL
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """, arguments: [userId, today]) {
+                    let id: String = row["id"]
+                    let existing: String = row["notes"]
+                    let combined = existing.isEmpty ? snippet : (existing + "\n\n" + snippet)
+                    try db.execute(sql: """
+                        UPDATE notepad_entries
+                        SET notes = ?, category = ?, updated_at = ?, dirty = 1
+                        WHERE id = ?
+                        """, arguments: [combined, category, now, id])
+                } else {
+                    try db.execute(sql: """
+                        INSERT INTO notepad_entries (
+                            id, user_id, entry_date, category, notes,
+                            created_at, updated_at, dirty
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                        """, arguments: [
+                            UUID().uuidString.lowercased(),
+                            userId, today, category, snippet, now, now,
+                        ])
+                }
+            }
+        } catch {
+            print("Append OCR to today entry failed: \(error)")
+        }
+    }
+
+    /// `YYYY-MM-DD` in the device's local timezone — matches the
+    /// `notepad_entries.entry_date` CHECK constraint.
+    private static func todayLocalDate() -> String {
+        let f = DateFormatter()
+        f.calendar = .init(identifier: .gregorian)
+        f.locale   = .init(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+
+    /// Build a CommonMark snippet for the OCR pages, page-ordered
+    /// (page index keys, sorted ascending). Each page is preceded
+    /// by a `## Page N` heading so multiple captures inside the
+    /// same day's entry stay readable.
+    private static func formatSnippet(pageTexts: [Int: String]) -> String {
+        let parts = pageTexts.keys.sorted().compactMap { idx -> String? in
+            let text = pageTexts[idx]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !text.isEmpty else { return nil }
+            return "## Page \(idx + 1)\n\n\(text)"
+        }
+        return parts.joined(separator: "\n\n")
+    }
+
     /// Reset back to `.idle` — typically called when the user
     /// dismisses the review screen.
     public func dismiss() {
         activeTask?.cancel()
         activeTask = nil
         state = .idle
+        selectedCategory = nil
+        previewImageURL  = nil
+    }
+
+    /// Picked-category persistence hook for the review screen's
+    /// chip row. Updates `selectedCategory` so the UI redraws, then
+    /// fires-and-forgets the SQL update against the in-flight
+    /// capture's row. No-ops when there's no active capture
+    /// (`.idle` / `.failed`).
+    public func setCategory(_ name: String?) {
+        selectedCategory = name
+        guard let captureId = currentCaptureId else { return }
+        Task {
+            try? await repository.setCategory(captureId: captureId, category: name)
+        }
+    }
+
+    /// Capture id from the live state machine. `nil` on `.idle` /
+    /// `.failed` (no row to update).
+    private var currentCaptureId: String? {
+        switch state {
+        case .recognizing(let id, _, _): return id
+        case .complete(let id, _, _):    return id
+        case .idle, .failed:             return nil
+        }
     }
 }

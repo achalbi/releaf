@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">QuickInk</string>
+
+    <!--
+      Google OAuth 2.0 Web client ID for Credential Manager.
+      Replace with the real ID from QuickInk's Google Cloud project
+      to flip from the stub auth client to the real one. The
+      `QuickInkAuthBinding` compose hook checks for the placeholder
+      string and falls back to `StubGoogleAuthClient` when it sees
+      the unmodified default — keeps the app buildable + previewable
+      without checked-in credentials.
+
+      Releaf's equivalent Web client ID lives in its own strings.xml
+      and is a separate Google Cloud project. Don't reuse Releaf's;
+      QuickInk needs an OAuth client tied to `app.quickink.mobile`
+      + this app's signing certificate SHA-1 fingerprints.
+    -->
+    <string name="google_web_client_id" translatable="false">REPLACE_WITH_GOOGLE_WEB_CLIENT_ID</string>
+</resources>

@@ -1,89 +1,137 @@
 /*
  * ScanReviewScreen.kt
  *
- * Shown while OCR runs on a fresh capture, then while the user
- * acknowledges the completed result. Reads `ScanFlowController`'s
- * state and renders accordingly:
+ * Shown after the user finishes a scan. Layout (top → bottom):
  *
- *   - Recognizing  → progress UI ("Recognizing page X of Y")
- *   - Complete     → summary + "Done" CTA returning to Home
- *   - Failed       → error + "Done" returning to Home
- *
- * Per-page editable text review (the user can edit the recognized
- * text before save) lands in Slice 4 alongside the notes editor
- * wrappers. For Slice 3 the screen is review-only — the OCR
- * result is auto-persisted as it lands; this screen just surfaces
- * progress and the final summary.
+ *   1. Big category-button grid  — the user picks a category
+ *      (or none) for the in-flight capture. Tap-to-toggle
+ *      persists immediately via `controller.setCategory(name)`.
+ *   2. Saved page preview        — the first-page JPEG the
+ *      scanner produced, so the user can confirm what was saved
+ *      while still on this surface.
+ *   3. Status indicator          — small progress / saved /
+ *      failed badge. The hero used to be the progress UI; now
+ *      it sits beneath the actionable affordances.
+ *   4. Done button                — terminal-state-only.
  *
  * Mirror of iOS `ScanReviewScreen.swift`.
  */
 
 package app.quickink.mobile.features.scan
 
+import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import app.quickink.mobile.QuickInkApp
+import app.quickink.mobile.data.category.CategoryRepository
 import app.quickink.mobile.features.onboarding.OnboardingPrimaryButton
+import app.quickink.mobile.ui.theme.LocalQuickInkColors
+import app.quickink.mobile.ui.theme.LocalQuickInkTypography
+import app.quickink.mobile.ui.theme.QuickInkRadius
+import app.quickink.mobile.ui.theme.QuickInkSpacing
+import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppSpacing
-import app.releaf.mobile.ui.theme.AppTypography
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 
 @Composable
-fun ScanReviewScreen(controller: ScanFlowController) {
+fun ScanReviewScreen(
+    controller: ScanFlowController,
+    userId: String,
+) {
     val state by controller.state.collectAsState()
+    val selectedCategory by controller.selectedCategory.collectAsState()
+    val previewImageUri by controller.previewImageUri.collectAsState()
+    val colors = LocalQuickInkColors.current
+
+    val context = LocalContext.current
+    val app = context.applicationContext as QuickInkApp
+    val categoryRepo = remember(app) { CategoryRepository(app.database.categoryDao()) }
+    val categories by remember(userId, categoryRepo) {
+        categoryRepo.observe(userId)
+    }.collectAsState(initial = emptyList())
+
+    val isFailed = state is ScanFlowController.State.Failed
+    val isRecognizing = state is ScanFlowController.State.Recognizing
+
+    // Lift the content past the system status bar + add visual
+    // breathing room so the category buttons clear the notch on
+    // edge-to-edge devices. Same pattern as Library / Settings.
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(AppColors.Canvas),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .quickInkDotGridBackground(),
     ) {
-        Spacer(Modifier.weight(1f))
-
-        when (val current = state) {
-            is ScanFlowController.State.Idle -> {
-                // Shouldn't render — `QuickInkRoot` swaps to
-                // HomeScreen on Idle. Defensive empty body.
-            }
-
-            is ScanFlowController.State.Recognizing -> {
-                RecognizingBody(
-                    completed = current.completedPages,
-                    total     = current.totalPages,
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(
+                    start  = QuickInkSpacing.s5,
+                    end    = QuickInkSpacing.s5,
+                    top    = statusBarTop + QuickInkSpacing.s7,
+                    bottom = QuickInkSpacing.s5,
+                ),
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s5),
+        ) {
+            if (categories.isNotEmpty() && !isFailed) {
+                CategoryButtonsGrid(
+                    categories       = categories.map { it.name },
+                    selectedCategory = selectedCategory,
+                    onSelect         = { controller.setCategory(it) },
                 )
             }
 
-            is ScanFlowController.State.Complete -> {
-                CompleteBody(success = current.successCount, total = current.totalPages)
+            if (!isFailed) {
+                SavedImagePreview(previewImageUri = previewImageUri)
             }
 
-            is ScanFlowController.State.Failed -> {
-                FailedBody(message = current.message)
-            }
+            StatusIndicator(state = state)
         }
 
-        Spacer(Modifier.weight(1f))
-
-        // Done button — visible only on terminal states. Blocks
-        // dismissal mid-OCR so a half-recognized capture isn't
-        // left dangling on Home; users wait for the pipeline.
-        if (state !is ScanFlowController.State.Recognizing) {
+        if (!isRecognizing) {
             OnboardingPrimaryButton(
                 label   = "Done",
                 onClick = { controller.dismiss() },
@@ -93,82 +141,191 @@ fun ScanReviewScreen(controller: ScanFlowController) {
     }
 }
 
+/**
+ * Two-column grid of bigger category buttons. Replaces the previous
+ * compact chip row — the picker is now the primary affordance on
+ * this screen, so it gets full-width buttons with serif headings
+ * instead of small pills.
+ */
 @Composable
-private fun RecognizingBody(completed: Int, total: Int) {
-    CircularProgressIndicator(
-        color = AppColors.ThemeGreenPrimary,
-        modifier = Modifier.size(48.dp),
-    )
+private fun CategoryButtonsGrid(
+    categories: List<String>,
+    selectedCategory: String?,
+    onSelect: (String?) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
 
-    Spacer(Modifier.size(AppSpacing.s5))
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
+        Text(
+            text  = "CATEGORY",
+            style = type.eyebrow,
+            color = colors.muted,
+        )
 
-    Text(
-        text  = "Recognizing text",
-        style = AppTypography.PageTitle,
-        color = AppColors.TextPrimary,
-    )
-
-    Spacer(Modifier.size(AppSpacing.s2))
-
-    Text(
-        text  = "Page $completed of $total",
-        style = AppTypography.Meta,
-        color = AppColors.TextSecondary,
-    )
+        // Manual two-column rows because we sit inside a verticalScroll
+        // (LazyVerticalGrid + verticalScroll don't compose). Pairs the
+        // categories into rows of 2.
+        categories.chunked(2).forEach { pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
+                pair.forEach { name ->
+                    val selected = name == selectedCategory
+                    Box(modifier = Modifier.weight(1f)) {
+                        CategoryButton(
+                            name     = name,
+                            selected = selected,
+                            onClick  = {
+                                // Tap-to-toggle: tapping the active
+                                // button clears the selection.
+                                onSelect(if (selected) null else name)
+                            },
+                        )
+                    }
+                }
+                if (pair.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
 }
 
 @Composable
-private fun CompleteBody(success: Int, total: Int) {
-    Icon(
-        imageVector  = Icons.Filled.CheckCircle,
-        contentDescription = null,
-        tint         = AppColors.ThemeGreenPrimary,
-        modifier     = Modifier.size(64.dp),
-    )
-
-    Spacer(Modifier.size(AppSpacing.s5))
-
-    Text(
-        text  = "Saved",
-        style = AppTypography.PageTitle,
-        color = AppColors.TextPrimary,
-    )
-
-    Spacer(Modifier.size(AppSpacing.s2))
-
-    Text(
-        text     = "Recognized text on $success of $total pages.",
-        style    = AppTypography.Meta,
-        color    = AppColors.TextSecondary,
-        textAlign = TextAlign.Center,
-        modifier = Modifier.padding(horizontal = AppSpacing.s5),
-    )
+private fun CategoryButton(name: String, selected: Boolean, onClick: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val bg = if (selected) colors.accent else colors.surface
+    val fg = if (selected) colors.textOnAccent else colors.ink
+    val borderColor = if (selected) colors.accent else colors.border
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(bg)
+            .border(1.dp, borderColor, RoundedCornerShape(QuickInkRadius.md))
+            .clickable(onClick = onClick)
+            .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s3),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text     = name,
+            style    = type.heading,
+            color    = fg,
+            textAlign = TextAlign.Center,
+            maxLines  = 2,
+        )
+    }
 }
 
 @Composable
-private fun FailedBody(message: String) {
-    Icon(
-        imageVector  = Icons.Filled.Warning,
-        contentDescription = null,
-        tint         = AppColors.Warning,
-        modifier     = Modifier.size(64.dp),
-    )
+private fun SavedImagePreview(previewImageUri: String?) {
+    val colors = LocalQuickInkColors.current
+    val context = LocalContext.current
 
-    Spacer(Modifier.size(AppSpacing.s5))
+    if (previewImageUri.isNullOrBlank()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(240.dp)
+                .clip(RoundedCornerShape(QuickInkRadius.md))
+                .background(colors.borderSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector       = Icons.Filled.Description,
+                contentDescription = null,
+                tint              = colors.muted,
+                modifier          = Modifier.size(48.dp),
+            )
+        }
+    } else {
+        AsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(Uri.parse(previewImageUri))
+                .crossfade(true)
+                .build(),
+            contentDescription = "Saved scan preview",
+            contentScale       = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 360.dp)
+                .clip(RoundedCornerShape(QuickInkRadius.md))
+                .background(colors.surface)
+                .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md)),
+        )
+    }
+}
 
-    Text(
-        text  = "Couldn't save",
-        style = AppTypography.PageTitle,
-        color = AppColors.TextPrimary,
-    )
+@Composable
+private fun StatusIndicator(state: ScanFlowController.State) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
 
-    Spacer(Modifier.size(AppSpacing.s2))
+    when (state) {
+        is ScanFlowController.State.Idle -> { /* not rendered */ }
 
-    Text(
-        text     = message,
-        style    = AppTypography.Meta,
-        color    = AppColors.TextSecondary,
-        textAlign = TextAlign.Center,
-        modifier = Modifier.padding(horizontal = AppSpacing.s5),
-    )
+        is ScanFlowController.State.Recognizing -> {
+            Row(
+                modifier            = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment   = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(
+                    color    = colors.accent,
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                )
+                Spacer(Modifier.size(QuickInkSpacing.s2))
+                Text(
+                    text  = "Recognizing page ${state.completedPages} of ${state.totalPages}",
+                    style = type.body,
+                    color = colors.inkSoft,
+                )
+            }
+        }
+
+        is ScanFlowController.State.Complete -> {
+            Row(
+                modifier            = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment   = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector       = Icons.Filled.CheckCircle,
+                    contentDescription = null,
+                    tint              = colors.success,
+                    modifier          = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.size(QuickInkSpacing.s2))
+                Text(
+                    text  = "Saved — text on ${state.successCount} of ${state.totalPages} pages",
+                    style = type.body,
+                    color = colors.inkSoft,
+                )
+            }
+        }
+
+        is ScanFlowController.State.Failed -> {
+            Column(
+                modifier             = Modifier.fillMaxWidth().padding(vertical = QuickInkSpacing.s5),
+                horizontalAlignment  = Alignment.CenterHorizontally,
+                verticalArrangement  = Arrangement.spacedBy(QuickInkSpacing.s2),
+            ) {
+                Icon(
+                    imageVector       = Icons.Filled.Warning,
+                    contentDescription = null,
+                    tint              = colors.warning,
+                    modifier          = Modifier.size(32.dp),
+                )
+                Text("Couldn't save", style = type.heading, color = colors.ink)
+                Text(
+                    text     = state.message,
+                    style    = type.body,
+                    color    = colors.inkSoft,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
 }

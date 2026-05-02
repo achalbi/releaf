@@ -119,7 +119,12 @@ struct QuickCaptureScreen: View {
             .accessibilityLabel("Flash")
         }
         .padding(.horizontal, QuickInkSpacing.s5)
-        .padding(.top, QuickInkSpacing.s4)
+        // Generous top padding so the close button clears the notch
+        // with breathing room. Doubles as a vertical-centering nudge:
+        // the bottom region (shutter + mode-selector + s7 bottom pad)
+        // is heavier than the top, so without this the page mock
+        // appeared visibly above center.
+        .padding(.top, QuickInkSpacing.s7)
     }
 
     // MARK: - Page preview

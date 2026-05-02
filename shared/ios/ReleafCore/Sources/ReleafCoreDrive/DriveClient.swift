@@ -49,6 +49,17 @@ public protocol DriveClient: AnyObject, Sendable {
     /// Upload / overwrite a small JSON file. `filename` is the Drive file name.
     func uploadJSON(_ data: Data, filename: String, parentId: String, accessToken: String) async throws -> DriveFile
 
+    /// Upload / overwrite a binary file (PDF, JPEG, etc.) with caller-
+    /// supplied MIME type. PATCHes an existing same-name child if present
+    /// so re-uploads don't fork into duplicates.
+    func uploadBinary(
+        _ data: Data,
+        filename: String,
+        contentType: String,
+        parentId: String,
+        accessToken: String
+    ) async throws -> DriveFile
+
     /// Download a file's bytes.
     func downloadBytes(fileId: String, accessToken: String) async throws -> Data
 
@@ -91,12 +102,22 @@ public final class InMemoryDriveClient: DriveClient, @unchecked Sendable {
     }
 
     public func uploadJSON(_ data: Data, filename: String, parentId: String, accessToken: String) async throws -> DriveFile {
+        try await uploadBinary(data, filename: filename, contentType: "application/json", parentId: parentId, accessToken: accessToken)
+    }
+
+    public func uploadBinary(
+        _ data: Data,
+        filename: String,
+        contentType: String,
+        parentId: String,
+        accessToken: String
+    ) async throws -> DriveFile {
         queue.sync {
             if let existing = files.values.first(where: { $0.name == filename && $0.parents == [parentId] }) {
                 blobs[existing.id] = data
                 return existing
             }
-            let file = DriveFile(id: UUID().uuidString, name: filename, mimeType: "application/json", parents: [parentId])
+            let file = DriveFile(id: UUID().uuidString, name: filename, mimeType: contentType, parents: [parentId])
             files[file.id] = file
             blobs[file.id] = data
             return file

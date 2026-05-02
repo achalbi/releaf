@@ -37,20 +37,7 @@ public struct QuickInkRoot: View {
     /// in this view.
     @StateObject private var authStore: AuthStore = makeQuickInkAuthStore()
 
-    public init() {
-        // Slice 4.2b — wire the sync stack once per process.
-        // Idempotent. When the eventual Xcode app target lands,
-        // this call moves into its `@main App.init()` (mirror of
-        // Releaf's `ReleafApp.swift`); installing it here keeps
-        // QuickInk's library-only build self-contained. The
-        // environment's auth observer kicks off a sync pass on
-        // every signed-in transition + cancels on sign-out.
-        //
-        // `makeQuickInkAuthStore()` is cached, so this call sees
-        // the same instance the @StateObject above wraps — see
-        // `QuickInkAuthBinding.swift`'s header.
-        QuickInkSyncEnvironment.shared.install(authStore: makeQuickInkAuthStore())
-    }
+    public init() {}
 
     public var body: some View {
         if !onboardingCompleted {
@@ -148,13 +135,35 @@ private struct MainShell: View {
         case noteEditor(entryId: String)
         case settings
         case search
+        case manageCategories
+        case scanDetail(captureId: String)
+        // Per-category browse — pushed from the Home category grid.
+        // Carries the canonical category name; the screen filters
+        // entries case-insensitively against `entry.category`.
+        case categoryEntries(name: String)
     }
 
     let userId: String
     @ObservedObject var authStore: AuthStore
 
     @StateObject private var controller: ScanFlowController
+    /// Process-stable so a Settings edit to `customDisplayName`
+    /// re-renders the Home greeting reactively without round-tripping
+    /// through UserDefaults observers.
+    @StateObject private var settings = SettingsState()
     @State private var path: [Route] = []
+
+    /// Settings override > Google session displayName > nil.
+    /// The home screen falls back to "QuickInk" when this is nil.
+    private var resolvedDisplayName: String? {
+        let custom = settings.customDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !custom.isEmpty { return custom }
+        if case .signedIn(let session) = authStore.state {
+            let google = session.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !google.isEmpty { return google }
+        }
+        return nil
+    }
 
     init(userId: String, authStore: AuthStore) {
         self.userId = userId
@@ -178,26 +187,39 @@ private struct MainShell: View {
         // that should land them on the review surface. When the
         // user dismisses, `path` is preserved (still @State on
         // MainShell), so they return to wherever they were.
-        switch controller.state {
-        case .recognizing, .complete, .failed:
-            ScanReviewScreen(controller: controller)
-        case .idle:
-            NavigationStack(path: $path) {
-                HomeScreen(
-                    controller:     controller,
-                    userId:         userId,
-                    onOpenNotes:    { path.append(.notesList) },
-                    onOpenSettings: { path.append(.settings) },
-                    onOpenSearch:   { path.append(.search) },
-                    onTapCategory:  nil, // Wired in a follow-up.
-                    onOpenEntry:    { entryId in path.append(.noteEditor(entryId: entryId)) }
-                )
-                .navigationBarBackButtonHidden(true)
-                .toolbar(.hidden, for: .navigationBar)
-                .navigationDestination(for: Route.self) { route in
-                    destination(for: route)
+        Group {
+            switch controller.state {
+            case .recognizing, .complete, .failed:
+                ScanReviewScreen(controller: controller, userId: userId)
+            case .idle:
+                NavigationStack(path: $path) {
+                    HomeScreen(
+                        controller:     controller,
+                        userId:         userId,
+                        onOpenNotes:    { path.append(.notesList) },
+                        onOpenSettings: { path.append(.settings) },
+                        onOpenSearch:   { path.append(.search) },
+                        onTapCategory:  { name in path.append(.categoryEntries(name: name)) },
+                        onOpenEntry:    { entryId in path.append(.noteEditor(entryId: entryId)) },
+                        onOpenScan:     { captureId in path.append(.scanDetail(captureId: captureId)) },
+                        displayName:    resolvedDisplayName
+                    )
+                    .navigationBarBackButtonHidden(true)
+                    .toolbar(.hidden, for: .navigationBar)
+                    .navigationDestination(for: Route.self) { route in
+                        destination(for: route)
+                    }
                 }
             }
+        }
+        .task(id: userId) {
+            // Idempotent first-launch / first-sign-in seed of the
+            // default 6 categories. Skipped for users who already
+            // have rows (e.g. on second launch). Picker chips in
+            // ScanReviewScreen + the Settings → Categories list
+            // both observe the same table — a freshly-seeded user
+            // sees the chips on the very next scan.
+            try? await CategoryRepository().seedDefaultsIfEmpty(userId: userId)
         }
     }
 
@@ -209,9 +231,9 @@ private struct MainShell: View {
         switch route {
         case .notesList:
             NotesListScreen(
-                userId:      userId,
-                onBack:      { path.removeLast() },
-                onOpenEntry: { entryId in path.append(.noteEditor(entryId: entryId)) }
+                userId:     userId,
+                onBack:     { path.removeLast() },
+                onOpenScan: { captureId in path.append(.scanDetail(captureId: captureId)) }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -228,23 +250,50 @@ private struct MainShell: View {
         case .settings:
             SettingsScreen(
                 onBack:    { path.removeLast() },
-                authStore: authStore
+                authStore: authStore,
+                onManageCategories: { path.append(.manageCategories) }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .manageCategories:
+            CategoriesSettingsScreen(
+                userId: userId,
+                onBack: { path.removeLast() }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .scanDetail(let captureId):
+            ScanDetailScreen(
+                captureId: captureId,
+                onBack:    { path.removeLast() }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
 
         case .search:
             SearchScreen(
-                userId:      userId,
-                onBack:      { path.removeLast() },
-                onOpenEntry: { entryId in
-                    // Replace the search step with the editor so
-                    // popping back from the editor returns to Home,
-                    // not Search. This matches the typical
+                userId:     userId,
+                onBack:     { path.removeLast() },
+                onOpenScan: { captureId in
+                    // Replace the search step with the detail so
+                    // popping back from detail returns to Home,
+                    // not Search. Matches the typical
                     // "search → tap result" UX.
                     path.removeLast()
-                    path.append(.noteEditor(entryId: entryId))
+                    path.append(.scanDetail(captureId: captureId))
                 }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .categoryEntries(let name):
+            CategoryEntriesScreen(
+                userId:       userId,
+                categoryName: name,
+                onBack:       { path.removeLast() },
+                onOpenScan:   { captureId in path.append(.scanDetail(captureId: captureId)) }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)

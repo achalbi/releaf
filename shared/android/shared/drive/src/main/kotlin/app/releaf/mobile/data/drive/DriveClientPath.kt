@@ -57,6 +57,28 @@ suspend fun DriveClient.uploadJsonAtPath(
 }
 
 /**
+ * Upload binary bytes (PDF, JPEG, etc.) to [relativePath] under
+ * [rootFolderId], creating missing intermediate folders. Replaces an
+ * existing file with the same path.
+ */
+suspend fun DriveClient.uploadBinaryAtPath(
+    data: ByteArray,
+    contentType: String,
+    relativePath: String,
+    rootFolderId: String,
+    accessToken: String,
+): DriveFile {
+    val lastSlash = relativePath.lastIndexOf('/')
+    val folderPath = if (lastSlash >= 0) relativePath.substring(0, lastSlash) else ""
+    val filename   = if (lastSlash >= 0) relativePath.substring(lastSlash + 1) else relativePath
+    val folderId = if (folderPath.isEmpty())
+        rootFolderId
+    else
+        ensurePath(folderPath, rootFolderId, accessToken)
+    return uploadBinary(data, filename, contentType, folderId, accessToken)
+}
+
+/**
  * Download the bytes at [relativePath]. Returns null when any folder
  * along the path is missing, or when the leaf file doesn't exist —
  * matches the "not found" contract the sync worker expects.

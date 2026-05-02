@@ -33,6 +33,8 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
 import app.quickink.mobile.data.capture.CaptureDao
 import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.category.CategoryDao
+import app.quickink.mobile.data.category.CategoryEntity
 import app.quickink.mobile.data.ocr.OcrResultDao
 import app.quickink.mobile.data.ocr.OcrResultEntity
 import app.releaf.mobile.data.notepad.NotepadDao
@@ -46,8 +48,14 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         SyncStateEntity::class,
         CaptureEntity::class,
         OcrResultEntity::class,
+        CategoryEntity::class,
     ],
-    version       = 1,
+    // v3 — captures.pdf_drive_file_id + captures.preview_drive_file_id
+    // (Drive ids of the per-row binary uploads). v2 added the
+    // categories table + captures.category column.
+    // `fallbackToDestructiveMigration` below handles the rebuild;
+    // when real users have data we'll register real Migration objects.
+    version       = 3,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {
@@ -56,6 +64,7 @@ abstract class QuickInkDatabase : RoomDatabase() {
     abstract fun syncStateDao():  SyncStateDao
     abstract fun captureDao():    CaptureDao
     abstract fun ocrResultDao():  OcrResultDao
+    abstract fun categoryDao():   CategoryDao
 
     companion object {
         @Volatile

@@ -48,11 +48,39 @@ data class CaptureEntity(
     @ColumnInfo(name = "page_count", defaultValue = "0")
     val pageCount: Int,
 
+    /**
+     * Pre-tagged category name picked on the scan review screen.
+     * Stored as a TEXT value (not an FK to `categories.id`) so a
+     * later soft-delete of the category row keeps the historical
+     * tag readable. See v2_capture_categories.sql for the rationale.
+     */
+    @ColumnInfo(name = "category")
+    val category: String?,
+
     @ColumnInfo(name = "conflict_stub")
     val conflictStub: String?,
 
     @ColumnInfo(name = "drive_file_id")
     val driveFileId: String?,
+
+    /**
+     * Drive file id of the per-row PDF binary upload. NULL = the
+     * PDF hasn't been pushed to Drive yet (or the local file went
+     * missing before upload). Populated by `SyncRepository` via
+     * `markPdfSynced` after `DriveClient.uploadBinary` returns.
+     * Defaulted so legacy construction sites keep compiling — only
+     * the upload pipeline writes a non-null value.
+     */
+    @ColumnInfo(name = "pdf_drive_file_id")
+    val pdfDriveFileId: String? = null,
+
+    /**
+     * Drive file id of the per-row preview-JPEG upload. Same
+     * lifecycle as [pdfDriveFileId]; null when the binary hasn't
+     * been mirrored to Drive.
+     */
+    @ColumnInfo(name = "preview_drive_file_id")
+    val previewDriveFileId: String? = null,
 
     @ColumnInfo(name = "created_at")
     val createdAt: String,

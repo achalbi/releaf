@@ -58,6 +58,42 @@ public extension DriveClient {
         return try await uploadJSON(data, filename: filename, parentId: folderId, accessToken: accessToken)
     }
 
+    /// Upload binary bytes (PDF, JPEG, etc.) to [relativePath] under
+    /// [rootFolderId], creating missing intermediate folders. Replaces
+    /// an existing file with the same path.
+    @discardableResult
+    func uploadBinaryAtPath(
+        _ data: Data,
+        contentType: String,
+        relativePath: String,
+        rootFolderId: String,
+        accessToken: String
+    ) async throws -> DriveFile {
+        let segments = relativePath.split(separator: "/").map(String.init)
+        guard !segments.isEmpty else {
+            throw DriveError.underlying("uploadBinaryAtPath: empty path")
+        }
+        let filename = segments.last!
+        let folderSegments = segments.dropLast()
+        let folderId: String
+        if folderSegments.isEmpty {
+            folderId = rootFolderId
+        } else {
+            folderId = try await ensurePath(
+                folderSegments.joined(separator: "/"),
+                rootFolderId: rootFolderId,
+                accessToken: accessToken
+            )
+        }
+        return try await uploadBinary(
+            data,
+            filename: filename,
+            contentType: contentType,
+            parentId: folderId,
+            accessToken: accessToken
+        )
+    }
+
     /// Download the bytes at [relativePath]. Returns nil when any
     /// folder along the path is missing or when the leaf file doesn't
     /// exist.

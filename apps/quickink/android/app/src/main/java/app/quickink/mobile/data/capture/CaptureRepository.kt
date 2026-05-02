@@ -17,6 +17,7 @@
 
 package app.quickink.mobile.data.capture
 
+import androidx.room.RoomRawQuery
 import app.quickink.mobile.data.ocr.OcrResultDao
 import app.quickink.mobile.data.ocr.OcrResultEntity
 import app.releaf.mobile.data.common.IsoClock
@@ -44,6 +45,7 @@ class CaptureRepository(
         pdfUri: String,
         previewUri: String?,
         pageCount: Int,
+        category: String? = null,
     ) {
         val now = IsoClock.nowIso()
         captureDao.insert(
@@ -54,6 +56,7 @@ class CaptureRepository(
                 pdfUri       = pdfUri,
                 previewUri   = previewUri,
                 pageCount    = pageCount,
+                category     = category,
                 conflictStub = null,
                 driveFileId  = null,
                 createdAt    = now,
@@ -62,6 +65,15 @@ class CaptureRepository(
                 deletedAt    = null,
             ),
         )
+    }
+
+    /**
+     * Update an existing capture's `category` to the user's pick
+     * from the scan-review screen. Bumps `updated_at` + `dirty`
+     * so the next sync pass uploads the change.
+     */
+    suspend fun setCategory(captureId: String, category: String?) {
+        captureDao.setCategory(captureId, category, IsoClock.nowIso())
     }
 
     /**
@@ -95,6 +107,173 @@ class CaptureRepository(
         )
     }
 
+    /**
+     * Search captures across category name + OCR text. Mirror of
+     * iOS's `CaptureRepository.search`. Returns each capture once
+     * with the strongest OCR snippet (when the hit came via FTS5).
+     * The two passes:
+     *   1. Captures whose `category` contains [query] (substring,
+     *      case-insensitive). No OCR snippet for these.
+     *   2. OCR-text matches via `fts_ocr_text` MATCH joined back to
+     *      captures.
+     * Dedupes by `capture.id` with category hits ordered first.
+     */
+    suspend fun search(userId: String, query: String): List<SearchHit> {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return emptyList()
+        val likePattern = "%$trimmed%"
+        val ftsQuery = buildFtsQuery(trimmed)
+
+        val seen = mutableSetOf<String>()
+        val hits = mutableListOf<SearchHit>()
+
+        for (row in captureDao.searchByCategory(userId, likePattern)) {
+            if (seen.add(row.id)) {
+                hits += SearchHit(capture = row, ocrSnippet = null)
+            }
+        }
+
+        // FTS5 raw query — see CaptureDao.searchByOcr for why we
+        // can't use a regular @Query here.
+        val rawSql = """
+            SELECT c.id            AS id,
+                   c.user_id       AS user_id,
+                   c.preview_uri   AS preview_uri,
+                   c.pdf_uri       AS pdf_uri,
+                   c.category      AS category,
+                   c.page_count    AS page_count,
+                   c.created_at    AS created_at,
+                   snippet(fts_ocr_text, 1, '‹', '›', '…', 24) AS ocr_snippet
+            FROM   fts_ocr_text f
+            JOIN   ocr_results r ON r.id = f.ocr_result_id
+            JOIN   captures    c ON c.id = r.capture_id
+            WHERE  f.text MATCH ?
+              AND  r.deleted_at IS NULL
+              AND  c.deleted_at IS NULL
+              AND  c.user_id = ?
+            ORDER BY rank
+            LIMIT 50
+        """.trimIndent()
+        val rawQuery = RoomRawQuery(sql = rawSql) { stmt ->
+            stmt.bindText(1, ftsQuery)
+            stmt.bindText(2, userId)
+        }
+
+        // FTS pass can throw on a malformed MATCH expression; if it
+        // does, fall through to the LIKE fallback below so the user
+        // still sees results. We swallow the throw rather than
+        // propagating because the UI's catch zeros the hits and the
+        // user has no way to recover.
+        try {
+            for (ocr in captureDao.searchByOcr(rawQuery)) {
+                if (!seen.add(ocr.id)) continue
+                val snippet = ocr.ocrSnippet
+                    ?.replace("‹", "")
+                    ?.replace("›", "")
+                val entity = CaptureEntity(
+                    id           = ocr.id,
+                    userId       = ocr.userId,
+                    title        = null,
+                    pdfUri       = ocr.pdfUri,
+                    previewUri   = ocr.previewUri,
+                    pageCount    = ocr.pageCount,
+                    category     = ocr.category,
+                    conflictStub = null,
+                    driveFileId  = null,
+                    createdAt    = ocr.createdAt,
+                    updatedAt    = ocr.createdAt,
+                    dirty        = false,
+                    deletedAt    = null,
+                )
+                hits += SearchHit(capture = entity, ocrSnippet = snippet)
+            }
+        } catch (_: Exception) {
+            // FTS5 syntax error or schema not yet created on this
+            // device — fall through to LIKE-based fallback.
+        }
+
+        // Pass 3 — substring fallback over `ocr_results.text`. Only
+        // runs when the FTS pass produced no OCR hits (malformed
+        // MATCH expr, FTS index empty because triggers haven't fired,
+        // etc.). O(rows × text length); bounded by LIMIT 50.
+        if (hits.none { it.ocrSnippet != null }) {
+            val likeSql = """
+                SELECT c.id            AS id,
+                       c.user_id       AS user_id,
+                       c.preview_uri   AS preview_uri,
+                       c.pdf_uri       AS pdf_uri,
+                       c.category      AS category,
+                       c.page_count    AS page_count,
+                       c.created_at    AS created_at,
+                       substr(r.text, max(1, instr(lower(r.text), lower(?)) - 30), 120) AS ocr_snippet
+                FROM   ocr_results r
+                JOIN   captures    c ON c.id = r.capture_id
+                WHERE  r.deleted_at IS NULL
+                  AND  c.deleted_at IS NULL
+                  AND  c.user_id = ?
+                  AND  lower(r.text) LIKE lower(?)
+                ORDER BY c.created_at DESC
+                LIMIT 50
+            """.trimIndent()
+            val likeQuery = RoomRawQuery(sql = likeSql) { stmt ->
+                stmt.bindText(1, trimmed)
+                stmt.bindText(2, userId)
+                stmt.bindText(3, likePattern)
+            }
+            try {
+                for (ocr in captureDao.searchByOcr(likeQuery)) {
+                    if (!seen.add(ocr.id)) continue
+                    val entity = CaptureEntity(
+                        id           = ocr.id,
+                        userId       = ocr.userId,
+                        title        = null,
+                        pdfUri       = ocr.pdfUri,
+                        previewUri   = ocr.previewUri,
+                        pageCount    = ocr.pageCount,
+                        category     = ocr.category,
+                        conflictStub = null,
+                        driveFileId  = null,
+                        createdAt    = ocr.createdAt,
+                        updatedAt    = ocr.createdAt,
+                        dirty        = false,
+                        deletedAt    = null,
+                    )
+                    hits += SearchHit(capture = entity, ocrSnippet = ocr.ocrSnippet)
+                }
+            } catch (_: Exception) {
+                // Last-resort path failed too — return whatever we
+                // have (probably category hits only).
+            }
+        }
+
+        return hits
+    }
+
+    /**
+     * Build a tokenised FTS5 MATCH expression from a free-form user
+     * query. Each whitespace-delimited word becomes a prefix term
+     * (`word*`) so partial-word matches work mid-typing.
+     *
+     * Strips EVERY non-alphanumeric / non-whitespace char (replaces
+     * with a space) before tokenising. The earlier "strip the five
+     * known FTS5 operators" approach left other reserved chars
+     * behind (`-`, `+`, `^`, smart quotes, OR / NEAR keywords),
+     * which produced malformed MATCH expressions for queries like
+     * "it's" or "math-physics" — the SQL throws, caller catches and
+     * zeroes the hits, and the user thinks search is broken.
+     * Aggressive sanitisation trades a tiny bit of expressivity for
+     * reliability; users typing punctuation almost always want the
+     * alphanumeric tokens around it.
+     */
+    private fun buildFtsQuery(raw: String): String {
+        val cleaned = raw.lowercase().map { c ->
+            if (c.isLetterOrDigit() || c.isWhitespace()) c else ' '
+        }.joinToString("")
+        val tokens = cleaned.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (tokens.isEmpty()) return "\"\""
+        return tokens.joinToString(" ") { "$it*" }
+    }
+
     private companion object {
         // `ignoreUnknownKeys = true` future-proofs us against
         // OcrBlock gaining new fields in `:shared:scan` — older
@@ -102,3 +281,13 @@ class CaptureRepository(
         private val json = Json { ignoreUnknownKeys = true }
     }
 }
+
+/**
+ * Result row for a Library / Search capture-based query. The
+ * `ocrSnippet` is `null` for non-OCR hits (e.g. category-only
+ * matches) and contains the FTS5-extracted excerpt otherwise.
+ */
+data class SearchHit(
+    val capture: CaptureEntity,
+    val ocrSnippet: String?,
+)

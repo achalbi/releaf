@@ -90,10 +90,31 @@ object QuickInkSyncScheduler {
         )
     }
 
+    /**
+     * Enqueue a one-shot PULL-ONLY pass via [QuickInkRestoreWorker].
+     * The Settings → "Restore from Drive" CTA calls this. Uses a
+     * distinct unique-work name so a queued restore can't be
+     * coalesced with a queued sync, and `ExistingWorkPolicy.REPLACE`
+     * so a fresh tap always wins (vs sync's KEEP).
+     */
+    fun requestRestore(context: Context) {
+        val request = OneTimeWorkRequestBuilder<QuickInkRestoreWorker>()
+            .setConstraints(networkConstraint)
+            .setBackoffCriteria(BackoffPolicy.LINEAR, ONESHOT_BACKOFF_SEC, TimeUnit.SECONDS)
+            .build()
+
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            QuickInkRestoreWorker.ONESHOT_WORK_NAME,
+            ExistingWorkPolicy.REPLACE,
+            request,
+        )
+    }
+
     /** Cancel every queued + running QuickInk sync job. */
     fun cancelAll(context: Context) {
         val wm = WorkManager.getInstance(context)
         wm.cancelUniqueWork(QuickInkSyncWorker.PERIODIC_WORK_NAME)
         wm.cancelUniqueWork(QuickInkSyncWorker.ONESHOT_WORK_NAME)
+        wm.cancelUniqueWork(QuickInkRestoreWorker.ONESHOT_WORK_NAME)
     }
 }

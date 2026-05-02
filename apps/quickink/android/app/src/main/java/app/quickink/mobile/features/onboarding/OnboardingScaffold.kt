@@ -42,6 +42,7 @@ import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
+import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 
 @Composable
 fun OnboardingScaffold(
@@ -59,7 +60,7 @@ fun OnboardingScaffold(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.bg),
+            .quickInkDotGridBackground(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.weight(1f))

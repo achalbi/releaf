@@ -22,21 +22,31 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.SolidColor
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -49,12 +59,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import app.quickink.mobile.QUICKINK_APP_VERSION
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
+import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
 import app.releaf.mobile.data.sync.SyncStateKeys
@@ -63,6 +75,11 @@ import app.releaf.mobile.data.sync.SyncStateKeys
 fun SettingsScreen(
     onBack: () -> Unit,
     authStore: AuthStore,
+    onManageCategories: (() -> Unit)? = null,
+    /// Pushed up to MainShell so the Home greeting reflects the
+    /// edit immediately (without a SharedPreferences observer).
+    /// Optional so this screen still renders standalone in previews.
+    onCustomDisplayNameChange: ((String) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val preferences = remember { SettingsPreferences(context) }
@@ -71,6 +88,22 @@ fun SettingsScreen(
 
     var driveBackupEnabled by remember { mutableStateOf(preferences.driveBackupEnabled) }
     var searchablePdfExportEnabled by remember { mutableStateOf(preferences.searchablePdfExportEnabled) }
+    var customDisplayName by remember { mutableStateOf(preferences.customDisplayName) }
+
+    // Transient "Syncing now…" feedback while a manual Sync now /
+    // Restore from Drive pass is in flight. The underlying
+    // QuickInkSyncScheduler.requestImmediate / requestRestore are
+    // fire-and-forget through WorkManager — without this the user
+    // has no visible signal that anything happened on tap.
+    var isSyncingFlash by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    fun flashSyncing() {
+        isSyncingFlash = true
+        coroutineScope.launch {
+            kotlinx.coroutines.delay(2_500L)
+            isSyncingFlash = false
+        }
+    }
     val authState by authStore.state.collectAsState()
 
     val app = context.applicationContext as QuickInkApp
@@ -84,10 +117,17 @@ fun SettingsScreen(
     val pendingCount = pendingRow?.value?.toIntOrNull() ?: 0
     val isSignedIn = authState is AuthState.SignedIn
 
+    // System status-bar inset + visual breathing room above the
+    // top bar — same pattern as HomeScreen / NotesListScreen so the
+    // "Settings" title clears the notch on edge-to-edge devices
+    // (target SDK 35+).
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.bg),
+            .quickInkDotGridBackground()
+            .padding(top = statusBarTop + QuickInkSpacing.s4),
     ) {
         // Top bar
         Row(
@@ -115,6 +155,21 @@ fun SettingsScreen(
         ) {
             Section(title = "Account") {
                 AccountRow(authState = authState, onSignOut = { authStore.signOut() })
+                // Display-name override row — what the Home greeting
+                // shows. Empty value falls back to the Google
+                // session's name (resolver lives in MainShell).
+                // Bound directly to SharedPreferences via
+                // `customDisplayName` setter, plus pushed up via the
+                // optional callback so the parent's reactive copy
+                // stays in sync.
+                DisplayNameRow(
+                    value = customDisplayName,
+                    onValueChange = { value ->
+                        customDisplayName = value
+                        preferences.customDisplayName = value
+                        onCustomDisplayNameChange?.invoke(value)
+                    },
+                )
             }
 
             Section(title = "Sync") {
@@ -131,25 +186,43 @@ fun SettingsScreen(
                     },
                 )
                 LastSyncRow(
-                    timestampIso = lastSyncRow?.value,
-                    pendingCount = pendingCount,
+                    timestampIso  = lastSyncRow?.value,
+                    pendingCount  = pendingCount,
+                    isSyncingFlash = isSyncingFlash,
                 )
                 Spacer(Modifier.size(QuickInkSpacing.s1))
                 Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
                     SecondaryButton(
                         label    = "Sync now",
                         onClick  = {
-                            if (isSignedIn) QuickInkSyncScheduler.requestImmediate(context)
+                            if (isSignedIn) {
+                                QuickInkSyncScheduler.requestImmediate(context)
+                                flashSyncing()
+                            }
                         },
                         modifier = Modifier.weight(1f),
                     )
                     SecondaryButton(
                         label    = "Restore from Drive",
                         onClick  = {
-                            if (isSignedIn) QuickInkSyncScheduler.requestImmediate(context)
+                            // Distinct path from "Sync now" — kicks
+                            // QuickInkRestoreWorker (pull-only) via
+                            // its own unique work name + REPLACE
+                            // policy so a fresh tap always wins.
+                            if (isSignedIn) {
+                                QuickInkSyncScheduler.requestRestore(context)
+                                flashSyncing()
+                            }
                         },
                         modifier = Modifier.weight(1f),
                     )
+                }
+                DriveFolderRow(context = context)
+            }
+
+            if (onManageCategories != null) {
+                Section(title = "Categories") {
+                    ManageCategoriesRow(onClick = onManageCategories)
                 }
             }
 
@@ -164,7 +237,62 @@ fun SettingsScreen(
                     },
                 )
             }
+
+            Section(title = "About") {
+                AboutRow()
+            }
         }
+    }
+}
+
+/**
+ * Inline TextField for the user's preferred display name. Edits flow
+ * up via [onValueChange] which writes to SharedPreferences AND pushes
+ * the new value to MainShell so the Home greeting updates without a
+ * preferences observer. Placeholder cues the fallback behaviour —
+ * empty here means the Google session's name wins.
+ */
+@Composable
+private fun DisplayNameRow(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1)) {
+        Text(text = "Display name", style = type.body, color = colors.ink)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(QuickInkRadius.md))
+                .background(colors.borderSoft)
+                .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
+        ) {
+            BasicTextField(
+                value         = value,
+                onValueChange = onValueChange,
+                textStyle     = type.body.copy(color = colors.ink),
+                cursorBrush   = SolidColor(colors.accent),
+                singleLine    = true,
+                modifier      = Modifier.fillMaxWidth(),
+                decorationBox = { inner ->
+                    if (value.isEmpty()) {
+                        Text(
+                            text  = "Use Google account name",
+                            style = type.body,
+                            color = colors.muted,
+                        )
+                    }
+                    inner()
+                },
+            )
+        }
+        Text(
+            text  = "Shown on the home screen. Leave blank to use your Google account name.",
+            style = type.meta,
+            color = colors.inkSoft,
+        )
     }
 }
 
@@ -278,7 +406,11 @@ private fun ToggleRow(
 }
 
 @Composable
-private fun LastSyncRow(timestampIso: String?, pendingCount: Int) {
+private fun LastSyncRow(
+    timestampIso: String?,
+    pendingCount: Int,
+    isSyncingFlash: Boolean = false,
+) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     Row(
@@ -291,20 +423,143 @@ private fun LastSyncRow(timestampIso: String?, pendingCount: Int) {
             color    = colors.ink,
             modifier = Modifier.weight(1f),
         )
-        if (pendingCount > 0) {
+        if (isSyncingFlash) {
+            // Inline progress + label so the user sees something
+            // happen the instant they tap Sync now / Restore.
+            CircularProgressIndicator(
+                color       = colors.accent,
+                strokeWidth = 2.dp,
+                modifier    = Modifier
+                    .size(12.dp)
+                    .padding(end = QuickInkSpacing.s2),
+            )
             Text(
-                text     = "$pendingCount pending",
+                text     = "Syncing now…",
                 style    = type.meta,
-                color    = colors.warning,
-                modifier = Modifier.padding(end = QuickInkSpacing.s2),
+                color    = colors.accent,
+            )
+        } else {
+            if (pendingCount > 0) {
+                Text(
+                    text     = "$pendingCount pending",
+                    style    = type.meta,
+                    color    = colors.warning,
+                    modifier = Modifier.padding(end = QuickInkSpacing.s2),
+                )
+            }
+            Text(
+                text      = relativeSyncTimestamp(timestampIso) ?: "Never",
+                style     = type.meta,
+                color     = colors.inkSoft,
+                textAlign = TextAlign.End,
+            )
+        }
+    }
+}
+
+/**
+ * Drive folder link — opens the user's Drive in the system browser
+ * at a search query for "QuickInk", which lands them on the per-app
+ * folder created by `SyncRepository.ensureRootFolder`. Direct
+ * deep-link to a specific folder ID would need the ID from the
+ * manifest; until that round-trips through the UI, the search-based
+ * link is a low-friction stand-in.
+ */
+@Composable
+private fun DriveFolderRow(context: android.content.Context) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                val intent = android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse(
+                        "https://drive.google.com/drive/u/0/search?q=QuickInk"
+                    )
+                )
+                context.startActivity(intent)
+            }
+            .padding(vertical = QuickInkSpacing.s2),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text  = "Open Drive folder",
+                style = type.body,
+                color = colors.ink,
+            )
+            Text(
+                text  = "Browse your scans + notes on Google Drive.",
+                style = type.meta,
+                color = colors.inkSoft,
+            )
+        }
+        Icon(
+            imageVector       = Icons.AutoMirrored.Filled.OpenInNew,
+            contentDescription = null,
+            tint              = colors.accent,
+            modifier          = Modifier.size(16.dp),
+        )
+    }
+}
+
+/**
+ * "About" section content — app version + a brief blurb. Pulls the
+ * version from the same constant the sync worker stamps into the
+ * Drive manifest, so the two stay aligned.
+ */
+@Composable
+private fun AboutRow() {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text     = "App version",
+                style    = type.body,
+                color    = colors.ink,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text  = QUICKINK_APP_VERSION,
+                style = type.meta,
+                color = colors.inkSoft,
             )
         }
         Text(
-            text      = timestampIso ?: "Never",
-            style     = type.meta,
-            color     = colors.inkSoft,
-            textAlign = TextAlign.End,
+            text  = "QuickInk by Releaf — scans go to your own Google Drive folder. Nothing leaves the device until you sign in and turn Drive backup on.",
+            style = type.meta,
+            color = colors.inkSoft,
         )
+    }
+}
+
+/**
+ * Mirror of HomeScreen's relative-time formatter: "moments ago" /
+ * "5m ago" / "2h ago" / "yesterday" / "3d ago" / "Apr 28". Null /
+ * unparsable returns null so the row falls back to "Never".
+ */
+private fun relativeSyncTimestamp(iso: String?): String? {
+    if (iso.isNullOrBlank()) return null
+    val instant = try {
+        java.time.Instant.parse(iso)
+    } catch (_: Exception) {
+        return null
+    }
+    val seconds = java.time.Duration.between(instant, java.time.Instant.now())
+        .seconds
+        .coerceAtLeast(0L)
+    return when {
+        seconds < 60        -> "moments ago"
+        seconds < 3600      -> "${seconds / 60}m ago"
+        seconds < 86_400    -> "${seconds / 3600}h ago"
+        seconds < 172_800   -> "yesterday"
+        seconds < 604_800   -> "${seconds / 86_400}d ago"
+        else                -> instant.atZone(java.time.ZoneId.systemDefault())
+            .toLocalDate()
+            .format(java.time.format.DateTimeFormatter.ofPattern("MMM d"))
     }
 }
 
@@ -322,5 +577,37 @@ private fun SecondaryButton(label: String, onClick: () -> Unit, modifier: Modifi
         contentAlignment = Alignment.Center,
     ) {
         Text(text = label, style = type.label, color = colors.ink)
+    }
+}
+
+/**
+ * Row that pushes the Manage Categories screen. Mirrors iOS's
+ * "Manage categories" disclosure row in [SettingsScreen.swift].
+ */
+@Composable
+private fun ManageCategoriesRow(onClick: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Row(
+        modifier = androidx.compose.ui.Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = QuickInkSpacing.s2),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = androidx.compose.ui.Modifier.weight(1f)) {
+            Text(text = "Manage categories", style = type.body, color = colors.ink)
+            Spacer(androidx.compose.ui.Modifier.size(2.dp))
+            Text(
+                text  = "Add, rename, or remove the tags shown when you scan.",
+                style = type.meta,
+                color = colors.inkSoft,
+            )
+        }
+        Icon(
+            imageVector       = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint              = colors.muted,
+        )
     }
 }

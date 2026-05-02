@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>app.quickink.mobile.sync</string>
+	</array>
+	<key>CFBundleGetInfoString</key>
+	<string></string>
+	<!--
+	  Google Sign-In iOS SDK reads `GIDClientID` directly from the
+	  main bundle's Info.plist (see ReleafCore's GoogleSignInBinding.swift,
+	  which calls Bundle.main.object(forInfoDictionaryKey: "GIDClientID")).
+	  The reverse-DNS form of this same client ID becomes the OAuth
+	  callback URL scheme listed under CFBundleURLTypes below — that's
+	  how Google's auth flow round-trips back into the app.
+	  Bundle ID `app.quickink.mobile` is registered against this client
+	  in the Google Cloud Console.
+	-->
+	<key>GIDClientID</key>
+	<string>534102618638-35h9gccgimo7su5utla0i8ocpq3i717v.apps.googleusercontent.com</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>app.quickink.mobile.googlesignin</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.534102618638-35h9gccgimo7su5utla0i8ocpq3i717v</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

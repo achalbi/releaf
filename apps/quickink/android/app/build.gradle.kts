@@ -24,6 +24,7 @@
  */
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     // AGP 9 auto-applies kotlin.android. Compose-compiler stays
@@ -45,6 +46,45 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+// Release signing — keystore secrets live OUTSIDE the repo. Two
+// supported sources (in order):
+//   1. `apps/quickink/android/keystore.properties` — local file
+//      that overrides nothing in git. CI can materialize this from
+//      a secret. Format:
+//        storeFile=../upload-keystore.jks
+//        storePassword=...
+//        keyAlias=upload
+//        keyPassword=...
+//   2. Environment variables (CI fallback):
+//        QUICKINK_UPLOAD_STORE_FILE, QUICKINK_UPLOAD_STORE_PASSWORD,
+//        QUICKINK_UPLOAD_KEY_ALIAS,  QUICKINK_UPLOAD_KEY_PASSWORD
+// When neither source resolves, `release` falls through to debug
+// signing so local debug-on-release builds still link (Play
+// uploads will still need a real key — see SIGNING.md).
+val keystorePropsFile = rootProject.file("../../apps/quickink/android/keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use(::load)
+}
+fun keystoreValue(propKey: String, envKey: String): String? =
+    keystoreProps.getProperty(propKey) ?: System.getenv(envKey)
+
+val uploadStoreFile     = keystoreValue("storeFile",     "QUICKINK_UPLOAD_STORE_FILE")
+val uploadStorePassword = keystoreValue("storePassword", "QUICKINK_UPLOAD_STORE_PASSWORD")
+val uploadKeyAlias      = keystoreValue("keyAlias",      "QUICKINK_UPLOAD_KEY_ALIAS")
+val uploadKeyPassword   = keystoreValue("keyPassword",   "QUICKINK_UPLOAD_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    uploadStoreFile, uploadStorePassword, uploadKeyAlias, uploadKeyPassword,
+).all { !it.isNullOrBlank() }
+
+// versionCode lives in a sidecar file so the `bumpVersionCode` task
+// can rewrite it without touching this script. Falls back to 1 if the
+// file is missing (e.g. fresh checkout before first release).
+val versionPropsFile = rootProject.file("../../apps/quickink/android/version.properties")
+val versionProps = Properties().apply {
+    if (versionPropsFile.exists()) versionPropsFile.inputStream().use(::load)
+}
+val computedVersionCode: Int = (versionProps.getProperty("versionCode") ?: "1").toInt()
+
 android {
     namespace  = "app.quickink.mobile"
     // Same SDK floors as Releaf — markdown lib AARs need API 36 at
@@ -56,7 +96,7 @@ android {
         applicationId = "app.quickink.mobile"  // §8 lock per proposal
         minSdk        = 26
         targetSdk     = 35
-        versionCode   = 1
+        versionCode   = computedVersionCode
         versionName   = "0.1.0"
     }
 
@@ -69,9 +109,46 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file("../../${uploadStoreFile!!}")
+                storePassword = uploadStorePassword
+                keyAlias      = uploadKeyAlias
+                keyPassword   = uploadKeyPassword
+                // Play App Signing rotates the app signing key on
+                // Google's side; we ship V1+V2 from the upload key
+                // and Play re-signs with the deployment key.
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 / resource shrinking — drops dead code + unused
+            // resources, obfuscates symbols. Required for an AAB
+            // that's reasonable in size on Play.
+            isMinifyEnabled    = true
+            isShrinkResources  = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            // Wire the upload key when present; otherwise fall
+            // through to debug signing so `assembleRelease` still
+            // produces an installable APK locally for smoke
+            // testing. Play uploads will fail unless real signing
+            // is configured.
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
         }
     }
 }
@@ -158,10 +235,58 @@ dependencies {
     // orchestrator remains plain coroutines.
     implementation(libs.work.runtime.ktx)
 
+    // Modern Android 12+ SplashScreen API + compat backport for
+    // older Android versions. Drives the system splash window
+    // (background + animated icon) so the icon shown during cold
+    // launch matches our brand. Activated in `MainActivity.onCreate`
+    // via `installSplashScreen()`; theme attributes live in
+    // `res/values/themes.xml` under `Theme.QuickInk.Splash`.
+    //
+    // TODO: move the version literal into libs.versions.toml under
+    // a `core-splashscreen = "1.0.1"` entry + a corresponding
+    // `androidx-core-splashscreen` library binding once the catalog
+    // is open (sibling :apps:releaf likely already has it pinned;
+    // reuse that version key).
+    implementation("androidx.core:core-splashscreen:1.0.1")
+
+    // Haze — Compose backdrop-blur. Drives the frosted-glass effect
+    // on the home BottomNavBar (`hazeChild` on the bar, `haze` source
+    // on the scrolling content behind it). `haze-materials` ships the
+    // iOS-Material-style HazeStyle presets (`HazeMaterials.regular`
+    // etc.) we pull from. Falls back to a tint on API < 32 where
+    // RenderEffect isn't available.
+    implementation(libs.haze)
+    implementation(libs.haze.materials)
+
+    // Coil — image loading for scan-preview thumbnails on the home
+    // rail and the full-bleed preview in `ScanDetailScreen`. Reads
+    // the `file://` URIs that `captures.preview_uri` stores.
+    implementation(libs.coil.compose)
+
     // Phase 4 Slice 4.4 — unit-test toolchain. Keeps the test
     // dep set minimal (junit + kotlinx-serialization for the
     // canonical-JSON interop test). Match the version pins
     // Releaf uses so both apps' test outputs stay aligned.
     testImplementation("junit:junit:4.13.2")
     testImplementation(libs.kotlinx.serialization.json)
+}
+
+// Increments versionCode in apps/quickink/android/version.properties.
+// Run before each Play upload:
+//   ./gradlew :apps:quickink:bumpVersionCode :apps:quickink:bundleRelease
+tasks.register("bumpVersionCode") {
+    group = "release"
+    description = "Increment versionCode in version.properties."
+    doLast {
+        val current = (versionProps.getProperty("versionCode") ?: "1").toInt()
+        val next = current + 1
+        val header = versionPropsFile.takeIf { it.exists() }
+            ?.readLines()
+            ?.takeWhile { it.isBlank() || it.startsWith("#") }
+            ?.joinToString("\n")
+            ?.let { if (it.isBlank()) "" else "$it\n" }
+            ?: ""
+        versionPropsFile.writeText("${header}versionCode=$next\n")
+        println("versionCode: $current → $next")
+    }
 }
