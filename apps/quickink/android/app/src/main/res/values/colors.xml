@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  QuickInk Android color tokens. These are the *resource-system*
+  colors used by Android's theming machinery (windowBackground,
+  statusBarColor, etc.). The Compose-side palette lives in
+  `app/.../ui/theme/QuickInkColors.kt` and is the source of truth
+  for in-tree UI; values here mirror it for system surfaces that
+  pre-date or escape Compose (the splash window, status-bar tint,
+  etc.).
+
+  Keep these in sync with QuickInkColors.kt and the iOS
+  QuickInkTheme.swift token table.
+-->
+<resources>
+    <color name="quickink_canvas">#FAF7F2</color>
+    <color name="quickink_ink">#2C2826</color>
+    <color name="quickink_accent">#D97757</color>
+    <color name="quickink_border_soft">#EDE4D2</color>
+</resources>

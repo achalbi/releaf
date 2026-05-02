@@ -1,15 +1,13 @@
 /*
  * OnboardingPrimaryButton.kt
  *
- * Shared CTA button shape for the 3 onboarding screens. Pulled
- * out so the pill / fill / typography / padding choices live in
- * one place — when the brand pass redesigns the CTA, one edit
- * here updates all three screens.
+ * Shared CTA button shape — coral pill, white label. Used by
+ * surfaces that aren't using `OnboardingScaffold` directly (e.g.,
+ * the legacy HomeScreen scan CTA before its full redesign).
  *
- * Lives in the QuickInk onboarding feature folder rather than in
- * :shared:designsystem because the shape is QuickInk-specific
- * and only used by onboarding. If/when more QuickInk surfaces
- * adopt the same CTA shape, promote it.
+ * Reads from `LocalQuickInkColors` / `LocalQuickInkTypography` so
+ * a brand pass tweak in `QuickInkTheme.kt` lands here without a
+ * direct edit.
  */
 
 package app.quickink.mobile.features.onboarding
@@ -25,10 +23,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.unit.dp
-import app.releaf.mobile.ui.theme.AppColors
-import app.releaf.mobile.ui.theme.AppSpacing
-import app.releaf.mobile.ui.theme.AppTypography
+import app.quickink.mobile.ui.theme.LocalQuickInkColors
+import app.quickink.mobile.ui.theme.LocalQuickInkTypography
+import app.quickink.mobile.ui.theme.QuickInkRadius
+import app.quickink.mobile.ui.theme.QuickInkSpacing
 
 @Composable
 fun OnboardingPrimaryButton(
@@ -36,20 +34,23 @@ fun OnboardingPrimaryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+
     Box(
         modifier = modifier
-            .padding(horizontal = AppSpacing.s5)
+            .padding(horizontal = QuickInkSpacing.s5)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(percent = 50))
-            .background(AppColors.ThemeGreenPrimary)
+            .clip(RoundedCornerShape(QuickInkRadius.pill))
+            .background(colors.accent)
             .clickable(onClick = onClick)
-            .padding(vertical = AppSpacing.s3),
+            .padding(vertical = QuickInkSpacing.s3),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text  = label,
-            style = AppTypography.Body,
-            color = AppColors.TextOnAccent,
+            style = type.label,
+            color = colors.textOnAccent,
         )
     }
 }

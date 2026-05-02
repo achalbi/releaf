@@ -27,7 +27,6 @@
 
 import SwiftUI
 import ReleafCoreAuth
-import ReleafCoreDesignSystem
 
 struct SignInScreen: View {
     @ObservedObject var state: OnboardingState
@@ -35,43 +34,72 @@ struct SignInScreen: View {
     let onSignedIn: () -> Void
 
     var body: some View {
-        VStack(spacing: AppSpacing.s5) {
-            Spacer()
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
 
-            Image(systemName: "icloud.and.arrow.up")
-                .font(.system(size: 64))
-                .foregroundStyle(AppColors.themeGreenPrimary)
+            DriveIllustration()
+                .frame(maxWidth: .infinity)
+                .frame(height: 320)
 
-            VStack(spacing: AppSpacing.s2) {
+            Spacer(minLength: QuickInkSpacing.s4)
+
+            VStack(spacing: QuickInkSpacing.s3) {
                 Text("Sign in to back up")
-                    .font(AppText.pageTitle)
-                    .foregroundStyle(AppColors.textPrimary)
-
-                Text("Sign in with Google so your scans sync to Drive and follow you across devices.")
-                    .font(AppText.body)
-                    .foregroundStyle(AppColors.textSecondary)
+                    .font(QuickInkText.display)
+                    .foregroundStyle(QuickInkColors.ink)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, AppSpacing.s5)
-            }
+                    .padding(.horizontal, QuickInkSpacing.s5)
 
-            // Drive toggle. Held in OnboardingState; persisted
-            // into Settings on success via `commitChoices` below.
-            Toggle(isOn: $state.driveBackupEnabled) {
-                Text("Back up to Google Drive")
-                    .font(AppText.body)
-                    .foregroundStyle(AppColors.textPrimary)
+                Text("Sign in with Google so your notes sync to Drive and follow you across devices.")
+                    .font(QuickInkText.body)
+                    .foregroundStyle(QuickInkColors.inkSoft)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, QuickInkSpacing.s7)
             }
-            .padding(.horizontal, AppSpacing.s5)
-            .disabled(isSigningIn)
+            .padding(.bottom, QuickInkSpacing.s4)
+
+            // Drive toggle — soft surface card row.
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Back up to Google Drive")
+                        .font(QuickInkText.label)
+                        .foregroundStyle(QuickInkColors.ink)
+                    Text("Recommended")
+                        .font(QuickInkText.caption)
+                        .foregroundStyle(QuickInkColors.muted)
+                }
+                Spacer()
+                Toggle("", isOn: $state.driveBackupEnabled)
+                    .labelsHidden()
+                    .tint(QuickInkColors.accent)
+                    .disabled(isSigningIn)
+            }
+            .padding(QuickInkSpacing.s4)
+            .quickInkCard()
+            .padding(.horizontal, QuickInkSpacing.s5)
 
             Spacer()
+
+            // Page indicator dots — third one active.
+            HStack(spacing: QuickInkSpacing.s2) {
+                Circle()
+                    .fill(QuickInkColors.border)
+                    .frame(width: 8, height: 8)
+                Circle()
+                    .fill(QuickInkColors.border)
+                    .frame(width: 8, height: 8)
+                Circle()
+                    .fill(QuickInkColors.accent)
+                    .frame(width: 24, height: 8)
+            }
+            .padding(.bottom, QuickInkSpacing.s5)
 
             footer
-                .padding(.horizontal, AppSpacing.s5)
-                .padding(.bottom, AppSpacing.s5)
+                .padding(.horizontal, QuickInkSpacing.s5)
+                .padding(.bottom, QuickInkSpacing.s7)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AppColors.canvas.ignoresSafeArea())
+        .background(QuickInkColors.bg.ignoresSafeArea())
         .onChange(of: authStore.state) { newValue in
             // On successful sign-in, persist the onboarding
             // bookkeeping (markComplete + commit Drive choice into
@@ -96,24 +124,32 @@ struct SignInScreen: View {
     private var footer: some View {
         if isSigningIn {
             ProgressView()
-                .tint(AppColors.themeGreenPrimary)
+                .tint(QuickInkColors.accent)
+                .scaleEffect(1.2)
+                .padding(.vertical, QuickInkSpacing.s3)
         } else {
-            VStack(spacing: AppSpacing.s2) {
+            VStack(spacing: QuickInkSpacing.s2) {
                 if let message = errorMessage {
                     Text(message)
-                        .font(AppText.meta)
-                        .foregroundStyle(AppColors.coralDeep)
+                        .font(QuickInkText.meta)
+                        .foregroundStyle(QuickInkColors.danger)
                         .multilineTextAlignment(.center)
                 }
 
                 Button(action: signIn) {
-                    Text("Sign in with Google")
-                        .font(AppText.body)
-                        .foregroundStyle(AppColors.textOnAccent)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, AppSpacing.s3)
-                        .background(AppColors.themeGreenPrimary)
-                        .clipShape(Capsule())
+                    HStack(spacing: QuickInkSpacing.s2) {
+                        // Google "G" mark — small badge inside a
+                        // white pill on the coral CTA. Uses an SF
+                        // Symbol fallback; swap for a brand-asset
+                        // image when the Xcode app target lands.
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(QuickInkColors.textOnAccent)
+                        Text("Continue with Google")
+                            .font(QuickInkText.label)
+                            .foregroundStyle(QuickInkColors.textOnAccent)
+                    }
+                    .quickInkCTA()
                 }
             }
         }

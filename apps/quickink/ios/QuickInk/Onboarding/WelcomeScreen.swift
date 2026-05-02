@@ -1,54 +1,29 @@
 /*
  * WelcomeScreen.swift
  *
- * Onboarding step 1/3. Brand intro + "Get started" CTA. Uses an
- * SF Symbol as the hero glyph for now; the brand-pass illustration
- * lands when QuickInk's onboarding-illustration scaffolding
- * extracts from Releaf (Phase 4 polish item, see file header on
- * `OnboardingState.swift`).
+ * Onboarding step 1/3 — brand intro. Layered notebook + page hero
+ * with an animated coral scan line and detection corners; serif
+ * tagline; "Continue" CTA.
+ *
+ * Uses `OnboardingScaffold` for shell layout and
+ * `NotebookScanIllustration` for the hero. All theme tokens come
+ * from `QuickInkTheme` (QuickInk-local), not ReleafCore.
  */
 
 import SwiftUI
-import ReleafCoreDesignSystem
 
 struct WelcomeScreen: View {
     let onContinue: () -> Void
 
     var body: some View {
-        VStack(spacing: AppSpacing.s5) {
-            Spacer()
-
-            Image(systemName: "doc.text.viewfinder")
-                .font(.system(size: 80))
-                .foregroundStyle(AppColors.themeGreenPrimary)
-
-            VStack(spacing: AppSpacing.s2) {
-                Text("Welcome to QuickInk")
-                    .font(AppText.pageTitle)
-                    .foregroundStyle(AppColors.textPrimary)
-
-                Text("Scan documents, search the text, never lose a page.")
-                    .font(AppText.body)
-                    .foregroundStyle(AppColors.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, AppSpacing.s5)
-            }
-
-            Spacer()
-
-            Button(action: onContinue) {
-                Text("Get Started")
-                    .font(AppText.body)
-                    .foregroundStyle(AppColors.textOnAccent)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, AppSpacing.s3)
-                    .background(AppColors.themeGreenPrimary)
-                    .clipShape(Capsule())
-            }
-            .padding(.horizontal, AppSpacing.s5)
-            .padding(.bottom, AppSpacing.s5)
+        OnboardingScaffold(
+            title:      "Your notebook,\ndigitised.",
+            subtitle:   "Snap any page. Get auto-cropped, OCR'd, categorized, and synced — no fuss.",
+            ctaLabel:   "Continue",
+            stepIndex:  0,
+            onContinue: onContinue
+        ) {
+            NotebookScanIllustration()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AppColors.canvas.ignoresSafeArea())
     }
 }

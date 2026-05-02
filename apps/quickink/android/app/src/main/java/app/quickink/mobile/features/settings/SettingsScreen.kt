@@ -1,9 +1,13 @@
 /*
  * SettingsScreen.kt
  *
- * Slice 5 — two persisted toggles. Account row, theme override,
- * version info, etc. land in later slices alongside the auth
- * wiring + brand pass.
+ * QuickInk Settings — Account / Sync / Experimental sections,
+ * styled with the QuickInk warm/coral palette via
+ * `LocalQuickInkColors` + `LocalQuickInkTypography`. Functional
+ * shape (Drive toggle, Last sync row, Sync now / Restore from
+ * Drive controls, Searchable PDF toggle) matches the Releaf
+ * `DriveSettingsSection` pattern; visual style is the editorial
+ * QuickInk look.
  *
  * Mirror of iOS `SettingsScreen.swift`.
  */
@@ -11,7 +15,10 @@
 package app.quickink.mobile.features.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,13 +29,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -44,15 +51,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
+import app.quickink.mobile.ui.theme.LocalQuickInkColors
+import app.quickink.mobile.ui.theme.LocalQuickInkTypography
+import app.quickink.mobile.ui.theme.QuickInkRadius
+import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
 import app.releaf.mobile.data.sync.SyncStateKeys
-import app.releaf.mobile.ui.components.AppButton
-import app.releaf.mobile.ui.components.AppButtonVariant
-import app.releaf.mobile.ui.theme.AppAccent
-import app.releaf.mobile.ui.theme.AppColors
-import app.releaf.mobile.ui.theme.AppSpacing
-import app.releaf.mobile.ui.theme.AppTypography
 
 @Composable
 fun SettingsScreen(
@@ -61,23 +66,18 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val preferences = remember { SettingsPreferences(context) }
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
 
     var driveBackupEnabled by remember { mutableStateOf(preferences.driveBackupEnabled) }
     var searchablePdfExportEnabled by remember { mutableStateOf(preferences.searchablePdfExportEnabled) }
     val authState by authStore.state.collectAsState()
 
-    // Slice 4.2b — read the last successful Drive sync timestamp
-    // from the local sync_state table for the "Last synced" row.
-    // `observe(...)` returns a Flow that emits null when the row
-    // doesn't exist yet (fresh install before the first pass).
     val app = context.applicationContext as QuickInkApp
     val syncStateDao = remember(app) { app.database.syncStateDao() }
     val lastSyncRow by syncStateDao
         .observe(SyncStateKeys.LAST_FULL_SYNC_AT)
         .collectAsState(initial = null)
-    // Slice 4.2d — pending-row count from the most recent pass.
-    // Worker writes this key after each sync (see SyncRepository).
-    // Surfaces as a "N pending" chip on the Last sync row when > 0.
     val pendingRow by syncStateDao
         .observe(SyncStateKeys.PENDING_COUNT)
         .collectAsState(initial = null)
@@ -87,81 +87,67 @@ fun SettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(AppColors.Canvas),
+            .background(colors.bg),
     ) {
-        TopBar(onBack = onBack)
+        // Top bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = QuickInkSpacing.s2, vertical = QuickInkSpacing.s2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector       = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint              = colors.ink,
+                )
+            }
+            Text(text = "Settings", style = type.pageTitle, color = colors.ink)
+        }
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = AppSpacing.s5, vertical = AppSpacing.s4),
-            verticalArrangement = Arrangement.spacedBy(AppSpacing.s5),
+                .padding(horizontal = QuickInkSpacing.s5, vertical = QuickInkSpacing.s4),
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s5),
         ) {
             Section(title = "Account") {
-                AccountRow(
-                    authState = authState,
-                    onSignOut = { authStore.signOut() },
-                )
+                AccountRow(authState = authState, onSignOut = { authStore.signOut() })
             }
 
             Section(title = "Sync") {
                 ToggleRow(
-                    label = "Back up to Google Drive",
-                    help  = "Scans and notes sync to Drive so they follow you across devices.",
+                    label   = "Back up to Google Drive",
+                    help    = "Scans and notes sync to Drive so they follow you across devices.",
                     checked = driveBackupEnabled,
                     onCheckedChange = { value ->
                         driveBackupEnabled = value
                         preferences.driveBackupEnabled = value
-                        // No need to schedule/cancel the worker on
-                        // toggle — the worker reads this preference
-                        // per pass and no-ops when off (see
-                        // QuickInkSyncWorker's header). Flipping to
-                        // on opportunistically kicks an immediate
-                        // pass so the user doesn't wait 15 minutes
-                        // to see their first upload.
                         if (value && authState is AuthState.SignedIn) {
                             QuickInkSyncScheduler.requestImmediate(context)
                         }
                     },
                 )
-                // Last sync row — reads from sync_state via
-                // SyncStateDao. Renders the raw ISO-8601 timestamp
-                // for now; a "moments ago / 5m ago / yesterday at
-                // 3:14pm" formatter can land later once the rest of
-                // the surface gets a relative-time util. (Releaf's
-                // DriveSettingsSection ships the same way today.)
                 LastSyncRow(
                     timestampIso = lastSyncRow?.value,
-                    enabled      = driveBackupEnabled,
                     pendingCount = pendingCount,
                 )
-
-                // Slice 4.2d — Sync now / Restore from Drive
-                // controls. Mirror of Releaf's DriveSettingsSection
-                // CTAs. Both fire requestImmediate; sync is
-                // bidirectional, so a manual kick of the same
-                // worker covers both push (sync now) and pull
-                // (restore) — distinct labels just frame the
-                // intent for the user. Taps on the signed-out
-                // state no-op gracefully because the worker
-                // short-circuits without a session.
-                Spacer(Modifier.size(AppSpacing.s1))
-                Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.s3)) {
-                    AppButton(
-                        text     = "Sync now",
+                Spacer(Modifier.size(QuickInkSpacing.s1))
+                Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
+                    SecondaryButton(
+                        label    = "Sync now",
                         onClick  = {
                             if (isSignedIn) QuickInkSyncScheduler.requestImmediate(context)
                         },
-                        variant  = AppButtonVariant.Secondary,
                         modifier = Modifier.weight(1f),
                     )
-                    AppButton(
-                        text     = "Restore from Drive",
+                    SecondaryButton(
+                        label    = "Restore from Drive",
                         onClick  = {
                             if (isSignedIn) QuickInkSyncScheduler.requestImmediate(context)
                         },
-                        variant  = AppButtonVariant.Secondary,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -169,8 +155,8 @@ fun SettingsScreen(
 
             Section(title = "Experimental") {
                 ToggleRow(
-                    label = "Searchable PDF export",
-                    help  = "Adds an invisible OCR text layer to exported PDFs so PDF readers can search and copy the text. Off by default while we tune the layout.",
+                    label   = "Searchable PDF export",
+                    help    = "Adds an invisible OCR text layer to exported PDFs so PDF readers can search and copy the text. Off by default while we tune the layout.",
                     checked = searchablePdfExportEnabled,
                     onCheckedChange = { value ->
                         searchablePdfExportEnabled = value
@@ -182,58 +168,49 @@ fun SettingsScreen(
     }
 }
 
-/**
- * Account section content — shows the signed-in email + a Sign
- * out row when there's a session, otherwise a minimal "Not signed
- * in" indicator. Sign out flips `AuthStore` state to `SignedOut`,
- * which `QuickInkRoot`'s router observes and bounces to the
- * SignIn screen (Option A — see QuickInkRoot.ReSignInGate).
- */
 @Composable
-private fun AccountRow(
-    authState: AuthState,
-    onSignOut: () -> Unit,
-) {
+private fun AccountRow(authState: AuthState, onSignOut: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
     val session = (authState as? AuthState.SignedIn)?.session
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(AppSpacing.s1),
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1),
         ) {
             Text(
                 text  = session?.displayName ?: "Signed in",
-                style = AppTypography.Body,
-                color = AppColors.TextPrimary,
+                style = type.body,
+                color = colors.ink,
             )
             Text(
                 text  = session?.email ?: "Not signed in",
-                style = AppTypography.Meta,
-                color = AppColors.TextSecondary,
+                style = type.meta,
+                color = colors.inkSoft,
             )
         }
         if (session != null) {
             Row(
                 modifier = Modifier
                     .clickable(onClick = onSignOut)
-                    .padding(AppSpacing.s2),
+                    .padding(QuickInkSpacing.s2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    imageVector  = Icons.AutoMirrored.Filled.Logout,
+                    imageVector       = Icons.AutoMirrored.Filled.Logout,
                     contentDescription = null,
-                    tint         = AppColors.CoralDeep,
-                    modifier     = Modifier.size(20.dp),
+                    tint              = colors.accentDeep,
+                    modifier          = Modifier.size(20.dp),
                 )
                 Text(
                     text     = "Sign out",
-                    style    = AppTypography.Body,
-                    color    = AppColors.CoralDeep,
-                    modifier = Modifier.padding(start = AppSpacing.s1),
+                    style    = type.body,
+                    color    = colors.accentDeep,
+                    modifier = Modifier.padding(start = QuickInkSpacing.s1),
                 )
             }
         }
@@ -241,43 +218,24 @@ private fun AccountRow(
 }
 
 @Composable
-private fun TopBar(onBack: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = AppSpacing.s2, vertical = AppSpacing.s2),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = onBack) {
-            Icon(
-                imageVector  = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                tint         = AppColors.TextPrimary,
-            )
-        }
-        Text(
-            text  = "Settings",
-            style = AppTypography.PageTitle,
-            color = AppColors.TextPrimary,
-        )
-    }
-}
-
-@Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s2)) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
         Text(
             text  = title.uppercase(),
-            style = AppTypography.Eyebrow,
-            color = AppColors.TextSecondary,
+            style = type.eyebrow,
+            color = colors.muted,
         )
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(AppRadiusMd))
-                .background(AppColors.CardSolid)
-                .padding(AppSpacing.s4),
-            verticalArrangement = Arrangement.spacedBy(AppSpacing.s2),
+                .clip(RoundedCornerShape(QuickInkRadius.md))
+                .background(colors.surface)
+                .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
+                .padding(QuickInkSpacing.s4),
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
         ) {
             content()
         }
@@ -291,69 +249,78 @@ private fun ToggleRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.s1)) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text  = label,
-                style = AppTypography.Body,
-                color = AppColors.TextPrimary,
+                text     = label,
+                style    = type.body,
+                color    = colors.ink,
                 modifier = Modifier.weight(1f),
             )
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
+            Switch(
+                checked         = checked,
+                onCheckedChange = onCheckedChange,
+                colors          = SwitchDefaults.colors(
+                    checkedThumbColor   = colors.textOnAccent,
+                    checkedTrackColor   = colors.accent,
+                    uncheckedThumbColor = colors.muted,
+                    uncheckedTrackColor = colors.borderSoft,
+                ),
+            )
         }
-        Text(
-            text  = help,
-            style = AppTypography.Meta,
-            color = AppColors.TextSecondary,
-        )
+        Text(text = help, style = type.meta, color = colors.inkSoft)
     }
 }
 
-/**
- * "Last synced" row inside the Sync section. When [enabled] is
- * false (Drive backup toggle off), grays the value to communicate
- * that the timestamp is frozen — sync isn't running. When [timestampIso]
- * is null (fresh install, never synced), shows "Never". When
- * [pendingCount] > 0, surfaces a "N pending" chip — rows that
- * failed the most recent pass and will retry on the next tick.
- */
 @Composable
-private fun LastSyncRow(
-    timestampIso: String?,
-    enabled: Boolean,
-    pendingCount: Int,
-) {
+private fun LastSyncRow(timestampIso: String?, pendingCount: Int) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text  = "Last synced",
-            style = AppTypography.Body,
-            color = AppColors.TextPrimary,
+            text     = "Last synced",
+            style    = type.body,
+            color    = colors.ink,
             modifier = Modifier.weight(1f),
         )
         if (pendingCount > 0) {
             Text(
-                text  = "$pendingCount pending",
-                style = AppTypography.Meta,
-                color = AppAccent.primary,
-                modifier = Modifier.padding(end = AppSpacing.s2),
+                text     = "$pendingCount pending",
+                style    = type.meta,
+                color    = colors.warning,
+                modifier = Modifier.padding(end = QuickInkSpacing.s2),
             )
         }
         Text(
-            text  = timestampIso ?: "Never",
-            style = AppTypography.Meta,
-            color = AppColors.TextSecondary,
+            text      = timestampIso ?: "Never",
+            style     = type.meta,
+            color     = colors.inkSoft,
             textAlign = TextAlign.End,
         )
     }
 }
 
-/// Local 12dp constant — `AppRadius` is iOS-side; Android tokens
-/// use direct dp values per the existing Releaf pattern. Promote
-/// to a shared `AppRadius` Compose object if more screens need it.
-private val AppRadiusMd = 12.dp
+@Composable
+private fun SecondaryButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(QuickInkRadius.pill))
+            .background(colors.borderSoft)
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.pill))
+            .clickable(onClick = onClick)
+            .padding(vertical = QuickInkSpacing.s3),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text = label, style = type.label, color = colors.ink)
+    }
+}

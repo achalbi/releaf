@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  QuickInk Android themes.
+
+  Why two themes:
+    - Theme.QuickInk         The real app theme. The Compose
+                             `QuickInkTheme { ... }` wrapper drives
+                             the in-app palette + typography, so this
+                             XML theme is intentionally thin: just
+                             enough to set the canvas background and
+                             match the system bars to the brand.
+
+    - Theme.QuickInk.Splash  The splash window. Inherits everything
+                             from Theme.QuickInk but overrides
+                             `android:windowBackground` with the
+                             cream + centered-mark layer-list. The
+                             launcher activity declares this theme
+                             in AndroidManifest.xml; MainActivity
+                             swaps to Theme.QuickInk in onCreate
+                             before setContent so the splash doesn't
+                             bleed into app chrome.
+
+  Uses Material3.NoActionBar as the parent because the app is
+  Compose-only — no XML ActionBar / Toolbar. Status bar color is set
+  to cream and statusBarContents (icons + clock) are darkened so
+  they're visible on the warm canvas. Same treatment for the
+  navigation bar.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <style name="Theme.QuickInk" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/quickink_canvas</item>
+        <item name="android:statusBarColor">@color/quickink_canvas</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/quickink_canvas</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
+    </style>
+
+    <style name="Theme.QuickInk.Splash" parent="Theme.QuickInk">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+    </style>
+
+</resources>

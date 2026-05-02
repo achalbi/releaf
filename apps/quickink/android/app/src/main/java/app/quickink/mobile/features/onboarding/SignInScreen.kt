@@ -12,15 +12,9 @@
  * Manager + AuthorizationClient flow when
  * `R.string.google_web_client_id` is populated, or falls through
  * to the `AuthStore.signIn()` stub when it's still the placeholder.
- * Either way, success transitions `AuthStore.state` to
- * `SignedIn`, which triggers `onSignedIn`.
  *
  * The screen is also reused by `QuickInkRoot.ReSignInGate` for the
- * sign-out → re-sign-in flow (Option A). The Drive toggle stays
- * functional in that path — toggling it overwrites Settings, same
- * as the first-run flow. `onSignedIn` is the only post-success
- * hook; for the ReSignInGate path it's a no-op (QuickInkRoot
- * routes off `AuthStore.state` directly).
+ * sign-out → re-sign-in flow (Option A).
  *
  * Mirror of iOS `SignInScreen.swift`.
  */
@@ -28,19 +22,26 @@
 package app.quickink.mobile.features.onboarding
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,14 +49,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.quickink.mobile.features.auth.rememberQuickInkSignInAction
+import app.quickink.mobile.ui.theme.LocalQuickInkColors
+import app.quickink.mobile.ui.theme.LocalQuickInkTypography
+import app.quickink.mobile.ui.theme.QuickInkRadius
+import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
-import app.releaf.mobile.ui.theme.AppColors
-import app.releaf.mobile.ui.theme.AppSpacing
-import app.releaf.mobile.ui.theme.AppTypography
 
 @Composable
 fun SignInScreen(
@@ -65,14 +68,12 @@ fun SignInScreen(
 ) {
     val signInAction = rememberQuickInkSignInAction(authStore)
     val authState by authStore.state.collectAsState()
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
 
-    // Whenever the AuthStore transitions to SignedIn while this
-    // screen is visible, fire onSignedIn. Keyed on `authState` so
-    // the effect re-runs when state flips. First-run callers
-    // mark onboarding complete + persist Drive choice in the
-    // handler; the ReSignInGate path passes a no-op handler and
-    // relies on `QuickInkRoot`'s state observer to swap to
-    // MainShell on its own.
+    // Whenever AuthStore flips to SignedIn while this screen is
+    // visible, fire onSignedIn. Keyed on `authState` so the effect
+    // re-runs on state flip.
     LaunchedEffect(authState) {
         if (authState is AuthState.SignedIn) {
             onSignedIn()
@@ -85,84 +86,152 @@ fun SignInScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(AppColors.Canvas),
+            .background(colors.bg),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.weight(1f))
 
-        Icon(
-            imageVector  = Icons.Filled.CloudUpload,
-            contentDescription = null,
-            tint         = AppColors.ThemeGreenPrimary,
-            modifier     = Modifier.size(64.dp),
-        )
-
-        Spacer(Modifier.size(AppSpacing.s5))
-
-        Text(
-            text  = "Sign in to back up",
-            style = AppTypography.PageTitle,
-            color = AppColors.TextPrimary,
-        )
-
-        Spacer(Modifier.size(AppSpacing.s2))
-
-        Text(
-            text     = "Sign in with Google so your scans sync to Drive and follow you across devices.",
-            style    = AppTypography.Body,
-            color    = AppColors.TextSecondary,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = AppSpacing.s5),
-        )
-
-        Spacer(Modifier.size(AppSpacing.s5))
-
-        // Drive toggle. Held in OnboardingState; OnboardingFlow
-        // persists into Settings on success.
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = AppSpacing.s5),
+                .height(320.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            DriveIllustration()
+        }
+
+        Spacer(Modifier.size(QuickInkSpacing.s4))
+
+        Text(
+            text     = "Sign in to back up",
+            style    = type.display,
+            color    = colors.ink,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = QuickInkSpacing.s5),
+        )
+
+        Spacer(Modifier.size(QuickInkSpacing.s3))
+
+        Text(
+            text     = "Sign in with Google so your notes sync to Drive and follow you across devices.",
+            style    = type.body,
+            color    = colors.inkSoft,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = QuickInkSpacing.s7),
+        )
+
+        Spacer(Modifier.size(QuickInkSpacing.s5))
+
+        // Drive toggle — soft surface card row.
+        Row(
+            modifier = Modifier
+                .padding(horizontal = QuickInkSpacing.s5)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(QuickInkRadius.md))
+                .background(colors.surface)
+                .padding(QuickInkSpacing.s4),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment     = Alignment.CenterVertically,
         ) {
-            Text(
-                text  = "Back up to Google Drive",
-                style = AppTypography.Body,
-                color = AppColors.TextPrimary,
-            )
+            Column(modifier = Modifier.padding(end = QuickInkSpacing.s3)) {
+                Text(
+                    text  = "Back up to Google Drive",
+                    style = type.label,
+                    color = colors.ink,
+                )
+                Text(
+                    text  = "Recommended",
+                    style = type.caption,
+                    color = colors.muted,
+                )
+            }
             Switch(
                 checked         = state.driveBackupEnabled,
                 onCheckedChange = { state.driveBackupEnabled = it },
                 enabled         = !isSigningIn,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor   = colors.textOnAccent,
+                    checkedTrackColor   = colors.accent,
+                    uncheckedThumbColor = colors.muted,
+                    uncheckedTrackColor = colors.borderSoft,
+                ),
             )
         }
 
         Spacer(Modifier.weight(1f))
 
+        // Page-indicator dots — third one active.
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+            verticalAlignment     = Alignment.CenterVertically,
+            modifier              = Modifier.padding(bottom = QuickInkSpacing.s5),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(colors.border)
+            )
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(colors.border)
+            )
+            Box(
+                modifier = Modifier
+                    .width(24.dp)
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(QuickInkRadius.pill))
+                    .background(colors.accent)
+            )
+        }
+
         if (isSigningIn) {
             CircularProgressIndicator(
-                color    = AppColors.ThemeGreenPrimary,
+                color    = colors.accent,
                 modifier = Modifier.size(36.dp),
             )
-            Spacer(Modifier.size(AppSpacing.s5))
+            Spacer(Modifier.size(QuickInkSpacing.s7))
         } else {
             errorMessage?.let { msg ->
                 Text(
                     text     = msg,
-                    style    = AppTypography.Meta,
-                    color    = AppColors.CoralDeep,
+                    style    = type.meta,
+                    color    = colors.danger,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = AppSpacing.s5),
+                    modifier = Modifier.padding(horizontal = QuickInkSpacing.s5),
                 )
-                Spacer(Modifier.size(AppSpacing.s2))
+                Spacer(Modifier.size(QuickInkSpacing.s2))
             }
 
-            OnboardingPrimaryButton(
-                label   = "Sign in with Google",
-                onClick = signInAction,
-            )
-            Spacer(Modifier.size(AppSpacing.s5))
+            // Coral pill CTA with a Google account glyph.
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = QuickInkSpacing.s5)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(QuickInkRadius.pill))
+                    .background(colors.accent)
+                    .clickable(onClick = signInAction)
+                    .padding(vertical = QuickInkSpacing.s3),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector       = Icons.Filled.AccountCircle,
+                        contentDescription = null,
+                        tint              = colors.textOnAccent,
+                        modifier          = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(QuickInkSpacing.s2))
+                    Text(
+                        text  = "Continue with Google",
+                        style = type.label,
+                        color = colors.textOnAccent,
+                    )
+                }
+            }
+            Spacer(Modifier.size(QuickInkSpacing.s7))
         }
     }
 }

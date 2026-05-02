@@ -44,6 +44,7 @@ import app.quickink.mobile.features.onboarding.OnboardingState
 import app.quickink.mobile.features.onboarding.SignInScreen
 import app.quickink.mobile.features.scan.ScanFlowController
 import app.quickink.mobile.features.scan.ScanReviewScreen
+import app.quickink.mobile.features.search.SearchScreen
 import app.quickink.mobile.features.settings.SettingsScreen
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
@@ -124,6 +125,7 @@ private object Routes {
     const val HOME        = "home"
     const val NOTES_LIST  = "notes_list"
     const val SETTINGS    = "settings"
+    const val SEARCH      = "search"
     const val NOTE_EDITOR = "note_editor/{entryId}"
 
     fun noteEditor(entryId: String): String =
@@ -180,6 +182,23 @@ private fun MainShell(userId: String) {
                 controller     = controller,
                 onOpenNotes    = { navController.navigate(Routes.NOTES_LIST) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onOpenSearch   = { navController.navigate(Routes.SEARCH) },
+                onTapCategory  = null, // Wired in a follow-up.
+                onOpenEntry    = { entryId ->
+                    navController.navigate(Routes.noteEditor(entryId))
+                },
+            )
+        }
+        composable(Routes.SEARCH) {
+            SearchScreen(
+                userId      = userId,
+                onBack      = { navController.popBackStack() },
+                onOpenEntry = { entryId ->
+                    // Replace the search step with the editor so popping
+                    // back from the editor returns to Home, not Search.
+                    navController.popBackStack()
+                    navController.navigate(Routes.noteEditor(entryId))
+                },
             )
         }
         composable(Routes.NOTES_LIST) {

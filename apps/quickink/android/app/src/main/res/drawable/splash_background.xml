@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Splash window background — minimal-mark variant per the brand
+  prototype board: cream canvas, calligraphic Q centered, no text.
+
+  Used by `Theme.QuickInk.Splash` as `android:windowBackground`. This
+  is shown by the system between launcher tap and the activity's
+  first frame; `MainActivity.onCreate` immediately swaps to
+  `Theme.QuickInk` so this drawable doesn't bleed into app chrome.
+
+  The mark size is fixed at 160dp — consistent across phone screens
+  and proportional to the 36% short-edge sizing used in the iOS
+  SplashView and the brand prototype board.
+
+  Note: this layer-list approach works on every API level the app
+  targets (minSdk 26+). If the team later adds the
+  `androidx.core:core-splashscreen` library, the same colors and
+  drawable can drive the modern Android 12+ SplashScreen API by
+  switching the parent style — see SPLASH_INTEGRATION.md.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Cream canvas, edge-to-edge. -->
+    <item android:drawable="@color/quickink_canvas" />
+
+    <!-- Centered calligraphic Q. Uses a tight-cropped variant so the
+         mark renders at full visual weight at the chosen dp size —
+         the adaptive-icon foreground has padding for the launcher
+         mask, which would make the splash mark look small. -->
+    <item
+        android:gravity="center"
+        android:width="140dp"
+        android:height="130dp">
+        <bitmap
+            android:src="@drawable/splash_mark"
+            android:gravity="center" />
+    </item>
+
+</layer-list>

@@ -147,6 +147,7 @@ private struct MainShell: View {
         case notesList
         case noteEditor(entryId: String)
         case settings
+        case search
     }
 
     let userId: String
@@ -184,8 +185,12 @@ private struct MainShell: View {
             NavigationStack(path: $path) {
                 HomeScreen(
                     controller:     controller,
+                    userId:         userId,
                     onOpenNotes:    { path.append(.notesList) },
-                    onOpenSettings: { path.append(.settings) }
+                    onOpenSettings: { path.append(.settings) },
+                    onOpenSearch:   { path.append(.search) },
+                    onTapCategory:  nil, // Wired in a follow-up.
+                    onOpenEntry:    { entryId in path.append(.noteEditor(entryId: entryId)) }
                 )
                 .navigationBarBackButtonHidden(true)
                 .toolbar(.hidden, for: .navigationBar)
@@ -224,6 +229,22 @@ private struct MainShell: View {
             SettingsScreen(
                 onBack:    { path.removeLast() },
                 authStore: authStore
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .search:
+            SearchScreen(
+                userId:      userId,
+                onBack:      { path.removeLast() },
+                onOpenEntry: { entryId in
+                    // Replace the search step with the editor so
+                    // popping back from the editor returns to Home,
+                    // not Search. This matches the typical
+                    // "search → tap result" UX.
+                    path.removeLast()
+                    path.append(.noteEditor(entryId: entryId))
+                }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)

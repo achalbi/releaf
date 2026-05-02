@@ -31,7 +31,7 @@ struct SettingsScreen: View {
             topBar
 
             ScrollView {
-                VStack(spacing: AppSpacing.s5) {
+                VStack(spacing: QuickInkSpacing.s5) {
                     section(title: "Account") {
                         accountRow
                     }
@@ -90,13 +90,13 @@ struct SettingsScreen: View {
                         )
                     }
                 }
-                .padding(.horizontal, AppSpacing.s5)
-                .padding(.top, AppSpacing.s4)
-                .padding(.bottom, AppSpacing.s8)
+                .padding(.horizontal, QuickInkSpacing.s5)
+                .padding(.top, QuickInkSpacing.s4)
+                .padding(.bottom, QuickInkSpacing.s8)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AppColors.canvas.ignoresSafeArea())
+        .background(QuickInkColors.bg.ignoresSafeArea())
     }
 
     /// Account section content — shows the signed-in display
@@ -112,27 +112,27 @@ struct SettingsScreen: View {
         }()
 
         HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: AppSpacing.s1) {
+            VStack(alignment: .leading, spacing: QuickInkSpacing.s1) {
                 Text(session?.displayName ?? "Signed in")
-                    .font(AppText.body)
-                    .foregroundStyle(AppColors.textPrimary)
+                    .font(QuickInkText.body)
+                    .foregroundStyle(QuickInkColors.ink)
                 Text(session?.email ?? "Not signed in")
-                    .font(AppText.meta)
-                    .foregroundStyle(AppColors.textSecondary)
+                    .font(QuickInkText.meta)
+                    .foregroundStyle(QuickInkColors.inkSoft)
             }
 
             Spacer()
 
             if session != nil {
                 Button(action: signOut) {
-                    HStack(spacing: AppSpacing.s1) {
+                    HStack(spacing: QuickInkSpacing.s1) {
                         Image(systemName: "rectangle.portrait.and.arrow.right")
                             .font(.system(size: 14))
                         Text("Sign out")
-                            .font(AppText.body)
+                            .font(QuickInkText.body)
                     }
-                    .foregroundStyle(AppColors.coralDeep)
-                    .padding(AppSpacing.s2)
+                    .foregroundStyle(QuickInkColors.accentDeep)
+                    .padding(QuickInkSpacing.s2)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Sign out")
@@ -150,19 +150,19 @@ struct SettingsScreen: View {
             Button(action: onBack) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 18))
-                    .foregroundStyle(AppColors.textPrimary)
-                    .padding(AppSpacing.s3)
+                    .foregroundStyle(QuickInkColors.ink)
+                    .padding(QuickInkSpacing.s3)
             }
             .accessibilityLabel("Back")
 
             Text("Settings")
-                .font(AppText.pageTitle)
-                .foregroundStyle(AppColors.textPrimary)
+                .font(QuickInkText.pageTitle)
+                .foregroundStyle(QuickInkColors.ink)
 
             Spacer()
         }
-        .padding(.horizontal, AppSpacing.s2)
-        .padding(.top, AppSpacing.s2)
+        .padding(.horizontal, QuickInkSpacing.s2)
+        .padding(.top, QuickInkSpacing.s2)
     }
 
     @ViewBuilder
@@ -170,33 +170,33 @@ struct SettingsScreen: View {
         title: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: AppSpacing.s2) {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
             Text(title.uppercased())
-                .font(AppText.eyebrow)
-                .tracking(AppLetterSpacing.eyebrow)
-                .foregroundStyle(AppColors.textSecondary)
+                .font(QuickInkText.eyebrow)
+                .tracking(QuickInkLetterSpacing.eyebrow)
+                .foregroundStyle(QuickInkColors.inkSoft)
 
-            VStack(spacing: AppSpacing.s2) {
+            VStack(spacing: QuickInkSpacing.s2) {
                 content()
             }
-            .padding(AppSpacing.s4)
+            .padding(QuickInkSpacing.s4)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(AppColors.cardSolid)
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+            .background(QuickInkColors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
         }
     }
 
     @ViewBuilder
     private func toggleRow(label: String, help: String, isOn: Binding<Bool>) -> some View {
-        VStack(alignment: .leading, spacing: AppSpacing.s1) {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s1) {
             Toggle(isOn: isOn) {
                 Text(label)
-                    .font(AppText.body)
-                    .foregroundStyle(AppColors.textPrimary)
+                    .font(QuickInkText.body)
+                    .foregroundStyle(QuickInkColors.ink)
             }
             Text(help)
-                .font(AppText.meta)
-                .foregroundStyle(AppColors.textSecondary)
+                .font(QuickInkText.meta)
+                .foregroundStyle(QuickInkColors.inkSoft)
         }
     }
 
@@ -210,18 +210,18 @@ struct SettingsScreen: View {
     private var lastSyncedRow: some View {
         HStack {
             Text("Last synced")
-                .font(AppText.body)
-                .foregroundStyle(AppColors.textPrimary)
+                .font(QuickInkText.body)
+                .foregroundStyle(QuickInkColors.ink)
             Spacer()
             if syncState.state.pendingCount > 0 {
                 Text("\(syncState.state.pendingCount) pending")
-                    .font(AppText.meta)
-                    .foregroundStyle(AppColors.coral)
-                    .padding(.trailing, AppSpacing.s2)
+                    .font(QuickInkText.meta)
+                    .foregroundStyle(QuickInkColors.accent)
+                    .padding(.trailing, QuickInkSpacing.s2)
             }
             Text(syncState.state.lastFullSyncAt ?? "Never")
-                .font(AppText.meta)
-                .foregroundStyle(AppColors.textSecondary)
+                .font(QuickInkText.meta)
+                .foregroundStyle(QuickInkColors.inkSoft)
         }
     }
 
@@ -239,7 +239,7 @@ struct SettingsScreen: View {
             if case .signedIn = authStore.state { return true }
             return false
         }()
-        HStack(spacing: AppSpacing.s3) {
+        HStack(spacing: QuickInkSpacing.s3) {
             AppButton("Sync now", variant: .secondary) {
                 if isSignedIn {
                     QuickInkSyncEnvironment.shared.scheduler.requestImmediate()
