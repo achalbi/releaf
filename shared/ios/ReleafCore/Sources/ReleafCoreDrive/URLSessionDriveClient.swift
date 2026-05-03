@@ -395,7 +395,11 @@ public final class URLSessionDriveClient: DriveClient, @unchecked Sendable {
         }
         switch http.statusCode {
         case 200...299: return
-        case 401: throw DriveError.unauthenticated
+        // 403 = Drive scope wasn't granted at sign-in (the most
+        // common silent-sync-failure cause), treat the same as 401
+        // so the sync env's auth-error path forces re-sign-in and
+        // the user re-consents with the drive.file checkbox.
+        case 401, 403: throw DriveError.unauthenticated
         case 404: throw DriveError.notFound
         default:  throw DriveError.underlying("HTTP \(http.statusCode)")
         }

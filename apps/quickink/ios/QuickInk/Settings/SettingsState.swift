@@ -47,6 +47,27 @@ public final class SettingsState: ObservableObject {
         didSet { UserDefaults.standard.set(customDisplayName, forKey: Keys.customDisplayName) }
     }
 
+    /// User's phone number, edited from the Profile screen. Free-form
+    /// string (no E.164 normalization yet) since the field is purely
+    /// cosmetic / for the user's reference.
+    @Published public var phoneNumber: String {
+        didSet { UserDefaults.standard.set(phoneNumber, forKey: Keys.phoneNumber) }
+    }
+
+    /// `file://` URI of the user's chosen profile photo. Empty when
+    /// none has been picked — the avatar then falls back to initial /
+    /// person glyph. The picked image is copied into the app's
+    /// Documents directory so the URI keeps resolving across launches.
+    @Published public var profilePhotoUri: String {
+        didSet { UserDefaults.standard.set(profilePhotoUri, forKey: Keys.profilePhotoUri) }
+    }
+
+    /// Free-text "personality punchline" — a one-liner the user writes
+    /// for themselves. Surfaced on the Profile screen only for now.
+    @Published public var personalityPunchline: String {
+        didSet { UserDefaults.standard.set(personalityPunchline, forKey: Keys.personalityPunchline) }
+    }
+
     public init() {
         let defaults = UserDefaults.standard
         // Drive backup defaults to true — Drive sync is the value
@@ -67,6 +88,9 @@ public final class SettingsState: ObservableObject {
         // session's name). Read as a plain string so SwiftUI bindings
         // bind cleanly to a TextField.
         self.customDisplayName = defaults.string(forKey: Keys.customDisplayName) ?? ""
+        self.phoneNumber          = defaults.string(forKey: Keys.phoneNumber) ?? ""
+        self.profilePhotoUri      = defaults.string(forKey: Keys.profilePhotoUri) ?? ""
+        self.personalityPunchline = defaults.string(forKey: Keys.personalityPunchline) ?? ""
     }
 
     /// Called from the onboarding sign-in screen after
@@ -79,8 +103,11 @@ public final class SettingsState: ObservableObject {
     }
 
     private enum Keys {
-        static let driveBackup         = "quickink.settings.drive_backup_enabled"
-        static let searchablePdfExport = "quickink.settings.searchable_pdf_export_enabled"
-        static let customDisplayName   = "quickink.settings.custom_display_name"
+        static let driveBackup          = "quickink.settings.drive_backup_enabled"
+        static let searchablePdfExport  = "quickink.settings.searchable_pdf_export_enabled"
+        static let customDisplayName    = "quickink.settings.custom_display_name"
+        static let phoneNumber          = "quickink.settings.phone_number"
+        static let profilePhotoUri      = "quickink.settings.profile_photo_uri"
+        static let personalityPunchline = "quickink.settings.personality_punchline"
     }
 }

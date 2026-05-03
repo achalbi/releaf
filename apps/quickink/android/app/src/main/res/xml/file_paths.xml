@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider path config.
+
+  Two consumers:
+
+    1. Profile-photo "Take Photo" flow — needs a writable content:// URI
+       in the app's cache dir; the camera launcher writes the captured
+       JPEG there, then ProfileScreen copies it into filesDir as
+       `profile_photo.jpg` and discards the cache copy.
+
+    2. Scan share sheet — captures' `pdf_uri` / `preview_uri` are
+       stored as `file://` URIs under filesDir after sync (and after
+       a Drive restore). Sharing a `file://` from app-private storage
+       to an external app is blocked on modern Android (the chooser
+       opens but the receiving app can't read the bytes — the
+       FLAG_GRANT_READ_URI_PERMISSION flag only takes effect on
+       content:// URIs). Wrapping the file with FileProvider returns
+       a content:// URI that DOES carry a usable grant. The
+       `attachments` entry below maps the AttachmentStorage path
+       (`<filesDir>/quickink/attachments/`) into the provider.
+-->
+<paths>
+    <cache-path
+        name="camera"
+        path="camera/" />
+    <!--
+      QuickInkApp.onCreate sets AttachmentStorage.appFolderName to
+      "quickink" so synced attachments land at
+      `<filesDir>/quickink/attachments/<uuid>.<ext>`. Historic
+      captures from before that override may still be referenced by
+      `<filesDir>/releaf/attachments/` URIs in the captures table —
+      `migrateLegacyAttachmentsFolder()` renames the directory and
+      rewrites those rows on first launch after the upgrade, so a
+      single entry covers both new and migrated captures.
+    -->
+    <files-path
+        name="attachments"
+        path="quickink/attachments/" />
+</paths>

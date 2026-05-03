@@ -22,6 +22,7 @@
 package app.quickink.mobile.features.scan
 
 import app.quickink.mobile.data.capture.CaptureRepository
+import app.quickink.mobile.data.category.CategoryDao
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import app.releaf.mobile.data.notepad.NotepadDao
@@ -43,6 +44,14 @@ class ScanFlowController(
     private val pipeline: OcrPipeline,
     private val notepadDao: NotepadDao,
     private val scope: CoroutineScope,
+    /**
+     * DAO for the user's category list. Read once at the end of
+     * each OCR pass so the controller can auto-pick a category from
+     * the first word of the recognized text. Default `null` keeps
+     * existing call sites (tests / previews) compiling — auto-match
+     * silently no-ops when the DAO isn't supplied.
+     */
+    private val categoryDao: CategoryDao? = null,
     /**
      * Slice 4.2c — fired when a scan pass finishes and at least
      * one row has been written. Wired by `QuickInkRoot.MainShell`
@@ -170,6 +179,33 @@ class ScanFlowController(
                             )
                             successCount += 1
                             pageTexts[page.pageIndex] = page.result.text
+
+                            // Fast-path auto-pick: as soon as page 0
+                            // (the first physical page) lands, try
+                            // to match its leading tokens against
+                            // the user's categories so the review
+                            // screen's chip flips on without
+                            // waiting for the rest of a multi-page
+                            // pipeline. Two-word phrases ("Meeting
+                            // Notes") are tried before the first
+                            // word alone — see [matchCategoryName].
+                            // Subsequent pages skip this branch —
+                            // only page 1 drives the auto-pick.
+                            // The post-loop block below still runs
+                            // as a fallback when page 0's OCR fails
+                            // entirely.
+                            if (page.pageIndex == 0 &&
+                                _selectedCategory.value == null
+                            ) {
+                                val tokens = extractLeadingTokens(pageTexts)
+                                val match = matchCategoryName(tokens)
+                                if (match != null) {
+                                    _selectedCategory.value = match
+                                    try {
+                                        repository.setCategory(captureId, match)
+                                    } catch (_: Exception) { /* best-effort */ }
+                                }
+                            }
                         } catch (e: Exception) {
                             // Persistence error on a single page — log,
                             // continue. Capture row + other pages still
@@ -190,7 +226,33 @@ class ScanFlowController(
                 )
             }
 
-            // 3. Append the recognized text into today's
+            // 3. Auto-pick fallback. The fast-path inside the loop
+            //    (above) handles the common case — page 0 succeeds
+            //    and the chip flips on the moment its OCR lands.
+            //    This block catches the edge case where page 0 OCR
+            //    failed but a later page succeeded: we still try
+            //    the lowest-indexed available page's leading tokens
+            //    so the user gets some auto-match instead of none.
+            //    Skipped when the user pre-picked a category, the
+            //    fast-path already matched, or the DAO wasn't
+            //    injected.
+            if (_selectedCategory.value == null) {
+                val tokens = extractLeadingTokens(pageTexts)
+                val match = matchCategoryName(tokens)
+                if (match != null) {
+                    _selectedCategory.value = match
+                    // Persist on the in-flight capture row so a
+                    // later restart restores the auto-pick. Best-
+                    // effort — silent failure leaves the chip
+                    // unselected on disk but in-memory selection
+                    // wins for the rest of this pass.
+                    try {
+                        repository.setCategory(captureId, match)
+                    } catch (_: Exception) { /* best-effort */ }
+                }
+            }
+
+            // 4. Append the recognized text into today's
             //    `notepad_entries` row so the home recents rail
             //    surfaces it immediately. One entry per (user, day);
             //    multiple captures append to the same row. The
@@ -315,4 +377,105 @@ class ScanFlowController(
             val text = pageTexts[idx]?.trim().orEmpty()
             if (text.isEmpty()) null else "## Page ${idx + 1}\n\n$text"
         }.joinToString(separator = "\n\n")
+
+    // ─── Auto-category from leading OCR tokens ────────────────────
+
+    /**
+     * Pull up to [maxTokens] leading word tokens from the lowest-
+     * indexed page's OCR text. Strips leading/trailing whitespace,
+     * splits on whitespace runs, and trims any non-alphanumeric
+     * padding so `"Ideas,"` / `"Ideas."` / `"  ideas "` all reduce
+     * to `"Ideas"`. Returns an empty list when there's no usable
+     * text — callers should treat that as "no auto-match".
+     */
+    private fun extractLeadingTokens(
+        pageTexts: Map<Int, String>,
+        maxTokens: Int = 2,
+    ): List<String> {
+        val firstKey = pageTexts.keys.minOrNull() ?: return emptyList()
+        val raw = pageTexts[firstKey] ?: return emptyList()
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return emptyList()
+        // Filter empty-after-strip tokens *before* taking the
+        // window, so a stray leading "—"/"•"/"1." doesn't eat into
+        // our maxTokens budget. With the wrong order, OCR text like
+        // "— Meeting Notes" would yield just ["Meeting"] instead of
+        // ["Meeting", "Notes"] and a "Meeting Notes" category would
+        // miss the auto-match.
+        return trimmed
+            .split(Regex("\\s+"))
+            .map { tok -> tok.trim { c -> !c.isLetterOrDigit() } }
+            .filter { it.isNotEmpty() }
+            .take(maxTokens)
+    }
+
+    /**
+     * Look up a category whose name matches the leading OCR
+     * [tokens] case- and number-insensitively, scoped to the
+     * current `userId`. The widest window is tried first — for a
+     * two-token input like `["Meeting", "Notes"]` we check the
+     * full phrase against multi-word categories before falling
+     * back to just `"Meeting"`. Each token (on both sides) is
+     * stemmed via [depluralize] so "Idea" still matches "Ideas",
+     * "Story" still matches "Stories", and so on. Returns the
+     * canonical (database-cased) name on a hit, `null` otherwise.
+     * No-ops when [categoryDao] wasn't injected (tests / previews).
+     */
+    private suspend fun matchCategoryName(tokens: List<String>): String? {
+        val dao = categoryDao ?: return null
+        if (tokens.isEmpty()) return null
+        return try {
+            val cats = dao.listActive(userId)
+            // Try the widest window first (two-word phrase), then
+            // fall back to just the first word. A single-token
+            // input only runs the fallback iteration.
+            for (window in tokens.size downTo 1) {
+                val needle = depluralizePhrase(tokens.take(window).joinToString(" "))
+                if (needle.isEmpty()) continue
+                val match = cats.firstOrNull { depluralizePhrase(it.name) == needle }
+                if (match != null) return match.name
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Whitespace-split tokenizer + per-token depluralizer. Lets
+     * `"Meeting Notes"` reduce to `"meeting note"` so a category
+     * named "Meeting Notes" still matches a scan starting with
+     * "Meeting Note" (or vice versa). Empty input → empty stem.
+     */
+    private fun depluralizePhrase(s: String): String =
+        s.split(Regex("\\s+")).joinToString(" ") { depluralize(it) }
+
+    /**
+     * Reduce an English word to its (rough) singular stem so we can
+     * compare a scanned token like "Ideas" against a category named
+     * "Idea" (or vice versa). Rules cover the common regular cases:
+     *
+     *   - `-ies` → `-y`     (stories → story)
+     *   - `-ches`/`-shes`/`-xes`/`-zes`/`-sses` → drop `-es`
+     *                       (boxes → box, classes → class)
+     *   - `-ss`             → kept as-is (class stays class)
+     *   - trailing `-s`     → dropped (ideas → idea, votes → vote)
+     *
+     * Irregular plurals (mice, geese, children) aren't handled —
+     * they fall through to a literal exact-match. Returns the
+     * lower-cased stem.
+     */
+    private fun depluralize(s: String): String {
+        val lower = s.lowercase()
+        if (lower.length <= 2) return lower
+        return when {
+            lower.endsWith("ies") -> lower.dropLast(3) + "y"
+            lower.endsWith("ches") || lower.endsWith("shes") ||
+            lower.endsWith("xes")  || lower.endsWith("zes")  ||
+            lower.endsWith("sses") -> lower.dropLast(2)
+            lower.endsWith("ss") -> lower
+            lower.endsWith("s")  -> lower.dropLast(1)
+            else -> lower
+        }
+    }
 }

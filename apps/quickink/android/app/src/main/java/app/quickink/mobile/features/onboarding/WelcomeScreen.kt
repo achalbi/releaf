@@ -18,12 +18,17 @@ import androidx.compose.runtime.Composable
 
 @Composable
 fun WelcomeScreen(onContinue: () -> Unit) {
+    // Title is split into upright + italic-coral parts to reproduce
+    // the mock's "Your notebook,\n*digitised.*" editorial flourish;
+    // subtitle copy is lifted verbatim from the mock so what ships
+    // matches the brief.
     OnboardingScaffold(
-        title      = "A pocket notebook\nthat remembers.",
-        subtitle   = "Scan a page, jot a thought, find it later by any word.",
-        ctaLabel   = "Continue",
-        stepIndex  = 0,
-        onContinue = onContinue,
+        title       = "Your notebook,",
+        titleAccent = "digitised.",
+        subtitle    = "Snap any page from your Quickink notebook — we'll crop, clean, and save it for you.",
+        ctaLabel    = "Continue",
+        stepIndex   = 0,
+        onContinue  = onContinue,
     ) {
         NotebookScanIllustration()
     }

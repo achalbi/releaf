@@ -36,10 +36,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -50,6 +47,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.quickink.mobile.features.auth.rememberQuickInkSignInAction
@@ -105,7 +103,7 @@ fun SignInScreen(
 
         Text(
             text     = "Synced privately\nto your Drive",
-            style    = type.display,
+            style    = type.onboardingTitle,
             color    = colors.ink,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = QuickInkSpacing.s5),
@@ -206,31 +204,32 @@ fun SignInScreen(
                 Spacer(Modifier.size(QuickInkSpacing.s2))
             }
 
-            // Coral pill CTA with a Google account glyph.
+            // Coral rounded-rectangle CTA (mockup's `rounded-2xl
+            // shadow-md`) — text-only per the latest design pass;
+            // the leading account-circle glyph was dropped so the
+            // button feels editorial rather than chrome-y. Label
+            // uses the same serif family as the hero.
             Box(
                 modifier = Modifier
                     .padding(horizontal = QuickInkSpacing.s5)
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(QuickInkRadius.pill))
+                    .shadow(
+                        elevation    = 14.dp,
+                        shape        = RoundedCornerShape(QuickInkRadius.xl),
+                        ambientColor = colors.accent,
+                        spotColor    = colors.accent,
+                    )
+                    .clip(RoundedCornerShape(QuickInkRadius.xl))
                     .background(colors.accent)
                     .clickable(onClick = signInAction)
-                    .padding(vertical = QuickInkSpacing.s3),
+                    .padding(vertical = QuickInkSpacing.s4),
                 contentAlignment = Alignment.Center,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector       = Icons.Filled.AccountCircle,
-                        contentDescription = null,
-                        tint              = colors.textOnAccent,
-                        modifier          = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.size(QuickInkSpacing.s2))
-                    Text(
-                        text  = "Continue with Google",
-                        style = type.label,
-                        color = colors.textOnAccent,
-                    )
-                }
+                Text(
+                    text  = "Continue with Google",
+                    style = type.ctaSerif,
+                    color = colors.textOnAccent,
+                )
             }
             Spacer(Modifier.size(QuickInkSpacing.s7))
         }

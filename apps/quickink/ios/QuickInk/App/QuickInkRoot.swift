@@ -134,6 +134,7 @@ private struct MainShell: View {
         case notesList
         case noteEditor(entryId: String)
         case settings
+        case profile
         case search
         case manageCategories
         case scanDetail(captureId: String)
@@ -202,7 +203,14 @@ private struct MainShell: View {
                         onTapCategory:  { name in path.append(.categoryEntries(name: name)) },
                         onOpenEntry:    { entryId in path.append(.noteEditor(entryId: entryId)) },
                         onOpenScan:     { captureId in path.append(.scanDetail(captureId: captureId)) },
-                        displayName:    resolvedDisplayName
+                        onOpenProfile:  { path.append(.profile) },
+                        onSignOut:      { Task { await authStore.signOut() } },
+                        displayName:    resolvedDisplayName,
+                        email: {
+                            if case .signedIn(let s) = authStore.state { return s.email }
+                            return ""
+                        }(),
+                        profilePhotoUri: settings.profilePhotoUri
                     )
                     .navigationBarBackButtonHidden(true)
                     .toolbar(.hidden, for: .navigationBar)
@@ -256,6 +264,15 @@ private struct MainShell: View {
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
 
+        case .profile:
+            ProfileScreen(
+                onBack:    { path.removeLast() },
+                authStore: authStore,
+                settings:  settings
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
         case .manageCategories:
             CategoriesSettingsScreen(
                 userId: userId,
@@ -267,6 +284,7 @@ private struct MainShell: View {
         case .scanDetail(let captureId):
             ScanDetailScreen(
                 captureId: captureId,
+                userId:    userId,
                 onBack:    { path.removeLast() }
             )
             .navigationBarBackButtonHidden(true)

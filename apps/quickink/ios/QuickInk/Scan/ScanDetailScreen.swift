@@ -16,19 +16,35 @@ import PDFKit
 struct ScanDetailScreen: View {
 
     let captureId: String
+    let userId: String
     let onBack: () -> Void
+
+    @StateObject private var categoriesVM: CategoryListViewModel
 
     @State private var capture: CaptureSummary?
     @State private var ocrPages: [OcrPagePreview] = []
     @State private var isLoadingOcr = false
     @State private var showOcr = false
     @State private var showDeleteConfirm = false
+    /// Drives the retag action sheet. Tapping the category pill (or
+    /// the "Tag scan" affordance for an untagged capture) sets this
+    /// to true; the sheet's options call `applyRetag(_:)`.
+    @State private var showRetagSheet = false
     @State private var imageZoomScale: CGFloat = 1.0
     /// Pre-rasterised page bitmaps for the page-turn viewer. Loaded
     /// lazily once we know the capture has more than one page;
     /// single-page captures keep using `PDFKitView` (cheaper, comes
     /// with pinch-zoom for free).
     @State private var pageImages: [UIImage] = []
+
+    init(captureId: String, userId: String, onBack: @escaping () -> Void) {
+        self.captureId = captureId
+        self.userId = userId
+        self.onBack = onBack
+        _categoriesVM = StateObject(
+            wrappedValue: CategoryListViewModel(userId: userId)
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,7 +69,15 @@ struct ScanDetailScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(QuickInkColors.bg.ignoresSafeArea())
-        .task { await loadCapture() }
+        .task {
+            // Start the categories observation first (synchronous,
+            // returns immediately) so it's already emitting by the
+            // time the retag sheet's content closure evaluates —
+            // otherwise a fast double-tap (open detail → tap pill)
+            // can flash an empty picker for a frame.
+            categoriesVM.start()
+            await loadCapture()
+        }
         .alert("Delete this scan?", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
@@ -61,6 +85,30 @@ struct ScanDetailScreen: View {
             }
         } message: {
             Text("The scan and its recognised text will be removed from this device and your other devices on the next sync.")
+        }
+        // Retag picker — tapping the category pill (or the "Tag
+        // scan" affordance) opens this. One button per active
+        // category plus a "Remove tag" affordance when the capture
+        // already has one. Each button calls `applyRetag(_:)` which
+        // persists via `CaptureRepository.setCategory(...)` and
+        // refreshes the in-screen capture state so the pill updates
+        // immediately.
+        .confirmationDialog(
+            "Tag scan as",
+            isPresented: $showRetagSheet,
+            titleVisibility: .visible
+        ) {
+            ForEach(categoriesVM.categories, id: \.id) { cat in
+                Button(cat.name) {
+                    Task { await applyRetag(cat.name) }
+                }
+            }
+            if let current = capture?.category, !current.isEmpty {
+                Button("Remove tag", role: .destructive) {
+                    Task { await applyRetag(nil) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -276,11 +324,37 @@ struct ScanDetailScreen: View {
             if capture.pageCount > 1 {
                 metaPill(text: "\(capture.pageCount) pages")
             }
-            if let category = capture.category, !category.isEmpty {
-                metaPill(text: category, accent: true)
-            }
+            // Category affordance — a tappable pill the user can
+            // hit to retag the saved scan. When the capture already
+            // has a tag, the pill renders the tag with the accent
+            // treatment; when it doesn't, we fall back to a muted
+            // "+ Tag scan" affordance so retagging is still
+            // discoverable. Both routes open the same retag sheet.
+            tagPill(for: capture)
             Spacer()
         }
+    }
+
+    @ViewBuilder
+    private func tagPill(for capture: CaptureSummary) -> some View {
+        let hasTag = !(capture.category ?? "").isEmpty
+        Button {
+            showRetagSheet = true
+        } label: {
+            HStack(spacing: QuickInkSpacing.s1) {
+                Image(systemName: hasTag ? "tag.fill" : "tag")
+                    .font(.system(size: 11, weight: .medium))
+                Text(hasTag ? (capture.category ?? "") : "Tag scan")
+                    .font(QuickInkText.caption)
+            }
+            .foregroundStyle(hasTag ? QuickInkColors.accent : QuickInkColors.inkSoft)
+            .padding(.horizontal, QuickInkSpacing.s3)
+            .padding(.vertical, QuickInkSpacing.s2)
+            .background(hasTag ? QuickInkColors.accentSoft : QuickInkColors.borderSoft)
+            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(hasTag ? "Edit tag" : "Add tag")
     }
 
     @ViewBuilder
@@ -383,6 +457,25 @@ struct ScanDetailScreen: View {
             onBack()
         } catch {
             print("ScanDetailScreen.deleteCapture failed: \(error)")
+        }
+    }
+
+    /// Persist a category change for this capture and refresh the
+    /// in-screen state so the pill flips immediately. `nil` clears
+    /// the tag. Best-effort — a transient SQL failure leaves the
+    /// pill where it was; the user can re-tap to retry.
+    private func applyRetag(_ category: String?) async {
+        do {
+            try await CaptureRepository().setCategory(
+                captureId: captureId,
+                category:  category
+            )
+            // Refresh the loaded `capture` so the pill flips —
+            // simpler than mutating the optional struct in place,
+            // and the SELECT is cheap.
+            await loadCapture()
+        } catch {
+            print("ScanDetailScreen.applyRetag failed: \(error)")
         }
     }
 

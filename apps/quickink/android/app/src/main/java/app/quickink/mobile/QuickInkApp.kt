@@ -29,6 +29,7 @@ import app.quickink.mobile.data.db.QuickInkDatabase
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
+import app.releaf.mobile.data.common.AttachmentStorage
 import app.releaf.mobile.data.drive.DriveClient
 import app.releaf.mobile.data.drive.InMemoryDriveClient
 import app.releaf.mobile.data.drive.OkHttpDriveClient
@@ -38,6 +39,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * App version string stamped into the Drive manifest.
@@ -92,8 +95,26 @@ class QuickInkApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Set the attachments folder name BEFORE the database is
+        // touched (and before any sync worker can reach into
+        // AttachmentStorage). The shared default is "releaf"; QuickInk
+        // overrides to keep its bytes under a sibling-app-distinct
+        // folder. The migration on the next line moves any
+        // pre-override files into the new location and rewrites the
+        // URIs the captures table stores so they keep resolving.
+        AttachmentStorage.appFolderName = "quickink"
+
         database  = QuickInkDatabase.get(this)
         authStore = AuthStore.get(this)
+
+        // Best-effort one-shot rename of the legacy attachments
+        // folder. Idempotent — if `releaf/attachments/` is gone (fresh
+        // install or already migrated) this no-ops. Runs on IO so app
+        // start doesn't pay for it; the work is small (a directory
+        // rename + one bulk SQL UPDATE) so the race window where a
+        // sync worker reads a stale URI is sub-second in practice.
+        appScope.launch(Dispatchers.IO) { migrateLegacyAttachmentsFolder() }
 
         // Pick the Drive client at runtime: real REST when the OAuth
         // Web Client ID has been populated, in-memory stub otherwise.
@@ -119,6 +140,78 @@ class QuickInkApp : Application() {
      * runtime "user flipped the switch off" case — see
      * `QuickInkSyncWorker.doWork`.
      */
+    /**
+     * One-shot move of the historical `<filesDir>/releaf/attachments/`
+     * directory (where attachments landed before
+     * `AttachmentStorage.appFolderName` was overridden in this app)
+     * into the new `<filesDir>/quickink/attachments/` location. Then
+     * rewrite the `pdf_uri` / `preview_uri` columns on every capture
+     * row that still references the old subpath so the on-disk move
+     * stays consistent with the database.
+     *
+     * Idempotent: if the legacy directory is already absent (fresh
+     * install or a previous run completed the move) this returns
+     * cheaply. Failures are swallowed — a partial state still
+     * eventually self-heals via the sync worker, which re-downloads
+     * the bytes from Drive into the new location and rewrites the URI
+     * itself.
+     */
+    private suspend fun migrateLegacyAttachmentsFolder() {
+        val oldDir = File(filesDir, "releaf/attachments")
+        if (!oldDir.exists()) return
+
+        val newDir = File(filesDir, "quickink/attachments")
+        runCatching {
+            // Make sure the new parent dir exists so renameTo can
+            // succeed (renameTo is atomic but only when the
+            // destination's parent already exists on the same
+            // filesystem — both paths are under filesDir, so that
+            // condition holds).
+            newDir.parentFile?.takeIf { !it.exists() }?.mkdirs()
+
+            if (!newDir.exists()) {
+                if (!oldDir.renameTo(newDir)) {
+                    // Fallback for the rare case where renameTo fails
+                    // (e.g. SELinux quirk on a specific OEM): copy
+                    // each file in, then delete the old dir.
+                    newDir.mkdirs()
+                    oldDir.listFiles()?.forEach { src ->
+                        val dst = File(newDir, src.name)
+                        if (!dst.exists()) {
+                            src.copyTo(dst, overwrite = false)
+                        }
+                    }
+                    oldDir.deleteRecursively()
+                }
+            } else {
+                // New dir already exists (e.g. a half-completed earlier
+                // run, or app reinstall race). Move any leftover files
+                // in, then drop the old dir.
+                oldDir.listFiles()?.forEach { src ->
+                    val dst = File(newDir, src.name)
+                    if (!dst.exists()) src.renameTo(dst)
+                }
+                oldDir.deleteRecursively()
+            }
+
+            // Drop the now-empty `releaf/` parent if we own it; it's
+            // an orphan once the attachments subdir is gone.
+            File(filesDir, "releaf").takeIf {
+                it.exists() && (it.list()?.isEmpty() == true)
+            }?.delete()
+        }
+
+        // Rewrite DB URIs that still point at the legacy subpath.
+        // Touch only matching rows (no `dirty` bump) — these are local
+        // paths, and remote sync rewrites the URI on download anyway.
+        runCatching {
+            database.captureDao().rewriteAttachmentPaths(
+                oldFrag = "/releaf/attachments/",
+                newFrag = "/quickink/attachments/",
+            )
+        }
+    }
+
     private fun observeAuthForSyncLifecycle() {
         authStore.state
             .distinctUntilChanged { old, new ->
@@ -130,8 +223,26 @@ class QuickInkApp : Application() {
             }
             .onEach { state ->
                 when (state) {
-                    is AuthState.SignedIn -> QuickInkSyncScheduler.schedulePeriodic(this)
-                    else                  -> QuickInkSyncScheduler.cancelAll(this)
+                    is AuthState.SignedIn -> {
+                        // Install the recurring 15-minute job AND
+                        // kick an immediate one-shot pass so the
+                        // user's first sync lands in seconds, not
+                        // 15 minutes after sign-in. iOS does the
+                        // same thing in
+                        // `QuickInkSyncEnvironment.install`'s auth
+                        // observer (`scheduleBackgroundRefresh()` +
+                        // `requestImmediate()`); Android was missing
+                        // the immediate kick, so a fresh sign-in
+                        // looked like sync was broken until the next
+                        // periodic tick (or the user manually tapped
+                        // "Sync now" in Settings). The worker's
+                        // per-pass Drive-backup gate still applies —
+                        // if the user has the toggle off, this
+                        // one-shot no-ops cleanly.
+                        QuickInkSyncScheduler.schedulePeriodic(this)
+                        QuickInkSyncScheduler.requestImmediate(this)
+                    }
+                    else -> QuickInkSyncScheduler.cancelAll(this)
                 }
             }
             .launchIn(appScope)

@@ -56,7 +56,14 @@ public final class QuickInkSyncEnvironment {
     /// without Google credentials checked in. Same posture Releaf
     /// takes in `SyncEnvironment`.
     public var driveClient: DriveClient = {
-        let configured = Bundle.main.object(forInfoDictionaryKey: GoogleSignInBinding.infoPlistKey) as? String
+        // Trim before checking — a copy/paste mishap could leave the
+        // GIDClientID Info.plist value as `"   "` or `"\n"`. Without
+        // this trim the gate would silently fall through to the real
+        // client, which would then fail OAuth on every call and look
+        // exactly like "sync isn't working" with no error trail. The
+        // empty-after-trim case correctly drops to the in-memory stub.
+        let raw = Bundle.main.object(forInfoDictionaryKey: GoogleSignInBinding.infoPlistKey) as? String
+        let configured = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
         return (configured?.isEmpty == false)
             ? URLSessionDriveClient()
             : InMemoryDriveClient()
@@ -97,6 +104,7 @@ public final class QuickInkSyncEnvironment {
 
         scheduler.runOnce = { [weak self] in
             guard let self else { return }
+            print("[QuickInkSync] runOnce: starting sync pass")
 
             // Drive-backup gate — read fresh per pass so toggling
             // in Settings takes effect on the next tick. UserDefaults
@@ -107,36 +115,100 @@ public final class QuickInkSyncEnvironment {
                 guard defaults.object(forKey: Self.driveBackupKey) != nil else { return true }
                 return defaults.bool(forKey: Self.driveBackupKey)
             }()
-            guard driveBackupEnabled else { return }
+            guard driveBackupEnabled else {
+                print("[QuickInkSync] gate (drive-backup): off in Settings — skipping")
+                return
+            }
 
-            guard let session = await self.currentSession(authStore: authStore) else { return }
-            let dataSource = QuickInkSyncDataSource(userId: session.userId)
+            guard let session = await self.currentSession(authStore: authStore) else {
+                print("[QuickInkSync] gate (signed-in): user is signed out — skipping")
+                return
+            }
+            print("[QuickInkSync] gates ok — userId=\(session.userId.prefix(8))…")
+
+            // Refresh the access token before every pass. The local
+            // TTL stamp on `session.expiresAt` was 55 min, but real
+            // Google access tokens expire at ~60 min and the device
+            // may have slept for hours since the last sync. The
+            // GoogleSignIn SDK's `refreshTokensIfNeeded` is a no-op
+            // when the token is still fresh and a silent network
+            // round-trip when it isn't, so this is cheap to do
+            // unconditionally. Without this step, every Sync now tap
+            // after the 60-min mark used to silently 401 and leave
+            // "Last synced" at "Never".
+            let activeSession: GoogleAuthSession = await self.refreshOrAdopt(
+                session: session,
+                authStore: authStore
+            ) ?? session
+
+            let dataSource = QuickInkSyncDataSource(userId: activeSession.userId)
             let repo = SyncRepository(
                 dataSource:  dataSource,
                 driveClient: self.driveClient,
                 stateStore:  self.stateStore
             )
-            _ = try? await repo.sync(
-                deviceId:    DeviceIdentity.get(),
-                accessToken: session.accessToken
-            )
+            // Don't `try?` — a swallow here was masking real failures
+            // (Drive 401, manifest-upload throws, decode errors). On
+            // throw, `SyncRepository.sync` already records pending-
+            // count via `recordSyncFailed` without falsely stamping
+            // `lastFullSyncAt`, so the UI's "Last synced" pill stays
+            // honest. We log to Console so dev / TestFlight builds
+            // surface what went wrong instead of silently degrading.
+            do {
+                let result = try await repo.sync(
+                    deviceId:    DeviceIdentity.get(),
+                    accessToken: activeSession.accessToken
+                )
+                print("[QuickInkSync] metadata pass done — uploaded=\(result.uploaded) " +
+                      "tombstoned=\(result.tombstoned) downloaded=\(result.downloaded) " +
+                      "failed=\(result.failed) versionBlocked=\(result.versionBlocked)")
+            } catch DriveError.unauthenticated {
+                // Drive rejected the (just-refreshed) token. The
+                // refresh token itself is dead — typically because
+                // the user revoked the app's Drive grant in their
+                // Google account, or signed out everywhere. Sign
+                // them out locally so QuickInkRoot's `ReSignInGate`
+                // takes over and prompts a fresh consent + token.
+                // The next sign-in will overwrite this session.
+                print("[QuickInkSync] Drive 401 even after refresh — signing user out so re-sign-in re-issues credentials")
+                await MainActor.run { Task { await authStore.signOut() } }
+                return
+            } catch {
+                print("[QuickInkSync] periodic sync failed: \(error). " +
+                      "UI's pendingCount will reflect the failure; lastFullSyncAt will not advance.")
+                // Don't return — still try the binary phase below.
+                // The metadata pass may have partially succeeded; a
+                // PDF that's already locally tagged with its remote
+                // file id can keep flowing.
+            }
 
             // Phase 6 — back up the actual scanned PDFs + preview
             // JPEGs to Drive. Runs after the JSON metadata pass so
             // the captures rows already exist in the manifest, and
             // a fresh-device restore can find them via the row's
             // `pdf_drive_file_id`. Best-effort: errors per row are
-            // swallowed so a single bad upload doesn't block the
-            // rest. Mirror `QuickInkBinarySync.kt` on Android.
+            // swallowed inside the helper so a single bad upload
+            // doesn't block the rest. We still log the outer-level
+            // throw (e.g. an unrecoverable network failure that took
+            // out the whole pass) for visibility. Mirror
+            // `QuickInkBinarySync.kt` on Android.
             let binarySync = QuickInkBinarySync(driveClient: self.driveClient)
-            try? await binarySync.uploadAndCascade(
-                userId:      session.userId,
-                accessToken: session.accessToken
-            )
-            try? await binarySync.restorePending(
-                userId:      session.userId,
-                accessToken: session.accessToken
-            )
+            do {
+                try await binarySync.uploadAndCascade(
+                    userId:      activeSession.userId,
+                    accessToken: activeSession.accessToken
+                )
+            } catch {
+                print("[QuickInkSync] binary upload phase failed: \(error)")
+            }
+            do {
+                try await binarySync.restorePending(
+                    userId:      activeSession.userId,
+                    accessToken: activeSession.accessToken
+                )
+            } catch {
+                print("[QuickInkSync] binary restore phase failed: \(error)")
+            }
         }
 
         scheduler.registerBackgroundRefreshHandler()
@@ -183,19 +255,39 @@ public final class QuickInkSyncEnvironment {
             // we can reuse the cached AuthStore via the `authObserver`
             // closure context. If not installed, no-op cleanly.
             guard self.installed,
-                  let session = await self.lastInstalledSession()
+                  let store = self.installedAuthStore,
+                  let session = await self.currentSession(authStore: store)
             else { return }
 
-            let dataSource = QuickInkSyncDataSource(userId: session.userId)
+            // Refresh before restore for the same reason the
+            // periodic pass does — a stale token is the most common
+            // reason "Restore from Drive" silently does nothing.
+            let activeSession = await self.refreshOrAdopt(
+                session: session,
+                authStore: store
+            ) ?? session
+
+            let dataSource = QuickInkSyncDataSource(userId: activeSession.userId)
             let repo = SyncRepository(
                 dataSource:  dataSource,
                 driveClient: self.driveClient,
                 stateStore:  self.stateStore
             )
-            _ = try? await repo.restore(
-                deviceId:    DeviceIdentity.get(),
-                accessToken: session.accessToken
-            )
+            do {
+                _ = try await repo.restore(
+                    deviceId:    DeviceIdentity.get(),
+                    accessToken: activeSession.accessToken
+                )
+            } catch DriveError.unauthenticated {
+                print("[QuickInkSync] restore: Drive 401 — signing user out")
+                await MainActor.run { Task { await store.signOut() } }
+            } catch {
+                // Settings → "Restore from Drive" doesn't have a
+                // dedicated error surface yet; logging keeps the
+                // failure recoverable from Console without crashing
+                // the user out of the screen.
+                print("[QuickInkSync] restore failed: \(error)")
+            }
         }
     }
 
@@ -208,8 +300,44 @@ public final class QuickInkSyncEnvironment {
     /// call site. Set inside `install` and read here.
     private weak var installedAuthStore: AuthStore?
 
-    private func lastInstalledSession() async -> GoogleAuthSession? {
-        guard let store = installedAuthStore else { return nil }
-        return await currentSession(authStore: store)
+    /// Refresh `session`'s access token via `RealGoogleAuthClient`
+    /// and adopt the result onto the AuthStore. Returns the
+    /// refreshed session on success, `nil` when no real client is
+    /// configured (Info.plist's `GIDClientID` empty — InMemory
+    /// driveClient path) or when the underlying refresh threw. The
+    /// caller falls back to the input session in those cases.
+    ///
+    /// Why call this on every pass: the GoogleSignIn SDK's
+    /// `refreshTokensIfNeeded` is a no-op when the access token is
+    /// still fresh, and a silent network round-trip when it isn't.
+    /// Without this hook every Sync now after the ~60-min token
+    /// boundary used to silently 401 and leave "Last synced" at
+    /// "Never" — see the QuickInkSyncWorker.kt parallel.
+    private func refreshOrAdopt(
+        session: GoogleAuthSession,
+        authStore: AuthStore
+    ) async -> GoogleAuthSession? {
+        let raw = Bundle.main.object(forInfoDictionaryKey: GoogleSignInBinding.infoPlistKey) as? String
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        let client = RealGoogleAuthClient(iosClientId: trimmed)
+        do {
+            let fresh = try await client.refresh(session)
+            await MainActor.run { authStore.adoptSession(fresh) }
+            print("[QuickInkSync] token refreshed (expiresAt=\(fresh.expiresAt))")
+            return fresh
+        } catch {
+            // Refresh itself failed — typically the GIDSignIn SDK
+            // can't restore `currentUser` (cold launch with no
+            // keychain entry). Don't sign out here: the caller's
+            // sync attempt will hit Drive with the (possibly stale)
+            // existing token and either succeed (if the local TTL
+            // was over-conservative) or 401, which the caller
+            // handles by signing the user out for re-consent.
+            print("[QuickInkSync] token refresh failed (\(error)) — falling through with existing token")
+            return nil
+        }
     }
 }

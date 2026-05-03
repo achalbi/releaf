@@ -63,10 +63,48 @@ class SettingsPreferences(context: Context) {
             prefs.edit().putString(KEY_CUSTOM_DISPLAY_NAME, value).apply()
         }
 
+    /**
+     * User's phone number, edited from the Profile screen. Free-form
+     * string (no E.164 normalization yet); the field is purely
+     * cosmetic / for the user's reference.
+     */
+    var phoneNumber: String
+        get() = prefs.getString(KEY_PHONE_NUMBER, "") ?: ""
+        set(value) {
+            prefs.edit().putString(KEY_PHONE_NUMBER, value).apply()
+        }
+
+    /**
+     * `file://` URI of the user's chosen profile photo. Empty when
+     * none has been picked — the avatar then falls back to initial /
+     * person glyph. The picked image is copied into the app's
+     * filesDir so the URI keeps resolving across launches and
+     * survives the original gallery URI being revoked.
+     */
+    var profilePhotoUri: String
+        get() = prefs.getString(KEY_PROFILE_PHOTO_URI, "") ?: ""
+        set(value) {
+            prefs.edit().putString(KEY_PROFILE_PHOTO_URI, value).apply()
+        }
+
+    /**
+     * Free-text "personality punchline" — a one-liner the user
+     * writes for themselves. Surfaced on the Profile screen only
+     * for now.
+     */
+    var personalityPunchline: String
+        get() = prefs.getString(KEY_PERSONALITY_PUNCHLINE, "") ?: ""
+        set(value) {
+            prefs.edit().putString(KEY_PERSONALITY_PUNCHLINE, value).apply()
+        }
+
     companion object {
-        private const val PREFS_NAME             = "quickink.settings"
-        private const val KEY_DRIVE_BACKUP       = "drive_backup_enabled"
-        private const val KEY_SEARCHABLE_PDF     = "searchable_pdf_export_enabled"
+        private const val PREFS_NAME              = "quickink.settings"
+        private const val KEY_DRIVE_BACKUP        = "drive_backup_enabled"
+        private const val KEY_SEARCHABLE_PDF      = "searchable_pdf_export_enabled"
         private const val KEY_CUSTOM_DISPLAY_NAME = "custom_display_name"
+        private const val KEY_PHONE_NUMBER        = "phone_number"
+        private const val KEY_PROFILE_PHOTO_URI   = "profile_photo_uri"
+        private const val KEY_PERSONALITY_PUNCHLINE = "personality_punchline"
     }
 }

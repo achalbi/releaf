@@ -71,6 +71,18 @@ public final class SyncStateStore: ObservableObject {
         state = load()
     }
 
+    /// Record that a sync pass failed *before* writing the remote
+    /// manifest — typically a manifest-upload throw. Only updates
+    /// `pendingCount`; deliberately does NOT touch
+    /// `lastFullSyncAt` / `manifestChecksum`, so the UI keeps
+    /// reporting the previous successful pass's timestamp instead
+    /// of falsely claiming the failed pass succeeded. Counterpart
+    /// to [recordSuccess] for the failure path.
+    public func recordSyncFailed(pendingCount: Int) {
+        defaults.set(pendingCount, forKey: Keys.pendingCount)
+        state = load()
+    }
+
     public func recordVersionBlocked() {
         defaults.set(true, forKey: Keys.versionBlocked)
         state = load()

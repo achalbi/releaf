@@ -50,6 +50,7 @@ import app.quickink.mobile.features.scan.ScanFlowController
 import app.quickink.mobile.features.scan.ScanReviewScreen
 import app.quickink.mobile.features.search.SearchScreen
 import app.quickink.mobile.features.settings.CategoriesSettingsScreen
+import app.quickink.mobile.features.settings.ProfileScreen
 import app.quickink.mobile.features.settings.SettingsPreferences
 import app.quickink.mobile.features.settings.SettingsScreen
 import app.releaf.mobile.auth.AuthState
@@ -131,6 +132,7 @@ private object Routes {
     const val HOME              = "home"
     const val NOTES_LIST        = "notes_list"
     const val SETTINGS          = "settings"
+    const val PROFILE           = "profile"
     const val SEARCH            = "search"
     const val NOTE_EDITOR       = "note_editor/{entryId}"
     const val CATEGORIES        = "categories"
@@ -175,6 +177,10 @@ private fun MainShell(userId: String) {
     // pushes the new value through `onCustomDisplayNameChange`.
     val settingsPrefs = remember { SettingsPreferences(context) }
     var customDisplayName by remember { mutableStateOf(settingsPrefs.customDisplayName) }
+    // Held as Compose state so a Profile-screen edit re-renders the
+    // home avatar reactively without a SharedPreferences observer —
+    // ProfileScreen pushes the new URI through `onProfilePhotoChange`.
+    var profilePhotoUri by remember { mutableStateOf(settingsPrefs.profilePhotoUri) }
     val authStateForName by app.authStore.state.collectAsState()
     val resolvedDisplayName: String? = run {
         val custom = customDisplayName.trim()
@@ -201,6 +207,10 @@ private fun MainShell(userId: String) {
             // off (per QuickInkSyncWorker's gate), so this is
             // safe to fire unconditionally.
             onPassComplete = { QuickInkSyncScheduler.requestImmediate(app) },
+            // Powers the OCR-first-word → category auto-pick at
+            // the end of each pass. Read-only; controller calls
+            // `listActive(userId)` once per pass.
+            categoryDao    = app.database.categoryDao(),
         )
     }
 
@@ -239,7 +249,11 @@ private fun MainShell(userId: String) {
                 onOpenScan     = { captureId ->
                     navController.navigate(Routes.scanDetail(captureId))
                 },
+                onOpenProfile  = { navController.navigate(Routes.PROFILE) },
+                onSignOut      = { app.authStore.signOut() },
+                email          = (authStateForName as? AuthState.SignedIn)?.session?.email.orEmpty(),
                 displayName    = resolvedDisplayName,
+                profilePhotoUri = profilePhotoUri,
             )
         }
         composable(Routes.SEARCH) {
@@ -282,6 +296,13 @@ private fun MainShell(userId: String) {
                 onCustomDisplayNameChange  = { customDisplayName = it },
             )
         }
+        composable(Routes.PROFILE) {
+            ProfileScreen(
+                onBack               = { navController.popBackStack() },
+                authStore            = app.authStore,
+                onProfilePhotoChange = { profilePhotoUri = it },
+            )
+        }
         composable(Routes.CATEGORIES) {
             CategoriesSettingsScreen(
                 userId = userId,
@@ -295,6 +316,7 @@ private fun MainShell(userId: String) {
             val captureId = backStackEntry.arguments?.getString("captureId").orEmpty()
             ScanDetailScreen(
                 captureId = captureId,
+                userId    = userId,
                 onBack    = { navController.popBackStack() },
             )
         }

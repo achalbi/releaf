@@ -159,6 +159,25 @@ interface CaptureDao {
     @Query("UPDATE captures SET preview_uri = :previewUri WHERE id = :id")
     suspend fun setPreviewUri(id: String, previewUri: String?)
 
+    /**
+     * Rewrite any occurrence of [oldFrag] in `pdf_uri` / `preview_uri`
+     * with [newFrag]. Used by the QuickInk attachment-folder rename
+     * (`releaf/attachments/` → `quickink/attachments/`) so existing
+     * captures keep resolving after the move on disk. Touches only
+     * rows that match the substring so unrelated rows aren't dirtied,
+     * and deliberately doesn't bump `dirty` — these URIs are local
+     * paths, and remote payloads get the URI rewritten on download
+     * regardless. Returns the number of rows updated.
+     */
+    @Query("""
+        UPDATE captures
+        SET pdf_uri     = REPLACE(pdf_uri,     :oldFrag, :newFrag),
+            preview_uri = REPLACE(preview_uri, :oldFrag, :newFrag)
+        WHERE pdf_uri     LIKE '%' || :oldFrag || '%'
+           OR preview_uri LIKE '%' || :oldFrag || '%'
+    """)
+    suspend fun rewriteAttachmentPaths(oldFrag: String, newFrag: String): Int
+
     // ─── Sync surface (Slice 4.2a) ────────────────────────────────────
 
     /**

@@ -6,6 +6,14 @@
 	<array>
 		<string>app.quickink.mobile.sync</string>
 	</array>
+	<!--
+	  Required for the profile-photo "Take Photo" flow on the
+	  Profile screen. The system shows this string in the camera-
+	  permission prompt the first time the user opts to capture a
+	  fresh profile photo (rather than picking from their library).
+	-->
+	<key>NSCameraUsageDescription</key>
+	<string>QuickInk uses the camera so you can take a fresh profile photo without leaving the app.</string>
 	<key>CFBundleGetInfoString</key>
 	<string></string>
 	<!--

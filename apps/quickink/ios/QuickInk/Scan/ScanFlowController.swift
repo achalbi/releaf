@@ -149,6 +149,27 @@ public final class ScanFlowController: ObservableObject {
                         )
                         successCount += 1
                         pageTexts[pageIndex] = result.text
+
+                        // Fast-path auto-pick: as soon as page 0
+                        // (the first physical page) lands, try to
+                        // match its leading tokens against the
+                        // user's categories so the review screen's
+                        // chip flips on without waiting for the
+                        // rest of a multi-page pipeline. Two-word
+                        // phrases ("Meeting Notes") are tried
+                        // before the first word alone — see
+                        // `matchCategoryName(tokens:)`. Subsequent
+                        // pages skip this branch — only page 1
+                        // drives the auto-pick. The post-loop block
+                        // below still runs as a fallback when page
+                        // 0's OCR fails entirely.
+                        if pageIndex == 0, let strongSelf = self, strongSelf.selectedCategory == nil {
+                            let tokens = Self.extractLeadingTokens(pageTexts: pageTexts)
+                            if let match = await strongSelf.matchCategoryName(tokens: tokens) {
+                                strongSelf.selectedCategory = match
+                                try? await repository.setCategory(captureId: captureId, category: match)
+                            }
+                        }
                     } catch {
                         // Persistence error on a single page — log,
                         // continue. The capture row + other pages
@@ -168,7 +189,27 @@ public final class ScanFlowController: ObservableObject {
                 )
             }
 
-            // 3. Append the recognized text into today's
+            // 3. Auto-pick fallback. The fast-path inside the loop
+            //    (above) handles the common case — page 0 succeeds
+            //    and the chip flips on the moment its OCR lands.
+            //    This block catches the edge case where page 0 OCR
+            //    failed but a later page succeeded: we still try the
+            //    lowest-indexed available page's leading tokens so
+            //    the user gets some auto-match instead of none.
+            //    Skipped when the user pre-picked a category or the
+            //    fast-path already matched.
+            if let strongSelf = self,
+               strongSelf.selectedCategory == nil {
+                let tokens = Self.extractLeadingTokens(pageTexts: pageTexts)
+                if let match = await strongSelf.matchCategoryName(tokens: tokens) {
+                    strongSelf.selectedCategory = match
+                    // Persist on the in-flight capture row so a later
+                    // restart restores the auto-pick. Best-effort.
+                    try? await repository.setCategory(captureId: captureId, category: match)
+                }
+            }
+
+            // 4. Append the recognized text into today's
             //    `notepad_entries` row so the home recents rail
             //    surfaces it immediately. One entry per (user, day);
             //    multiple captures append to the same row. The
@@ -305,5 +346,116 @@ public final class ScanFlowController: ObservableObject {
         case .complete(let id, _, _):    return id
         case .idle, .failed:             return nil
         }
+    }
+
+    // MARK: - Auto-category from leading OCR tokens
+
+    /// Pull up to `maxTokens` leading word tokens from the lowest-
+    /// indexed page's OCR text. Strips leading/trailing whitespace,
+    /// splits on whitespace runs, and trims any non-alphanumeric
+    /// padding so `"Ideas,"` / `"Ideas."` / `"  ideas "` all reduce
+    /// to `"Ideas"`. Returns an empty list when there's no usable
+    /// text — callers should treat that as "no auto-match".
+    static func extractLeadingTokens(pageTexts: [Int: String], maxTokens: Int = 2) -> [String] {
+        guard let firstKey = pageTexts.keys.min(),
+              let raw = pageTexts[firstKey] else { return [] }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        // Filter empty-after-strip tokens *before* taking the
+        // window, so a stray leading "—"/"•"/"1." doesn't eat into
+        // our maxTokens budget. With the wrong order, OCR text like
+        // "— Meeting Notes" would yield just ["Meeting"] instead of
+        // ["Meeting", "Notes"] and a "Meeting Notes" category would
+        // miss the auto-match.
+        let words = trimmed
+            .split(whereSeparator: { $0.isWhitespace })
+            .map { String($0).trimmingCharacters(in: CharacterSet.alphanumerics.inverted) }
+            .filter { !$0.isEmpty }
+        return Array(words.prefix(maxTokens))
+    }
+
+    /// Look up a category whose name matches the leading OCR
+    /// `tokens` case- and number-insensitively, scoped to the
+    /// current `userId`. The widest window is tried first — for a
+    /// two-token input like `["Meeting", "Notes"]` we check the
+    /// full phrase against multi-word categories before falling
+    /// back to just `"Meeting"`. Each token (on both sides) is
+    /// stemmed via `depluralize(_:)` so "Idea" still matches
+    /// "Ideas", "Story" still matches "Stories", and so on.
+    /// Returns the canonical (database-cased) name on a hit,
+    /// `nil` otherwise. Reads the shared GRDB queue directly to
+    /// avoid coupling the controller to `CategoryRepository`'s
+    /// observation API — we only need a one-shot read here.
+    private func matchCategoryName(tokens: [String]) async -> String? {
+        guard !tokens.isEmpty else { return nil }
+        let userId = self.userId
+        let dbQueue = QuickInkDatabase.shared.dbQueue
+        return try? await dbQueue.read { db -> String? in
+            // Pull the active category names and compare in Swift —
+            // the depluralization rules are awkward to express in
+            // SQL, and the typical user has a single-digit number
+            // of categories so the in-memory pass is cheap.
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT name FROM categories
+                WHERE user_id = ? AND deleted_at IS NULL
+                """, arguments: [userId])
+            // Try the widest window first (two-word phrase), then
+            // fall back to just the first word. A single-token
+            // input only runs the fallback iteration.
+            for window in stride(from: tokens.count, through: 1, by: -1) {
+                let needle = Self.depluralizePhrase(tokens.prefix(window).joined(separator: " "))
+                guard !needle.isEmpty else { continue }
+                if let row = rows.first(where: { row in
+                    Self.depluralizePhrase(row["name"] as String) == needle
+                }) {
+                    return row["name"] as String?
+                }
+            }
+            return nil
+        }
+    }
+
+    /// Whitespace-split tokenizer + per-token depluralizer. Lets
+    /// `"Meeting Notes"` reduce to `"meeting note"` so a category
+    /// named "Meeting Notes" still matches a scan starting with
+    /// "Meeting Note" (or vice versa). Empty input → empty stem.
+    nonisolated static func depluralizePhrase(_ s: String) -> String {
+        s.split(whereSeparator: { $0.isWhitespace })
+            .map { depluralize(String($0)) }
+            .joined(separator: " ")
+    }
+
+    /// Reduce an English word to its (rough) singular stem so we can
+    /// compare a scanned token like "Ideas" against a category named
+    /// "Idea" (or vice versa). Rules cover the common regular cases:
+    ///
+    ///   - `-ies` → `-y`     (stories → story)
+    ///   - `-ches`/`-shes`/`-xes`/`-zes`/`-sses` → drop `-es`
+    ///                       (boxes → box, classes → class)
+    ///   - `-ss`             → kept as-is (class stays class)
+    ///   - trailing `-s`     → dropped (ideas → idea, votes → vote)
+    ///
+    /// Irregular plurals (mice, geese, children) aren't handled —
+    /// they fall through to a literal exact-match. Returns the lower-
+    /// cased stem.
+    ///
+    /// `nonisolated` so it's callable from the GRDB read closure
+    /// (which runs on a background queue, not the main actor) inside
+    /// `matchCategoryName`. The function is pure — no instance
+    /// state, no UI work — so the isolation downgrade is safe.
+    nonisolated static func depluralize(_ s: String) -> String {
+        let lower = s.lowercased()
+        guard lower.count > 2 else { return lower }
+        if lower.hasSuffix("ies") {
+            return String(lower.dropLast(3)) + "y"
+        }
+        if lower.hasSuffix("ches") || lower.hasSuffix("shes") ||
+           lower.hasSuffix("xes")  || lower.hasSuffix("zes")  ||
+           lower.hasSuffix("sses") {
+            return String(lower.dropLast(2))
+        }
+        if lower.hasSuffix("ss") { return lower }
+        if lower.hasSuffix("s")  { return String(lower.dropLast()) }
+        return lower
     }
 }

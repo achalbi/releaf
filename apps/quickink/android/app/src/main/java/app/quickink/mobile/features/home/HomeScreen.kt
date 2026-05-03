@@ -19,6 +19,11 @@
 
 package app.quickink.mobile.features.home
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -45,10 +50,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Group
@@ -82,9 +89,11 @@ import android.net.Uri
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.R
 import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.category.CategoryEntity
 import app.quickink.mobile.features.scan.QuickCaptureScreen
 import app.quickink.mobile.features.scan.ScanFlowController
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
 import coil.request.ImageRequest
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
@@ -113,10 +122,28 @@ fun HomeScreen(
     onTapCategory: ((String) -> Unit)? = null,
     onOpenEntry: ((String) -> Unit)? = null,
     onOpenScan: ((String) -> Unit)? = null,
+    /// Routes to the new Profile editor (photo / phone / punchline).
+    /// Picked from the avatar dropdown menu alongside "Sign out".
+    /// Wired at QuickInkRoot.
+    onOpenProfile: (() -> Unit)? = null,
+    /// Avatar dropdown's Sign out action. Wired at QuickInkRoot to
+    /// `authStore.signOut()` so the avatar menu can drop the user
+    /// straight to the SignIn gate without a Settings detour.
+    onSignOut: (() -> Unit)? = null,
     /// Resolved display name shown on the greeting. Already
     /// reconciled at the parent (Settings override > Google session
     /// displayName > null). Null falls through to "QuickInk".
     displayName: String? = null,
+    /// Signed-in account email, threaded through from the parent
+    /// (`QuickInkRoot`'s AuthStore session). Surfaced under the name
+    /// in the profile drawer's banner header. Empty string when
+    /// signed out — banner hides the email row.
+    email: String = "",
+    /// `file://` URI of the user's profile photo, when set. Empty
+    /// string falls back to the initial / glyph avatar. Reconciled
+    /// at the parent so a Profile-screen edit re-renders the home
+    /// avatar without a SharedPreferences observer.
+    profilePhotoUri: String = "",
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
@@ -129,6 +156,13 @@ fun HomeScreen(
     // the system scanner internally and dismisses itself on
     // completion.
     var showQuickCapture by remember { mutableStateOf(false) }
+
+    // Slide-in profile drawer triggered by the avatar tap — mirror
+    // of Releaf's home drawer (apps/releaf/android/.../HomeScreen.kt).
+    // Replaces the previous Material `DropdownMenu` so the avatar
+    // action surface is visually consistent across the two sibling
+    // apps.
+    var showProfileDrawer by remember { mutableStateOf(false) }
 
     if (showQuickCapture) {
         QuickCaptureScreen(
@@ -146,6 +180,15 @@ fun HomeScreen(
     val captureDao = remember(app) { app.database.captureDao() }
     val recentCaptures by remember(userId, captureDao) {
         captureDao.observeRecent(userId, limit = 30)
+    }.collectAsState(initial = emptyList())
+
+    // Live category list — every active category, newest-first.
+    // Mirrors iOS's CategoryListViewModel observation. Sort happens
+    // in the grid composable (kept close to render so changes to
+    // `created_at` reorder without an extra remember layer).
+    val categoryDao = remember(app) { app.database.categoryDao() }
+    val categories by remember(userId, categoryDao) {
+        categoryDao.observeActive(userId)
     }.collectAsState(initial = emptyList())
 
     // System status-bar inset — without this, the greeting crowds the
@@ -198,15 +241,23 @@ fun HomeScreen(
                     bottom = 140.dp,
                 ),
         ) {
-            HomeHeader(displayName = displayName, onProfileTap = onOpenSettings)
+            HomeHeader(
+                displayName     = displayName,
+                profilePhotoUri = profilePhotoUri,
+                onTapAvatar     = { showProfileDrawer = true },
+            )
             Spacer(Modifier.size(QuickInkSpacing.s5))
             RecentRail(
-                captures    = recentCaptures.take(12),
+                captures    = recentCaptures.take(6),
                 onAllNotes  = onOpenNotes,
                 onOpenScan  = onOpenScan,
             )
             Spacer(Modifier.size(QuickInkSpacing.s5))
-            CategoryGrid(captures = recentCaptures, onTapCategory = onTapCategory)
+            CategoryGrid(
+                categories    = categories,
+                captures      = recentCaptures,
+                onTapCategory = onTapCategory,
+            )
             // Sync pill at the bottom of the scroll content —
             // scrolls with the page, no floating over content,
             // centered horizontally.
@@ -228,6 +279,35 @@ fun HomeScreen(
             hazeState  = hazeState,
             modifier   = Modifier.align(Alignment.BottomCenter),
         )
+
+        // Slide-in profile drawer — sibling layer above the home
+        // content + bottom nav. Renders edge-to-edge so the banner
+        // bleeds behind the status bar and the footer bleeds behind
+        // the navigation bar (insets handled inside the overlay).
+        AnimatedVisibility(
+            visible = showProfileDrawer,
+            enter   = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
+            exit    = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
+        ) {
+            ProfileDrawerOverlay(
+                displayName     = (displayName?.trim().orEmpty()).ifEmpty { "QuickInk" },
+                email           = email,
+                profilePhotoUri = profilePhotoUri,
+                onClose         = { showProfileDrawer = false },
+                onOpenProfile   = {
+                    showProfileDrawer = false
+                    (onOpenProfile ?: onOpenSettings)()
+                },
+                onOpenSettings  = {
+                    showProfileDrawer = false
+                    onOpenSettings()
+                },
+                onSignOut       = {
+                    showProfileDrawer = false
+                    onSignOut?.invoke()
+                },
+            )
+        }
     }
 }
 
@@ -264,10 +344,12 @@ private fun relativeSyncTimestamp(iso: String?): String? {
 @Composable
 private fun HomeHeader(
     displayName: String?,
-    onProfileTap: () -> Unit,
+    profilePhotoUri: String,
+    onTapAvatar: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
+    val context = LocalContext.current
     val greeting = remember {
         when (LocalTime.now().hour) {
             in 5..11  -> "Good morning"
@@ -290,19 +372,38 @@ private fun HomeHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        // Top-right profile pill — coral disc with the user's initial
-        // (when we have a name) or a default person icon. Tap routes
-        // to Settings, mirroring how Google's consumer apps use the
-        // avatar as the entry to account/preferences.
+        // Top-right profile pill — renders the user's profile photo
+        // (when picked), the user's initial (when we have a name),
+        // or a default person glyph. Tap slides the profile drawer
+        // in from the leading edge — same pattern as Releaf's home
+        // avatar → home drawer.
         Box(
             modifier = Modifier
                 .size(44.dp)
                 .clip(CircleShape)
                 .background(colors.accentSoft)
-                .clickable(onClick = onProfileTap),
+                .border(2.dp, colors.accent, CircleShape)
+                .clickable(onClick = onTapAvatar),
             contentAlignment = Alignment.Center,
         ) {
-            if (initial != null) {
+            if (profilePhotoUri.isNotEmpty()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(Uri.parse(profilePhotoUri))
+                        // Cache disabled because the user's photo
+                        // is overwritten in-place at the same path
+                        // — without this, a fresh pick would keep
+                        // serving the stale bitmap. The avatar is
+                        // small (44dp), so the perf cost is nil.
+                        .memoryCachePolicy(CachePolicy.DISABLED)
+                        .diskCachePolicy(CachePolicy.DISABLED)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "Open profile menu",
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.fillMaxSize().clip(CircleShape),
+                )
+            } else if (initial != null) {
                 Text(
                     text  = initial,
                     style = type.heading,
@@ -311,7 +412,7 @@ private fun HomeHeader(
             } else {
                 Icon(
                     imageVector       = Icons.Filled.AccountCircle,
-                    contentDescription = "Profile and settings",
+                    contentDescription = "Open profile menu",
                     tint              = colors.accent,
                     modifier          = Modifier.size(28.dp),
                 )
@@ -516,31 +617,53 @@ private fun friendlyMonthDay(iso: String): String =
 
 // MARK: - Category grid
 
-private data class Category(val name: String, val icon: ImageVector)
-
-private val CATEGORIES = listOf(
-    Category("Ideas",      Icons.Filled.Lightbulb),
-    Category("Projects",   Icons.Filled.Folder),
-    Category("Brainstorm", Icons.Filled.Star),
-    Category("Meetings",   Icons.Filled.Group),
-    Category("Journal",    Icons.Filled.Book),
-    Category("Study",      Icons.Filled.School),
-)
+/**
+ * Map a category name to its tile icon. Default-seed names get
+ * purpose-specific glyphs; user-created categories fall through to
+ * a generic label icon. Matches the iOS `iconFor(_:)` switch.
+ */
+private fun iconForCategory(name: String): ImageVector =
+    when (name.lowercase()) {
+        "ideas"      -> Icons.Filled.Lightbulb
+        "projects"   -> Icons.Filled.Folder
+        "meetings"   -> Icons.Filled.Group
+        "todo"       -> Icons.Filled.CheckCircle
+        "study"      -> Icons.Filled.School
+        "journal"    -> Icons.Filled.Book
+        "brainstorm" -> Icons.Filled.Star
+        else         -> Icons.AutoMirrored.Filled.Label
+    }
 
 @Composable
 private fun CategoryGrid(
+    categories: List<CategoryEntity>,
     captures: List<CaptureEntity>,
     onTapCategory: ((String) -> Unit)?,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
 
+    // Sort by the most recent capture in each category. ISO-8601
+    // `created_at` strings sort lexicographically by timeline, so no
+    // parse step needed. Categories with no captures in the loaded
+    // window fall to the end (empty-string key sorts smallest in
+    // descending order); among those, the DAO's
+    // (position ASC, name ASC) ordering carries through because
+    // `sortedByDescending` is stable.
+    val sorted = remember(categories, captures) {
+        val latestByName: Map<String, String> = captures
+            .groupBy { (it.category ?: "").lowercase() }
+            .mapValues { (_, list) -> list.maxOf { it.createdAt } }
+        categories.sortedByDescending { latestByName[it.name.lowercase()] ?: "" }
+    }
+
     Column {
         Text(text = "CATEGORIES", style = type.eyebrow, color = colors.muted)
         Spacer(Modifier.size(QuickInkSpacing.s3))
-        // 2 columns × 3 rows. Compose's LazyVGrid is overkill for 6
-        // fixed cells — use a Column of Rows.
-        CATEGORIES.chunked(2).forEachIndexed { i, pair ->
+        // 2-column grid sized to the live category count. Number of
+        // rows grows with the user's library; LazyVGrid still isn't
+        // worth it for the typical handful.
+        sorted.chunked(2).forEachIndexed { i, pair ->
             if (i > 0) Spacer(Modifier.size(QuickInkSpacing.s3))
             Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
                 pair.forEach { cat ->
@@ -549,12 +672,18 @@ private fun CategoryGrid(
                     }
                     CategoryTile(
                         name         = cat.name,
-                        icon         = cat.icon,
+                        icon         = iconForCategory(cat.name),
                         count        = stats.count,
                         recencyBadge = stats.recencyBadge,
                         onTap        = { onTapCategory?.invoke(cat.name) },
                         modifier     = Modifier.weight(1f),
                     )
+                }
+                // Pad the trailing row when the count is odd so the
+                // last tile keeps its half-width footprint instead of
+                // stretching across both columns.
+                if (pair.size == 1) {
+                    Spacer(Modifier.weight(1f))
                 }
             }
         }
@@ -975,7 +1104,7 @@ private fun ZapFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 imageVector        = Icons.Filled.Bolt,
                 contentDescription = "Scan",
                 tint               = colors.textOnAccent,
-                modifier           = Modifier.size(22.dp),
+                modifier           = Modifier.size(32.dp),
             )
         }
     }

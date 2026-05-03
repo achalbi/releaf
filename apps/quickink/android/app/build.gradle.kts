@@ -274,19 +274,32 @@ dependencies {
 // Increments versionCode in apps/quickink/android/version.properties.
 // Run before each Play upload:
 //   ./gradlew :apps:quickink:bumpVersionCode :apps:quickink:bundleRelease
+//
+// The action body deliberately captures only `propsFile` (a plain
+// `java.io.File`) and re-reads the properties at execution time.
+// Referencing the script-level `versionProps` / `versionPropsFile`
+// from inside `doLast` pulls the Project / Script object into the
+// task's serialized state, which Gradle's configuration cache
+// rejects with "cannot serialize Gradle script object references".
+// Re-reading also keeps the bump idempotent if the file is touched
+// between configuration and execution.
 tasks.register("bumpVersionCode") {
     group = "release"
     description = "Increment versionCode in version.properties."
+    val propsFile = versionPropsFile
     doLast {
-        val current = (versionProps.getProperty("versionCode") ?: "1").toInt()
+        val props = Properties().apply {
+            if (propsFile.exists()) propsFile.inputStream().use(::load)
+        }
+        val current = (props.getProperty("versionCode") ?: "1").toInt()
         val next = current + 1
-        val header = versionPropsFile.takeIf { it.exists() }
+        val header = propsFile.takeIf { it.exists() }
             ?.readLines()
             ?.takeWhile { it.isBlank() || it.startsWith("#") }
             ?.joinToString("\n")
             ?.let { if (it.isBlank()) "" else "$it\n" }
             ?: ""
-        versionPropsFile.writeText("${header}versionCode=$next\n")
+        propsFile.writeText("${header}versionCode=$next\n")
         println("versionCode: $current → $next")
     }
 }

@@ -1,11 +1,10 @@
 /*
  * NotesListScreen.swift
  *
- * QuickInk's Library — the user's full scan gallery, sorted /
- * filterable / grouped. Same data source as the home rail
- * (`captures` via `CaptureListViewModel`) but unbounded and with
- * day-bucket grouping + chip filters off the live `categories`
- * table.
+ * QuickInk's Library — the user's full scan gallery. Same data
+ * source as the home rail (`captures` via `CaptureListViewModel`)
+ * but unbounded, with category chips (wrapping pill row, count next
+ * to each label) off the live `categories` table.
  *
  * Tap → `ScanDetailScreen` for the selected capture (preview +
  * OCR-on-demand). The notepad-entries-driven editor is no longer
@@ -61,12 +60,11 @@ struct NotesListScreen: View {
                 Spacer()
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
-                        ForEach(groupedCaptures, id: \.label) { group in
-                            section(label: group.label, captures: group.captures)
-                        }
+                    LazyVStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
+                        flatBody
                     }
                     .padding(.horizontal, QuickInkSpacing.s5)
+                    .padding(.top, QuickInkSpacing.s2)
                     .padding(.bottom, QuickInkSpacing.s7)
                 }
             }
@@ -123,31 +121,61 @@ struct NotesListScreen: View {
 
     // MARK: - Filter chips
 
+    /// Per-category counts used to label the chips. Keyed by
+    /// lower-cased category name so user-typed casing on
+    /// `capture.category` doesn't fragment buckets.
+    private var countByCategory: [String: Int] {
+        Dictionary(grouping: capturesVM.captures) {
+            ($0.category ?? "").lowercased()
+        }
+        .mapValues(\.count)
+    }
+
     @ViewBuilder
     private var filterChips: some View {
-        // "All" + every active category. Chip names stay
-        // case-sensitive on display but we filter case-insensitively
-        // below — `captures.category` may be user-typed.
-        let names = ["All"] + categoriesVM.categories.map(\.name)
-
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: QuickInkSpacing.s2) {
-                ForEach(names, id: \.self) { cat in
-                    let active = (cat == activeCategory)
-                    Button(action: { activeCategory = cat }) {
-                        Text(cat)
-                            .font(QuickInkText.label)
-                            .foregroundStyle(active ? QuickInkColors.textOnAccent : QuickInkColors.ink)
-                            .padding(.horizontal, QuickInkSpacing.s4)
-                            .padding(.vertical, QuickInkSpacing.s2)
-                            .background(active ? QuickInkColors.accent : QuickInkColors.borderSoft)
-                            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
+        // Wrapping pill row — every chip stays on screen, no
+        // horizontal scroll. Chip names stay case-sensitive on
+        // display but we filter case-insensitively below —
+        // `captures.category` may be user-typed.
+        let counts = countByCategory
+        WrappingHStack(
+            spacing: QuickInkSpacing.s2,
+            lineSpacing: QuickInkSpacing.s2
+        ) {
+            chip(label: "All", count: capturesVM.captures.count, active: activeCategory == "All") {
+                activeCategory = "All"
+            }
+            ForEach(categoriesVM.categories, id: \.id) { cat in
+                chip(
+                    label: cat.name,
+                    count: counts[cat.name.lowercased()] ?? 0,
+                    active: cat.name == activeCategory
+                ) {
+                    activeCategory = cat.name
                 }
             }
-            .padding(.horizontal, QuickInkSpacing.s5)
         }
+        .padding(.horizontal, QuickInkSpacing.s5)
+    }
+
+    @ViewBuilder
+    private func chip(label: String, count: Int, active: Bool, action: @escaping () -> Void) -> some View {
+        let onChip = active ? QuickInkColors.textOnAccent : QuickInkColors.ink
+        Button(action: action) {
+            HStack(spacing: QuickInkSpacing.s2) {
+                Text(label)
+                    .font(QuickInkText.label)
+                    .foregroundStyle(onChip)
+                Text("\(count)")
+                    .font(QuickInkText.caption)
+                    .foregroundStyle(onChip.opacity(active ? 0.85 : 0.6))
+            }
+            .padding(.horizontal, QuickInkSpacing.s4)
+            .padding(.vertical, QuickInkSpacing.s2)
+            .background(active ? QuickInkColors.accent : QuickInkColors.borderSoft)
+            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Filter / sort / group
@@ -165,77 +193,33 @@ struct NotesListScreen: View {
         }
     }
 
-    private struct Group {
-        let label: String
-        let captures: [CaptureSummary]
-    }
-
-    /// Day-bucket grouping keyed off `capture.createdAt` (ISO-8601).
-    /// `Today` / `This week` / `Earlier` matches the SearchScreen
-    /// timeline language. Falls back to a single "All" bucket if
-    /// timestamps don't parse.
-    private var groupedCaptures: [Group] {
-        let cal = Calendar.current
-        let now = Date()
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        var today: [CaptureSummary] = []
-        var thisWeek: [CaptureSummary] = []
-        var earlier: [CaptureSummary] = []
-
-        for c in filteredSorted {
-            guard let date = formatter.date(from: c.createdAt) else {
-                earlier.append(c); continue
-            }
-            if cal.isDateInToday(date) {
-                today.append(c)
-            } else if let weekRange = cal.dateInterval(of: .weekOfYear, for: now), weekRange.contains(date) {
-                thisWeek.append(c)
-            } else {
-                earlier.append(c)
-            }
-        }
-
-        var groups: [Group] = []
-        if !today.isEmpty    { groups.append(.init(label: "Today",     captures: today)) }
-        if !thisWeek.isEmpty { groups.append(.init(label: "This week", captures: thisWeek)) }
-        if !earlier.isEmpty  { groups.append(.init(label: "Earlier",   captures: earlier)) }
-        if groups.isEmpty    { groups.append(.init(label: "All",       captures: filteredSorted)) }
-        return groups
-    }
-
+    /// Flat scan list — every capture in the active filter, sorted
+    /// newest-first (or oldest-first if the user flipped the sort).
+    /// No day buckets; a single grid or list runs the full length.
     @ViewBuilder
-    private func section(label: String, captures: [CaptureSummary]) -> some View {
-        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
-            Text(label.uppercased())
-                .font(QuickInkText.eyebrow)
-                .tracking(QuickInkLetterSpacing.eyebrow)
-                .foregroundStyle(QuickInkColors.muted)
-
-            if viewMode == .grid {
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(), spacing: QuickInkSpacing.s3),
-                        GridItem(.flexible(), spacing: QuickInkSpacing.s3),
-                    ],
-                    spacing: QuickInkSpacing.s3
-                ) {
-                    ForEach(captures) { capture in
-                        Button(action: { onOpenScan(capture.id) }) {
-                            LibraryScanGridCard(capture: capture)
-                        }
-                        .buttonStyle(.plain)
+    private var flatBody: some View {
+        if viewMode == .grid {
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: QuickInkSpacing.s3),
+                    GridItem(.flexible(), spacing: QuickInkSpacing.s3),
+                ],
+                spacing: QuickInkSpacing.s3
+            ) {
+                ForEach(filteredSorted) { capture in
+                    Button(action: { onOpenScan(capture.id) }) {
+                        LibraryScanGridCard(capture: capture)
                     }
+                    .buttonStyle(.plain)
                 }
-            } else {
-                VStack(spacing: QuickInkSpacing.s3) {
-                    ForEach(captures) { capture in
-                        Button(action: { onOpenScan(capture.id) }) {
-                            LibraryScanListRow(capture: capture)
-                        }
-                        .buttonStyle(.plain)
+            }
+        } else {
+            VStack(spacing: QuickInkSpacing.s3) {
+                ForEach(filteredSorted) { capture in
+                    Button(action: { onOpenScan(capture.id) }) {
+                        LibraryScanListRow(capture: capture)
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -423,4 +407,92 @@ fileprivate func friendlyMonthDay(_ iso: String) -> String {
         return f.string(from: date)
     }
     return String(iso.prefix(10))
+}
+
+// MARK: - WrappingHStack
+
+/// Flow layout that wraps children onto multiple rows when the
+/// container width is exceeded. Counterpart to Compose's `FlowRow`
+/// on Android, which is what the chip row above uses. Children keep
+/// their intrinsic widths; spacing/lineSpacing control the gap
+/// between adjacent items and between rows.
+struct WrappingHStack: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        let rows = layoutRows(maxWidth: maxWidth, subviews: subviews)
+        let height = rows.reduce(0) { $0 + $1.height } +
+            CGFloat(max(0, rows.count - 1)) * lineSpacing
+        let usedWidth = rows.map(\.width).max() ?? 0
+        // Hand back the proposed width so the layout fills its
+        // container horizontally — chips stay left-aligned within.
+        let width = proposal.width ?? usedWidth
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = layoutRows(maxWidth: bounds.width, subviews: subviews)
+        var y = bounds.minY
+        for row in rows {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = row.sizes[index - row.startIndex]
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(size)
+                )
+                x += size.width + spacing
+            }
+            y += row.height + lineSpacing
+        }
+    }
+
+    private struct Row {
+        let indices: Range<Int>
+        let sizes: [CGSize]
+        let width: CGFloat
+        let height: CGFloat
+        var startIndex: Int { indices.lowerBound }
+    }
+
+    private func layoutRows(maxWidth: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        var currentSizes: [CGSize] = []
+        var currentStart = 0
+        var currentWidth: CGFloat = 0
+        var currentHeight: CGFloat = 0
+
+        for (index, subview) in subviews.enumerated() {
+            let size = subview.sizeThatFits(.unspecified)
+            let prospective = currentWidth == 0 ? size.width : currentWidth + spacing + size.width
+            if prospective > maxWidth, !currentSizes.isEmpty {
+                rows.append(Row(
+                    indices: currentStart..<index,
+                    sizes: currentSizes,
+                    width: currentWidth,
+                    height: currentHeight
+                ))
+                currentSizes = [size]
+                currentStart = index
+                currentWidth = size.width
+                currentHeight = size.height
+            } else {
+                currentSizes.append(size)
+                currentWidth = prospective
+                currentHeight = max(currentHeight, size.height)
+            }
+        }
+        if !currentSizes.isEmpty {
+            rows.append(Row(
+                indices: currentStart..<(currentStart + currentSizes.count),
+                sizes: currentSizes,
+                width: currentWidth,
+                height: currentHeight
+            ))
+        }
+        return rows
+    }
 }

@@ -44,9 +44,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.SolidColor
-import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -62,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import app.quickink.mobile.QUICKINK_APP_VERSION
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
+import app.quickink.mobile.data.sync.QuickInkSyncWorker
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
@@ -70,6 +69,8 @@ import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
 import app.releaf.mobile.data.sync.SyncStateKeys
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 
 @Composable
 fun SettingsScreen(
@@ -90,20 +91,31 @@ fun SettingsScreen(
     var searchablePdfExportEnabled by remember { mutableStateOf(preferences.searchablePdfExportEnabled) }
     var customDisplayName by remember { mutableStateOf(preferences.customDisplayName) }
 
-    // Transient "Syncing now…" feedback while a manual Sync now /
-    // Restore from Drive pass is in flight. The underlying
-    // QuickInkSyncScheduler.requestImmediate / requestRestore are
-    // fire-and-forget through WorkManager — without this the user
-    // has no visible signal that anything happened on tap.
-    var isSyncingFlash by remember { mutableStateOf(false) }
-    val coroutineScope = rememberCoroutineScope()
-    fun flashSyncing() {
-        isSyncingFlash = true
-        coroutineScope.launch {
-            kotlinx.coroutines.delay(2_500L)
-            isSyncingFlash = false
-        }
+    // "Syncing now…" feedback driven by the actual worker state,
+    // not a fixed timer. Observes the unique sync work via
+    // WorkManager's per-name LiveData/Flow — when the worker is
+    // ENQUEUED or RUNNING the badge shows; when it finishes
+    // (SUCCEEDED / FAILED / CANCELLED) the badge clears and the
+    // sync_state DAO Flow drives the "Last synced" line. The old
+    // 2.5s `flashSyncing()` timer was a UX bug: WorkManager
+    // typically takes 5–10s to actually start a constrained
+    // OneTimeWork (mitigated now by `setExpedited` in
+    // QuickInkSyncScheduler.requestUserSync), so the timer ended
+    // before the worker even ran, and users saw "Last synced:
+    // Never" reappear right after tapping Sync now.
+    val workManager = remember(context) { WorkManager.getInstance(context) }
+    val syncWorkInfos by remember(workManager) {
+        workManager.getWorkInfosForUniqueWorkFlow(QuickInkSyncWorker.ONESHOT_WORK_NAME)
+    }.collectAsState(initial = emptyList())
+    val restoreWorkInfos by remember(workManager) {
+        workManager.getWorkInfosForUniqueWorkFlow(
+            app.quickink.mobile.data.sync.QuickInkRestoreWorker.ONESHOT_WORK_NAME
+        )
+    }.collectAsState(initial = emptyList())
+    val isSyncingFlash: Boolean = (syncWorkInfos + restoreWorkInfos).any {
+        it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING
     }
+
     val authState by authStore.state.collectAsState()
 
     val app = context.applicationContext as QuickInkApp
@@ -196,8 +208,19 @@ fun SettingsScreen(
                         label    = "Sync now",
                         onClick  = {
                             if (isSignedIn) {
-                                QuickInkSyncScheduler.requestImmediate(context)
-                                flashSyncing()
+                                // requestUserSync (REPLACE) instead of
+                                // requestImmediate (KEEP) so a tap
+                                // cancels any pending retry from a
+                                // previous failure and starts clean —
+                                // KEEP was silently dropping the tap
+                                // whenever a backoff retry was queued,
+                                // leaving "Last synced" stuck on
+                                // "Never". See QuickInkSyncScheduler
+                                // for the rationale.
+                                QuickInkSyncScheduler.requestUserSync(context)
+                                // No fake timer needed — `isSyncingFlash`
+                                // is driven by WorkInfo above and
+                                // tracks the worker's real state.
                             }
                         },
                         modifier = Modifier.weight(1f),
@@ -211,7 +234,9 @@ fun SettingsScreen(
                             // policy so a fresh tap always wins.
                             if (isSignedIn) {
                                 QuickInkSyncScheduler.requestRestore(context)
-                                flashSyncing()
+                                // No fake timer needed — `isSyncingFlash`
+                                // is driven by WorkInfo above and
+                                // tracks the worker's real state.
                             }
                         },
                         modifier = Modifier.weight(1f),
@@ -611,3 +636,4 @@ private fun ManageCategoriesRow(onClick: () -> Unit) {
         )
     }
 }
+

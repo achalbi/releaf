@@ -123,6 +123,7 @@ private val DarkQuickInkColors = QuickInkColorScheme(
 @Immutable
 data class QuickInkTypographyScheme(
     val display: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Display,
+    val onboardingTitle: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.OnboardingTitle,
     val pageTitle: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.PageTitle,
     val heading: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Heading,
     val eyebrow: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Eyebrow,
@@ -130,6 +131,7 @@ data class QuickInkTypographyScheme(
     val bodyItalic: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.BodyItalic,
     val handwritten: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Handwritten,
     val label: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Label,
+    val ctaSerif: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.CtaSerif,
     val meta: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Meta,
     val caption: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Caption,
 )

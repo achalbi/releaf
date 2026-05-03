@@ -33,6 +33,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -284,6 +286,12 @@ fun CameraIllustration() {
 /**
  * Cloud upload glyph paired with notebook pages. Mirror of iOS
  * `DriveIllustration`.
+ *
+ * Uses Material's `Icons.Filled.Cloud` for the silhouette rather
+ * than a hand-built rounded-rectangle proxy — the Material cloud
+ * renders the iconic cloud shape recognisably at any size. The
+ * "bordered surface" look is reproduced by stacking the outline
+ * variant (`Icons.Outlined.Cloud`) on top in the border tint.
  */
 @Composable
 fun DriveIllustration() {
@@ -299,29 +307,42 @@ fun DriveIllustration() {
                 .background(colors.accentSoft),
         )
 
-        // Cloud body — built from rounded rectangle with arrow icon.
-        // Hand-built path is overkill for the smaller mobile screen;
-        // a rounded rectangle reads cleanly enough as a "cloud" with
-        // the up-arrow on top.
+        // Cloud silhouette — surface-tinted filled cloud with a
+        // thin border-tinted outline stacked on top. No drop shadow:
+        // an earlier pass tried a heavy 24dp ink-tinted shadow to
+        // match the mock, but Compose's elevation paints a hard
+        // rectangle behind the icon (it doesn't respect the SVG
+        // path), which read as a dark box framing the cloud rather
+        // than a soft drop. The accentSoft halo behind the cloud
+        // already gives enough lift on the warm canvas.
         Box(
-            modifier = Modifier
-                .offset(y = (-20).dp)
-                .size(width = 200.dp, height = 130.dp)
-                .shadow(3.dp, RoundedCornerShape(percent = 50))
-                .clip(RoundedCornerShape(percent = 50))
-                .background(colors.surface)
-                .border(1.5.dp, colors.border, RoundedCornerShape(percent = 50)),
+            modifier         = Modifier.offset(y = (-20).dp),
             contentAlignment = Alignment.Center,
         ) {
+            Icon(
+                imageVector       = Icons.Filled.Cloud,
+                contentDescription = null,
+                tint              = colors.surface,
+                modifier          = Modifier.size(width = 220.dp, height = 150.dp),
+            )
+            Icon(
+                imageVector       = Icons.Outlined.Cloud,
+                contentDescription = null,
+                tint              = colors.border,
+                modifier          = Modifier.size(width = 220.dp, height = 150.dp),
+            )
+            // Up-arrow inside the cloud — coral, indicating upload.
             Icon(
                 imageVector       = Icons.Filled.ArrowUpward,
                 contentDescription = null,
                 tint              = colors.accent,
-                modifier          = Modifier.size(48.dp),
+                modifier          = Modifier
+                    .size(48.dp)
+                    .offset(y = (-2).dp),
             )
         }
 
-        // Two paper cards below cloud.
+        // Two paper cards below cloud, suggesting pages flowing up.
         Box(
             modifier = Modifier
                 .offset(x = (-10).dp, y = 80.dp)

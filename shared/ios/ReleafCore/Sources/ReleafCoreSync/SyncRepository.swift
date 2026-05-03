@@ -282,23 +282,25 @@ public final class SyncRepository: @unchecked Sendable {
                 accessToken: accessToken
             )
         } catch {
+            // Manifest never reached Drive — the sync did NOT succeed.
+            // Don't touch `lastFullSyncAt` / `manifestChecksum`: the
+            // UI's "Last synced" pill must keep showing the previous
+            // successful pass's timestamp, not lie that a failed pass
+            // just landed. Only the pending-count is bumped so the
+            // user sees the rows queued for retry. Mirrors Android's
+            // `Result.retry()` path where WorkManager backs off
+            // without claiming success.
             failed += 1
             // Snapshot to a `let` before crossing the @Sendable boundary
             // (capturing a mutable local is a Swift 6 concurrency error).
             let pending = failed
             await MainActor.run {
-                stateStore.recordSuccess(
-                    lastFullSyncAt: nowIso,
-                    manifestChecksum: "",
-                    pendingCount: pending
-                )
+                stateStore.recordSyncFailed(pendingCount: pending)
             }
-            return SyncResult(
-                uploaded: uploaded,
-                tombstoned: tombstoned,
-                downloaded: downloaded,
-                failed: failed
-            )
+            // Surface the underlying error to the caller so the
+            // scheduler / UI can react (today: logged in
+            // `QuickInkSyncEnvironment.runOnce` after this rethrow).
+            throw error
         }
 
         // 8. Persist sync state for the UI.

@@ -45,9 +45,10 @@ struct SignInScreen: View {
 
             VStack(spacing: QuickInkSpacing.s3) {
                 Text("Synced privately\nto your Drive")
-                    .font(QuickInkText.display)
+                    .font(QuickInkText.onboardingTitle)
                     .foregroundStyle(QuickInkColors.ink)
                     .multilineTextAlignment(.center)
+                    .lineSpacing(2)
                     .padding(.horizontal, QuickInkSpacing.s5)
 
                 Text("Your notebook follows you across devices. We never see your pages.")
@@ -137,19 +138,17 @@ struct SignInScreen: View {
                 }
 
                 Button(action: signIn) {
-                    HStack(spacing: QuickInkSpacing.s2) {
-                        // Google "G" mark — small badge inside a
-                        // white pill on the coral CTA. Uses an SF
-                        // Symbol fallback; swap for a brand-asset
-                        // image when the Xcode app target lands.
-                        Image(systemName: "person.crop.circle.fill")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(QuickInkColors.textOnAccent)
-                        Text("Continue with Google")
-                            .font(QuickInkText.label)
-                            .foregroundStyle(QuickInkColors.textOnAccent)
-                    }
-                    .quickInkCTA()
+                    // Per latest design pass, the leading
+                    // `person.crop.circle` glyph is dropped — the
+                    // mock CTA is text-only with the same serif
+                    // styling as the hero, letting the button feel
+                    // editorial rather than chrome-y. Swap to a real
+                    // Google "G" brand mark if/when the brand pass
+                    // calls for it.
+                    Text("Continue with Google")
+                        .font(QuickInkFont.serif(18, weight: .medium))
+                        .foregroundStyle(QuickInkColors.textOnAccent)
+                        .quickInkOnboardingCTA()
                 }
             }
         }

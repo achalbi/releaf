@@ -48,5 +48,24 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          FileProvider used by the profile-photo "Take Photo" flow.
+          The camera intent (`ActivityResultContracts.TakePicture`)
+          needs a content:// URI it can write to; this provider
+          exposes a single cache-path entry (`@xml/file_paths`) rooted
+          at the app's cacheDir/camera/ directory. Authority is the
+          applicationId + ".fileprovider" so a future debug/release
+          variant gets a unique authority automatically.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

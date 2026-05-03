@@ -46,13 +46,38 @@ struct HomeScreen: View {
     /// `nil` keeps the rail rendering but disables navigation —
     /// useful for previews / tests.
     var onOpenScan: ((String) -> Void)? = nil
+    /// Routes to the new Profile editor (photo / phone / punchline).
+    /// Picked from the avatar dropdown menu alongside "Sign out".
+    /// Wired at QuickInkRoot.
+    var onOpenProfile: (() -> Void)? = nil
+    /// Avatar dropdown's Sign out action. Wired at QuickInkRoot to
+    /// `authStore.signOut()` so the avatar menu can drop the user
+    /// straight to the SignIn gate without a Settings detour.
+    var onSignOut: (() -> Void)? = nil
     /// Resolved display name shown on the greeting. Already
     /// reconciled at the parent (Settings override > Google session
     /// displayName > nil). `nil` falls through to "QuickInk".
     var displayName: String? = nil
+    /// Signed-in account email, threaded through from the parent
+    /// (`QuickInkRoot`'s AuthStore session). Surfaced under the name
+    /// in the profile drawer's banner header. Empty string when
+    /// signed out — banner hides the email row.
+    var email: String = ""
+    /// `file://` URI of the user's profile photo, when set. Empty
+    /// string falls back to the initial / glyph avatar. Reconciled
+    /// at the parent so a Profile-screen edit re-renders the home
+    /// avatar without a UserDefaults observer.
+    var profilePhotoUri: String = ""
 
     @State private var showQuickCapture = false
+    /// Side-panel drawer that slides in from the leading edge when
+    /// the avatar is tapped — mirror of Releaf's home drawer
+    /// (apps/releaf/ios/Releaf/Features/Home/HomeScreen.swift).
+    /// Replaces the previous `Menu` so the avatar action surface is
+    /// visually consistent across the two sibling apps.
+    @State private var showProfileDrawer = false
     @StateObject private var capturesVM: CaptureListViewModel
+    @StateObject private var categoriesVM: CategoryListViewModel
     @ObservedObject private var syncState = SyncStateStore.shared
 
     init(
@@ -64,7 +89,11 @@ struct HomeScreen: View {
         onTapCategory: ((String) -> Void)? = nil,
         onOpenEntry: ((String) -> Void)? = nil,
         onOpenScan: ((String) -> Void)? = nil,
-        displayName: String? = nil
+        onOpenProfile: (() -> Void)? = nil,
+        onSignOut: (() -> Void)? = nil,
+        displayName: String? = nil,
+        email: String = "",
+        profilePhotoUri: String = ""
     ) {
         self.controller = controller
         self.userId = userId
@@ -74,14 +103,62 @@ struct HomeScreen: View {
         self.onTapCategory = onTapCategory
         self.onOpenEntry = onOpenEntry
         self.onOpenScan = onOpenScan
+        self.onOpenProfile = onOpenProfile
+        self.onSignOut = onSignOut
         self.displayName = displayName
+        self.email = email
+        self.profilePhotoUri = profilePhotoUri
 
         _capturesVM = StateObject(
             wrappedValue: CaptureListViewModel(userId: userId)
         )
+        _categoriesVM = StateObject(
+            wrappedValue: CategoryListViewModel(userId: userId)
+        )
     }
 
     var body: some View {
+        // Outer ZStack hosts the slide-in profile drawer as a
+        // sibling layer above the home content. The drawer needs
+        // to bleed past the bottom safe-area inset (where the nav
+        // bar lives), so wrapping it as an `.overlay` of the
+        // ScrollView wouldn't extend far enough — only the ZStack
+        // sibling reaches the screen edges.
+        ZStack(alignment: .topLeading) {
+            mainContent
+
+            if showProfileDrawer {
+                ProfileDrawerOverlay(
+                    displayName:     resolvedDisplayName,
+                    email:           email,
+                    profilePhotoUri: profilePhotoUri,
+                    onClose:         {
+                        withAnimation(.easeInOut(duration: 0.22)) { showProfileDrawer = false }
+                    },
+                    onOpenProfile: {
+                        withAnimation(.easeInOut(duration: 0.22)) { showProfileDrawer = false }
+                        onOpenProfile?()
+                    },
+                    onOpenSettings: {
+                        withAnimation(.easeInOut(duration: 0.22)) { showProfileDrawer = false }
+                        onOpenSettings()
+                    },
+                    onSignOut: {
+                        withAnimation(.easeInOut(duration: 0.22)) { showProfileDrawer = false }
+                        onSignOut?()
+                    }
+                )
+                .transition(.move(edge: .leading))
+                .zIndex(1)
+            }
+        }
+    }
+
+    /// Original home content (scrolling dashboard + bottom nav).
+    /// Hoisted out of `body` so the outer `ZStack` can host the
+    /// slide-in profile drawer as a sibling above it.
+    @ViewBuilder
+    private var mainContent: some View {
         // `.safeAreaInset(edge: .bottom)` hosts the bar (mirror of
         // Releaf's MainShell pattern). Critical: a `ZStack(alignment:
         // .bottom)` here would give the bar the ZStack's full height,
@@ -120,8 +197,10 @@ struct HomeScreen: View {
             bottomNavBar
         }
         .task {
-            // Open the live captures observation backing the rail.
+            // Open the live captures observation backing the rail
+            // and the live categories observation backing the grid.
             capturesVM.start()
+            categoriesVM.start()
         }
         .fullScreenCover(isPresented: $showQuickCapture) {
             // Mode-picker surface (the dark, branded scan UI).
@@ -167,18 +246,30 @@ struct HomeScreen: View {
         return trimmed.isEmpty ? "QuickInk" : trimmed
     }
 
-    /// Top-right profile pill — coral disc with the user's initial
-    /// (when we have a name) or a SF Symbol person icon. Tap routes
-    /// to Settings, mirroring how Google's consumer apps use the
-    /// avatar as the entry to account/preferences.
+    /// Top-right profile pill — coral disc with the user's profile
+    /// photo (when picked), the user's initial (when we have a
+    /// name), or the SF Symbol person glyph. Tap slides the
+    /// profile drawer in from the leading edge — same pattern as
+    /// Releaf's avatar → home drawer. The drawer surfaces Profile
+    /// (the new editor), Settings, and Sign out as account actions.
     @ViewBuilder
     private var profileIconButton: some View {
-        Button(action: onOpenSettings) {
+        Button {
+            withAnimation(.easeInOut(duration: 0.22)) {
+                showProfileDrawer = true
+            }
+        } label: {
             ZStack {
                 Circle()
                     .fill(QuickInkColors.accentSoft)
                     .frame(width: 44, height: 44)
-                if let initial = displayNameInitial {
+                if let avatar = avatarUIImage {
+                    Image(uiImage: avatar)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 44, height: 44)
+                        .clipShape(Circle())
+                } else if let initial = displayNameInitial {
                     Text(initial)
                         .font(QuickInkText.heading)
                         .foregroundStyle(QuickInkColors.accent)
@@ -188,9 +279,26 @@ struct HomeScreen: View {
                         .foregroundStyle(QuickInkColors.accent)
                 }
             }
+            .overlay(
+                Circle().stroke(QuickInkColors.accent, lineWidth: 2)
+            )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Profile and settings")
+        .accessibilityLabel("Open profile menu")
+    }
+
+    /// Lazy-load the picked profile photo. `UIImage(contentsOfFile:)`
+    /// is cheap and SwiftUI re-evaluates this computed property on
+    /// every render — when the URI changes the new image lands
+    /// without an explicit invalidation.
+    private var avatarUIImage: UIImage? {
+        guard !profilePhotoUri.isEmpty else { return nil }
+        let path: String? = {
+            if let url = URL(string: profilePhotoUri), url.isFileURL { return url.path }
+            return profilePhotoUri
+        }()
+        guard let path else { return nil }
+        return UIImage(contentsOfFile: path)
     }
 
     private var displayNameInitial: String? {
@@ -279,7 +387,7 @@ struct HomeScreen: View {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: QuickInkSpacing.s3) {
-                        ForEach(capturesVM.captures.prefix(12)) { capture in
+                        ForEach(capturesVM.captures.prefix(6)) { capture in
                             RecentScanThumb(capture: capture)
                                 .onTapGesture { onOpenScan?(capture.id) }
                         }
@@ -315,14 +423,40 @@ struct HomeScreen: View {
 
     // MARK: - Category grid
 
-    private static let categories: [(name: String, icon: String)] = [
-        ("Ideas",      "lightbulb"),
-        ("Projects",   "folder"),
-        ("Brainstorm", "sparkles"),
-        ("Meetings",   "person.3"),
-        ("Journal",    "book.closed"),
-        ("Study",      "graduationcap"),
-    ]
+    /// Sort by the most recent capture in each category. ISO-8601
+    /// `createdAt` strings sort lexicographically by timeline, so no
+    /// parse step is needed. Categories with no captures in the
+    /// loaded window fall to the end (empty-string key sorts smallest
+    /// in descending order). Mirror of Android's `sorted` block.
+    private var sortedCategories: [CategoryEntity] {
+        let latestByName: [String: String] = Dictionary(
+            grouping: capturesVM.captures
+        ) { ($0.category ?? "").lowercased() }
+        .mapValues { list in list.map(\.createdAt).max() ?? "" }
+
+        return categoriesVM.categories.sorted { a, b in
+            let aT = latestByName[a.name.lowercased()] ?? ""
+            let bT = latestByName[b.name.lowercased()] ?? ""
+            return aT > bT
+        }
+    }
+
+    /// Map a category name to its tile SF Symbol. Default-seed names
+    /// get purpose-specific glyphs; user-created categories fall
+    /// through to a generic tag. Matches the Android
+    /// `iconForCategory` switch.
+    private func iconFor(_ name: String) -> String {
+        switch name.lowercased() {
+        case "ideas":      return "lightbulb"
+        case "projects":   return "folder"
+        case "meetings":   return "person.3"
+        case "todo":       return "checkmark.circle"
+        case "study":      return "graduationcap"
+        case "journal":    return "book.closed"
+        case "brainstorm": return "sparkles"
+        default:           return "tag"
+        }
+    }
 
     @ViewBuilder
     private var categoryGrid: some View {
@@ -332,6 +466,9 @@ struct HomeScreen: View {
                 .tracking(QuickInkLetterSpacing.eyebrow)
                 .foregroundStyle(QuickInkColors.muted)
 
+            // 2-column grid sized to the live category count — every
+            // active row from the `categories` table, newest first.
+            // LazyVGrid scales to the long tail of user-added rows.
             LazyVGrid(
                 columns: [
                     GridItem(.flexible(), spacing: QuickInkSpacing.s3),
@@ -339,11 +476,11 @@ struct HomeScreen: View {
                 ],
                 spacing: QuickInkSpacing.s3
             ) {
-                ForEach(Self.categories, id: \.name) { cat in
+                ForEach(sortedCategories, id: \.id) { cat in
                     let stats = categoryStats(for: cat.name)
                     CategoryTile(
                         name:         cat.name,
-                        icon:         cat.icon,
+                        icon:         iconFor(cat.name),
                         count:        stats.count,
                         recencyBadge: stats.recencyBadge
                     )
@@ -577,7 +714,7 @@ struct HomeScreen: View {
                     .frame(width: 56, height: 56)
                     .shadow(color: QuickInkColors.accent.opacity(0.38), radius: 16, x: 0, y: 8)
                 Image(systemName: "bolt.fill")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 32, weight: .semibold))
                     .foregroundStyle(QuickInkColors.textOnAccent)
             }
             .offset(y: -16)

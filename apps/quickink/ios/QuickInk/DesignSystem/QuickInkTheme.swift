@@ -169,20 +169,27 @@ public enum QuickInkFont {
         public static let handwritten = "Caveat"
     }
 
-    /// Cormorant Garamond at the given size + weight. Falls back
-    /// to system serif design if the family isn't bundled.
+    /// Cormorant Garamond at the given size + weight, falling back
+    /// to the system *serif* design (New York on iOS) when the
+    /// family isn't bundled — important: the previous
+    /// `Font.custom(name, size:)` fallback returned the system
+    /// **sans** default, which made every "serif" surface render in
+    /// SF Pro and threw off the editorial hierarchy from the mock.
+    /// Using `.system(...design:.serif)` gives a real serif at every
+    /// build, and once Cormorant Garamond .ttf files are dropped in
+    /// `DesignSystem/Fonts/`, swap this back to `Font.custom(name,
+    /// size:).weight(weight)` so the bundled family takes over.
     public static func serif(_ size: CGFloat, weight: Font.Weight = .regular, italic: Bool = false) -> Font {
-        let name = italic ? Family.serifItalic : Family.serif
-        // `Font.custom(_:size:)` returns the system fallback if the
-        // family isn't registered — calling `.weight` on it still
-        // works and produces a system fallback at the right weight.
-        return Font.custom(name, size: size).weight(weight)
+        let base = Font.system(size: size, weight: weight, design: .serif)
+        return italic ? base.italic() : base
     }
 
     /// Caveat handwritten font for note previews. Falls back to
     /// system serif italic if the family isn't bundled.
     public static func handwritten(_ size: CGFloat) -> Font {
-        return Font.custom(Family.handwritten, size: size)
+        // Same fallback strategy as `serif(...)`: prefer a real
+        // serif italic over the SF default until Caveat is bundled.
+        return Font.system(size: size, weight: .regular, design: .serif).italic()
     }
 
     /// System sans for UI labels (chips, nav, status pills).
@@ -216,6 +223,12 @@ public enum QuickInkFont {
 public enum QuickInkText {
     /// Onboarding hero / page hero — large serif, light weight.
     public static let display    = QuickInkFont.serif(40, weight: .light)
+
+    /// Onboarding hero title — sized to match the JSX mockup
+    /// (`text-[30px] leading-[1.15]`). Smaller than `display` so
+    /// the two-line tagline doesn't crowd the illustration on a
+    /// 390-wide phone frame.
+    public static let onboardingTitle = QuickInkFont.serif(30, weight: .regular)
 
     /// Standard page title (Settings, Library, etc.) — serif, regular weight.
     public static let pageTitle  = QuickInkFont.serif(28, weight: .regular)
@@ -309,6 +322,21 @@ public extension View {
             .padding(.vertical, QuickInkSpacing.s3)
             .background(QuickInkColors.accent)
             .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+    }
+
+    /// Onboarding CTA surface — coral, rounded-rectangle (not a
+    /// full pill), taller vertical padding, with a soft coral
+    /// drop-shadow. Mirrors the JSX mockup's
+    /// `rounded-2xl py-4 shadow-md` pattern. Pair with
+    /// `QuickInkText.label` text + a trailing arrow icon for the
+    /// canonical onboarding "Continue" button.
+    func quickInkOnboardingCTA() -> some View {
+        self
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, QuickInkSpacing.s4)
+            .background(QuickInkColors.accent)
+            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.xl, style: .continuous))
+            .shadow(color: QuickInkColors.accent.opacity(0.30), radius: 12, x: 0, y: 6)
     }
 
     /// Card surface — white fill with border, rounded corners.

@@ -29,6 +29,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -36,8 +39,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import app.quickink.mobile.ui.theme.QuickInkFonts
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
@@ -51,11 +62,42 @@ fun OnboardingScaffold(
     ctaLabel: String,
     stepIndex: Int,
     totalSteps: Int = 3,
+    /**
+     * Optional italic + coral clause appended to the title on a new
+     * line, mirroring the mock's "Your notebook,\n*digitised.*"
+     * pattern. When null the title renders as a single upright
+     * serif block.
+     */
+    titleAccent: String? = null,
     onContinue: () -> Unit,
     illustration: @Composable () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
+
+    // Build the title with an optional italic+coral accent on a
+    // new line. AnnotatedString lets the two clauses share a single
+    // wrapping/centering pass — splitting them into two Text views
+    // would force a fixed line break and lose the centered-block
+    // multi-line feel from the mock.
+    val titleAnnotated: AnnotatedString = remember(title, titleAccent, colors.accent) {
+        buildAnnotatedString {
+            append(title)
+            if (titleAccent != null) {
+                append("\n")
+                withStyle(
+                    SpanStyle(
+                        fontFamily = QuickInkFonts.serif,
+                        fontStyle  = FontStyle.Italic,
+                        fontWeight = FontWeight.Normal,
+                        color      = colors.accent,
+                    )
+                ) {
+                    append(titleAccent)
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -77,9 +119,15 @@ fun OnboardingScaffold(
 
         Spacer(Modifier.size(QuickInkSpacing.s4))
 
+        // Title uses `onboardingTitle` (30sp) rather than the
+        // app-wide `display` (40sp) so the two-line tagline doesn't
+        // dominate the screen on a 390-wide phone frame — matches
+        // the JSX mockup's `text-[30px]` heading. The `titleAccent`
+        // clause (if any) renders inline as italic coral via the
+        // AnnotatedString built above.
         Text(
-            text     = title,
-            style    = type.display,
+            text     = titleAnnotated,
+            style    = type.onboardingTitle,
             color    = colors.ink,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = QuickInkSpacing.s5),
@@ -119,22 +167,43 @@ fun OnboardingScaffold(
             }
         }
 
-        // CTA — coral pill.
+        // CTA — coral rounded-rectangle (not a full pill) with a
+        // trailing arrow icon and a soft coral drop-shadow. Mirrors
+        // the JSX mockup's `rounded-2xl … shadow-md` button.
+        // Label uses the same serif family as the hero so the
+        // editorial type carries through to the action.
         Box(
             modifier = Modifier
                 .padding(horizontal = QuickInkSpacing.s5)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(QuickInkRadius.pill))
+                .shadow(
+                    elevation = 14.dp,
+                    shape     = RoundedCornerShape(QuickInkRadius.xl),
+                    ambientColor = colors.accent,
+                    spotColor    = colors.accent,
+                )
+                .clip(RoundedCornerShape(QuickInkRadius.xl))
                 .background(colors.accent)
-                .padding(vertical = QuickInkSpacing.s3)
-                .clickableNoIndication(onClick = onContinue),
+                .clickableNoIndication(onClick = onContinue)
+                .padding(vertical = QuickInkSpacing.s4),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text  = ctaLabel,
-                style = type.label,
-                color = colors.textOnAccent,
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+                verticalAlignment     = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text  = ctaLabel,
+                    style = type.ctaSerif,
+                    color = colors.textOnAccent,
+                )
+                Icon(
+                    imageVector       = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = null,
+                    tint              = colors.textOnAccent,
+                    modifier          = Modifier.size(16.dp),
+                )
+            }
         }
 
         Spacer(Modifier.size(QuickInkSpacing.s7))

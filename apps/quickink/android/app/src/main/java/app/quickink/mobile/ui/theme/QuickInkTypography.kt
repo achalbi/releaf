@@ -69,6 +69,19 @@ object QuickInkTextStyle {
         lineHeight = 48.sp,
     )
 
+    /**
+     * Onboarding hero title — sized to match the JSX mockup
+     * (`text-[30px] leading-[1.15]`). Smaller than [Display] so the
+     * two-line tagline doesn't crowd the illustration on a 390-wide
+     * phone frame. Mirror of iOS `QuickInkText.onboardingTitle`.
+     */
+    val OnboardingTitle: TextStyle = TextStyle(
+        fontFamily = QuickInkFonts.serif,
+        fontSize   = 30.sp,
+        fontWeight = FontWeight.Normal,
+        lineHeight = 35.sp,
+    )
+
     /** Standard page title (Settings, Library, etc.). */
     val PageTitle: TextStyle = TextStyle(
         fontFamily = QuickInkFonts.serif,
@@ -125,6 +138,19 @@ object QuickInkTextStyle {
         fontSize   = 14.sp,
         fontWeight = FontWeight.Medium,
         lineHeight = 20.sp,
+    )
+
+    /**
+     * CTA label rendered in the editorial serif family. Used by
+     * the onboarding "Continue" / "Continue with Google" buttons so
+     * the action matches the hero typography from the mock rather
+     * than dropping into SF Pro / system sans for the button text.
+     */
+    val CtaSerif: TextStyle = TextStyle(
+        fontFamily = QuickInkFonts.serif,
+        fontSize   = 18.sp,
+        fontWeight = FontWeight.Medium,
+        lineHeight = 22.sp,
     )
 
     /** Meta — timestamps, sync status, helper copy. */

@@ -239,7 +239,11 @@ class OkHttpDriveClient(
             .build()
         http.newCall(req).execute().useSafely { resp ->
             if (resp.code == 404) throw DriveError.NotFound
-            if (resp.code == 401) throw DriveError.Unauthenticated
+            // 403 = Drive scope wasn't granted at sign-in (most
+            // common silent-sync-failure cause), treat the same as
+            // 401 so the worker's auth-error path forces re-sign-in
+            // and the user re-consents with the drive.file checkbox.
+            if (resp.code == 401 || resp.code == 403) throw DriveError.Unauthenticated
             if (!resp.isSuccessful) throw DriveError.Underlying("download failed: ${resp.code}")
             resp.body?.bytes() ?: throw DriveError.Underlying("empty body on download")
         }
@@ -256,7 +260,11 @@ class OkHttpDriveClient(
                 .build()
             http.newCall(req).execute().useSafely { resp ->
                 if (resp.code == 404) throw DriveError.NotFound
-                if (resp.code == 401) throw DriveError.Unauthenticated
+                // 403 = Drive scope wasn't granted at sign-in (most
+            // common silent-sync-failure cause), treat the same as
+            // 401 so the worker's auth-error path forces re-sign-in
+            // and the user re-consents with the drive.file checkbox.
+            if (resp.code == 401 || resp.code == 403) throw DriveError.Unauthenticated
                 if (!resp.isSuccessful) throw DriveError.Underlying("trash failed: ${resp.code}")
             }
         }
@@ -294,7 +302,11 @@ class OkHttpDriveClient(
                 .header("Authorization", "Bearer $accessToken")
                 .build()
             http.newCall(req).execute().useSafely { resp ->
-                if (resp.code == 401) throw DriveError.Unauthenticated
+                // 403 = Drive scope wasn't granted at sign-in (most
+            // common silent-sync-failure cause), treat the same as
+            // 401 so the worker's auth-error path forces re-sign-in
+            // and the user re-consents with the drive.file checkbox.
+            if (resp.code == 401 || resp.code == 403) throw DriveError.Unauthenticated
                 if (!resp.isSuccessful) throw DriveError.Underlying("query failed: ${resp.code}")
                 val body = resp.body?.string() ?: throw DriveError.Underlying("empty query response")
                 val decoded = json.decodeFromString(FileListResponse.serializer(), body)
@@ -328,7 +340,11 @@ class OkHttpDriveClient(
             .header("Authorization", "Bearer $accessToken")
             .build()
         return http.newCall(req).execute().useSafely { resp ->
-            if (resp.code == 401) throw DriveError.Unauthenticated
+            // 403 = Drive scope wasn't granted at sign-in (most
+            // common silent-sync-failure cause), treat the same as
+            // 401 so the worker's auth-error path forces re-sign-in
+            // and the user re-consents with the drive.file checkbox.
+            if (resp.code == 401 || resp.code == 403) throw DriveError.Unauthenticated
             if (!resp.isSuccessful) throw DriveError.Underlying("createFolder failed: ${resp.code}")
             val respBody = resp.body?.string() ?: throw DriveError.Underlying("empty createFolder response")
             json.decodeFromString(FileResource.serializer(), respBody).toDomain()
@@ -367,7 +383,11 @@ class OkHttpDriveClient(
             .header("Authorization", "Bearer $accessToken")
             .build()
         return http.newCall(req).execute().useSafely { resp ->
-            if (resp.code == 401) throw DriveError.Unauthenticated
+            // 403 = Drive scope wasn't granted at sign-in (most
+            // common silent-sync-failure cause), treat the same as
+            // 401 so the worker's auth-error path forces re-sign-in
+            // and the user re-consents with the drive.file checkbox.
+            if (resp.code == 401 || resp.code == 403) throw DriveError.Unauthenticated
             if (!resp.isSuccessful) throw DriveError.Underlying("createFile failed: ${resp.code}")
             val respBody = resp.body?.string() ?: throw DriveError.Underlying("empty createFile response")
             json.decodeFromString(FileResource.serializer(), respBody).toDomain()
@@ -403,7 +423,11 @@ class OkHttpDriveClient(
             .header("Authorization", "Bearer $accessToken")
             .build()
         return http.newCall(req).execute().useSafely { resp ->
-            if (resp.code == 401) throw DriveError.Unauthenticated
+            // 403 = Drive scope wasn't granted at sign-in (most
+            // common silent-sync-failure cause), treat the same as
+            // 401 so the worker's auth-error path forces re-sign-in
+            // and the user re-consents with the drive.file checkbox.
+            if (resp.code == 401 || resp.code == 403) throw DriveError.Unauthenticated
             if (resp.code == 404) throw DriveError.NotFound
             if (!resp.isSuccessful) throw DriveError.Underlying("updateFile failed: ${resp.code}")
             val respBody = resp.body?.string() ?: throw DriveError.Underlying("empty updateFile response")

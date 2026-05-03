@@ -19,6 +19,11 @@ import SwiftUI
 struct OnboardingScaffold<Illustration: View>: View {
 
     let title: String
+    /// Optional italic + coral clause appended to the title on a new
+    /// line, mirroring the mock's "Your notebook,\n*digitised.*"
+    /// pattern. When nil the title renders as a single upright
+    /// serif block.
+    let titleAccent: String?
     let subtitle: String
     let ctaLabel: String
     let stepIndex: Int      // 0-based
@@ -28,6 +33,7 @@ struct OnboardingScaffold<Illustration: View>: View {
 
     init(
         title: String,
+        titleAccent: String? = nil,
         subtitle: String,
         ctaLabel: String,
         stepIndex: Int,
@@ -36,6 +42,7 @@ struct OnboardingScaffold<Illustration: View>: View {
         @ViewBuilder illustration: @escaping () -> Illustration
     ) {
         self.title = title
+        self.titleAccent = titleAccent
         self.subtitle = subtitle
         self.ctaLabel = ctaLabel
         self.stepIndex = stepIndex
@@ -56,11 +63,17 @@ struct OnboardingScaffold<Illustration: View>: View {
             Spacer(minLength: QuickInkSpacing.s4)
 
             // Editorial copy — serif heading + ink-soft subtitle.
+            // Title uses `onboardingTitle` (30pt) rather than the
+            // app-wide `display` (40pt) so the two-line tagline
+            // doesn't dominate the screen on a 390-wide frame —
+            // matches the mockup's `text-[30px]` heading. When a
+            // `titleAccent` is supplied we render the accent in
+            // italic coral on its own line, matching
+            // "Your notebook,\n*digitised.*" from the mock.
             VStack(spacing: QuickInkSpacing.s3) {
-                Text(title)
-                    .font(QuickInkText.display)
-                    .foregroundStyle(QuickInkColors.ink)
+                titleView
                     .multilineTextAlignment(.center)
+                    .lineSpacing(2)
                     .padding(.horizontal, QuickInkSpacing.s5)
 
                 Text(subtitle)
@@ -86,18 +99,59 @@ struct OnboardingScaffold<Illustration: View>: View {
             }
             .padding(.bottom, QuickInkSpacing.s5)
 
-            // CTA — coral pill with white label.
+            // CTA — coral rounded-rectangle (not a full pill) with
+            // a trailing arrow icon and a soft coral drop-shadow.
+            // Mirrors the mockup's `rounded-2xl … shadow-md` button.
+            // Label uses the same serif family as the hero so the
+            // editorial type carries through to the action.
             Button(action: onContinue) {
-                Text(ctaLabel)
-                    .font(QuickInkText.label)
-                    .foregroundStyle(QuickInkColors.textOnAccent)
-                    .quickInkCTA()
+                HStack(spacing: QuickInkSpacing.s2) {
+                    Text(ctaLabel)
+                        .font(QuickInkFont.serif(18, weight: .medium))
+                        .foregroundStyle(QuickInkColors.textOnAccent)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(QuickInkColors.textOnAccent)
+                }
+                .quickInkOnboardingCTA()
             }
             .padding(.horizontal, QuickInkSpacing.s5)
             .padding(.bottom, QuickInkSpacing.s7)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(QuickInkColors.bg.ignoresSafeArea())
+    }
+
+    /// Title block. Built from `Text` concatenation so the upright
+    /// + italic-coral parts share a single layout (proper line
+    /// wrapping, single multi-line alignment) — splitting them into
+    /// two `Text` views in a VStack would force a fixed line break
+    /// and lose the centered-alignment treatment.
+    ///
+    /// Color modifiers inside the concatenation use
+    /// `.foregroundColor(_:)` rather than `.foregroundStyle(_:)`
+    /// because the `Text`-returning `foregroundStyle` overload (the
+    /// one Swift selects when the result has to stay a `Text` for
+    /// `+` concatenation) is iOS 17+, and the QuickInk package
+    /// targets `.iOS(.v16)`. `Text.foregroundColor(_:)` ships back
+    /// to iOS 13 with the same Text-returning shape.
+    @ViewBuilder
+    private var titleView: some View {
+        if let accent = titleAccent {
+            (
+                Text(title)
+                    .font(QuickInkText.onboardingTitle)
+                    .foregroundColor(QuickInkColors.ink)
+                + Text("\n")
+                + Text(accent)
+                    .font(QuickInkFont.serif(30, weight: .regular, italic: true))
+                    .foregroundColor(QuickInkColors.accent)
+            )
+        } else {
+            Text(title)
+                .font(QuickInkText.onboardingTitle)
+                .foregroundStyle(QuickInkColors.ink)
+        }
     }
 }
 
@@ -264,7 +318,15 @@ struct CameraIllustration: View {
 }
 
 /// Onboarding step 3 — cloud upload glyph paired with notebook
-/// page. Drive backup metaphor.
+/// pages. Drive backup metaphor.
+///
+/// The cloud silhouette is rendered from the SF Symbol
+/// `cloud.fill` rather than a hand-built path. The previous path-
+/// based version had a malformed seam between the right and top
+/// arcs and didn't read as a cloud; SF Symbols ships the iconic
+/// iOS cloud shape and renders crisply at any size. The bordered
+/// look is reproduced by stacking the outline variant (`cloud`)
+/// on top in the border tint.
 struct DriveIllustration: View {
     var body: some View {
         ZStack {
@@ -273,25 +335,35 @@ struct DriveIllustration: View {
                 .fill(QuickInkColors.accentSoft)
                 .frame(width: 260, height: 260)
 
-            // Cloud silhouette — built from overlapping circles +
-            // a base rectangle for the flat bottom edge.
-            cloudShape
-                .fill(QuickInkColors.surface)
-                .frame(width: 200, height: 130)
-                .overlay(
-                    cloudShape.stroke(QuickInkColors.border, lineWidth: 1.5)
-                )
-                .shadow(color: QuickInkColors.ink.opacity(0.08), radius: 6, x: 0, y: 3)
-                .offset(y: -20)
+            // Cloud silhouette — surface-fill cloud with a thin
+            // border outline stacked on top. Drop shadow is layered:
+            // a wide darker shadow gives the cloud real weight on
+            // the warm canvas (matches the heavier shadow in the
+            // mock), with a tighter softer shadow for crisp edges.
+            ZStack {
+                Image(systemName: "cloud.fill")
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(QuickInkColors.surface)
+                    .shadow(color: QuickInkColors.ink.opacity(0.28), radius: 24, x: 0, y: 14)
+                    .shadow(color: QuickInkColors.ink.opacity(0.14), radius: 8,  x: 0, y: 4)
+                Image(systemName: "cloud")
+                    .resizable()
+                    .scaledToFit()
+                    .fontWeight(.thin)
+                    .foregroundStyle(QuickInkColors.border)
+            }
+            .frame(width: 220, height: 150)
+            .offset(y: -20)
 
-            // Up-arrow inside the cloud.
+            // Up-arrow inside the cloud — coral, indicating upload.
             Image(systemName: "arrow.up")
-                .font(.system(size: 36, weight: .medium))
+                .font(.system(size: 38, weight: .semibold))
                 .foregroundStyle(QuickInkColors.accent)
                 .offset(y: -22)
 
-            // Small page glyph below the cloud, suggesting upload
-            // direction.
+            // Small page glyphs below the cloud, suggesting the
+            // pages flowing up into Drive.
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(QuickInkColors.paper1)
                 .frame(width: 50, height: 64)
@@ -311,21 +383,6 @@ struct DriveIllustration: View {
                 )
                 .rotationEffect(.degrees(-4))
                 .offset(x: 30, y: 84)
-        }
-    }
-
-    /// Hand-built cloud shape — two top arcs + flat bottom.
-    private var cloudShape: some Shape {
-        Path { path in
-            let w: CGFloat = 200
-            let h: CGFloat = 130
-            path.move(to: CGPoint(x: 30, y: h))
-            path.addLine(to: CGPoint(x: w - 30, y: h))
-            path.addArc(center: CGPoint(x: w - 30, y: h - 30), radius: 30, startAngle: .degrees(90), endAngle: .degrees(0), clockwise: true)
-            path.addArc(center: CGPoint(x: w - 70, y: 50), radius: 50, startAngle: .degrees(0), endAngle: .degrees(-90), clockwise: true)
-            path.addArc(center: CGPoint(x: 70, y: 70), radius: 40, startAngle: .degrees(-90), endAngle: .degrees(180), clockwise: true)
-            path.addArc(center: CGPoint(x: 30, y: h - 30), radius: 30, startAngle: .degrees(180), endAngle: .degrees(90), clockwise: true)
-            path.closeSubpath()
         }
     }
 }

@@ -38,17 +38,23 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -72,10 +78,12 @@ import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.quickink.mobile.ui.theme.quickInkDotGridBackground
+import androidx.core.content.FileProvider
 import app.releaf.mobile.data.common.IsoClock
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
+import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -84,6 +92,7 @@ import java.time.format.FormatStyle
 @Composable
 fun ScanDetailScreen(
     captureId: String,
+    userId: String,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -94,10 +103,22 @@ fun ScanDetailScreen(
 
     val captureDao = remember(app) { app.database.captureDao() }
     val ocrDao = remember(app) { app.database.ocrResultDao() }
+    val categoryDao = remember(app) { app.database.categoryDao() }
 
     var capture by remember(captureId) { mutableStateOf<CaptureEntity?>(null) }
     var showOcr by remember(captureId) { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    // Drives the retag bottom sheet. Tapping the category pill (or
+    // the "Tag scan" affordance for an untagged capture) sets this
+    // to true; the sheet's options call into [retagCapture].
+    var showRetagSheet by remember { mutableStateOf(false) }
+
+    // Live category list — populated from the same DAO the home
+    // grid + review screen read, scoped to the current user. The
+    // sheet uses this for its picker rows.
+    val categories by remember(userId, categoryDao) {
+        categoryDao.observeActive(userId)
+    }.collectAsState(initial = emptyList())
 
     LaunchedEffect(captureId) {
         capture = captureDao.findById(captureId)
@@ -216,7 +237,10 @@ fun ScanDetailScreen(
                 )
             } else {
                 PreviewImage(capture = current)
-                MetaBlock(capture = current)
+                MetaBlock(
+                    capture  = current,
+                    onTagTap = { showRetagSheet = true },
+                )
                 OcrSection(
                     showOcr   = showOcr,
                     isLoading = showOcr && !ocrLoaded,
@@ -225,6 +249,30 @@ fun ScanDetailScreen(
                 )
             }
         }
+    }
+
+    // Retag bottom sheet — tapping the category pill (or the
+    // untagged "Tag scan" affordance) opens this. One row per
+    // active category plus a "Remove tag" row when the capture
+    // already has one. Each row calls into [retagCapture] which
+    // persists via `CaptureDao.setCategory(...)` and refreshes
+    // the in-screen `capture` state so the pill flips
+    // immediately.
+    if (showRetagSheet) {
+        RetagSheet(
+            categories = categories.map { it.name },
+            current    = capture?.category,
+            onDismiss  = { showRetagSheet = false },
+            onPick     = { name ->
+                showRetagSheet = false
+                scope.launch {
+                    try {
+                        captureDao.setCategory(captureId, name, IsoClock.nowIso())
+                        capture = captureDao.findById(captureId)
+                    } catch (_: Exception) { /* best-effort */ }
+                }
+            },
+        )
     }
 }
 
@@ -305,13 +353,23 @@ private fun PreviewImage(capture: CaptureEntity) {
 /**
  * Hand the capture's content off to the system share sheet. Tries
  * the PDF first (richest result); falls back to the preview JPEG if
- * the PDF URI is missing or rejected by the chooser. Surfaces
- * failures via Toast so the user knows the tap registered — silent
- * failure was reported as "share button not wired".
+ * the PDF URI is missing or unshareable.
  *
- * `FLAG_GRANT_READ_URI_PERMISSION` only works for URIs we own or
- * received with grantable permission; ML-Kit's scanner grants the
- * latter, so forwarding is allowed.
+ * URI handling matters here: after sync (or a Drive restore) the
+ * `pdf_uri` / `preview_uri` rows are `file://` URIs rooted at
+ * AttachmentStorage's directory (`<filesDir>/quickink/attachments/`
+ * once QuickInkApp.onCreate's `appFolderName` override has run, with
+ * historic rows migrated in by `migrateLegacyAttachmentsFolder`).
+ * Modern Android forbids forwarding `file://` URIs from app-private
+ * storage to other apps — the chooser opens but the receiving app
+ * can't read the bytes (FLAG_GRANT_READ only takes effect on
+ * `content://` URIs). So we wrap any `file://` URI through our
+ * FileProvider to get a content:// URI that does carry a usable
+ * grant. Fresh captures from ML Kit's scanner already arrive as
+ * content:// URIs; those are forwarded as-is.
+ *
+ * Failures surface via Toast so the user knows the tap registered —
+ * silent failure was reported as "share button not wired".
  */
 private fun sharePdf(
     context: android.content.Context,
@@ -319,7 +377,7 @@ private fun sharePdf(
     previewUri: String?,
 ) {
     val candidates = listOfNotNull(
-        pdfUri?.takeIf { it.isNotBlank() }    to "application/pdf",
+        pdfUri?.takeIf { it.isNotBlank() }     to "application/pdf",
         previewUri?.takeIf { it.isNotBlank() } to "image/jpeg",
     ).mapNotNull { (uri, type) -> uri?.let { it to type } }
 
@@ -331,11 +389,16 @@ private fun sharePdf(
     }
 
     for ((rawUri, mime) in candidates) {
-        val uri = try { Uri.parse(rawUri) } catch (_: Exception) { continue }
+        val shareUri = shareableUri(context, rawUri) ?: continue
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = mime
-            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_STREAM, shareUri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            // Without `clipData`, the grant flag isn't honored on
+            // some receivers (notably anything routed through a
+            // chooser target on API 24+). Mirroring EXTRA_STREAM into
+            // clipData is the documented workaround.
+            clipData = android.content.ClipData.newRawUri(null, shareUri)
         }
         try {
             context.startActivity(Intent.createChooser(intent, "Share scan"))
@@ -351,8 +414,33 @@ private fun sharePdf(
     ).show()
 }
 
+/// Translate a stored capture URI string into something the share
+/// sheet's receivers can actually read. `file://` URIs go through
+/// FileProvider so the receiver gets a content:// URI with a usable
+/// read grant; `content://` URIs (e.g. ML Kit's fresh scanner output)
+/// are returned as-is. Returns null when the URI can't be parsed or
+/// the file is outside the FileProvider's exposed paths.
+private fun shareableUri(context: android.content.Context, raw: String): Uri? {
+    val parsed = runCatching { Uri.parse(raw) }.getOrNull() ?: return null
+    return when (parsed.scheme) {
+        "content" -> parsed
+        "file"    -> {
+            val path = parsed.path ?: return null
+            val file = File(path)
+            if (!file.exists()) return null
+            val authority = "${context.packageName}.fileprovider"
+            runCatching { FileProvider.getUriForFile(context, authority, file) }
+                .getOrNull()
+        }
+        else -> null
+    }
+}
+
 @Composable
-private fun MetaBlock(capture: CaptureEntity) {
+private fun MetaBlock(
+    capture: CaptureEntity,
+    onTagTap: () -> Unit,
+) {
     Row(
         modifier              = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
@@ -362,9 +450,42 @@ private fun MetaBlock(capture: CaptureEntity) {
         if (capture.pageCount > 1) {
             MetaPill(text = "${capture.pageCount} pages")
         }
-        capture.category?.takeIf { it.isNotEmpty() }?.let {
-            MetaPill(text = it, accent = true)
-        }
+        // Category affordance — a tappable pill that opens the
+        // retag sheet. When the capture already has a tag, the pill
+        // renders the tag with the accent treatment; when it
+        // doesn't, we fall back to a muted "Tag scan" affordance so
+        // retagging is still discoverable.
+        TagPill(category = capture.category, onClick = onTagTap)
+    }
+}
+
+@Composable
+private fun TagPill(category: String?, onClick: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val hasTag = !category.isNullOrEmpty()
+    val bg = if (hasTag) colors.accentSoft else colors.borderSoft
+    val fg = if (hasTag) colors.accent     else colors.inkSoft
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(QuickInkRadius.pill))
+            .background(bg)
+            .clickable(onClick = onClick)
+            .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1),
+    ) {
+        Icon(
+            imageVector       = if (hasTag) Icons.Filled.LocalOffer else Icons.Filled.Add,
+            contentDescription = null,
+            tint              = fg,
+            modifier          = Modifier.size(12.dp),
+        )
+        Text(
+            text  = if (hasTag) category!! else "Tag scan",
+            style = type.caption,
+            color = fg,
+        )
     }
 }
 
@@ -381,6 +502,113 @@ private fun MetaPill(text: String, accent: Boolean = false) {
             .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
     ) {
         Text(text = text, style = type.caption, color = fg)
+    }
+}
+
+/**
+ * Bottom-sheet retag picker. Shows one row per active category
+ * (with the current selection check-marked + accent-tinted) plus a
+ * "Remove tag" row when the capture already has one. Selecting any
+ * row calls back through [onPick] with the chosen category name
+ * (or `null` for "Remove tag"). Cancelled by scrim tap, drag-down,
+ * or back-press.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RetagSheet(
+    categories: List<String>,
+    current: String?,
+    onDismiss: () -> Unit,
+    onPick: (String?) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val sheetState = rememberModalBottomSheetState()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = colors.surface,
+        contentColor     = colors.ink,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start  = QuickInkSpacing.s5,
+                    end    = QuickInkSpacing.s5,
+                    bottom = QuickInkSpacing.s5,
+                ),
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+            Text(
+                text  = "Tag scan as",
+                style = type.heading,
+                color = colors.ink,
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s1))
+            categories.forEach { name ->
+                val selected = name == current
+                RetagRow(
+                    label    = name,
+                    selected = selected,
+                    onClick  = { onPick(name) },
+                )
+            }
+            if (!current.isNullOrEmpty()) {
+                Spacer(Modifier.size(QuickInkSpacing.s1))
+                Text(
+                    text      = "Remove tag",
+                    style     = type.label,
+                    color     = colors.danger,
+                    textAlign = TextAlign.Center,
+                    modifier  = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(QuickInkRadius.md))
+                        .clickable { onPick(null) }
+                        .padding(vertical = QuickInkSpacing.s3),
+                )
+            }
+            Text(
+                text      = "Cancel",
+                style     = type.label,
+                color     = colors.muted,
+                textAlign = TextAlign.Center,
+                modifier  = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(QuickInkRadius.md))
+                    .clickable(onClick = onDismiss)
+                    .padding(vertical = QuickInkSpacing.s2),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RetagRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(if (selected) colors.accentSoft else colors.borderSoft)
+            .clickable(onClick = onClick)
+            .padding(horizontal = QuickInkSpacing.s4, vertical = QuickInkSpacing.s3),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        Icon(
+            imageVector       = if (selected) Icons.Filled.Check else Icons.Filled.LocalOffer,
+            contentDescription = null,
+            tint              = if (selected) colors.accent else colors.inkSoft,
+            modifier          = Modifier.size(18.dp),
+        )
+        Text(
+            text     = label,
+            style    = type.body,
+            color    = if (selected) colors.accent else colors.ink,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

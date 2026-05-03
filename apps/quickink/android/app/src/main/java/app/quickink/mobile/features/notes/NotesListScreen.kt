@@ -1,11 +1,10 @@
 /*
  * NotesListScreen.kt
  *
- * QuickInk's Library — the user's full scan gallery, sorted /
- * filterable / grouped. Same data source as the home rail
- * (`captures` via `CaptureDao.observeActive`) but unbounded and
- * with day-bucket grouping + chip filters off the live `categories`
- * table.
+ * QuickInk's Library — the user's full scan gallery. Same data
+ * source as the home rail (`captures` via `CaptureDao.observeActive`)
+ * but unbounded, with category chips (wrapping pill row, count next
+ * to each label) off the live `categories` table.
  *
  * Tap → `ScanDetailScreen` for the selected capture (preview +
  * OCR-on-demand). The notepad-entries-driven editor is no longer
@@ -23,10 +22,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,12 +34,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -74,10 +71,8 @@ import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 
 private enum class ViewMode { Grid, List }
 /**
@@ -128,7 +123,13 @@ fun NotesListScreen(
         }
     }
 
-    val grouped = remember(filteredSorted) { groupByDay(filteredSorted) }
+    // Per-category counts for the chip labels. Built off the full
+    // captures set (not the filtered view) so each chip's number
+    // reflects the size of its bucket regardless of which chip is
+    // currently active.
+    val countByCategory = remember(captures) {
+        captures.groupingBy { (it.category ?: "").lowercase() }.eachCount()
+    }
 
     Column(
         modifier = Modifier
@@ -184,20 +185,29 @@ fun NotesListScreen(
             }
         }
 
-        // Filter chips
-        Row(
+        // Filter chips — wraps onto multiple rows so every category
+        // is visible at once, no horizontal scroll. Each chip carries
+        // its bucket count next to the label.
+        @OptIn(ExperimentalLayoutApi::class)
+        FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = QuickInkSpacing.s5, vertical = QuickInkSpacing.s2),
             horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+            verticalArrangement   = Arrangement.spacedBy(QuickInkSpacing.s2),
         ) {
-            val names = listOf("All") + categories.map { it.name }
-            names.forEach { cat ->
+            FilterChip(
+                label    = "All",
+                count    = captures.size,
+                selected = activeCategory == "All",
+                onClick  = { activeCategory = "All" },
+            )
+            categories.forEach { cat ->
                 FilterChip(
-                    label    = cat,
-                    selected = cat == activeCategory,
-                    onClick  = { activeCategory = cat },
+                    label    = cat.name,
+                    count    = countByCategory[cat.name.lowercase()] ?: 0,
+                    selected = cat.name == activeCategory,
+                    onClick  = { activeCategory = cat.name },
                 )
             }
         }
@@ -209,46 +219,36 @@ fun NotesListScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = QuickInkSpacing.s5),
-                verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s5),
+                verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
             ) {
-                grouped.forEach { (label, list) ->
-                    item(key = "header-$label") {
-                        Text(
-                            text  = label.uppercase(),
-                            style = type.eyebrow,
-                            color = colors.muted,
-                            modifier = Modifier.padding(top = QuickInkSpacing.s4),
-                        )
-                    }
-                    if (viewMode == ViewMode.Grid) {
-                        // Two-column grid laid out as paired rows so we
-                        // can keep using LazyColumn (mixing LazyColumn +
-                        // LazyVerticalGrid in the same scroll surface
-                        // is awkward). Each row holds up to 2 cards.
-                        list.chunked(2).forEachIndexed { idx, pair ->
-                            item(key = "grid-$label-$idx-${pair.first().id}") {
-                                Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
-                                    pair.forEach { capture ->
-                                        Box(modifier = Modifier.weight(1f)) {
-                                            LibraryScanGridCard(
-                                                capture = capture,
-                                                onTap   = { onOpenScan(capture.id) },
-                                            )
-                                        }
+                if (viewMode == ViewMode.Grid) {
+                    // Two-column grid laid out as paired rows so we
+                    // can keep using LazyColumn (mixing LazyColumn +
+                    // LazyVerticalGrid in the same scroll surface
+                    // is awkward). Each row holds up to 2 cards.
+                    filteredSorted.chunked(2).forEachIndexed { idx, pair ->
+                        item(key = "grid-$idx-${pair.first().id}") {
+                            Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
+                                pair.forEach { capture ->
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        LibraryScanGridCard(
+                                            capture = capture,
+                                            onTap   = { onOpenScan(capture.id) },
+                                        )
                                     }
-                                    if (pair.size == 1) {
-                                        Spacer(modifier = Modifier.weight(1f))
-                                    }
+                                }
+                                if (pair.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
                                 }
                             }
                         }
-                    } else {
-                        items(list, key = { "list-${it.id}" }) { capture ->
-                            LibraryScanListRow(
-                                capture = capture,
-                                onTap   = { onOpenScan(capture.id) },
-                            )
-                        }
+                    }
+                } else {
+                    items(filteredSorted, key = { "list-${it.id}" }) { capture ->
+                        LibraryScanListRow(
+                            capture = capture,
+                            onTap   = { onOpenScan(capture.id) },
+                        )
                     }
                 }
                 item(key = "bottom-pad") { Spacer(Modifier.size(QuickInkSpacing.s7)) }
@@ -258,20 +258,24 @@ fun NotesListScreen(
 }
 
 @Composable
-private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun FilterChip(label: String, count: Int, selected: Boolean, onClick: () -> Unit) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
-    Box(
+    val onChip = if (selected) colors.textOnAccent else colors.ink
+    Row(
         modifier = Modifier
             .clip(RoundedCornerShape(QuickInkRadius.pill))
             .background(if (selected) colors.accent else colors.borderSoft)
             .clickable(onClick = onClick)
             .padding(horizontal = QuickInkSpacing.s4, vertical = QuickInkSpacing.s2),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        Text(text = label, style = type.label, color = onChip)
+        Spacer(Modifier.size(QuickInkSpacing.s2))
         Text(
-            text  = label,
-            style = type.label,
-            color = if (selected) colors.textOnAccent else colors.ink,
+            text  = count.toString(),
+            style = type.caption,
+            color = onChip.copy(alpha = if (selected) 0.85f else 0.6f),
         )
     }
 }
@@ -471,41 +475,6 @@ private fun LibraryScanListRow(capture: CaptureEntity, onTap: () -> Unit) {
             }
         }
     }
-}
-
-/**
- * Group captures into Today / This week / Earlier buckets keyed off
- * the capture's `createdAt` ISO timestamp (parsed in the device's
- * local timezone). Falls back to one "All" bucket if every input
- * fails to parse — defensive but rarely hit in practice.
- */
-private fun groupByDay(captures: List<CaptureEntity>): List<Pair<String, List<CaptureEntity>>> {
-    val today = mutableListOf<CaptureEntity>()
-    val week  = mutableListOf<CaptureEntity>()
-    val earlier = mutableListOf<CaptureEntity>()
-    val now = LocalDate.now(ZoneId.systemDefault())
-    val weekAgo = now.minusDays(6) // Today + previous 6 days = "this week".
-
-    for (c in captures) {
-        val date = try {
-            Instant.parse(c.createdAt).atZone(ZoneId.systemDefault()).toLocalDate()
-        } catch (_: Exception) {
-            null
-        }
-        when {
-            date == null         -> earlier += c
-            date == now          -> today   += c
-            !date.isBefore(weekAgo) -> week  += c
-            else                 -> earlier += c
-        }
-    }
-
-    val out = mutableListOf<Pair<String, List<CaptureEntity>>>()
-    if (today.isNotEmpty())   out += "Today"     to today
-    if (week.isNotEmpty())    out += "This week" to week
-    if (earlier.isNotEmpty()) out += "Earlier"   to earlier
-    if (out.isEmpty())        out += "All"       to captures
-    return out
 }
 
 private fun friendlyMonthDay(iso: String): String =

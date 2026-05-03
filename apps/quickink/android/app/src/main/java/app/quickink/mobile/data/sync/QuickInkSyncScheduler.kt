@@ -37,6 +37,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
@@ -76,6 +77,13 @@ object QuickInkSyncScheduler {
      * Enqueue an immediate single-flight push. Safe to call from
      * any repository after a row is marked dirty — KEEP coalesces a
      * burst of calls into one run.
+     *
+     * For *user-initiated* syncs (Settings → "Sync now"), call
+     * [requestUserSync] instead. KEEP causes a serious dead-state
+     * bug for that path: once a worker run fails and WorkManager
+     * queues a backoff retry, every subsequent KEEP request is
+     * silently dropped because the retry is still ENQUEUED. Result:
+     * the user keeps tapping "Sync now" and sees nothing happen.
      */
     fun requestImmediate(context: Context) {
         val request = OneTimeWorkRequestBuilder<QuickInkSyncWorker>()
@@ -86,6 +94,43 @@ object QuickInkSyncScheduler {
         WorkManager.getInstance(context).enqueueUniqueWork(
             QuickInkSyncWorker.ONESHOT_WORK_NAME,
             ExistingWorkPolicy.KEEP,
+            request,
+        )
+    }
+
+    /**
+     * Enqueue an immediate sync triggered by an explicit user
+     * action (Settings → "Sync now"). Uses [ExistingWorkPolicy.REPLACE]
+     * so a fresh tap *cancels any pending retry from a previous
+     * failed run* and starts clean — KEEP would have silently
+     * dropped the request, leaving the user stuck behind the old
+     * retry's backoff window.
+     *
+     * Marked **expedited** so WorkManager actually starts the
+     * worker within ~10 seconds instead of the indefinite delay
+     * non-expedited OneTimeWork can sit at on Android 12+. The
+     * user has just tapped "Sync now"; deferring execution past
+     * the optimistic UI flash is what produced the "Last synced
+     * still shows Never" symptom users were reporting.
+     * `RUN_AS_NON_EXPEDITED_WORK_REQUEST` is the safe fallback
+     * when the per-app expedited quota is exhausted (instead of
+     * throwing).
+     *
+     * Same "fresh tap always wins" posture [requestRestore] takes
+     * for the Restore button. Mirrors the iOS
+     * `SyncScheduler.requestImmediate(...)` semantics where each
+     * call kicks a fresh in-process Task.
+     */
+    fun requestUserSync(context: Context) {
+        val request = OneTimeWorkRequestBuilder<QuickInkSyncWorker>()
+            .setConstraints(networkConstraint)
+            .setBackoffCriteria(BackoffPolicy.LINEAR, ONESHOT_BACKOFF_SEC, TimeUnit.SECONDS)
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .build()
+
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            QuickInkSyncWorker.ONESHOT_WORK_NAME,
+            ExistingWorkPolicy.REPLACE,
             request,
         )
     }
