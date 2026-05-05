@@ -57,15 +57,20 @@ public final class CaptureRepository: @unchecked Sendable {
         pdfURL: URL?,
         previewURL: URL?,
         pageCount: Int,
-        category: String? = nil
+        category: String? = nil,
+        /// Capture origin. `"scan"` (default) — went through
+        /// VisionKit's document scanner. `"import"` — picked from
+        /// the system photo picker. Drives the "Import" pill in
+        /// the Library cards.
+        source: String = "scan"
     ) async throws {
         let now = IsoClock.nowIso()
         try await dbQueue.write { db in
             try db.execute(sql: """
                 INSERT INTO captures (
                     id, user_id, title, pdf_uri, preview_uri,
-                    page_count, category, created_at, updated_at, dirty
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    page_count, category, source, created_at, updated_at, dirty
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """, arguments: [
                     id,
                     userId,
@@ -74,6 +79,7 @@ public final class CaptureRepository: @unchecked Sendable {
                     previewURL?.absoluteString,
                     pageCount,
                     category,
+                    source,
                     now,
                     now,
                 ])
@@ -91,6 +97,38 @@ public final class CaptureRepository: @unchecked Sendable {
                 SET category = ?, updated_at = ?, dirty = 1
                 WHERE id = ?
                 """, arguments: [category, now, captureId])
+        }
+    }
+
+    /// Update the user-editable title on a capture. Same dirty-bit
+    /// pattern as `setCategory`. Pass `nil` to clear the title
+    /// (which makes the Library card fall back to OCR snippet →
+    /// category → "Untitled scan").
+    public func setTitle(captureId: String, title: String?) async throws {
+        let now = IsoClock.nowIso()
+        try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE captures
+                SET title = ?, updated_at = ?, dirty = 1
+                WHERE id = ?
+                """, arguments: [title, now, captureId])
+        }
+    }
+
+    /// Replace the OCR text on a single page row. Used by the scan
+    /// detail editor when the user corrects the recognised text.
+    /// Sets the dirty bit + bumps `updated_at` so the next sync
+    /// pass mirrors the change to Drive. The FTS5 virtual table
+    /// rebuilds its index automatically via the AFTER UPDATE
+    /// trigger on `ocr_results`.
+    public func setOcrText(ocrResultId: String, text: String) async throws {
+        let now = IsoClock.nowIso()
+        try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE ocr_results
+                SET text = ?, updated_at = ?, dirty = 1
+                WHERE id = ?
+                """, arguments: [text, now, ocrResultId])
         }
     }
 
@@ -118,7 +156,7 @@ public final class CaptureRepository: @unchecked Sendable {
 
             // Pass 1 — category substring match.
             let catRows = try CaptureSummary.fetchAll(db, sql: """
-                SELECT id, preview_uri, pdf_uri, category, page_count, created_at
+                SELECT id, title, preview_uri, pdf_uri, category, page_count, created_at, source
                 FROM captures
                 WHERE user_id = ?
                   AND deleted_at IS NULL

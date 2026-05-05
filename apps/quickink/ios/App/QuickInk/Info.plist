@@ -41,5 +41,36 @@
 			</array>
 		</dict>
 	</array>
+	<!--
+	  iOS 13+ launch-screen dict — declarative replacement for the
+	  legacy LaunchScreen.storyboard. Mirrors Android's
+	  `Theme.QuickInk.Splash` (cream window background + centered
+	  calligraphic Q): the system shows this between the launcher
+	  tap and the SwiftUI app's first frame, so it's the user's
+	  first visual of the app and needs to feel branded, not blank.
+	  Without these keys iOS falls back to a plain white/black
+	  screen.
+
+	  - UIColorName     references `QuickInkSplashBackground` color
+	                    asset in Assets.xcassets (cream in light,
+	                    near-black in dark).
+	  - UIImageName     references `QuickInkSplashMark.imageset` —
+	                    same brand mark Android shows on its splash.
+	                    Image is sized at @1x/@2x/@3x (240/480/720
+	                    px) so it renders at ~240pt. Source is
+	                    `apps/quickink/design/exports/quickink-mark-
+	                    1024.png` so the @3x asset stays crisp
+	                    (downscale, never upscale).
+	  - UIImageRespectsSafeAreaInsets defaults to true and is left
+	    unset so the system centers the image cleanly within the
+	    safe area on every device size.
+	-->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>QuickInkSplashBackground</string>
+		<key>UIImageName</key>
+		<string>QuickInkSplashMark</string>
+	</dict>
 </dict>
 </plist>

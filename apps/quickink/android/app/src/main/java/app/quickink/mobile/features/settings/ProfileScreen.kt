@@ -102,6 +102,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import app.quickink.mobile.QuickInkApp
+import app.quickink.mobile.data.profile.ProfileSettingsEntity
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
@@ -134,14 +135,77 @@ fun ProfileScreen(
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
 
+    val authState by authStore.state.collectAsState()
+    val session = (authState as? AuthState.SignedIn)?.session
+
+    // Profile fields are now backed by the `profile_settings` Room
+    // entity (synced via QuickInkSyncDataSource). The screen still
+    // keeps the in-memory mutableStateOf to drive instant UI
+    // feedback while the user types — the DAO write happens on
+    // commit (focus loss / save) and the entity flow re-syncs on
+    // the next composition. Prefs writes are kept side-by-side as
+    // a one-release legacy fallback so a rollback to the previous
+    // pref-only build doesn't lose user data.
+    val app = context.applicationContext as QuickInkApp
+    val profileSettingsDao = remember(app) { app.database.profileSettingsDao() }
+    val userId: String = session?.userId.orEmpty()
+
+    val profileRow by remember(userId, profileSettingsDao) {
+        if (userId.isEmpty()) kotlinx.coroutines.flow.flowOf(null)
+        else profileSettingsDao.observe(userId)
+    }.collectAsState(initial = null)
+
     var phoneNumber by remember { mutableStateOf(preferences.phoneNumber) }
     var personalityPunchline by remember { mutableStateOf(preferences.personalityPunchline) }
     var profilePhotoUri by remember { mutableStateOf(preferences.profilePhotoUri) }
 
-    val authState by authStore.state.collectAsState()
-    val session = (authState as? AuthState.SignedIn)?.session
+    // Bootstrap pass — first render after the v4 schema upgrade has
+    // an empty `profile_settings` table. We seed it from whatever
+    // the user already had in SharedPreferences and mark dirty so
+    // the next sync pass pushes it up to Drive.
+    androidx.compose.runtime.LaunchedEffect(userId, profileRow) {
+        if (userId.isEmpty()) return@LaunchedEffect
+        if (profileRow == null) {
+            val now = java.time.OffsetDateTime.now().toString()
+            val customDisplay = preferences.customDisplayName.takeIf { it.isNotBlank() }
+            val phone         = preferences.phoneNumber.takeIf { it.isNotBlank() }
+            val punch         = preferences.personalityPunchline.takeIf { it.isNotBlank() }
+            val photoUri      = preferences.profilePhotoUri.takeIf { it.isNotBlank() }
+            profileSettingsDao.upsertLocal(
+                ProfileSettingsEntity(
+                    id                   = userId,
+                    userId               = userId,
+                    displayName          = customDisplay,
+                    phoneNumber          = phone,
+                    personalityPunchline = punch,
+                    photoLocalUri        = photoUri,
+                    photoDriveFileId     = null,
+                    photoUpdatedAt       = if (photoUri != null) now else null,
+                    driveFileId          = null,
+                    createdAt            = now,
+                    updatedAt            = now,
+                    dirty                = true,
+                    deletedAt            = null,
+                )
+            )
+        } else {
+            // Reconcile in-memory state with whatever the DAO holds
+            // — handles the new-device-restore path where the row
+            // was downloaded via the sync layer and the screen needs
+            // to reflect it. Empty-string normalisation matches
+            // SharedPreferences's prior contract.
+            phoneNumber          = profileRow!!.phoneNumber.orEmpty()
+            personalityPunchline = profileRow!!.personalityPunchline.orEmpty()
+            profilePhotoUri      = profileRow!!.photoLocalUri.orEmpty()
+        }
+    }
+
     val resolvedDisplayName: String = run {
-        val custom = preferences.customDisplayName.trim()
+        // Prefer the entity's display_name (synced); fall back to
+        // legacy prefs (pre-migration) and then the session name.
+        val entityName = profileRow?.displayName?.trim().orEmpty()
+        val custom = if (entityName.isNotEmpty()) entityName
+                     else preferences.customDisplayName.trim()
         if (custom.isNotEmpty()) custom
         else session?.displayName?.trim()?.takeIf { it.isNotEmpty() } ?: "QuickInk"
     }
@@ -150,11 +214,10 @@ fun ProfileScreen(
 
     // Live data — Notes / Tags counts and the user's last-capture
     // timestamp pulled straight from the Room DAOs the rest of the
-    // app reads. `userId` is empty when signed out (no session); the
-    // observers then return empty lists and the stats render their
-    // empty state, which is the right behaviour.
-    val app = context.applicationContext as QuickInkApp
-    val userId = session?.userId.orEmpty()
+    // app reads. `userId` (declared above with the profile bootstrap)
+    // is empty when signed out (no session); the observers then
+    // return empty lists and the stats render their empty state,
+    // which is the right behaviour.
     val captureDao = remember(app) { app.database.captureDao() }
     val categoryDao = remember(app) { app.database.categoryDao() }
     val syncStateDao = remember(app) { app.database.syncStateDao() }
@@ -203,6 +266,17 @@ fun ProfileScreen(
             if (savedUri != null) {
                 profilePhotoUri = savedUri
                 preferences.profilePhotoUri = savedUri
+                // Mirror the change into the synced entity so the
+                // photo flows up to Drive on the next sync pass and
+                // restores onto a new device after sign-in. The
+                // `setPhoto` DAO method also nulls `photo_drive_file_id`
+                // so QuickInkBinarySync re-uploads the new bytes
+                // rather than leaving the row pointing at the old
+                // Drive blob.
+                if (userId.isNotEmpty()) {
+                    val now = java.time.OffsetDateTime.now().toString()
+                    profileSettingsDao.setPhoto(userId, savedUri, now)
+                }
                 onProfilePhotoChange?.invoke(savedUri)
             }
         }
@@ -300,11 +374,31 @@ fun ProfileScreen(
                 onPhoneChange    = { value ->
                     phoneNumber = value
                     preferences.phoneNumber = value
+                    if (userId.isNotEmpty()) {
+                        val now = java.time.OffsetDateTime.now().toString()
+                        coroutineScope.launch {
+                            profileSettingsDao.setPhoneNumber(
+                                id        = userId,
+                                phone     = value.takeIf { it.isNotBlank() },
+                                timestamp = now,
+                            )
+                        }
+                    }
                 },
                 punchline        = personalityPunchline,
                 onPunchlineChange = { value ->
                     personalityPunchline = value
                     preferences.personalityPunchline = value
+                    if (userId.isNotEmpty()) {
+                        val now = java.time.OffsetDateTime.now().toString()
+                        coroutineScope.launch {
+                            profileSettingsDao.setPersonalityPunchline(
+                                id        = userId,
+                                line      = value.takeIf { it.isNotBlank() },
+                                timestamp = now,
+                            )
+                        }
+                    }
                 },
             )
 

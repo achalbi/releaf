@@ -26,6 +26,7 @@
  */
 
 import SwiftUI
+import PhotosUI
 import ReleafCoreScan
 
 struct QuickCaptureScreen: View {
@@ -36,6 +37,17 @@ struct QuickCaptureScreen: View {
     @State private var pageCount: Int = 0
     @State private var sweepOffset: CGFloat = -50
     @State private var showSystemScanner = false
+
+    /// Selected `PhotosPickerItem`s from the gallery picker — order
+    /// matches the user's selection order in the picker, so a
+    /// multi-page PDF preserves the order they tapped photos in.
+    /// Loading happens in `.onChange` — each item's `Data` is
+    /// decoded to `UIImage`, the array is handed to
+    /// `ImportArtifacts.build` which writes the JPEGs + a single
+    /// multi-page PDF and returns the URL triple. Reset to `[]`
+    /// after the load so picking the same set twice still triggers
+    /// the handler.
+    @State private var pickedItems: [PhotosPickerItem] = []
 
     enum CaptureMode: String, CaseIterable {
         case single, multiPage, auto
@@ -65,10 +77,73 @@ struct QuickCaptureScreen: View {
             }
         }
         .preferredColorScheme(.dark)
+        // Mode change → reset the page counter so the Multi-page
+        // badge doesn't display stale numbers from a previous
+        // mode's session. Mirrors Android's LaunchedEffect(mode).
+        // Single-parameter form — iOS 16 compatible. The two-arg
+        // `onChange(of:_:_:)` overload is iOS 17+ and would break
+        // the package's iOS 16 deployment target.
+        .onChange(of: mode) { _ in pageCount = 0 }
+        // Photo-pick handler — replaces the system scanner's old
+        // gallery tab (which ML Kit owned on Android, VisionKit
+        // never had on iOS). Loads each selected item as Data in
+        // selection order, decodes to UIImage, hands the list to
+        // `ImportArtifacts.build` for JPEGs + a single multi-page
+        // PDF, then routes through the same `controller.onScanComplete`
+        // pipeline as a real scan, with `source: "import"` so the
+        // resulting capture row gets the "Import" pill in Library
+        // views.
+        //
+        // Decoding is sequential rather than parallel: a 30-photo
+        // import then loads 30 transfers in order, but loadTransferable
+        // is I/O-bound on Photos.framework, not CPU-bound, so the
+        // serial cost is dominated by Photos' own fetch latency. A
+        // TaskGroup would parallelize the I/O but would have to
+        // re-sort by index afterwards to preserve picker order; the
+        // serial form is simpler and the difference at typical
+        // selection sizes (≤10 photos) is imperceptible.
+        .onChange(of: pickedItems) { newItems in
+            guard !newItems.isEmpty else { return }
+            Task {
+                var images: [UIImage] = []
+                images.reserveCapacity(newItems.count)
+                for item in newItems {
+                    guard let data  = try? await item.loadTransferable(type: Data.self),
+                          let image = UIImage(data: data) else {
+                        // Skip un-decodable items rather than abort
+                        // the whole import — mirrors how the scanner
+                        // drops a single failed page rather than
+                        // discarding the whole session.
+                        continue
+                    }
+                    images.append(image)
+                }
+                guard let result = ImportArtifacts.build(from: images) else {
+                    await MainActor.run { pickedItems = [] }
+                    return
+                }
+                await MainActor.run {
+                    pageCount = result.pageURLs.count
+                    controller.onScanComplete(
+                        pdfURL:     result.pdfURL,
+                        previewURL: result.previewURL,
+                        pageURLs:   result.pageURLs,
+                        source:     "import"
+                    )
+                    pickedItems = []
+                    onDismiss()
+                }
+            }
+        }
         .fullScreenCover(isPresented: $showSystemScanner) {
             DocumentScannerView(
                 onComplete: { pdfURL, previewURL, pageURLs in
                     showSystemScanner = false
+                    // Surface the actual page count returned by the
+                    // scanner. The user sees this on the badge
+                    // after the scanner closes — a real number, not
+                    // a per-shutter-tap fake.
+                    pageCount = pageURLs.count
                     controller.onScanComplete(
                         pdfURL:     pdfURL,
                         previewURL: previewURL,
@@ -78,7 +153,15 @@ struct QuickCaptureScreen: View {
                 },
                 onCancel: {
                     showSystemScanner = false
-                }
+                },
+                // Single mode → cap at one page so any extra
+                // captures inside VisionKit are dropped before the
+                // PDF / JPEGs are written. Multi-page / Auto leave
+                // it nil so the user can keep adding pages inside
+                // the sheet. Read at sheet-presentation time, so
+                // the mode the user had selected when they tapped
+                // shutter is the one that wins.
+                pageLimit: mode == .single ? 1 : nil
             )
             .ignoresSafeArea()
         }
@@ -199,8 +282,9 @@ struct QuickCaptureScreen: View {
     @ViewBuilder
     private var shutterRow: some View {
         HStack(alignment: .center) {
-            // Page count badge — visible once user has captured at
-            // least one in multi-mode.
+            // Page count badge — visible in multi-mode, showing
+            // the page count returned by the most recent scanner
+            // session (zero before the first capture).
             if mode == .multiPage {
                 pageBadge
                     .frame(width: 64)
@@ -214,20 +298,13 @@ struct QuickCaptureScreen: View {
 
             Spacer()
 
-            // Done button (multi-mode finish) — placeholder.
-            if mode == .multiPage && pageCount > 0 {
-                Button(action: { showSystemScanner = true }) {
-                    Text("Done")
-                        .font(QuickInkText.label)
-                        .foregroundStyle(.white)
-                        .frame(width: 64, height: 36)
-                        .background(QuickInkColors.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            } else {
-                Spacer().frame(width: 64)
-            }
+            // Right slot — Import button. Replaces VisionKit's
+            // (nonexistent) gallery affordance with a system
+            // PhotosPicker so the capture can be tagged
+            // `source: "import"` and the Library cards can render
+            // an "Import" pill. Mirror of Android.
+            importButton
+                .frame(width: 64, height: 64)
         }
         .padding(.horizontal, QuickInkSpacing.s5)
         .padding(.bottom, QuickInkSpacing.s4)
@@ -251,6 +328,34 @@ struct QuickCaptureScreen: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Capture page")
+    }
+
+    @ViewBuilder
+    private var importButton: some View {
+        // PhotosPicker drives a system gallery sheet directly off
+        // the binding — no extra `.photosPicker(isPresented:)` is
+        // needed when the picker is its own button. Visually quieter
+        // than the shutter (white-on-translucent disc, ~48pt) so it
+        // reads as a secondary affordance. Same surface treatment
+        // as the close button in the top bar.
+        //
+        // Omitting `maxSelectionCount` keeps the picker uncapped —
+        // we let the system picker enforce its own ceiling rather
+        // than impose product policy. The init defaults the param
+        // to nil, which Photos.framework treats as unlimited.
+        PhotosPicker(
+            selection:    $pickedItems,
+            matching:     .images,
+            photoLibrary: .shared()
+        ) {
+            Image(systemName: "photo.on.rectangle")
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.85))
+                .frame(width: 48, height: 48)
+                .background(Color.white.opacity(0.10))
+                .clipShape(Circle())
+        }
+        .accessibilityLabel("Import photos")
     }
 
     @ViewBuilder
@@ -294,23 +399,14 @@ struct QuickCaptureScreen: View {
     // MARK: - Actions
 
     private func triggerScan() {
-        // Single + Auto: hand off to system scanner immediately.
-        // Multi-page: increment badge for visual polish, then on
-        // "Done" tap, hand off. (Real multi-page accumulation is
-        // VisionKit's job; this badge is visual only until that
-        // pipeline lands.)
-        switch mode {
-        case .single, .auto:
-            showSystemScanner = true
-        case .multiPage:
-            pageCount += 1
-            if pageCount == 1 {
-                // First page in multi mode: present scanner; the
-                // user can keep capturing within it. When they
-                // finish, the result flows through onScanComplete.
-                showSystemScanner = true
-            }
-        }
+        // Always launch the system scanner. The scanner runs its
+        // own UI from there: edge detection, capture, optional
+        // Add-page (suppressed in Single via `pageLimit`), Done.
+        // The earlier "increment pageCount, only launch on first
+        // tap" code stranded the user after canceling VisionKit
+        // — pageCount=2 → the gate failed → shutter became a
+        // no-op. Mirrors Android.
+        showSystemScanner = true
     }
 }
 

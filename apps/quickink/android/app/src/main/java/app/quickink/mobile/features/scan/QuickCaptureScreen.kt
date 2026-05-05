@@ -25,6 +25,9 @@
 
 package app.quickink.mobile.features.scan
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -54,8 +57,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -63,6 +66,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,6 +79,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
@@ -82,12 +87,41 @@ import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.releaf.shared.scan.rememberDocumentScannerLauncher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class CaptureMode(val label: String) {
+    /**
+     * Single-page intent. Launches the ML Kit scanner with
+     * `setPageLimit(1)` so the in-scanner Add-page affordance is
+     * suppressed and the capture returns after one page.
+     */
     Single("Single"),
+    /**
+     * Multi-page intent. No page limit set — the in-scanner UI
+     * lets the user keep adding pages until they tap Done.
+     */
     MultiPage("Multi-page"),
+    /**
+     * Auto mode placeholder — same scanner config as Multi-page
+     * today. Reserved for a future BASE / BASE_WITH_FILTER
+     * auto-capture-on-edge-detect path; for now it behaves the
+     * same as Multi-page.
+     */
     Auto("Auto"),
 }
+
+// Flash control was removed — Google's GmsDocumentScanning runs
+// its own activity with its own flash UI in-scanner, and there's
+// no public option on `GmsDocumentScannerOptions` to seed flash
+// state from outside. Adding a button here that visually cycles
+// without actually driving the camera ended up looking broken to
+// users (icon flipped, but nothing happened on the actual capture).
+//
+// If we ever move to a custom CameraX pre-capture surface, flash
+// can come back here and drive the camera directly. Until then
+// users use the in-scanner flash button.
 
 @Composable
 fun QuickCaptureScreen(
@@ -98,15 +132,58 @@ fun QuickCaptureScreen(
     val type = LocalQuickInkTypography.current
 
     var mode by remember { mutableStateOf(CaptureMode.Single) }
+    // pageCount kept for the visible "N pages" badge in Multi-page
+    // mode — tracks how many pages the LAST scanner session
+    // returned. Reset when the user switches modes so the badge
+    // doesn't stick around with stale numbers from a prior run.
     var pageCount by remember { mutableIntStateOf(0) }
+
+    // Mode change → reset the page counter so the Multi-page badge
+    // doesn't display stale numbers from a previous mode's session.
+    androidx.compose.runtime.LaunchedEffect(mode) {
+        pageCount = 0
+    }
 
     val scannerLauncher = rememberDocumentScannerLauncher(
         onResult = { result ->
+            pageCount = result.pageUris.size
             controller.onScanComplete(result)
             onDismiss()
         },
-        onError  = { /* TODO surface error */ },
+        onError = { /* TODO surface error */ },
+        pageLimit = if (mode == CaptureMode.Single) 1 else null,
+        galleryImportAllowed = false,
     )
+
+    // System photo picker — replaces the old in-scanner gallery
+    // tab (`galleryImportAllowed = true`) we used to lean on. Tap
+    // the right-slot Import button → PickMultipleVisualMedia returns
+    // a list of content:// URIs (selection order preserved) →
+    // `buildImportArtifacts` writes each JPEG and a single multi-
+    // page PDF into AttachmentStorage on a worker thread → the
+    // controller takes the artifacts with `source = "import"` so
+    // Library cards render the "Import" pill on the resulting
+    // capture row. Mirror of iOS PhotosPicker (multi-select).
+    //
+    // No `maxItems` — falls back to the system picker's own cap
+    // (around 100 on current builds), which is well past any
+    // realistic single-import session. Capping it lower here would
+    // be arbitrary product policy without an underlying constraint.
+    val context = LocalContext.current
+    val importScope = rememberCoroutineScope()
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(),
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        importScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                buildImportArtifacts(context, uris)
+            } ?: return@launch
+            pageCount = result.pageUris.size
+            controller.onScanComplete(result, source = "import")
+            onDismiss()
+        }
+    }
 
     val transition = rememberInfiniteTransition(label = "scan-sweep")
     val sweep by transition.animateFloat(
@@ -153,7 +230,14 @@ fun QuickCaptureScreen(
                 Spacer(Modifier.weight(1f))
                 Text(text = "Capture", style = type.label, color = Color.White.copy(alpha = 0.85f))
                 Spacer(Modifier.weight(1f))
-                CircleIconButton(icon = Icons.Filled.FlashOff, onClick = { /* flash follow-up */ })
+                // Right-slot spacer to keep the title centred — the
+                // flash button used to live here. Removed because
+                // Google's scanner owns flash internally and we
+                // can't drive it from outside (see header note).
+                // Reserve the same 36dp footprint a CircleIconButton
+                // claims so the layout doesn't shift when comparing
+                // against older builds.
+                Spacer(Modifier.size(36.dp))
             }
 
             Spacer(Modifier.weight(1f))
@@ -255,31 +339,38 @@ fun QuickCaptureScreen(
                     }
                 }
 
-                // Shutter.
-                ShutterButton(onClick = {
-                    when (mode) {
-                        CaptureMode.Single, CaptureMode.Auto -> scannerLauncher.launch()
-                        CaptureMode.MultiPage -> {
-                            pageCount += 1
-                            if (pageCount == 1) scannerLauncher.launch()
-                        }
-                    }
-                })
+                // Shutter — always launches the system scanner. The
+                // scanner runs its own UI from there: edge
+                // detection, capture, optional Add-page, Done. The
+                // current `mode` selection feeds the launcher's
+                // `pageLimit` (above): Single → 1, others → no
+                // limit, so the in-scanner Add-page affordance is
+                // hidden in Single and visible in Multi/Auto. The
+                // earlier "increment pageCount, only launch on
+                // first tap" code was a leftover from a custom
+                // multi-page state machine that never shipped — it
+                // made every shutter tap after the first a no-op.
+                ShutterButton(onClick = scannerLauncher::launch)
 
-                // Right slot — Done in multi mode after first capture.
-                Box(modifier = Modifier.size(width = 64.dp, height = 64.dp), contentAlignment = Alignment.Center) {
-                    if (mode == CaptureMode.MultiPage && pageCount > 0) {
-                        Box(
-                            modifier = Modifier
-                                .size(width = 64.dp, height = 36.dp)
-                                .clip(RoundedCornerShape(QuickInkRadius.pill))
-                                .background(colors.accent)
-                                .clickable { scannerLauncher.launch() },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(text = "Done", style = type.label, color = Color.White)
-                        }
-                    }
+                // Right slot — Import button (system photo picker).
+                // Replaces ML Kit's in-scanner gallery tab so the
+                // resulting capture can be tagged `source = "import"`
+                // and the Library cards can render an "Import" pill.
+                // Mirrors the slot the page badge claims on the left,
+                // so the layout stays balanced around the shutter.
+                Box(
+                    modifier = Modifier.size(width = 64.dp, height = 64.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ImportButton(
+                        onClick = {
+                            importLauncher.launch(
+                                PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                                )
+                            )
+                        },
+                    )
                 }
             }
 
@@ -370,6 +461,29 @@ private fun ShutterButton(onClick: () -> Unit) {
                 modifier          = Modifier.size(26.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun ImportButton(onClick: () -> Unit) {
+    // Visually quieter than the shutter — neutral white-on-translucent
+    // disc, ~48dp, sized to fit inside the 64dp right slot without
+    // dominating the row. Same surface treatment as the close button
+    // in the top bar so it reads as a secondary affordance.
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.10f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector       = Icons.Filled.Image,
+            contentDescription = "Import photo",
+            tint              = Color.White.copy(alpha = 0.85f),
+            modifier          = Modifier.size(22.dp),
+        )
     }
 }
 

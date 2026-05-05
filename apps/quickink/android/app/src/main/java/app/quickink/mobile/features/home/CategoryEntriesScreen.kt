@@ -56,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.capture.displayTitle
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
@@ -208,13 +209,32 @@ private fun TimelineRow(capture: CaptureEntity, onClick: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
         ) {
             Text(
-                text     = capture.category ?: "Scan",
+                text     = capture.displayTitle(),
                 style    = type.heading,
                 color    = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+                verticalAlignment     = Alignment.CenterVertically,
+            ) {
+                // Import chip — flags captures sourced from the
+                // system photo picker rather than the document
+                // scanner. Renders inline with time/page-count
+                // because the thumbnail is too narrow (56dp) to
+                // host a corner pill cleanly.
+                if (capture.source == "import") {
+                    Text(
+                        text  = "Import",
+                        style = type.caption,
+                        color = colors.textOnAccent,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(QuickInkRadius.sm))
+                            .background(colors.accent)
+                            .padding(horizontal = QuickInkSpacing.s2, vertical = 1.dp),
+                    )
+                }
                 if (time.isNotEmpty()) {
                     Text(text = time, style = type.caption, color = colors.muted)
                 }

@@ -37,7 +37,6 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
@@ -106,26 +105,25 @@ object QuickInkSyncScheduler {
      * dropped the request, leaving the user stuck behind the old
      * retry's backoff window.
      *
-     * Marked **expedited** so WorkManager actually starts the
-     * worker within ~10 seconds instead of the indefinite delay
-     * non-expedited OneTimeWork can sit at on Android 12+. The
-     * user has just tapped "Sync now"; deferring execution past
-     * the optimistic UI flash is what produced the "Last synced
-     * still shows Never" symptom users were reporting.
-     * `RUN_AS_NON_EXPEDITED_WORK_REQUEST` is the safe fallback
-     * when the per-app expedited quota is exhausted (instead of
-     * throwing).
+     * NOT marked expedited. Earlier code added
+     * `setExpedited(RUN_AS_NON_EXPEDITED_WORK_REQUEST)` to bypass
+     * Android 12+ scheduling delay, but expedited work requires
+     * `CoroutineWorker.getForegroundInfo()` to be overridden — and
+     * we don't have a foreground notification wired. Without the
+     * override, expedited requests are silently demoted /
+     * cancelled mid-run, which produced runaway
+     * `JobCancellationException` loops (workers cancelled every
+     * 3-5 seconds, retried, cancelled again). Plain non-expedited
+     * one-time work runs within ~5-15s for a foreground app, which
+     * is plenty given the UI's tap-ack window covers the gap.
      *
      * Same "fresh tap always wins" posture [requestRestore] takes
-     * for the Restore button. Mirrors the iOS
-     * `SyncScheduler.requestImmediate(...)` semantics where each
-     * call kicks a fresh in-process Task.
+     * for the Restore button.
      */
     fun requestUserSync(context: Context) {
         val request = OneTimeWorkRequestBuilder<QuickInkSyncWorker>()
             .setConstraints(networkConstraint)
             .setBackoffCriteria(BackoffPolicy.LINEAR, ONESHOT_BACKOFF_SEC, TimeUnit.SECONDS)
-            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
 
         WorkManager.getInstance(context).enqueueUniqueWork(

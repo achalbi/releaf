@@ -17,19 +17,68 @@ import GRDB
 
 public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Identifiable {
     public let id: String
+    /// Defaulting to `nil` keeps existing manual init sites compiling
+    /// (e.g., search-result construction in `CaptureRepository`); the
+    /// SELECTs that drive the Library + detail view explicitly read
+    /// the column so the field is populated where it matters.
+    public let title: String?
     public let previewUri: String?
     public let pdfUri: String
     public let category: String?
     public let pageCount: Int
     public let createdAt: String
+    /// `"scan"` (default) — went through VisionKit. `"import"` —
+    /// came from the system photo picker. Drives the "Import" pill
+    /// on the Library cards. Defaulting to `"scan"` keeps any
+    /// search-result construction site (and rows synced from older
+    /// clients) reading back as scans.
+    public let source: String
+
+    public init(
+        id: String,
+        title: String? = nil,
+        previewUri: String?,
+        pdfUri: String,
+        category: String?,
+        pageCount: Int,
+        createdAt: String,
+        source: String = "scan"
+    ) {
+        self.id         = id
+        self.title      = title
+        self.previewUri = previewUri
+        self.pdfUri     = pdfUri
+        self.category   = category
+        self.pageCount  = pageCount
+        self.createdAt  = createdAt
+        self.source     = source
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id         = try c.decode(String.self, forKey: .id)
+        self.title      = try c.decodeIfPresent(String.self, forKey: .title)
+        self.previewUri = try c.decodeIfPresent(String.self, forKey: .previewUri)
+        self.pdfUri     = try c.decode(String.self, forKey: .pdfUri)
+        self.category   = try c.decodeIfPresent(String.self, forKey: .category)
+        self.pageCount  = try c.decode(Int.self, forKey: .pageCount)
+        self.createdAt  = try c.decode(String.self, forKey: .createdAt)
+        // Tolerate rows where SELECT didn't pull `source` (e.g. an
+        // older callsite that hasn't been updated) by defaulting
+        // to "scan". The schema column is NOT NULL DEFAULT 'scan'
+        // so a real DB row always has a value.
+        self.source     = (try c.decodeIfPresent(String.self, forKey: .source)) ?? "scan"
+    }
 
     public enum CodingKeys: String, CodingKey {
         case id
+        case title
         case previewUri = "preview_uri"
         case pdfUri     = "pdf_uri"
         case category
         case pageCount  = "page_count"
         case createdAt  = "created_at"
+        case source
     }
 }
 
@@ -50,7 +99,7 @@ public final class CaptureListViewModel: ObservableObject {
     public func start() {
         cancellable = ValueObservation.tracking { [userId] db in
             try CaptureSummary.fetchAll(db, sql: """
-                SELECT id, preview_uri, pdf_uri, category, page_count, created_at
+                SELECT id, title, preview_uri, pdf_uri, category, page_count, created_at, source
                 FROM captures
                 WHERE user_id = ? AND deleted_at IS NULL
                 ORDER BY created_at DESC

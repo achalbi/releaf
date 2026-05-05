@@ -124,12 +124,16 @@ private val DarkQuickInkColors = QuickInkColorScheme(
 data class QuickInkTypographyScheme(
     val display: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Display,
     val onboardingTitle: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.OnboardingTitle,
+    /** Cormorant body — onboarding showroom feel. App screens use [body]. */
+    val onboardingBody: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.OnboardingBody,
     val pageTitle: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.PageTitle,
     val heading: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Heading,
     val eyebrow: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Eyebrow,
+    /** Inter body — app screens. Onboarding uses [onboardingBody]. */
     val body: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Body,
     val bodyItalic: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.BodyItalic,
     val handwritten: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Handwritten,
+    val cardTitle: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.CardTitle,
     val label: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Label,
     val ctaSerif: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.CtaSerif,
     val meta: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Meta,
@@ -173,10 +177,33 @@ val LocalQuickInkRadius = staticCompositionLocalOf {
  */
 @Composable
 fun QuickInkTheme(
-    useDarkTheme: Boolean = androidx.compose.foundation.isSystemInDarkTheme(),
+    /// User-pickable theme override. `System` follows the OS; `Light`
+    /// / `Dark` force the corresponding mode.
+    themeMode: ThemeMode = ThemeMode.System,
+    /// User-pickable primary color (Coral / Leaf Green / Leaf Yellow
+    /// / Leaf Dry). The composed `accent` token resolves to the
+    /// picked family's deep variant in light mode, base variant in
+    /// dark mode (so contrast against the canvas stays readable
+    /// either way).
+    primaryColor: PrimaryColor = PrimaryColor.Coral,
     content: @Composable () -> Unit,
 ) {
-    val quickInkColors = if (useDarkTheme) DarkQuickInkColors else LightQuickInkColors
+    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val useDarkTheme = when (themeMode) {
+        ThemeMode.System -> systemDark
+        ThemeMode.Light  -> false
+        ThemeMode.Dark   -> true
+    }
+    // Resolve the picked primary against the effective mode and
+    // graft it onto the base scheme. Light → deep variant; dark →
+    // base variant. accentDeep stays as the deep variant in both
+    // modes so hover / pressed states keep their emphasis.
+    val resolvedAccent = if (useDarkTheme) primaryColor.base else primaryColor.deep
+    val baseScheme    = if (useDarkTheme) DarkQuickInkColors else LightQuickInkColors
+    val quickInkColors = baseScheme.copy(
+        accent     = resolvedAccent,
+        accentDeep = primaryColor.deep,
+    )
     val typography = QuickInkTypographyScheme()
 
     val materialColorScheme = if (useDarkTheme) {

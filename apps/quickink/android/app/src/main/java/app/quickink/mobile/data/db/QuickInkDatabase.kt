@@ -37,6 +37,8 @@ import app.quickink.mobile.data.category.CategoryDao
 import app.quickink.mobile.data.category.CategoryEntity
 import app.quickink.mobile.data.ocr.OcrResultDao
 import app.quickink.mobile.data.ocr.OcrResultEntity
+import app.quickink.mobile.data.profile.ProfileSettingsDao
+import app.quickink.mobile.data.profile.ProfileSettingsEntity
 import app.releaf.mobile.data.notepad.NotepadDao
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.sync.SyncStateDao
@@ -49,22 +51,30 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         CaptureEntity::class,
         OcrResultEntity::class,
         CategoryEntity::class,
+        ProfileSettingsEntity::class,
     ],
+    // v5 — adds `captures.source` ("scan" / "import") so the
+    // Library cards can flag captures that came in from the system
+    // photo picker rather than the document scanner. v4 — adds the
+    // `profile_settings` table (display name, phone, personality
+    // punchline, photo URI/Drive id) so profile state syncs across
+    // devices instead of being stuck in local SharedPreferences.
     // v3 — captures.pdf_drive_file_id + captures.preview_drive_file_id
     // (Drive ids of the per-row binary uploads). v2 added the
     // categories table + captures.category column.
     // `fallbackToDestructiveMigration` below handles the rebuild;
     // when real users have data we'll register real Migration objects.
-    version       = 3,
+    version       = 5,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {
 
-    abstract fun notepadDao():    NotepadDao
-    abstract fun syncStateDao():  SyncStateDao
-    abstract fun captureDao():    CaptureDao
-    abstract fun ocrResultDao():  OcrResultDao
-    abstract fun categoryDao():   CategoryDao
+    abstract fun notepadDao():           NotepadDao
+    abstract fun syncStateDao():         SyncStateDao
+    abstract fun captureDao():           CaptureDao
+    abstract fun ocrResultDao():         OcrResultDao
+    abstract fun categoryDao():          CategoryDao
+    abstract fun profileSettingsDao():   ProfileSettingsDao
 
     companion object {
         @Volatile

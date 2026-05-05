@@ -34,19 +34,29 @@ public final class SyncStateStore: ObservableObject {
         public var pendingCount: Int
         public var driveQuotaExhaustedAt: String?
         public var versionBlocked: Bool
+        /// Locally-dirty rows that haven't been pushed to Drive
+        /// yet. Refreshed by a foreground 60-second poll in
+        /// `QuickInkSyncEnvironment` and zeroed after a successful
+        /// sync run. Drives the "N pending" pill on Home and
+        /// triggers the auto-safety-net push when > 0. Distinct
+        /// from `pendingCount`, which tracks rows that FAILED the
+        /// last push.
+        public var localDirtyCount: Int
 
         public init(
             lastFullSyncAt: String? = nil,
             manifestChecksum: String? = nil,
             pendingCount: Int = 0,
             driveQuotaExhaustedAt: String? = nil,
-            versionBlocked: Bool = false
+            versionBlocked: Bool = false,
+            localDirtyCount: Int = 0
         ) {
             self.lastFullSyncAt = lastFullSyncAt
             self.manifestChecksum = manifestChecksum
             self.pendingCount = pendingCount
             self.driveQuotaExhaustedAt = driveQuotaExhaustedAt
             self.versionBlocked = versionBlocked
+            self.localDirtyCount = localDirtyCount
         }
     }
 
@@ -83,6 +93,18 @@ public final class SyncStateStore: ObservableObject {
         state = load()
     }
 
+    /// Update the locally-dirty-row counter that drives the Home
+    /// "N pending" pill. Called from
+    /// `QuickInkSyncEnvironment`'s 60-second foreground ticker
+    /// (regular refresh, may be 0 or > 0) and from the `runOnce`
+    /// success path (always 0 — a successful push cleared
+    /// everything that was dirty). Mirror of Android's
+    /// `LOCAL_DIRTY_COUNT` sync-state row.
+    public func recordLocalDirtyCount(_ count: Int) {
+        defaults.set(count, forKey: Keys.localDirtyCount)
+        state = load()
+    }
+
     public func recordVersionBlocked() {
         defaults.set(true, forKey: Keys.versionBlocked)
         state = load()
@@ -106,7 +128,8 @@ public final class SyncStateStore: ObservableObject {
             manifestChecksum: defaults.string(forKey: Keys.manifestChecksum),
             pendingCount: defaults.integer(forKey: Keys.pendingCount),
             driveQuotaExhaustedAt: defaults.string(forKey: Keys.driveQuotaExhaustedAt),
-            versionBlocked: defaults.bool(forKey: Keys.versionBlocked)
+            versionBlocked: defaults.bool(forKey: Keys.versionBlocked),
+            localDirtyCount: defaults.integer(forKey: Keys.localDirtyCount)
         )
     }
 
@@ -116,10 +139,11 @@ public final class SyncStateStore: ObservableObject {
         static let pendingCount          = "releaf.sync.pending_count"
         static let driveQuotaExhaustedAt = "releaf.sync.drive_quota_exhausted_at"
         static let versionBlocked        = "releaf.sync.version_blocked"
+        static let localDirtyCount       = "releaf.sync.local_dirty_count"
 
         static let all: [String] = [
             lastFullSyncAt, manifestChecksum, pendingCount,
-            driveQuotaExhaustedAt, versionBlocked,
+            driveQuotaExhaustedAt, versionBlocked, localDirtyCount,
         ]
     }
 }

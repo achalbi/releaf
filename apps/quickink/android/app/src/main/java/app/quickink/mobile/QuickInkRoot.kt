@@ -45,6 +45,7 @@ import app.quickink.mobile.features.onboarding.OnboardingFlow
 import app.quickink.mobile.features.onboarding.OnboardingPreferences
 import app.quickink.mobile.features.onboarding.OnboardingState
 import app.quickink.mobile.features.onboarding.SignInScreen
+import app.quickink.mobile.features.scan.QuickCaptureScreen
 import app.quickink.mobile.features.scan.ScanDetailScreen
 import app.quickink.mobile.features.scan.ScanFlowController
 import app.quickink.mobile.features.scan.ScanReviewScreen
@@ -59,7 +60,19 @@ import app.releaf.shared.scan.MlKitTextRecognizer
 import app.releaf.shared.scan.OcrPipeline
 
 @Composable
-fun QuickInkRoot() {
+fun QuickInkRoot(
+    /// User's Appearance picks (Settings → Theme). Hoisted to
+    /// MainActivity so the QuickInkTheme wrapper can react to
+    /// changes; threaded through to SettingsScreen so the picker UI
+    /// can mutate them. Defaults preserve standalone-Compose-preview
+    /// behaviour (no SettingsPreferences read needed at preview time).
+    currentPrimaryColor: app.quickink.mobile.ui.theme.PrimaryColor =
+        app.quickink.mobile.ui.theme.PrimaryColor.Coral,
+    currentThemeMode: app.quickink.mobile.ui.theme.ThemeMode =
+        app.quickink.mobile.ui.theme.ThemeMode.System,
+    onPrimaryColorChange: (app.quickink.mobile.ui.theme.PrimaryColor) -> Unit = {},
+    onThemeModeChange: (app.quickink.mobile.ui.theme.ThemeMode) -> Unit = {},
+) {
     val context = LocalContext.current
     val app     = context.applicationContext as QuickInkApp
     val preferences = remember { OnboardingPreferences(context) }
@@ -83,7 +96,13 @@ fun QuickInkRoot() {
         authState !is AuthState.SignedIn -> ReSignInGate(authStore = app.authStore)
 
         // Signed in — the main shell takes over.
-        else -> MainShell(userId = (authState as AuthState.SignedIn).session.userId)
+        else -> MainShell(
+            userId               = (authState as AuthState.SignedIn).session.userId,
+            currentPrimaryColor  = currentPrimaryColor,
+            currentThemeMode     = currentThemeMode,
+            onPrimaryColorChange = onPrimaryColorChange,
+            onThemeModeChange    = onThemeModeChange,
+        )
     }
 }
 
@@ -165,7 +184,19 @@ private object Routes {
  * this with the real auth-state-derived value in a follow-up.
  */
 @Composable
-private fun MainShell(userId: String) {
+private fun MainShell(
+    userId: String,
+    /// Threaded through from QuickInkRoot → MainActivity. The
+    /// SettingsScreen tab consumes these to render the Appearance
+    /// section's pickers; mutations bubble back up to MainActivity
+    /// which holds the @State that QuickInkTheme reads.
+    currentPrimaryColor: app.quickink.mobile.ui.theme.PrimaryColor =
+        app.quickink.mobile.ui.theme.PrimaryColor.Coral,
+    currentThemeMode: app.quickink.mobile.ui.theme.ThemeMode =
+        app.quickink.mobile.ui.theme.ThemeMode.System,
+    onPrimaryColorChange: (app.quickink.mobile.ui.theme.PrimaryColor) -> Unit = {},
+    onThemeModeChange: (app.quickink.mobile.ui.theme.ThemeMode) -> Unit = {},
+) {
     val context = LocalContext.current
     val app     = context.applicationContext as QuickInkApp
     val scope   = rememberCoroutineScope()
@@ -201,12 +232,10 @@ private fun MainShell(userId: String) {
             pipeline       = OcrPipeline(MlKitTextRecognizer(app)),
             notepadDao     = app.database.notepadDao(),
             scope          = scope,
-            // Slice 4.2c — kick a one-shot sync at the end of
-            // each scan pass. WorkManager's KEEP policy coalesces
-            // bursts and the worker no-ops when Drive backup is
-            // off (per QuickInkSyncWorker's gate), so this is
-            // safe to fire unconditionally.
-            onPassComplete = { QuickInkSyncScheduler.requestImmediate(app) },
+            // Sync is user-initiated only — no auto-kick after a
+            // scan. The user can tap Settings → "Sync now" when
+            // they want their captures pushed to Drive.
+            onPassComplete = { /* intentional no-op */ },
             // Powers the OCR-first-word → category auto-pick at
             // the end of each pass. Read-only; controller calls
             // `listActive(userId)` once per pass.
@@ -230,16 +259,48 @@ private fun MainShell(userId: String) {
         return
     }
 
+    // Lifted out of HomeScreen so the ⚡ FAB on Library / Search /
+    // Settings can also trigger the QuickCapture sheet without
+    // hopping back to Home first. HomeScreen still owns its own
+    // local `showQuickCapture` state for the FAB on its own surface;
+    // both routes set this same root-level flag, and the early-
+    // return below renders QuickCaptureScreen above the NavHost.
+    var showQuickCapture by remember { mutableStateOf(false) }
+    if (showQuickCapture) {
+        QuickCaptureScreen(
+            controller = controller,
+            onDismiss  = { showQuickCapture = false },
+        )
+        return
+    }
+
     val navController = rememberNavController()
+
+    /// Tab-style navigation between top-level destinations (Home,
+    /// Library, Search, Settings). `popUpTo(HOME, saveState=true)` +
+    /// `restoreState=true` gives Material's expected tab semantics:
+    /// each tab keeps its own scroll position / draft state across
+    /// switches, the back stack stays shallow (one entry), and back
+    /// from any tab returns to Home.
+    val navToTab: (String) -> Unit = { route ->
+        navController.navigate(route) {
+            popUpTo(Routes.HOME) {
+                saveState = true
+                inclusive = false
+            }
+            launchSingleTop = true
+            restoreState    = true
+        }
+    }
 
     NavHost(navController = navController, startDestination = Routes.HOME) {
         composable(Routes.HOME) {
             HomeScreen(
                 controller     = controller,
                 userId         = userId,
-                onOpenNotes    = { navController.navigate(Routes.NOTES_LIST) },
-                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                onOpenSearch   = { navController.navigate(Routes.SEARCH) },
+                onOpenNotes    = { navToTab(Routes.NOTES_LIST) },
+                onOpenSettings = { navToTab(Routes.SETTINGS) },
+                onOpenSearch   = { navToTab(Routes.SEARCH) },
                 onTapCategory  = { name ->
                     navController.navigate(Routes.categoryEntries(name))
                 },
@@ -259,22 +320,30 @@ private fun MainShell(userId: String) {
         composable(Routes.SEARCH) {
             SearchScreen(
                 userId     = userId,
-                onBack     = { navController.popBackStack() },
                 onOpenScan = { captureId ->
                     // Replace the search step with the detail so popping
                     // back from the detail returns to Home, not Search.
                     navController.popBackStack()
                     navController.navigate(Routes.scanDetail(captureId))
                 },
+                onHome     = { navToTab(Routes.HOME) },
+                onLibrary  = { navToTab(Routes.NOTES_LIST) },
+                onScan     = { showQuickCapture = true },
+                onSearch   = { /* current tab — no-op */ },
+                onSettings = { navToTab(Routes.SETTINGS) },
             )
         }
         composable(Routes.NOTES_LIST) {
             NotesListScreen(
                 userId     = userId,
-                onBack     = { navController.popBackStack() },
                 onOpenScan = { captureId ->
                     navController.navigate(Routes.scanDetail(captureId))
                 },
+                onHome     = { navToTab(Routes.HOME) },
+                onLibrary  = { /* current tab — no-op */ },
+                onScan     = { showQuickCapture = true },
+                onSearch   = { navToTab(Routes.SEARCH) },
+                onSettings = { navToTab(Routes.SETTINGS) },
             )
         }
         composable(
@@ -294,6 +363,15 @@ private fun MainShell(userId: String) {
                 authStore                  = app.authStore,
                 onManageCategories         = { navController.navigate(Routes.CATEGORIES) },
                 onCustomDisplayNameChange  = { customDisplayName = it },
+                primaryColor               = currentPrimaryColor,
+                themeMode                  = currentThemeMode,
+                onPrimaryColorChange       = onPrimaryColorChange,
+                onThemeModeChange          = onThemeModeChange,
+                onHome                     = { navToTab(Routes.HOME) },
+                onLibrary                  = { navToTab(Routes.NOTES_LIST) },
+                onScan                     = { showQuickCapture = true },
+                onSearch                   = { navToTab(Routes.SEARCH) },
+                onSettings                 = { /* current tab — no-op */ },
             )
         }
         composable(Routes.PROFILE) {

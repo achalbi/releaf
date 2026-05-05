@@ -20,6 +20,9 @@
  */
 
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 import ReleafCoreAuth
 import ReleafCoreDesignSystem
 
@@ -37,26 +40,45 @@ public struct QuickInkRoot: View {
     /// in this view.
     @StateObject private var authStore: AuthStore = makeQuickInkAuthStore()
 
+    /// Scene-phase observation drives the foreground-only
+    /// pending-push loop in `QuickInkSyncEnvironment`. The loop
+    /// polls dirty rows every 60s while the app is `.active` and
+    /// stops cleanly when it goes `.background` so we don't burn
+    /// battery / cellular when the user isn't looking at the app.
+    @Environment(\.scenePhase) private var scenePhase
+
     public init() {}
 
     public var body: some View {
-        if !onboardingCompleted {
-            // First-time users — full 3-screen onboarding.
-            OnboardingFlow(
-                authStore:  authStore,
-                onComplete: { onboardingCompleted = true }
-            )
-        } else {
-            switch authStore.state {
-            case .signedIn(let session):
-                MainShell(userId: session.userId, authStore: authStore)
-            default:
-                // Onboarding done but no active session — Option A:
-                // bounce to the SignIn screen only (skip welcome +
-                // permissions). Persisted Drive choice from earlier
-                // onboarding stays valid; toggling it here overwrites
-                // Settings, same as the first-run flow.
-                ReSignInGate(authStore: authStore)
+        Group {
+            if !onboardingCompleted {
+                // First-time users — full 3-screen onboarding.
+                OnboardingFlow(
+                    authStore:  authStore,
+                    onComplete: { onboardingCompleted = true }
+                )
+            } else {
+                switch authStore.state {
+                case .signedIn(let session):
+                    MainShell(userId: session.userId, authStore: authStore)
+                default:
+                    // Onboarding done but no active session — Option A:
+                    // bounce to the SignIn screen only (skip welcome +
+                    // permissions). Persisted Drive choice from earlier
+                    // onboarding stays valid; toggling it here overwrites
+                    // Settings, same as the first-run flow.
+                    ReSignInGate(authStore: authStore)
+                }
+            }
+        }
+        .onChange(of: scenePhase) { phase in
+            switch phase {
+            case .active:
+                QuickInkSyncEnvironment.shared.startPendingPushLoop()
+            case .background, .inactive:
+                QuickInkSyncEnvironment.shared.stopPendingPushLoop()
+            @unknown default:
+                break
             }
         }
     }
@@ -153,6 +175,23 @@ private struct MainShell: View {
     /// through UserDefaults observers.
     @StateObject private var settings = SettingsState()
     @State private var path: [Route] = []
+    /// Lifted out of HomeScreen so the ⚡ FAB on Library / Search /
+    /// Settings can also present the QuickCapture sheet without
+    /// hopping back to Home first. HomeScreen still owns its own
+    /// local `showQuickCapture` for its FAB on its own surface; both
+    /// routes present the same `QuickCaptureScreen`, just from
+    /// different ownership layers.
+    @State private var showQuickCapture = false
+
+    /// Tab-style switch between top-level destinations (Library,
+    /// Search, Settings). Replaces the nav stack with a single entry,
+    /// so back from any tab returns to Home — matches the standard
+    /// bottom-tab UX. Calling with the route the user is already on
+    /// is a no-op caller-side (the bar's per-tab callback short-
+    /// circuits to `{ }`).
+    private func navToTab(_ route: Route) {
+        path = [route]
+    }
 
     /// Settings override > Google session displayName > nil.
     /// The home screen falls back to "QuickInk" when this is nil.
@@ -175,9 +214,12 @@ private struct MainShell: View {
         // is off (per QuickInkSyncEnvironment's drive-toggle gate),
         // so this is safe to fire unconditionally. Captured by
         // value so the closure doesn't retain `self`.
+        // Sync is user-initiated only — no auto-kick after a scan.
+        // The user taps Settings → "Sync now" when they want
+        // captures pushed to Drive.
         _controller = StateObject(wrappedValue: ScanFlowController(
             userId:         userId,
-            onPassComplete: { QuickInkSyncEnvironment.shared.scheduler.requestImmediate() }
+            onPassComplete: { /* intentional no-op */ }
         ))
     }
 
@@ -229,6 +271,45 @@ private struct MainShell: View {
             // sees the chips on the very next scan.
             try? await CategoryRepository().seedDefaultsIfEmpty(userId: userId)
         }
+        // Quick-capture modal lifted from HomeScreen so the ⚡ FAB
+        // on Library / Search / Settings can present it too. Same
+        // QuickCaptureScreen the Home FAB shows.
+        .fullScreenCover(isPresented: $showQuickCapture) {
+            QuickCaptureScreen(
+                controller: controller,
+                onDismiss:  { showQuickCapture = false }
+            )
+        }
+        // Appearance overrides — `preferredColorScheme(nil)` lets
+        // the OS decide; passing .light / .dark forces the override
+        // for every descendent view. `tint` paints all system
+        // controls (Toggle, Button, NavigationLink chevrons, etc.)
+        // with the picked primary's resolved variant so the picker's
+        // effect propagates without each screen needing an
+        // environment lookup.
+        .preferredColorScheme(settings.themeMode.colorScheme)
+        .tint(resolvedAccent)
+    }
+
+    /// Resolves the picked primary against the effective theme.
+    /// Light mode → deep variant (more contrast on cream). Dark
+    /// mode → base variant (more contrast on dark stone). The
+    /// `themeMode` override takes precedence over the system trait
+    /// where it's set; `system` falls through to the OS preference.
+    private var resolvedAccent: Color {
+        let isDark: Bool = {
+            switch settings.themeMode {
+            case .light: return false
+            case .dark:  return true
+            case .system:
+                #if canImport(UIKit)
+                return UITraitCollection.current.userInterfaceStyle == .dark
+                #else
+                return false
+                #endif
+            }
+        }()
+        return isDark ? settings.primaryColor.base : settings.primaryColor.deep
     }
 
     @ViewBuilder
@@ -241,7 +322,12 @@ private struct MainShell: View {
             NotesListScreen(
                 userId:     userId,
                 onBack:     { path.removeLast() },
-                onOpenScan: { captureId in path.append(.scanDetail(captureId: captureId)) }
+                onOpenScan: { captureId in path.append(.scanDetail(captureId: captureId)) },
+                onHome:     { path.removeAll() },
+                onLibrary:  { /* current tab — no-op */ },
+                onScan:     { showQuickCapture = true },
+                onSearch:   { navToTab(.search) },
+                onSettings: { navToTab(.settings) }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -259,7 +345,12 @@ private struct MainShell: View {
             SettingsScreen(
                 onBack:    { path.removeLast() },
                 authStore: authStore,
-                onManageCategories: { path.append(.manageCategories) }
+                onManageCategories: { path.append(.manageCategories) },
+                onHome:     { path.removeAll() },
+                onLibrary:  { navToTab(.notesList) },
+                onScan:     { showQuickCapture = true },
+                onSearch:   { navToTab(.search) },
+                onSettings: { /* current tab — no-op */ }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -301,7 +392,13 @@ private struct MainShell: View {
                     // "search → tap result" UX.
                     path.removeLast()
                     path.append(.scanDetail(captureId: captureId))
-                }
+                },
+                settings: settings,
+                onHome:     { path.removeAll() },
+                onLibrary:  { navToTab(.notesList) },
+                onScan:     { showQuickCapture = true },
+                onSearch:   { /* current tab — no-op */ },
+                onSettings: { navToTab(.settings) }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)

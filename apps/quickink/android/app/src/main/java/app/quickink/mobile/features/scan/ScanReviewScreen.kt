@@ -197,20 +197,24 @@ private fun CategoryButton(name: String, selected: Boolean, onClick: () -> Unit)
     val bg = if (selected) colors.accent else colors.surface
     val fg = if (selected) colors.textOnAccent else colors.ink
     val borderColor = if (selected) colors.accent else colors.border
+    // Compact button — was minHeight 64dp / padding s3 / type.heading,
+    // which made the picker feel like a hero grid. Shrunk to a tap-
+    // friendly 44dp tall with cardTitle so the page reads as a scan
+    // review with categories beneath, not a category-picker hero.
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 64.dp)
+            .heightIn(min = 44.dp)
             .clip(RoundedCornerShape(QuickInkRadius.md))
             .background(bg)
             .border(1.dp, borderColor, RoundedCornerShape(QuickInkRadius.md))
             .clickable(onClick = onClick)
-            .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s3),
+            .padding(horizontal = QuickInkSpacing.s2, vertical = QuickInkSpacing.s2),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text     = name,
-            style    = type.heading,
+            style    = type.cardTitle,
             color    = fg,
             textAlign = TextAlign.Center,
             maxLines  = 2,

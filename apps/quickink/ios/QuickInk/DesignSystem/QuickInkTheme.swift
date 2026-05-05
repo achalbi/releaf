@@ -30,23 +30,54 @@
  *   muted       #A8A29E  tertiary text, inactive nav
  *   paper1/2/3  #E8DCC4 / #F0E4D7 / #EADFCF  note thumbnail bg
  *
- * Fonts (mockup brief):
- *   - Headings: Cormorant Garamond (serif, sometimes italic)
- *   - Body editorial: Cormorant Garamond
- *   - UI labels: system sans
- *   - Handwritten previews: Caveat
+ * Fonts (post type-system pass — see TYPE_SYSTEM in repo root):
+ *   - Onboarding headings: Cormorant Garamond (high-contrast didone,
+ *     reads "showroom"; reserved for the welcome flow only)
+ *   - App headings & editorial italic: Fraunces (warmer modern serif,
+ *     optically tuned for the smaller mobile display sizes the app
+ *     actually uses — Library titles, Settings page titles, card
+ *     titles, italic taglines)
+ *   - Body & UI (both contexts): Inter (replaces system sans so iOS
+ *     and Android render identically — SF Pro vs Roboto drifted)
+ *   - Handwritten previews: Caveat (unchanged)
  *
- * Custom font bundling: Cormorant Garamond and Caveat are both
- * Google Fonts (OFL). To bundle:
+ * Two-serif rule: Cormorant and Fraunces never appear on the same
+ * screen. The handoff happens once when the user finishes onboarding
+ * and lands on Home. Onboarding screens reach for `serif(...)`,
+ * `display`, `onboardingTitle`, and `onboardingBody`. Every other
+ * screen uses `appSerif(...)` via the rerouted tokens (`pageTitle`,
+ * `heading`, `cardTitle`, `bodyItalic`, `body`).
+ *
+ * Custom font bundling: Cormorant Garamond, Fraunces, Inter, and
+ * Caveat are all Google Fonts (OFL). To bundle:
  *   1. Drop .ttf/.otf files into QuickInk/DesignSystem/Fonts/
- *   2. In Package.swift, add `resources: [.process("DesignSystem/Fonts")]`
- *      under the QuickInkFeatures target.
- *   3. Register them at app launch via `QuickInkFont.registerAll()`.
+ *      Required new files for the type-system pass (Google Fonts'
+ *      newer multi-axis build embeds the optical size in the file
+ *      name and the PostScript name; we pin to one optical per
+ *      family — see frauncesPostScriptName / interPostScriptName):
+ *        Fraunces_72pt-Regular.ttf         (PS: Fraunces72pt-Regular)
+ *        Fraunces_72pt-SemiBold.ttf        (PS: Fraunces72pt-SemiBold)
+ *        Fraunces_72pt-Italic.ttf          (PS: Fraunces72pt-Italic)
+ *        Fraunces_72pt-SemiBoldItalic.ttf  (PS: Fraunces72pt-SemiBoldItalic)
+ *        Inter_18pt-Regular.ttf            (PS: Inter18pt-Regular)
+ *        Inter_18pt-Medium.ttf             (PS: Inter18pt-Medium)
  *
- * Until fonts are bundled, `QuickInkFont.serif(...)` and
- * `QuickInkFont.handwritten(...)` fall back to the closest system
- * design (`.serif` and `.serif italic` respectively). The visual
- * is degraded but the layout and weight hierarchy remain correct.
+ *      Fraunces 72pt is the display-optical — picked for the
+ *      magazine feel. The static set skips Medium (Light →
+ *      Regular → SemiBold → Bold), so the "heading weight" lands
+ *      on SemiBold — which is also the spec call (CSS weight 600).
+ *      If 72pt-optical strokes read thin at small rendering sizes,
+ *      switch to the variable font with opsz pinned per text level
+ *      rather than overweighting the static instance.
+ *   2. Package.swift already declares `.process("DesignSystem/Fonts")`,
+ *      so new files are picked up automatically.
+ *   3. Registration at launch happens in `QuickInkFont.registerAll()`
+ *      and is file-name agnostic (iterates everything in the bundle),
+ *      so no code change is needed when new files arrive.
+ *
+ * Until a given .ttf is bundled, `Font.custom(...)` falls back to the
+ * closest system design. Layout + weight hierarchy stay correct;
+ * only the visual character is degraded.
  */
 
 import SwiftUI
@@ -88,17 +119,37 @@ public enum QuickInkColors {
     // | warning      | #C97A2C    | #C97A2C    |
     // | danger       | #B54B3F    | #B54B3F    |
 
-    public static let bg           = dynamic(light: 0xFAF7F2, dark: 0x1C1917)
+    // Brand-pass refresh:
+    //   - Canvas / Text Primary / Text Secondary are now FIXED across
+    //     the whole picker — only the accent rotates. Hex values
+    //     come from the design table (see file header).
+    //   - Accent defaults to Coral. The QuickInkTheme view modifier
+    //     swaps it at runtime by reading SettingsState.primaryColor
+    //     and SettingsState.themeMode (light → deep variant, dark →
+    //     base variant).
+    public static let bg           = dynamic(light: 0xF5EEDF, dark: 0x1C1917)
     public static let surface      = dynamic(light: 0xFFFFFF, dark: 0x292524)
     public static let border       = dynamic(light: 0xEDE4D2, dark: 0x3D3733)
     public static let borderSoft   = dynamic(light: 0xF0E9DD, dark: 0x35302C)
-    public static let accent       = dynamic(light: 0xD97757, dark: 0xD97757)
+    public static let accent       = dynamic(light: 0xC65A3E, dark: 0xE07856)
     public static let accentSoft   = dynamic(light: 0xF5EDE0, dark: 0x3A2A20)
-    public static let accentDeep   = dynamic(light: 0xB85F42, dark: 0xB85F42)
-    public static let ink          = dynamic(light: 0x2C2826, dark: 0xF5EFE6)
-    public static let inkSoft      = dynamic(light: 0x5C4A38, dark: 0xC9BDA8)
+    public static let accentDeep   = dynamic(light: 0xC65A3E, dark: 0xC65A3E)
+    public static let ink          = dynamic(light: 0x463C31, dark: 0xF5EFE6)
+    public static let inkSoft      = dynamic(light: 0x5F5245, dark: 0xC9BDA8)
     public static let muted        = dynamic(light: 0xA8A29E, dark: 0x8C857F)
     public static let textOnAccent = Color(hex: 0xFFFFFF)
+
+    // Hue family variants — exposed so the per-screen theme overlay
+    // (see PrimaryColor + applyPrimaryColor below) can resolve
+    // accent / accentDeep from the user's pick.
+    public static let coralBase       = Color(hex: 0xE07856)
+    public static let coralDeep       = Color(hex: 0xC65A3E)
+    public static let leafGreenBase   = Color(hex: 0x7AA874)
+    public static let leafGreenDeep   = Color(hex: 0x5B8C52)
+    public static let leafYellowBase  = Color(hex: 0xF4C430)
+    public static let leafYellowDeep  = Color(hex: 0xE8B923)
+    public static let leafDryBase     = Color(hex: 0xB8956A)
+    public static let leafDryDeep     = Color(hex: 0x8B7355)
 
     public static let paper1       = dynamic(light: 0xE8DCC4, dark: 0x3F362A)
     public static let paper2       = dynamic(light: 0xF0E4D7, dark: 0x42392C)
@@ -136,6 +187,68 @@ public enum QuickInkColors {
     }
 }
 
+/// The four hue families the user can pick from in Settings →
+/// Appearance. Each family carries its base + deep variant; the
+/// theme layer picks one based on the active mode.
+public enum PrimaryColor: String, CaseIterable {
+    case coral
+    case leafGreen
+    case leafYellow
+    case leafDry
+
+    public var displayName: String {
+        switch self {
+        case .coral:      return "Coral"
+        case .leafGreen:  return "Leaf Green"
+        case .leafYellow: return "Leaf Yellow"
+        case .leafDry:    return "Leaf Dry"
+        }
+    }
+
+    public var base: Color {
+        switch self {
+        case .coral:      return QuickInkColors.coralBase
+        case .leafGreen:  return QuickInkColors.leafGreenBase
+        case .leafYellow: return QuickInkColors.leafYellowBase
+        case .leafDry:    return QuickInkColors.leafDryBase
+        }
+    }
+
+    public var deep: Color {
+        switch self {
+        case .coral:      return QuickInkColors.coralDeep
+        case .leafGreen:  return QuickInkColors.leafGreenDeep
+        case .leafYellow: return QuickInkColors.leafYellowDeep
+        case .leafDry:    return QuickInkColors.leafDryDeep
+        }
+    }
+}
+
+/// User-pickable theme override. `system` follows the OS setting;
+/// `light` / `dark` force the corresponding mode regardless of OS.
+public enum ThemeMode: String, CaseIterable {
+    case system
+    case light
+    case dark
+
+    public var displayName: String {
+        switch self {
+        case .system: return "System"
+        case .light:  return "Light"
+        case .dark:   return "Dark"
+        }
+    }
+
+    /// Map to SwiftUI's `ColorScheme?` — `nil` lets the OS decide.
+    public var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light:  return .light
+        case .dark:   return .dark
+        }
+    }
+}
+
 #if canImport(UIKit)
 private extension UIColor {
     /// Hex helper mirroring `Color(hex:)`. Only used inside the
@@ -153,54 +266,186 @@ private extension UIColor {
 
 /// Font helpers for QuickInk's editorial type system.
 ///
-/// `serif(...)` produces Cormorant Garamond when bundled, falling
-/// back to SwiftUI's `.serif` design otherwise. `handwritten(...)`
-/// targets Caveat with an italic-serif fallback. `ui(...)` returns
-/// the system sans for chips, nav labels, and status pills.
+/// Three font families resolve here:
+///
+///   - `serif(...)` → Cormorant Garamond. RESERVED for onboarding.
+///     High-contrast didone — beautiful at 30pt+, ghosts at 14pt.
+///     App screens must use `appSerif(...)` instead.
+///   - `appSerif(...)` → Fraunces. The app screens' editorial
+///     serif. Warmer, lower-contrast, optically tuned, holds up at
+///     mobile display sizes (14–28pt) where Cormorant gets fragile.
+///   - `ui(...)` → Inter. Replaces what was previously
+///     `Font.system(...)` so iOS and Android render identically and
+///     the brand carries across platforms. Used for body, labels,
+///     chips, nav, captions.
+///
+/// All three resolve via `Font.custom(...)` with a PostScript-name
+/// selector that maps a `Font.Weight` (and italic flag) to a
+/// specific bundled `.ttf`. SwiftUI's `Font.custom(...).weight(...)`
+/// modifier sometimes synthesizes a faux-bold rather than picking
+/// the matching face — selecting the file directly is the
+/// deterministic approach.
+///
+/// `handwritten(...)` targets Caveat (Medium only).
 public enum QuickInkFont {
 
-    /// Custom font names. Match the .ttf PostScript names — once
-    /// fonts are bundled in `DesignSystem/Fonts/`, these resolve;
-    /// before, `Font.custom(...)` falls through to the system
-    /// fallback when called with an unknown family.
-    public enum Family {
-        public static let serif       = "Cormorant Garamond"
-        public static let serifItalic = "Cormorant Garamond Italic"
-        public static let handwritten = "Caveat"
-    }
-
-    /// Cormorant Garamond at the given size + weight, falling back
-    /// to the system *serif* design (New York on iOS) when the
-    /// family isn't bundled — important: the previous
-    /// `Font.custom(name, size:)` fallback returned the system
-    /// **sans** default, which made every "serif" surface render in
-    /// SF Pro and threw off the editorial hierarchy from the mock.
-    /// Using `.system(...design:.serif)` gives a real serif at every
-    /// build, and once Cormorant Garamond .ttf files are dropped in
-    /// `DesignSystem/Fonts/`, swap this back to `Font.custom(name,
-    /// size:).weight(weight)` so the bundled family takes over.
+    /// Cormorant Garamond at the given size + weight, optionally
+    /// italic. RESERVED for onboarding screens — `display`,
+    /// `onboardingTitle`, `onboardingBody`. App screens reach for
+    /// `appSerif(...)` instead.
     public static func serif(_ size: CGFloat, weight: Font.Weight = .regular, italic: Bool = false) -> Font {
-        let base = Font.system(size: size, weight: weight, design: .serif)
-        return italic ? base.italic() : base
+        return Font.custom(cormorantPostScriptName(weight: weight, italic: italic), size: size)
     }
 
-    /// Caveat handwritten font for note previews. Falls back to
-    /// system serif italic if the family isn't bundled.
+    /// Fraunces at the given size + weight, optionally italic. The
+    /// app screens' editorial serif — used by every QuickInkText
+    /// app token (`pageTitle`, `heading`, `cardTitle`, `bodyItalic`).
+    /// Bundled weights: Regular, Medium, plus the italic of each.
+    /// SemiBold/Bold are not bundled to keep the font payload small;
+    /// the mapper falls those weights back to Medium.
+    public static func appSerif(_ size: CGFloat, weight: Font.Weight = .regular, italic: Bool = false) -> Font {
+        return Font.custom(frauncesPostScriptName(weight: weight, italic: italic), size: size)
+    }
+
+    /// Caveat handwritten font for note previews. Only the Medium
+    /// weight is bundled today; if other weights are needed later,
+    /// drop the .ttf into `DesignSystem/Fonts/` and switch this to
+    /// a weight-aware selector like `cormorantPostScriptName`.
     public static func handwritten(_ size: CGFloat) -> Font {
-        // Same fallback strategy as `serif(...)`: prefer a real
-        // serif italic over the SF default until Caveat is bundled.
-        return Font.system(size: size, weight: .regular, design: .serif).italic()
+        return Font.custom("Caveat-Medium", size: size)
     }
 
-    /// System sans for UI labels (chips, nav, status pills).
+    /// Map a SwiftUI `Font.Weight` + italic flag to the PostScript
+    /// name of the matching bundled `.ttf`. Filenames in
+    /// `DesignSystem/Fonts/` are PascalCase per Google Fonts'
+    /// shipped naming; the PostScript names embedded in the files
+    /// match. `Font.Weight` is a struct (not a true enum), hence
+    /// the chain of `==` checks instead of a `switch`.
+    private static func cormorantPostScriptName(weight: Font.Weight, italic: Bool) -> String {
+        let weightSuffix: String
+        if weight == .ultraLight || weight == .thin || weight == .light {
+            weightSuffix = "Light"
+        } else if weight == .medium {
+            weightSuffix = "Medium"
+        } else if weight == .semibold {
+            weightSuffix = "SemiBold"
+        } else if weight == .bold || weight == .heavy || weight == .black {
+            weightSuffix = "Bold"
+        } else {
+            weightSuffix = "Regular"
+        }
+        if italic {
+            // The italic regular variant ships as
+            // `CormorantGaramond-Italic.ttf`, NOT `…-RegularItalic`.
+            return weightSuffix == "Regular"
+                ? "CormorantGaramond-Italic"
+                : "CormorantGaramond-\(weightSuffix)Italic"
+        }
+        return "CormorantGaramond-\(weightSuffix)"
+    }
+
+    /// Map a SwiftUI `Font.Weight` + italic flag to the matching
+    /// bundled Fraunces file at the **72pt optical size** — the
+    /// magazine-display optical, chosen for the boutique feel
+    /// (high contrast, airy hairlines, dramatic italics).
+    ///
+    /// Bundled weights: Regular + SemiBold (plus their italics).
+    /// SemiBold (CSS weight 600) is the spec call for app pageTitle
+    /// and H2-sized text — see TYPE_SYSTEM in repo root and the
+    /// Fraunces 600 spec entries for "Achal B I" (Display) and
+    /// "Daily journal" (H2). **Medium is not part of Fraunces' 72pt
+    /// static instance set** (it ships Thin/Light/Regular/SemiBold/
+    /// Bold/Black), so any "heading-weight" call site
+    /// (`.medium`, `.semibold`, `.bold`, etc.) lands on SemiBold.
+    ///
+    /// Optical-size trade-off: 72pt-optical strokes are designed
+    /// to read at 60pt+ rendering. Scaled down to our 14–28pt
+    /// type system, the strokes can feel slightly thinner than
+    /// a "true" SemiBold at native rendering would. If hairlines
+    /// disappear in QA on lower-density Android, swap to the
+    /// Fraunces variable font with opsz axis pinned per text
+    /// level (true optical-size correctness at every rendering
+    /// size, single font file replaces the four statics).
+    ///
+    /// Filename convention from Google Fonts' new build:
+    /// `Fraunces_72pt-Regular.ttf` → PostScript `Fraunces72pt-Regular`
+    /// (underscore dropped in the PS name, "pt" preserved).
+    /// Inspected from the actual font's `name` table — see
+    /// scripts/install-fonts.sh.
+    private static func frauncesPostScriptName(weight: Font.Weight, italic: Bool) -> String {
+        let weightSuffix: String
+        if weight == .medium
+            || weight == .semibold
+            || weight == .bold
+            || weight == .heavy
+            || weight == .black
+        {
+            // Spec is Fraunces 600 (SemiBold) — see doc comment.
+            // Don't bump to Bold for "thinness compensation"; if
+            // SemiBold reads thin at small rendering sizes, the
+            // fix is the variable font with opsz pinned, not
+            // overweighting the static.
+            weightSuffix = "SemiBold"
+        } else {
+            weightSuffix = "Regular"
+        }
+        if italic {
+            // Fraunces' italic-regular ships as `Fraunces72pt-Italic`,
+            // mirroring Cormorant's filename convention.
+            return weightSuffix == "Regular"
+                ? "Fraunces72pt-Italic"
+                : "Fraunces72pt-\(weightSuffix)Italic"
+        }
+        return "Fraunces72pt-\(weightSuffix)"
+    }
+
+    /// Map a SwiftUI `Font.Weight` to the matching bundled Inter
+    /// file at the **18pt optical size** (Inter's smallest optical;
+    /// the right pick for our 11–16pt UI rendering). Bundled
+    /// weights are Regular and Medium — that's all the QuickInk
+    /// type system uses. SemiBold/Bold/Heavy fall back to Medium,
+    /// Light/Thin to Regular.
+    ///
+    /// PostScript name from Google Fonts' new build:
+    /// `Inter_18pt-Regular.ttf` → `Inter18pt-Regular`.
+    private static func interPostScriptName(weight: Font.Weight) -> String {
+        if weight == .medium
+            || weight == .semibold
+            || weight == .bold
+            || weight == .heavy
+            || weight == .black
+        {
+            return "Inter18pt-Medium"
+        }
+        return "Inter18pt-Regular"
+    }
+
+    /// Inter for body, labels, chips, nav, captions. Replaces what
+    /// was previously `Font.system(...)`. Kept as `ui(...)` (not
+    /// `body(...)` etc.) so the rename ripples nowhere — every
+    /// existing call site that asks for `QuickInkFont.ui(...)` now
+    /// transparently gets Inter.
     public static func ui(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        return Font.system(size: size, weight: weight, design: .default)
+        return Font.custom(interPostScriptName(weight: weight), size: size)
     }
 
     /// Register all bundled QuickInk font files. Call once at app
     /// launch from the Xcode app target's `@main App` init or
     /// equivalent; idempotent if files aren't present (logs and
     /// no-ops). Iterates over the package's resource bundle.
+    ///
+    /// `subdirectory` is `nil` (not `"Fonts"`) because Package.swift
+    /// declares the font directory with `.process(...)`, which
+    /// FLATTENS the directory contents to the bundle root rather
+    /// than preserving the `Fonts/` subfolder. Looking in `Fonts/`
+    /// returned an empty list and silently skipped registration —
+    /// SwiftUI then fell back to system serif for every
+    /// `Font.custom("CormorantGaramond-...", size:)` call.
+    ///
+    /// In DEBUG builds, prints a compact summary of which TTFs
+    /// registered (and which failed) so the "why is the screen in
+    /// system serif?" debugging step is `Run → look at console`,
+    /// not `dig through the Xcode bundle`.
     public static func registerAll() {
         #if SWIFT_PACKAGE
         let bundle = Bundle.module
@@ -208,54 +453,127 @@ public enum QuickInkFont {
         let bundle = Bundle.main
         #endif
         let exts = ["ttf", "otf"]
+        var registered: [String] = []
+        var failed: [String] = []
         for ext in exts {
-            guard let urls = bundle.urls(forResourcesWithExtension: ext, subdirectory: "Fonts") else { continue }
+            guard let urls = bundle.urls(forResourcesWithExtension: ext, subdirectory: nil) else { continue }
             for url in urls {
-                CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+                var error: Unmanaged<CFError>?
+                let ok = CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error)
+                if ok {
+                    registered.append(url.lastPathComponent)
+                } else if let cfError = error?.takeRetainedValue() {
+                    // `takeRetainedValue()` consumes the +1 retain
+                    // CTFontManager hands us so we don't leak.
+                    // Already-registered (`kCTFontManagerError-
+                    // AlreadyRegistered`) isn't a real failure — it
+                    // happens during SwiftUI Previews hot reload
+                    // and re-init paths — treat as success.
+                    let code = (cfError as Error as NSError).code
+                    if code == Int(CTFontManagerError.alreadyRegistered.rawValue) {
+                        registered.append(url.lastPathComponent)
+                    } else {
+                        failed.append("\(url.lastPathComponent) (code=\(code))")
+                    }
+                } else {
+                    failed.append(url.lastPathComponent)
+                }
             }
         }
+        #if DEBUG
+        print("[QuickInkFont] registered \(registered.count) font file(s):")
+        for f in registered.sorted() { print("  ✓ \(f)") }
+        if !failed.isEmpty {
+            print("[QuickInkFont] FAILED \(failed.count) font file(s):")
+            for f in failed.sorted() { print("  ✗ \(f)") }
+        }
+        #endif
     }
 }
 
 /// Pre-baked text styles matching the mockup hierarchy. Use these
 /// instead of constructing `QuickInkFont.serif(...)` calls inline,
 /// so a brand pass tweak lands in one place.
+///
+/// Two-context contract (post type-system pass):
+///   - Onboarding tokens (`display`, `onboardingTitle`,
+///     `onboardingBody`) → resolve to Cormorant Garamond.
+///   - App tokens (`pageTitle`, `heading`, `cardTitle`,
+///     `bodyItalic`) → resolve to Fraunces via `appSerif(...)`.
+///   - `body` → resolves to Inter (sans). App screens use it
+///     directly; onboarding screens explicitly reach for
+///     `onboardingBody` instead.
+///   - UI tokens (`eyebrow`, `label`, `meta`, `caption`) → Inter
+///     for both contexts (UI sans is the same family everywhere).
+///
+/// Weight pass kept from the prior pass: every editorial-serif
+/// style sits one step heavier than the mock-spec default so the
+/// serif reads with presence at small sizes on phone screens.
 public enum QuickInkText {
-    /// Onboarding hero / page hero — large serif, light weight.
-    public static let display    = QuickInkFont.serif(40, weight: .light)
+    /// App-tier large display serif — used for the Home greeting
+    /// name ("Achal B I") and the Profile screen header. Fraunces
+    /// 72pt at 40pt rendering. Despite the legacy name, this is
+    /// NOT used in onboarding — the onboarding wordmark goes
+    /// through `onboardingTitle` (Cormorant). Audited via grep
+    /// for `QuickInkText.display`: only home + profile.
+    public static let display    = QuickInkFont.appSerif(40, weight: .regular)
 
     /// Onboarding hero title — sized to match the JSX mockup
     /// (`text-[30px] leading-[1.15]`). Smaller than `display` so
     /// the two-line tagline doesn't crowd the illustration on a
-    /// 390-wide phone frame.
-    public static let onboardingTitle = QuickInkFont.serif(30, weight: .regular)
+    /// 390-wide phone frame. Cormorant Garamond.
+    public static let onboardingTitle = QuickInkFont.serif(30, weight: .medium)
 
-    /// Standard page title (Settings, Library, etc.) — serif, regular weight.
-    public static let pageTitle  = QuickInkFont.serif(28, weight: .regular)
+    /// Onboarding body — Cormorant Garamond medium. Used by the
+    /// onboarding scaffold's tagline + SignInScreen's lead copy
+    /// where the editorial showroom feel matters more than density.
+    /// App screens use `body` (Inter) instead.
+    public static let onboardingBody = QuickInkFont.serif(16, weight: .medium)
 
-    /// Section eyebrow above grouped content (used uppercase + tracked).
+    /// App page title (Settings, Library, Detail, etc.) — Fraunces
+    /// medium. Switched from Cormorant in the type-system pass:
+    /// Fraunces is warmer and reads better at small mobile sizes.
+    public static let pageTitle  = QuickInkFont.appSerif(28, weight: .medium)
+
+    /// Section eyebrow above grouped content (uppercase + tracked).
+    /// Inter semibold.
     public static let eyebrow    = QuickInkFont.ui(11, weight: .semibold)
 
-    /// Section heading (smaller than pageTitle).
-    public static let heading    = QuickInkFont.serif(20, weight: .medium)
+    /// App section heading (smaller than pageTitle). Fraunces semibold.
+    public static let heading    = QuickInkFont.appSerif(20, weight: .semibold)
 
-    /// Body editorial copy (Cormorant Garamond regular).
-    public static let body       = QuickInkFont.serif(16, weight: .regular)
+    /// App body — Inter medium. Reading copy on app screens reads
+    /// as "tool" (sans) while editorial moments stay on the serif
+    /// via `bodyItalic` / `heading` / `pageTitle`. Onboarding
+    /// screens use `onboardingBody` for the Cormorant feel.
+    public static let body       = QuickInkFont.ui(16, weight: .medium)
 
-    /// Italic accent body (taglines, smart suggestions).
-    public static let bodyItalic = QuickInkFont.serif(16, weight: .regular, italic: true)
+    /// Italic accent body — taglines, smart suggestions on app
+    /// screens. Fraunces italic medium.
+    public static let bodyItalic = QuickInkFont.appSerif(16, weight: .medium, italic: true)
 
     /// Caveat handwritten — used inside note thumbnails.
     public static let handwritten = QuickInkFont.handwritten(20)
 
-    /// UI label (chip text, nav labels, button text on small CTAs).
-    public static let label      = QuickInkFont.ui(14, weight: .medium)
+    /// Card title — Inter at body scale (14pt SemiBold), used for
+    /// note / scan thumbnail titles. Originally Fraunces, switched
+    /// to Inter so the home recent rail matches the library
+    /// cards' UI-sans treatment — note titles are functional
+    /// (scannable in dense grids) and the editorial serif felt
+    /// precious for a file list. Library cards still override with
+    /// `heading.copy(...)` because they sit at a different size;
+    /// home rail uses this token directly.
+    public static let cardTitle  = QuickInkFont.ui(14, weight: .semibold)
 
-    /// Meta — timestamps, sync status, helper copy.
-    public static let meta       = QuickInkFont.ui(12, weight: .regular)
+    /// UI label (chip text, nav labels, button text on small CTAs).
+    /// Inter semibold.
+    public static let label      = QuickInkFont.ui(14, weight: .semibold)
+
+    /// Meta — timestamps, sync status, helper copy. Inter medium.
+    public static let meta       = QuickInkFont.ui(12, weight: .medium)
 
     /// Caption — smallest readable size. Used in confidence badges,
-    /// page counters, etc.
+    /// page counters, etc. Inter medium.
     public static let caption    = QuickInkFont.ui(10, weight: .medium)
 }
 

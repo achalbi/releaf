@@ -304,6 +304,20 @@ public final class QuickInkDatabase: @unchecked Sendable {
             try db.execute(sql: "ALTER TABLE captures ADD COLUMN preview_drive_file_id TEXT")
         }
 
+        // ─── v4_capture_source ──────────────────────────────────
+        //
+        // Adds `captures.source` so the Library cards can flag
+        // captures that came from the system photo picker
+        // ("import") versus the document scanner ("scan", default).
+        // Free-form TEXT instead of an enum so a future third
+        // source ("share-extension", etc.) can land without another
+        // migration. Defaulted at the column level so legacy rows
+        // synced from older clients (without the field on the wire)
+        // read back as scans.
+        migrator.registerMigration("v4_capture_source") { db in
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN source TEXT NOT NULL DEFAULT 'scan'")
+        }
+
         return migrator
     }
 }

@@ -139,6 +139,14 @@ struct HomeScreen: View {
                         withAnimation(.easeInOut(duration: 0.22)) { showProfileDrawer = false }
                         onOpenProfile?()
                     },
+                    onOpenLibrary: {
+                        withAnimation(.easeInOut(duration: 0.22)) { showProfileDrawer = false }
+                        onOpenNotes()
+                    },
+                    onOpenSearch: {
+                        withAnimation(.easeInOut(duration: 0.22)) { showProfileDrawer = false }
+                        onOpenSearch?()
+                    },
                     onOpenSettings: {
                         withAnimation(.easeInOut(duration: 0.22)) { showProfileDrawer = false }
                         onOpenSettings()
@@ -172,6 +180,17 @@ struct HomeScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
                 headerBlock
+                // "N pending" pill — renders only while there are
+                // local rows that haven't been pushed to Drive. One
+                // tap kicks the upload-only sync via the shared
+                // scheduler. Count is sourced from
+                // `SyncStateStore.localDirtyCount`, refreshed by
+                // `QuickInkSyncEnvironment`'s 60-second foreground
+                // tick (which also auto-kicks the sync — the pill
+                // is the visible surface of that mechanism).
+                if syncState.state.localDirtyCount > 0 {
+                    pendingSyncPill
+                }
                 recentRail
                 categoryGrid
                 // Sync pill at the bottom of the scroll content —
@@ -194,7 +213,14 @@ struct HomeScreen: View {
         }
         .background(QuickInkColors.bg.ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            bottomNavBar
+            QuickInkBottomNavBar(
+                activeTab:  .home,
+                onHome:     { /* current screen */ },
+                onLibrary:  onOpenNotes,
+                onScan:     { showQuickCapture = true },
+                onSearch:   { onOpenSearch?() },
+                onSettings: onOpenSettings
+            )
         }
         .task {
             // Open the live captures observation backing the rail
@@ -316,6 +342,63 @@ struct HomeScreen: View {
         case 12..<18: return "Good afternoon"
         default:      return "Good evening"
         }
+    }
+
+    // MARK: - Pending-sync pill
+
+    /// Coral pill shown between the greeting and the recent rail
+    /// when there are local rows that haven't reached Drive yet.
+    /// One tap kicks `QuickInkSyncEnvironment.scheduler.requestImmediate()` —
+    /// the same entry point Settings → "Sync now" uses. The
+    /// `localDirtyCount` is refreshed every 60 seconds by the
+    /// foreground pending-push loop (and the loop ALSO auto-kicks
+    /// the sync, so this pill is mostly a visible surface +
+    /// manual-override path for users who want the sync to fire
+    /// before the next 60-second tick).
+    @ViewBuilder
+    private var pendingSyncPill: some View {
+        let count = syncState.state.localDirtyCount
+        Button(action: {
+            QuickInkSyncEnvironment.shared.scheduler.requestImmediate()
+        }) {
+            HStack(spacing: QuickInkSpacing.s3) {
+                ZStack {
+                    Circle().fill(QuickInkColors.accent)
+                        .frame(width: 28, height: 28)
+                    Text(count > 99 ? "99+" : "\(count)")
+                        .font(QuickInkText.label)
+                        .foregroundStyle(QuickInkColors.textOnAccent)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(count == 1 ? "1 item pending" : "\(count) items pending")
+                        .font(QuickInkText.body)
+                        .foregroundStyle(QuickInkColors.ink)
+                    Text("Tap to back up to Drive now")
+                        .font(QuickInkText.meta)
+                        .foregroundStyle(QuickInkColors.inkSoft)
+                }
+                Spacer()
+                Text("Sync →")
+                    .font(QuickInkText.label)
+                    .foregroundStyle(QuickInkColors.accent)
+            }
+            .padding(.horizontal, QuickInkSpacing.s4)
+            .padding(.vertical, QuickInkSpacing.s3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(QuickInkColors.accentSoft)
+            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous)
+                    .stroke(QuickInkColors.accent.opacity(0.55), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(
+            count == 1
+                ? "1 item pending. Tap to back up to Drive."
+                : "\(count) items pending. Tap to back up to Drive."
+        ))
     }
 
     // MARK: - Sync status pill
@@ -535,198 +618,6 @@ struct HomeScreen: View {
 
     // MARK: - Bottom nav with Zap FAB
 
-    /// Floating glass-morphism bottom nav — frosted card hovering over
-    /// the canvas with the Zap FAB lifted in the center. Mirror of
-    /// Releaf's `BottomNav` layout, restyled with a `.regularMaterial`
-    /// backdrop blur + warm cream tint so the editorial palette reads
-    /// through the frost. The bar's silhouette is identical on Android
-    /// (HomeScreen.kt → BottomNavBar) — Compose has no built-in
-    /// backdrop blur without a third-party lib, so the Android side
-    /// approximates with a translucent surface + bright top-edge.
-    @ViewBuilder
-    private var bottomNavBar: some View {
-        let cardShape = RoundedRectangle(cornerRadius: QuickInkRadius.lg, style: .continuous)
-
-        // ZStack(.top) so the FAB renders as a SIBLING of the bar,
-        // AFTER the bar's `.overlay(border)` modifier. With the FAB
-        // inside the HStack, the bar's `.overlay` was painting the
-        // hairline border on top of the lifted FAB at the
-        // intersection along the bar's top edge — visually the FAB
-        // had a stripe through it. Lifting the FAB out of the HStack
-        // and rendering it as the ZStack's second (top) child fixes
-        // the z-order without changing the FAB's visual position.
-        ZStack(alignment: .top) {
-            HStack(spacing: 0) {
-                navIcon(systemName: "house.fill", label: "Home", active: true) { /* current screen */ }
-                    .frame(maxWidth: .infinity)
-                navIconAsset(assetName: "IconNote", label: "Library", active: false, action: onOpenNotes)
-                    .frame(maxWidth: .infinity)
-                // Placeholder for the FAB column — keeps the HStack at
-                // 5 equal cells so the flanking cells stay symmetric.
-                // Fixed `.frame(height: 64)` so the bar's intrinsic
-                // height doesn't collapse when the actual FAB moves
-                // out of this slot.
-                Color.clear
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 64)
-                navIconAsset(assetName: "IconSearch", label: "Search", active: false) { onOpenSearch?() }
-                    .frame(maxWidth: .infinity)
-                navIcon(systemName: "gearshape", label: "Settings", active: false, action: onOpenSettings)
-                    .frame(maxWidth: .infinity)
-            }
-            .padding(.horizontal, QuickInkSpacing.s1)
-            .padding(.vertical, QuickInkSpacing.s1)
-            // Canonical SwiftUI material API: `.background(material,
-            // in: shape)` clips the backdrop blur to the rounded rect
-            // cleanly. Stacking matters — first `.background` sits
-            // closest to the content, subsequent calls go further
-            // behind. Tint at 0.32 lets the material's gray show
-            // through warmed by QuickInk cream.
-            .background(QuickInkColors.surface.opacity(0.32), in: cardShape)
-            .background(.thinMaterial, in: cardShape)
-            .overlay(
-                // Top-bright glass border — frosted-glass cue.
-                cardShape.strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.55),
-                            QuickInkColors.border.opacity(0.40),
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 1
-                )
-            )
-            // Shadows lightened from the previous pass — border halo
-            // 0.32→0.18 (radius 5→4) and card lift 0.20→0.12. The bar
-            // now reads as a softer hovering glass tile instead of a
-            // chip with a heavy stroke.
-            .shadow(color: QuickInkColors.ink.opacity(0.18), radius: 4, x: 0, y: 2)
-            .shadow(color: QuickInkColors.ink.opacity(0.12), radius: 18, x: 0, y: 10)
-
-            // FAB sibling — drawn AFTER the bar in the ZStack so it
-            // sits on top of the border + glass surface.
-            zapFab
-        }
-        .padding(.horizontal, QuickInkSpacing.s4)
-        .padding(.bottom, QuickInkSpacing.s3)
-    }
-
-    @ViewBuilder
-    private func navIcon(systemName: String, label: String, active: Bool, action: @escaping () -> Void) -> some View {
-        // Active cells render the icon + label inside an accentSoft
-        // rounded-rect pill, tinted with the accent. Inactive cells
-        // render flat in `ink` — same posture as Releaf's BottomNav
-        // RegularTab.
-        let tint = active ? QuickInkColors.accent : QuickInkColors.ink
-        let bg   = active ? QuickInkColors.accentSoft : Color.clear
-        Button(action: action) {
-            VStack(spacing: 2) {
-                Image(systemName: systemName)
-                    .font(.system(size: 20))
-                    .foregroundStyle(tint)
-                Text(label)
-                    .font(QuickInkText.caption)
-                    .foregroundStyle(tint)
-            }
-            .padding(.horizontal, QuickInkSpacing.s2)
-            .padding(.vertical, QuickInkSpacing.s2)
-            .background(
-                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                    .fill(bg)
-            )
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(label))
-        .accessibilityAddTraits(active ? [.isSelected] : [])
-    }
-
-    /// Asset-backed nav icon — same shape as `navIcon` but renders a
-    /// QuickInk vector asset (template-rendered, tinted via
-    /// foregroundStyle). Used for the Library / Search tabs which
-    /// have brand-specific icons in `Assets.xcassets`.
-    @ViewBuilder
-    private func navIconAsset(assetName: String, label: String, active: Bool, action: @escaping () -> Void) -> some View {
-        let tint = active ? QuickInkColors.accent : QuickInkColors.ink
-        let bg   = active ? QuickInkColors.accentSoft : Color.clear
-        Button(action: action) {
-            VStack(spacing: 2) {
-                Image(assetName, bundle: .module)
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 20, height: 20)
-                    .foregroundStyle(tint)
-                Text(label)
-                    .font(QuickInkText.caption)
-                    .foregroundStyle(tint)
-            }
-            .padding(.horizontal, QuickInkSpacing.s2)
-            .padding(.vertical, QuickInkSpacing.s2)
-            .background(
-                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                    .fill(bg)
-            )
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(label))
-        .accessibilityAddTraits(active ? [.isSelected] : [])
-    }
-
-    /// The signature ⚡ Zap FAB — coral disc with a top→bottom
-    /// gradient, lifted ~16pt above the card's top edge so it reads
-    /// as a hovering brand mark. Counterpart to Releaf's BrandTab.
-    ///
-    /// Three layers, bottom up:
-    ///   1. Canvas ring — bg-coloured disc 8pt larger than the FAB
-    ///      with its own drop shadow. Punches through the frosted
-    ///      glass bar so the lifted brand mark sits on a canvas moat
-    ///      instead of looking pasted onto the bar surface.
-    ///   2. Coral gradient disc with its accent halo shadow.
-    ///   3. Bolt glyph.
-    @ViewBuilder
-    private var zapFab: some View {
-        let gradient = LinearGradient(
-            colors: [QuickInkColors.accent, QuickInkColors.accentDeep],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        Button(action: { showQuickCapture = true }) {
-            ZStack {
-                // Canvas ring shadow lightened (0.38→0.22, radius
-                // 14→10, y 7→5) — moat still reads but no longer
-                // dominates the bar's softer glass.
-                Circle()
-                    .fill(QuickInkColors.bg)
-                    .frame(width: 64, height: 64)
-                    .shadow(color: QuickInkColors.ink.opacity(0.22), radius: 10, x: 0, y: 5)
-                // Gradient FAB disc + its own coral halo. Halo
-                // lightened 0.55→0.38, radius 22→16, y 12→8. Shadow
-                // attached HERE rather than on the outer ZStack so it
-                // doesn't bleed through the canvas ring below.
-                Circle()
-                    .fill(gradient)
-                    .frame(width: 56, height: 56)
-                    .shadow(color: QuickInkColors.accent.opacity(0.38), radius: 16, x: 0, y: 8)
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 32, weight: .semibold))
-                    .foregroundStyle(QuickInkColors.textOnAccent)
-            }
-            .offset(y: -16)
-            // No `.frame(maxWidth: .infinity)` here — the FAB now
-            // lives as a ZStack sibling of the bar (not an HStack
-            // cell), so it should size intrinsically to its 64pt
-            // canvas ring. ZStack(alignment: .top) centers it
-            // horizontally and aligns its top to the bar's top edge.
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Quick capture")
-    }
 }
 
 // MARK: - Component: RecentScanThumb
@@ -750,11 +641,17 @@ struct RecentScanThumb: View {
                     placeholder
                 }
 
+                sourceChip
+                    .padding(QuickInkSpacing.s2)
+
                 // Page-count chip — only when the capture has more
                 // than one page, so single-page scans stay clean.
+                // Pinned top-trailing so it doesn't overlap with
+                // the Import pill on imported multi-page captures.
                 if capture.pageCount > 1 {
                     pageCountChip
                         .padding(QuickInkSpacing.s2)
+                        .frame(maxWidth: .infinity, alignment: .topTrailing)
                 }
             }
             .frame(width: 140, height: 120)
@@ -765,8 +662,11 @@ struct RecentScanThumb: View {
             )
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(displayTitle)
-                    .font(QuickInkText.label)
+                // Title Case — matches the library grid/list/search
+                // normalisation. `.capitalized` is per-word, splits
+                // on whitespace.
+                Text(displayTitle.capitalized)
+                    .font(QuickInkText.cardTitle)
                     .foregroundStyle(QuickInkColors.ink)
                     .lineLimit(1)
                 Text(displayDate)
@@ -814,8 +714,30 @@ struct RecentScanThumb: View {
             )
     }
 
+    @ViewBuilder
+    private var sourceChip: some View {
+        let isImport = capture.source == "import"
+        HStack(spacing: 4) {
+            Image(systemName: isImport ? "photo" : "camera.fill")
+                .font(.system(size: 10))
+            Text(isImport ? "Import" : "Scan")
+                .font(QuickInkText.caption)
+        }
+        .foregroundStyle(isImport ? QuickInkColors.textOnAccent : QuickInkColors.ink.opacity(0.7))
+        .padding(.horizontal, QuickInkSpacing.s2)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
+                .fill(isImport ? QuickInkColors.accent : QuickInkColors.surface.opacity(0.9))
+        )
+    }
+
     private var displayTitle: String {
-        capture.category ?? "Scan"
+        if let t = capture.title?.trimmingCharacters(in: .whitespaces),
+           !t.isEmpty {
+            return t
+        }
+        return capture.category ?? "Scan"
     }
 
     /// Friendly date — `2026-05-02T14:30:00.000Z` → `May 2`. Falls

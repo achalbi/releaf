@@ -61,6 +61,9 @@ import app.quickink.mobile.QUICKINK_APP_VERSION
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.data.sync.QuickInkSyncWorker
+import app.quickink.mobile.features.nav.NavTab
+import app.quickink.mobile.features.nav.QuickInkBottomNavBar
+import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
@@ -68,9 +71,13 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
+import app.releaf.mobile.data.common.IsoClock
+import app.releaf.mobile.data.sync.SyncErrorCodes
+import app.releaf.mobile.data.sync.SyncStateEntity
 import app.releaf.mobile.data.sync.SyncStateKeys
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(
@@ -81,6 +88,25 @@ fun SettingsScreen(
     /// edit immediately (without a SharedPreferences observer).
     /// Optional so this screen still renders standalone in previews.
     onCustomDisplayNameChange: ((String) -> Unit)? = null,
+    /// Appearance state, hoisted to MainActivity. The Settings UI
+    /// renders the picker; mutations flow through the callbacks so
+    /// QuickInkTheme at the activity level can recompose with the
+    /// new accent / mode. Defaults preserve standalone-preview
+    /// behaviour (no callback wiring needed at preview time).
+    primaryColor: app.quickink.mobile.ui.theme.PrimaryColor =
+        app.quickink.mobile.ui.theme.PrimaryColor.Coral,
+    themeMode: app.quickink.mobile.ui.theme.ThemeMode =
+        app.quickink.mobile.ui.theme.ThemeMode.System,
+    onPrimaryColorChange: (app.quickink.mobile.ui.theme.PrimaryColor) -> Unit = {},
+    onThemeModeChange: (app.quickink.mobile.ui.theme.ThemeMode) -> Unit = {},
+    /// Tab navigation callbacks for the floating bottom nav. The
+    /// Settings tab paints itself active; tapping it is a no-op
+    /// (we're already here).
+    onHome: () -> Unit = onBack,
+    onLibrary: () -> Unit = {},
+    onScan: () -> Unit = {},
+    onSearch: () -> Unit = {},
+    onSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val preferences = remember { SettingsPreferences(context) }
@@ -91,18 +117,22 @@ fun SettingsScreen(
     var searchablePdfExportEnabled by remember { mutableStateOf(preferences.searchablePdfExportEnabled) }
     var customDisplayName by remember { mutableStateOf(preferences.customDisplayName) }
 
-    // "Syncing now…" feedback driven by the actual worker state,
-    // not a fixed timer. Observes the unique sync work via
-    // WorkManager's per-name LiveData/Flow — when the worker is
-    // ENQUEUED or RUNNING the badge shows; when it finishes
-    // (SUCCEEDED / FAILED / CANCELLED) the badge clears and the
-    // sync_state DAO Flow drives the "Last synced" line. The old
-    // 2.5s `flashSyncing()` timer was a UX bug: WorkManager
-    // typically takes 5–10s to actually start a constrained
-    // OneTimeWork (mitigated now by `setExpedited` in
-    // QuickInkSyncScheduler.requestUserSync), so the timer ended
-    // before the worker even ran, and users saw "Last synced:
-    // Never" reappear right after tapping Sync now.
+    // "Syncing now…" feedback combines two signals:
+    //
+    //   1. `tapAckUntilMs` — set when the user taps Sync now /
+    //      Restore. Bridges the brief queued-before-running window
+    //      (~1–2s with `setExpedited`) so the user sees an ack
+    //      immediately, even before WorkManager dispatches.
+    //
+    //   2. WorkInfo.State.RUNNING — only RUNNING shows the badge.
+    //      ENQUEUED is intentionally ignored: a worker that
+    //      `Result.retry()`s after a failure goes back to
+    //      ENQUEUED during exponential backoff, and treating that
+    //      as "syncing" left users staring at a spinner that
+    //      never stopped (the regression that prompted this fix).
+    //
+    // When either signal is true, show the badge; when both go
+    // quiet, the sync_state DAO Flow drives the "Last synced" line.
     val workManager = remember(context) { WorkManager.getInstance(context) }
     val syncWorkInfos by remember(workManager) {
         workManager.getWorkInfosForUniqueWorkFlow(QuickInkSyncWorker.ONESHOT_WORK_NAME)
@@ -112,9 +142,27 @@ fun SettingsScreen(
             app.quickink.mobile.data.sync.QuickInkRestoreWorker.ONESHOT_WORK_NAME
         )
     }.collectAsState(initial = emptyList())
-    val isSyncingFlash: Boolean = (syncWorkInfos + restoreWorkInfos).any {
-        it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING
+    val isWorkerRunning: Boolean = (syncWorkInfos + restoreWorkInfos).any {
+        it.state == WorkInfo.State.RUNNING
     }
+    // Tap-ack window: when the user taps Sync now we set this to
+    // ~6s in the future; until that timestamp passes, the badge
+    // stays on regardless of WorkInfo state. After the window
+    // expires, we hand off to the WorkInfo-RUNNING signal. 6s is a
+    // safe upper bound on `setExpedited` dispatch latency.
+    var tapAckUntilMs by remember { mutableStateOf(0L) }
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    androidx.compose.runtime.LaunchedEffect(tapAckUntilMs) {
+        // Only spin while the ack window is open — once it closes
+        // we stop ticking and rely on Flow re-renders.
+        while (System.currentTimeMillis() < tapAckUntilMs) {
+            nowMs = System.currentTimeMillis()
+            kotlinx.coroutines.delay(250L)
+        }
+        nowMs = System.currentTimeMillis()
+    }
+    val isTapAckActive = nowMs < tapAckUntilMs
+    val isSyncingFlash: Boolean = isTapAckActive || isWorkerRunning
 
     val authState by authStore.state.collectAsState()
 
@@ -127,7 +175,24 @@ fun SettingsScreen(
         .observe(SyncStateKeys.PENDING_COUNT)
         .collectAsState(initial = null)
     val pendingCount = pendingRow?.value?.toIntOrNull() ?: 0
+    val errorCodeRow by syncStateDao
+        .observe(SyncStateKeys.LAST_SYNC_ERROR_CODE)
+        .collectAsState(initial = null)
+    val lastSyncErrorCode = errorCodeRow?.value.orEmpty()
     val isSignedIn = authState is AuthState.SignedIn
+
+    // Last restore outcome — surfaces a transient banner under the
+    // Sync section's action buttons so the user sees what just
+    // happened without staring at a logcat. Cleared on dismiss or
+    // on the next restore tap. See `RestoreOutcome.parse` for the
+    // wire format the worker writes.
+    val restoreOutcomeRow by syncStateDao
+        .observe(SyncStateKeys.LAST_RESTORE_OUTCOME)
+        .collectAsState(initial = null)
+    val restoreOutcome = remember(restoreOutcomeRow?.value) {
+        RestoreOutcome.parse(restoreOutcomeRow?.value)
+    }
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
 
     // System status-bar inset + visual breathing room above the
     // top bar — same pattern as HomeScreen / NotesListScreen so the
@@ -135,12 +200,12 @@ fun SettingsScreen(
     // (target SDK 35+).
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .quickInkDotGridBackground()
-            .padding(top = statusBarTop + QuickInkSpacing.s4),
-    ) {
+    Box(modifier = Modifier.fillMaxSize().quickInkDotGridBackground()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = statusBarTop + QuickInkSpacing.s4),
+        ) {
         // Top bar
         Row(
             modifier = Modifier
@@ -162,9 +227,27 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = QuickInkSpacing.s5, vertical = QuickInkSpacing.s4),
+                .padding(
+                    start  = QuickInkSpacing.s5,
+                    end    = QuickInkSpacing.s5,
+                    top    = QuickInkSpacing.s4,
+                    // Reserve nav-bar height so the last setting row
+                    // doesn't sit under the floating bar at scroll-end.
+                    bottom = QuickInkBottomNavReservedHeight,
+                ),
             verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s5),
         ) {
+            Section(title = "Appearance") {
+                ThemeModeRow(
+                    selected = themeMode,
+                    onChange = onThemeModeChange,
+                )
+                PrimaryColorRow(
+                    selected = primaryColor,
+                    onChange = onPrimaryColorChange,
+                )
+            }
+
             Section(title = "Account") {
                 AccountRow(authState = authState, onSignOut = { authStore.signOut() })
                 // Display-name override row — what the Home greeting
@@ -202,6 +285,17 @@ fun SettingsScreen(
                     pendingCount  = pendingCount,
                     isSyncingFlash = isSyncingFlash,
                 )
+                // Surface a "needs re-auth" banner when Drive has
+                // been rejecting the token (401/403). The worker
+                // can't refresh the token in the background on
+                // Android (Credential Manager refresh requires an
+                // Activity), so the user has to sign out + sign
+                // back in — and at the consent sheet, make sure
+                // the Drive checkbox is ticked. Banner clears
+                // automatically once a sync succeeds.
+                if (lastSyncErrorCode == SyncErrorCodes.AUTH_REJECTED && isSignedIn) {
+                    AuthRejectedBanner(onSignOut = { authStore.signOut() })
+                }
                 Spacer(Modifier.size(QuickInkSpacing.s1))
                 Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
                     SecondaryButton(
@@ -211,18 +305,29 @@ fun SettingsScreen(
                                 // requestUserSync (REPLACE) instead of
                                 // requestImmediate (KEEP) so a tap
                                 // cancels any pending retry from a
-                                // previous failure and starts clean —
-                                // KEEP was silently dropping the tap
-                                // whenever a backoff retry was queued,
-                                // leaving "Last synced" stuck on
-                                // "Never". See QuickInkSyncScheduler
-                                // for the rationale.
+                                // previous failure and starts clean.
                                 QuickInkSyncScheduler.requestUserSync(context)
-                                // No fake timer needed — `isSyncingFlash`
-                                // is driven by WorkInfo above and
-                                // tracks the worker's real state.
+                                // Open a 6s tap-ack window — covers
+                                // the queued-before-running gap so
+                                // the user sees immediate feedback
+                                // even before WorkManager dispatches.
+                                // After the window expires the badge
+                                // is driven solely by WorkInfo.RUNNING,
+                                // so a stuck-in-retry worker doesn't
+                                // pin the spinner on forever.
+                                tapAckUntilMs = System.currentTimeMillis() + 6_000L
                             }
                         },
+                        // Disable while a sync is in flight. Without
+                        // this, a double-tap fires two REPLACE work
+                        // requests in quick succession; the second
+                        // cancels the warming worker started by the
+                        // first, and we end up with two
+                        // CancellationException-bearing failures and
+                        // no progress. Stays disabled for the full
+                        // tap-ack window AND while WorkInfo reports
+                        // RUNNING — see [isSyncingFlash].
+                        enabled  = isSignedIn && !isSyncingFlash,
                         modifier = Modifier.weight(1f),
                     )
                     SecondaryButton(
@@ -234,12 +339,42 @@ fun SettingsScreen(
                             // policy so a fresh tap always wins.
                             if (isSignedIn) {
                                 QuickInkSyncScheduler.requestRestore(context)
-                                // No fake timer needed — `isSyncingFlash`
-                                // is driven by WorkInfo above and
-                                // tracks the worker's real state.
+                                tapAckUntilMs = System.currentTimeMillis() + 6_000L
                             }
                         },
+                        // Same debounce as Sync now. Restore uses a
+                        // distinct unique-work-name so its own REPLACE
+                        // calls don't cancel a running QuickInkSyncWorker,
+                        // but the user can still nuke an in-flight
+                        // restore with a double-tap on this button —
+                        // gate that out for symmetry.
+                        enabled  = isSignedIn && !isSyncingFlash,
                         modifier = Modifier.weight(1f),
+                    )
+                }
+                // Restore-outcome banner — visible after a Restore
+                // run completes. Surfaces "Restored 73 items, 11
+                // orphan rows skipped, 0 failed" or similar. Auto-
+                // dismiss is intentional only on the user's next
+                // tap (Sync / Restore overwrites the sync_state
+                // value via the worker), or on the explicit Dismiss
+                // button.
+                if (restoreOutcome != null) {
+                    RestoreOutcomeBanner(
+                        outcome   = restoreOutcome,
+                        onDismiss = {
+                            coroutineScope.launch {
+                                runCatching {
+                                    syncStateDao.upsert(
+                                        SyncStateEntity(
+                                            key       = SyncStateKeys.LAST_RESTORE_OUTCOME,
+                                            value     = "",
+                                            updatedAt = IsoClock.nowIso(),
+                                        )
+                                    )
+                                }
+                            }
+                        },
                     )
                 }
                 DriveFolderRow(context = context)
@@ -267,6 +402,18 @@ fun SettingsScreen(
                 AboutRow()
             }
         }
+        }
+
+        // Floating bottom nav — Settings tab is active.
+        QuickInkBottomNavBar(
+            activeTab  = NavTab.Settings,
+            onHome     = onHome,
+            onLibrary  = onLibrary,
+            onScan     = onScan,
+            onSearch   = onSearch,
+            onSettings = onSettings,
+            modifier   = Modifier.align(Alignment.BottomCenter),
+        )
     }
 }
 
@@ -430,6 +577,186 @@ private fun ToggleRow(
     }
 }
 
+/**
+ * Snapshot of the most recent [QuickInkRestoreWorker] run. Parsed
+ * from the pipe-separated string the worker writes to
+ * `sync_state[LAST_RESTORE_OUTCOME]`. See the worker's
+ * `writeRestoreOutcome` for the wire format.
+ */
+private data class RestoreOutcome(
+    val downloaded: Int,
+    val applyFailed: Int,
+    val orphanFound: Int,
+    val orphanCleaned: Int,
+    val completedAt: String,
+    val status: String,
+) {
+    companion object {
+        /**
+         * Parse the worker-written string. Returns null when the
+         * value is null/blank (no restore has run yet, or the user
+         * dismissed the banner — which writes back an empty value).
+         * Defensive: unrecognised keys are ignored, missing keys
+         * default to 0/empty.
+         */
+        fun parse(raw: String?): RestoreOutcome? {
+            if (raw.isNullOrBlank()) return null
+            val parts: Map<String, String> = raw.split('|').mapNotNull { segment ->
+                val eq = segment.indexOf('=')
+                if (eq <= 0) null
+                else segment.substring(0, eq) to segment.substring(eq + 1)
+            }.toMap()
+            val status = parts["status"].orEmpty()
+            if (status.isEmpty()) return null
+            return RestoreOutcome(
+                downloaded    = parts["downloaded"]?.toIntOrNull() ?: 0,
+                applyFailed   = parts["applyFailed"]?.toIntOrNull() ?: 0,
+                orphanFound   = parts["orphanFound"]?.toIntOrNull() ?: 0,
+                orphanCleaned = parts["orphanCleaned"]?.toIntOrNull() ?: 0,
+                completedAt   = parts["completedAt"].orEmpty(),
+                status        = status,
+            )
+        }
+    }
+}
+
+/**
+ * Transient banner that surfaces the result of the most recent
+ * [QuickInkRestoreWorker] run — number of items restored, orphan
+ * rows skipped + tombstoned on Drive, and any apply failures.
+ * Sits below the Sync now / Restore from Drive buttons in the Sync
+ * section. Auto-dismissed when a fresh restore starts (the worker
+ * overwrites the value); the user can also tap Dismiss to clear it.
+ *
+ * Status drives the visual treatment:
+ *   - "ok"              → neutral surface (info tone), summary line.
+ *   - "failed"          → warning surface, "Restore failed" headline.
+ *   - "version_blocked" → warning surface, "App needs update" headline.
+ */
+@Composable
+private fun RestoreOutcomeBanner(
+    outcome: RestoreOutcome,
+    onDismiss: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+
+    val isError = outcome.status != "ok"
+    val tint    = if (isError) colors.warning else colors.accent
+    val border  = tint.copy(alpha = 0.55f)
+    val bg      = tint.copy(alpha = 0.12f)
+
+    val title: String = when (outcome.status) {
+        "failed"          -> "Restore failed"
+        "version_blocked" -> "Restore blocked — app update required"
+        else              -> "Restore complete"
+    }
+
+    val body: String = when (outcome.status) {
+        "ok" -> buildString {
+            append("Restored ")
+            append(outcome.downloaded)
+            append(" item")
+            if (outcome.downloaded != 1) append('s')
+            append(" from Drive.")
+            if (outcome.applyFailed > 0) {
+                append(' ')
+                append(outcome.applyFailed)
+                append(" failed to apply (see logcat for detail).")
+            }
+            if (outcome.orphanCleaned > 0) {
+                append(" Cleaned up ")
+                append(outcome.orphanCleaned)
+                append(" stale orphan record")
+                if (outcome.orphanCleaned != 1) append('s')
+                append(" on Drive.")
+            } else if (outcome.orphanFound > 0) {
+                append(' ')
+                append(outcome.orphanFound)
+                append(" orphan record")
+                if (outcome.orphanFound != 1) append('s')
+                append(" detected on Drive but couldn't be cleaned (see logcat).")
+            }
+        }
+        "failed" ->
+            "Drive rejected the restore request. Check your internet connection " +
+                "or sign out and sign back in if this persists."
+        "version_blocked" ->
+            "Your Drive backup was written by a newer app version. Update " +
+                "QuickInk to the latest release before restoring."
+        else -> "" // Shouldn't happen — parse() returns null on unknown status.
+    }
+
+    Column(
+        modifier = androidx.compose.ui.Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(bg)
+            .border(1.dp, border, RoundedCornerShape(QuickInkRadius.md))
+            .padding(QuickInkSpacing.s4),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+    ) {
+        Text(text = title, style = type.body, color = colors.ink)
+        if (body.isNotBlank()) {
+            Text(text = body, style = type.meta, color = colors.inkSoft)
+        }
+        SecondaryButton(
+            label    = "Dismiss",
+            onClick  = onDismiss,
+            modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/**
+ * "Drive needs re-authentication" banner shown when the worker
+ * has hit a persistent Drive auth rejection (401 / 403). Most
+ * common cause: the user's access token was revoked server-side,
+ * or the Drive scope wasn't granted at sign-in. The worker can't
+ * refresh in the background (Credential Manager refresh needs an
+ * Activity), so the user has to sign out and sign back in —
+ * making sure the Drive checkbox is ticked on the consent sheet.
+ *
+ * Banner clears automatically once a sync succeeds (the worker's
+ * SUCCESS path writes an empty string to LAST_SYNC_ERROR_CODE).
+ */
+@Composable
+private fun AuthRejectedBanner(onSignOut: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Column(
+        modifier = androidx.compose.ui.Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(colors.warning.copy(alpha = 0.12f))
+            .border(
+                1.dp,
+                colors.warning.copy(alpha = 0.55f),
+                RoundedCornerShape(QuickInkRadius.md),
+            )
+            .padding(QuickInkSpacing.s4),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+    ) {
+        Text(
+            text  = "Drive sync needs re-authentication",
+            style = type.body,
+            color = colors.ink,
+        )
+        Text(
+            text  = "Google rejected your token (401/403). Sign out and " +
+                    "sign back in — when prompted, make sure to grant access " +
+                    "to Google Drive on the consent screen.",
+            style = type.meta,
+            color = colors.inkSoft,
+        )
+        SecondaryButton(
+            label    = "Sign out",
+            onClick  = onSignOut,
+            modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+        )
+    }
+}
+
 @Composable
 private fun LastSyncRow(
     timestampIso: String?,
@@ -589,7 +916,20 @@ private fun relativeSyncTimestamp(iso: String?): String? {
 }
 
 @Composable
-private fun SecondaryButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun SecondaryButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    /**
+     * When false, the button stops accepting taps and dims its
+     * label to muted to signal the inactive state. Used by the
+     * Sync now / Restore from Drive call sites in the Sync section
+     * to debounce while a worker run is in flight — without this,
+     * a double-tap fires two `requestUserSync(REPLACE)` calls,
+     * which cancels the in-flight worker mid-execution.
+     */
+    enabled: Boolean = true,
+) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     Box(
@@ -597,11 +937,15 @@ private fun SecondaryButton(label: String, onClick: () -> Unit, modifier: Modifi
             .clip(RoundedCornerShape(QuickInkRadius.pill))
             .background(colors.borderSoft)
             .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.pill))
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = QuickInkSpacing.s3),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = label, style = type.label, color = colors.ink)
+        Text(
+            text  = label,
+            style = type.label,
+            color = if (enabled) colors.ink else colors.muted,
+        )
     }
 }
 
@@ -637,3 +981,96 @@ private fun ManageCategoriesRow(onClick: () -> Unit) {
     }
 }
 
+
+// ──────────────────────────────────────────────────────────────────────
+// Appearance — theme mode + primary color pickers
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Three-segment toggle for the user's theme override (System / Light /
+ * Dark). The active segment paints `accent` over `accentSoft`; inactive
+ * segments stay transparent on the section's white card.
+ */
+@Composable
+private fun ThemeModeRow(
+    selected: app.quickink.mobile.ui.theme.ThemeMode,
+    onChange: (app.quickink.mobile.ui.theme.ThemeMode) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+        Text(text = "Theme", style = type.label, color = colors.ink)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(QuickInkRadius.pill))
+                .background(colors.borderSoft)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            app.quickink.mobile.ui.theme.ThemeMode.values().forEach { mode ->
+                val active = mode == selected
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(QuickInkRadius.pill))
+                        .background(if (active) colors.accent else androidx.compose.ui.graphics.Color.Transparent)
+                        .clickable { onChange(mode) }
+                        .padding(vertical = QuickInkSpacing.s2),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text  = mode.displayName,
+                        style = type.label,
+                        color = if (active) colors.textOnAccent else colors.ink,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Row of swatch circles, one per [PrimaryColor]. The picked swatch
+ * gets a coloured ring + checkmark; the others are flat discs.
+ *
+ * Each swatch displays the family's DEEP variant — that's the
+ * variant that lights up in light mode (where most users are), so
+ * the picker preview matches what you'll see on Home / FAB / CTAs.
+ */
+@Composable
+private fun PrimaryColorRow(
+    selected: app.quickink.mobile.ui.theme.PrimaryColor,
+    onChange: (app.quickink.mobile.ui.theme.PrimaryColor) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(text = "Primary color", style = type.label, color = colors.ink, modifier = Modifier.weight(1f))
+            Text(text = selected.displayName, style = type.meta, color = colors.inkSoft)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
+            app.quickink.mobile.ui.theme.PrimaryColor.values().forEach { hue ->
+                val active = hue == selected
+                // Empty content lambda — the swatch has no inner glyph,
+                // but Compose's `Box(modifier, contentAlignment)`
+                // overload requires a content slot. The empty `{}`
+                // lets the compiler resolve to that overload.
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(hue.deep)
+                        .border(
+                            width = if (active) 3.dp else 1.dp,
+                            color = if (active) hue.deep else colors.border,
+                            shape = androidx.compose.foundation.shape.CircleShape,
+                        )
+                        .clickable { onChange(hue) },
+                    contentAlignment = Alignment.Center,
+                ) {}
+            }
+        }
+    }
+}

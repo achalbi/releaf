@@ -255,6 +255,12 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
     /// Drive file id of the per-row preview-JPEG binary upload.
     /// Same restore semantics as [pdfDriveFileId].
     public let previewDriveFileId: String?
+    /// How the capture was created — `"scan"` (the document scanner)
+    /// or `"import"` (the system photo picker). Defaulted to "scan"
+    /// for back-compat with rows synced from older clients that
+    /// didn't write the field; the column-level default in the
+    /// captures schema mirrors this.
+    public let source: String
     public let createdAt: String
     public let updatedAt: String
 
@@ -268,6 +274,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         category: String?,
         pdfDriveFileId: String? = nil,
         previewDriveFileId: String? = nil,
+        source: String = "scan",
         createdAt: String,
         updatedAt: String
     ) {
@@ -280,8 +287,29 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         self.category = category
         self.pdfDriveFileId = pdfDriveFileId
         self.previewDriveFileId = previewDriveFileId
+        self.source = source
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id                 = try c.decode(String.self, forKey: .id)
+        self.userId             = try c.decode(String.self, forKey: .userId)
+        self.title              = try c.decodeIfPresent(String.self, forKey: .title)
+        self.pdfUri             = try c.decode(String.self, forKey: .pdfUri)
+        self.previewUri         = try c.decodeIfPresent(String.self, forKey: .previewUri)
+        self.pageCount          = try c.decode(Int.self, forKey: .pageCount)
+        self.category           = try c.decodeIfPresent(String.self, forKey: .category)
+        self.pdfDriveFileId     = try c.decodeIfPresent(String.self, forKey: .pdfDriveFileId)
+        self.previewDriveFileId = try c.decodeIfPresent(String.self, forKey: .previewDriveFileId)
+        // `source` is back-compat optional on the wire — older
+        // clients didn't write it, and a fresh-device restore from
+        // such an older payload should read back as a scan rather
+        // than crash on a missing key.
+        self.source             = (try c.decodeIfPresent(String.self, forKey: .source)) ?? "scan"
+        self.createdAt          = try c.decode(String.self, forKey: .createdAt)
+        self.updatedAt          = try c.decode(String.self, forKey: .updatedAt)
     }
 
     public enum CodingKeys: String, CodingKey {
@@ -294,6 +322,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         case category
         case pdfDriveFileId     = "pdf_drive_file_id"
         case previewDriveFileId = "preview_drive_file_id"
+        case source
         case createdAt          = "created_at"
         case updatedAt          = "updated_at"
     }

@@ -1,225 +1,414 @@
 /*
  * NotesListScreen.swift
  *
- * QuickInk's Library — the user's full scan gallery. Same data
- * source as the home rail (`captures` via `CaptureListViewModel`)
- * but unbounded, with category chips (wrapping pill row, count next
- * to each label) off the live `categories` table.
+ * QuickInk's Library — the user's full scan gallery, redesigned to
+ * match the editorial mock (lined-paper note cards, handwritten
+ * preview snippets, date-bucketed sections).
  *
- * Tap → `ScanDetailScreen` for the selected capture (preview +
- * OCR-on-demand). The notepad-entries-driven editor is no longer
- * the destination — captures are the canonical artifact.
+ * Visual structure (per mock):
+ *   • Header — "Library" serif title, no back chevron (Library is
+ *     a tab destination, accessed via the bottom-nav `Library` cell).
+ *     Trailing controls live in a single pill: a sort affordance
+ *     (up/down arrows menu) on the left, a grid/list segmented
+ *     toggle on the right with the active half painted coral.
+ *   • Sub-meta — `{count} notes` line under the title. Synced-bytes
+ *     readout is a TODO (sums attachment file sizes; deferred).
+ *   • Category chips — horizontal scroll, "All" leading, no count
+ *     badges. Inactive chips are outlined white pills; active is
+ *     filled coral.
+ *   • Date sections — captures bucketed by relative day: TODAY /
+ *     THIS WEEK / EARLIER. Each section renders an eyebrow header
+ *     and a 2-column grid of cards.
+ *   • Card design — paper-toned upper portion with lined ruling and
+ *     a handwritten Caveat preview snippet (lazy-loaded OCR), small
+ *     page-count chip in the top-right; white footer with serif
+ *     title + accent-soft category tag + relative date.
  *
- * Mirror of Android `NotesListScreen.kt`.
+ * Mirror of Android `NotesListScreen.kt` (which still tracks the
+ * older grid/list layout — Android redesign lands separately).
  */
 
 import SwiftUI
+import GRDB
 
 struct NotesListScreen: View {
 
     let userId: String
     let onBack: () -> Void
     let onOpenScan: (_ captureId: String) -> Void
+    /// Tab navigation callbacks for the floating bottom nav. The
+    /// Library tab paints itself active; tapping it is a no-op
+    /// (we're already here). The other callbacks switch tabs at the
+    /// route level — see QuickInkRoot's tab wiring.
+    let onHome: () -> Void
+    let onLibrary: () -> Void
+    let onScan: () -> Void
+    let onSearch: () -> Void
+    let onSettings: () -> Void
 
-    @StateObject private var capturesVM: CaptureListViewModel
+    @StateObject private var capturesVM:   CaptureListViewModel
     @StateObject private var categoriesVM: CategoryListViewModel
 
     @State private var viewMode: ViewMode = .grid
-    @State private var sort: SortOrder = .newest
     @State private var activeCategory: String = "All"
 
+    // Date-range filter — replaces the previous newest/oldest sort
+    // affordance. `nil` on either side means "no filter on that
+    // side". Apply commits both endpoints atomically; Clear sets
+    // both to nil. The DAO already returns `created_at DESC`, so
+    // user-controlled sort direction was thin value next to a real
+    // date filter.
+    @State private var dateRangeStart: Date? = nil
+    @State private var dateRangeEnd: Date? = nil
+    @State private var showDatePicker: Bool = false
+
     enum ViewMode { case grid, list }
-    /// Library always sorts on `capture.created_at` — only the
-    /// direction is user-selectable. Category remains a filter
-    /// (chips), not a sort key.
-    enum SortOrder { case newest, oldest }
 
     init(
         userId: String,
         onBack: @escaping () -> Void,
-        onOpenScan: @escaping (_ captureId: String) -> Void
+        onOpenScan: @escaping (_ captureId: String) -> Void,
+        onHome: @escaping () -> Void = {},
+        onLibrary: @escaping () -> Void = {},
+        onScan: @escaping () -> Void = {},
+        onSearch: @escaping () -> Void = {},
+        onSettings: @escaping () -> Void = {}
     ) {
         self.userId = userId
         self.onBack = onBack
         self.onOpenScan = onOpenScan
+        self.onHome = onHome
+        self.onLibrary = onLibrary
+        self.onScan = onScan
+        self.onSearch = onSearch
+        self.onSettings = onSettings
 
         _capturesVM   = StateObject(wrappedValue: CaptureListViewModel(userId: userId))
         _categoriesVM = StateObject(wrappedValue: CategoryListViewModel(userId: userId))
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            filterChips
-                .padding(.top, QuickInkSpacing.s2)
-                .padding(.bottom, QuickInkSpacing.s3)
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .padding(.horizontal, QuickInkSpacing.s5)
+                .padding(.top, QuickInkSpacing.s4)
+
+            categoryChips
+                .padding(.top, QuickInkSpacing.s4)
 
             if filteredSorted.isEmpty {
                 Spacer()
                 emptyState
+                    .frame(maxWidth: .infinity)
                 Spacer()
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
-                        flatBody
+                    LazyVStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
+                        ForEach(dateBuckets, id: \.title) { bucket in
+                            section(title: bucket.title, items: bucket.items)
+                        }
                     }
                     .padding(.horizontal, QuickInkSpacing.s5)
-                    .padding(.top, QuickInkSpacing.s2)
+                    .padding(.top, QuickInkSpacing.s5)
                     .padding(.bottom, QuickInkSpacing.s7)
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(QuickInkColors.bg.ignoresSafeArea())
+        // `.safeAreaInset` hosts the floating bar without manual
+        // bottom padding — the inset extends the screen's safe area
+        // automatically so scroll content never sits behind the bar.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            QuickInkBottomNavBar(
+                activeTab:  .library,
+                onHome:     onHome,
+                onLibrary:  { /* current tab */ },
+                onScan:     onScan,
+                onSearch:   onSearch,
+                onSettings: onSettings
+            )
+        }
         .task {
             capturesVM.start()
             categoriesVM.start()
         }
     }
 
-    // MARK: - Top bar
+    // MARK: - Header (title + date-filter/view pill + meta)
 
     @ViewBuilder
-    private var topBar: some View {
-        HStack {
-            Button(action: onBack) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(QuickInkColors.ink)
-                    .padding(QuickInkSpacing.s3)
-            }
-            .accessibilityLabel("Back")
-
+    private var header: some View {
+        HStack(alignment: .center) {
             Text("Library")
                 .font(QuickInkText.pageTitle)
                 .foregroundStyle(QuickInkColors.ink)
-
             Spacer()
-
-            Menu {
-                Button("Newest first") { sort = .newest }
-                Button("Oldest first") { sort = .oldest }
-            } label: {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(QuickInkColors.ink)
-                    .padding(QuickInkSpacing.s3)
-            }
-            .accessibilityLabel("Sort")
-
-            Button(action: { viewMode = (viewMode == .grid ? .list : .grid) }) {
-                Image(systemName: viewMode == .grid ? "list.bullet" : "square.grid.2x2")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(QuickInkColors.ink)
-                    .padding(QuickInkSpacing.s3)
-            }
-            .accessibilityLabel("Toggle grid/list view")
+            controlPill
         }
-        .padding(.horizontal, QuickInkSpacing.s2)
-        .padding(.top, QuickInkSpacing.s2)
+
+        Text("\(capturesVM.captures.count) notes")
+            .font(QuickInkText.meta)
+            .foregroundStyle(QuickInkColors.muted)
+            .padding(.top, QuickInkSpacing.s2)
+
+        // Active-range readout + Clear button. Surfaces below the
+        // count so the user can see and cancel the filter without
+        // re-opening the date picker.
+        if dateRangeStart != nil || dateRangeEnd != nil {
+            HStack {
+                Text(formatDateRange(dateRangeStart, dateRangeEnd))
+                    .font(QuickInkText.meta)
+                    .foregroundStyle(QuickInkColors.accent)
+                Spacer()
+                Button("Clear") {
+                    dateRangeStart = nil
+                    dateRangeEnd = nil
+                }
+                .font(QuickInkText.meta)
+                .foregroundStyle(QuickInkColors.accent)
+            }
+            .padding(.top, QuickInkSpacing.s1)
+        }
     }
 
-    // MARK: - Filter chips
+    /// Trailing pill in the header. Two halves: a calendar button
+    /// (opens the date-range picker sheet) on the left, a grid/list
+    /// segmented toggle on the right. The active half of the toggle
+    /// paints coral; the inactive half stays cream. The calendar
+    /// button paints coral itself when a range is active, doubling
+    /// as a status indicator.
+    ///
+    /// Replaced the previous newest/oldest sort menu — captures come
+    /// back from the VM in `created_at DESC` order already, so
+    /// user-controlled sort direction added little next to a real
+    /// date filter.
+    @ViewBuilder
+    private var controlPill: some View {
+        let rangeActive = dateRangeStart != nil || dateRangeEnd != nil
+        HStack(spacing: 0) {
+            Button {
+                showDatePicker = true
+            } label: {
+                Image(systemName: "calendar")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(rangeActive ? QuickInkColors.textOnAccent : QuickInkColors.ink)
+                    .frame(width: 44, height: 36)
+            }
+            .accessibilityLabel("Filter by date")
+            .background(rangeActive ? QuickInkColors.accent : QuickInkColors.surface)
+            .clipShape(Circle())
+            .overlay(
+                Circle().stroke(rangeActive ? QuickInkColors.accent : QuickInkColors.border, lineWidth: 1)
+            )
+            .padding(.trailing, QuickInkSpacing.s2)
+            .sheet(isPresented: $showDatePicker) {
+                DateRangePickerSheet(
+                    initialStart: dateRangeStart,
+                    initialEnd:   dateRangeEnd,
+                    onApply: { start, end in
+                        dateRangeStart = start
+                        dateRangeEnd = end
+                        showDatePicker = false
+                    },
+                    onClear: {
+                        dateRangeStart = nil
+                        dateRangeEnd = nil
+                        showDatePicker = false
+                    }
+                )
+            }
 
-    /// Per-category counts used to label the chips. Keyed by
-    /// lower-cased category name so user-typed casing on
-    /// `capture.category` doesn't fragment buckets.
-    private var countByCategory: [String: Int] {
-        Dictionary(grouping: capturesVM.captures) {
-            ($0.category ?? "").lowercased()
+            // Grid/list segmented pill — two halves, each tappable.
+            HStack(spacing: 0) {
+                segment(
+                    icon: "square.grid.2x2.fill",
+                    label: "Grid",
+                    active: viewMode == .grid
+                ) { viewMode = .grid }
+
+                segment(
+                    icon: "list.bullet",
+                    label: "List",
+                    active: viewMode == .list
+                ) { viewMode = .list }
+            }
+            .background(QuickInkColors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous)
+                    .stroke(QuickInkColors.border, lineWidth: 1)
+            )
         }
-        .mapValues(\.count)
     }
 
     @ViewBuilder
-    private var filterChips: some View {
-        // Wrapping pill row — every chip stays on screen, no
-        // horizontal scroll. Chip names stay case-sensitive on
-        // display but we filter case-insensitively below —
-        // `captures.category` may be user-typed.
-        let counts = countByCategory
-        WrappingHStack(
-            spacing: QuickInkSpacing.s2,
-            lineSpacing: QuickInkSpacing.s2
-        ) {
-            chip(label: "All", count: capturesVM.captures.count, active: activeCategory == "All") {
-                activeCategory = "All"
-            }
-            ForEach(categoriesVM.categories, id: \.id) { cat in
-                chip(
-                    label: cat.name,
-                    count: counts[cat.name.lowercased()] ?? 0,
-                    active: cat.name == activeCategory
-                ) {
-                    activeCategory = cat.name
+    private func segment(icon: String, label: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(active ? QuickInkColors.textOnAccent : QuickInkColors.ink)
+                .frame(width: 44, height: 36)
+                .background(active ? QuickInkColors.accent : Color.clear)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    // MARK: - Category chips
+
+    @ViewBuilder
+    private var categoryChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: QuickInkSpacing.s2) {
+                chip(label: "All", active: activeCategory == "All") {
+                    activeCategory = "All"
+                }
+                ForEach(categoriesVM.categories, id: \.id) { cat in
+                    chip(label: cat.name, active: cat.name == activeCategory) {
+                        activeCategory = cat.name
+                    }
                 }
             }
+            .padding(.horizontal, QuickInkSpacing.s5)
         }
-        .padding(.horizontal, QuickInkSpacing.s5)
     }
 
     @ViewBuilder
-    private func chip(label: String, count: Int, active: Bool, action: @escaping () -> Void) -> some View {
-        let onChip = active ? QuickInkColors.textOnAccent : QuickInkColors.ink
+    private func chip(label: String, active: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: QuickInkSpacing.s2) {
-                Text(label)
-                    .font(QuickInkText.label)
-                    .foregroundStyle(onChip)
-                Text("\(count)")
-                    .font(QuickInkText.caption)
-                    .foregroundStyle(onChip.opacity(active ? 0.85 : 0.6))
-            }
-            .padding(.horizontal, QuickInkSpacing.s4)
-            .padding(.vertical, QuickInkSpacing.s2)
-            .background(active ? QuickInkColors.accent : QuickInkColors.borderSoft)
-            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+            Text(label)
+                .font(QuickInkText.label)
+                .foregroundStyle(active ? QuickInkColors.textOnAccent : QuickInkColors.ink)
+                .padding(.horizontal, QuickInkSpacing.s4)
+                .padding(.vertical, QuickInkSpacing.s2)
+                .background(active ? QuickInkColors.accent : QuickInkColors.surface)
+                .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous)
+                        .stroke(active ? Color.clear : QuickInkColors.border, lineWidth: 1)
+                )
         }
         .buttonStyle(.plain)
     }
 
-    // MARK: - Filter / sort / group
+    // MARK: - Filter / bucket
 
     private var filteredSorted: [CaptureSummary] {
-        let filtered: [CaptureSummary] = {
+        let byCategory: [CaptureSummary] = {
             if activeCategory == "All" { return capturesVM.captures }
             let needle = activeCategory.lowercased()
             return capturesVM.captures.filter { ($0.category ?? "").lowercased() == needle }
         }()
+        let rangeActive = dateRangeStart != nil || dateRangeEnd != nil
+        guard rangeActive else {
+            // VM yields newest-first; nothing further to do.
+            return byCategory
+        }
 
-        switch sort {
-        case .newest: return filtered // VM is already newest-first.
-        case .oldest: return filtered.reversed()
+        // End is widened to "end of day" so a single-day pick (start
+        // == end at midnight) still matches captures from later in
+        // the same calendar day.
+        let cal = Calendar.current
+        let lowerBound = dateRangeStart.map { cal.startOfDay(for: $0) }
+        let upperBound = dateRangeEnd.flatMap {
+            cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: $0))
+        }
+        let isoParser = ISO8601DateFormatter()
+        isoParser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoFallback = ISO8601DateFormatter()
+        isoFallback.formatOptions = [.withInternetDateTime]
+
+        return byCategory.filter { capture in
+            let parsed = isoParser.date(from: capture.createdAt)
+                ?? isoFallback.date(from: capture.createdAt)
+            guard let date = parsed else { return false }
+            if let lower = lowerBound, date < lower { return false }
+            if let upper = upperBound, date >= upper { return false }
+            return true
         }
     }
 
-    /// Flat scan list — every capture in the active filter, sorted
-    /// newest-first (or oldest-first if the user flipped the sort).
-    /// No day buckets; a single grid or list runs the full length.
-    @ViewBuilder
-    private var flatBody: some View {
-        if viewMode == .grid {
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: QuickInkSpacing.s3),
-                    GridItem(.flexible(), spacing: QuickInkSpacing.s3),
-                ],
-                spacing: QuickInkSpacing.s3
-            ) {
-                ForEach(filteredSorted) { capture in
-                    Button(action: { onOpenScan(capture.id) }) {
-                        LibraryScanGridCard(capture: capture)
-                    }
-                    .buttonStyle(.plain)
-                }
+    /// Bucket the filtered list into TODAY / THIS WEEK / EARLIER
+    /// sections. Empty buckets are dropped so the UI doesn't render
+    /// a header with nothing under it.
+    private struct Bucket: Identifiable {
+        let title: String
+        let items: [CaptureSummary]
+        var id: String { title }
+    }
+
+    private var dateBuckets: [Bucket] {
+        let calendar = Calendar.current
+        let now = Date()
+        let isoFractional = ISO8601DateFormatter()
+        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoBasic = ISO8601DateFormatter()
+        isoBasic.formatOptions = [.withInternetDateTime]
+
+        var today: [CaptureSummary] = []
+        var thisWeek: [CaptureSummary] = []
+        var earlier: [CaptureSummary] = []
+
+        for capture in filteredSorted {
+            let date = isoFractional.date(from: capture.createdAt) ?? isoBasic.date(from: capture.createdAt) ?? now
+            if calendar.isDateInToday(date) {
+                today.append(capture)
+            } else if isWithinSameWeek(date, now: now, calendar: calendar) {
+                thisWeek.append(capture)
+            } else {
+                earlier.append(capture)
             }
-        } else {
-            VStack(spacing: QuickInkSpacing.s3) {
-                ForEach(filteredSorted) { capture in
-                    Button(action: { onOpenScan(capture.id) }) {
-                        LibraryScanListRow(capture: capture)
+        }
+
+        var buckets: [Bucket] = []
+        if !today.isEmpty    { buckets.append(Bucket(title: "TODAY",     items: today)) }
+        if !thisWeek.isEmpty { buckets.append(Bucket(title: "THIS WEEK", items: thisWeek)) }
+        if !earlier.isEmpty  { buckets.append(Bucket(title: "EARLIER",   items: earlier)) }
+        return buckets
+    }
+
+    /// True when `date` falls in the same calendar week as `now`
+    /// (week start follows the user's locale via Calendar.current),
+    /// excluding "today" — today gets its own bucket above.
+    private func isWithinSameWeek(_ date: Date, now: Date, calendar: Calendar) -> Bool {
+        if calendar.isDateInToday(date) { return false }
+        return calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear)
+    }
+
+    // MARK: - Section + grid
+
+    @ViewBuilder
+    private func section(title: String, items: [CaptureSummary]) -> some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
+            Text(title)
+                .font(QuickInkText.eyebrow)
+                .tracking(QuickInkLetterSpacing.eyebrow)
+                .foregroundStyle(QuickInkColors.muted)
+
+            if viewMode == .grid {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: QuickInkSpacing.s3),
+                        GridItem(.flexible(), spacing: QuickInkSpacing.s3),
+                    ],
+                    spacing: QuickInkSpacing.s3
+                ) {
+                    ForEach(items) { capture in
+                        Button(action: { onOpenScan(capture.id) }) {
+                            LibraryNoteCard(capture: capture)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                }
+            } else {
+                VStack(spacing: QuickInkSpacing.s3) {
+                    ForEach(items) { capture in
+                        Button(action: { onOpenScan(capture.id) }) {
+                            LibraryScanListRow(capture: capture)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }
@@ -252,80 +441,191 @@ struct NotesListScreen: View {
     }
 }
 
-// MARK: - Cards
+// MARK: - Library note card (mock-style)
 
-/// Grid-layout card showing the actual scan preview JPEG. Mirror of
-/// the home rail's `RecentScanThumb` but at the larger Library grid
-/// scale.
-struct LibraryScanGridCard: View {
+/// Editorial note card matching the Library mock: paper-toned upper
+/// portion with lined ruling and a handwritten Caveat preview snippet
+/// (lazy-loaded from the first OCR row), a small page-count chip in
+/// the top-right, and a white footer with serif title + accent-soft
+/// category tag + relative date.
+struct LibraryNoteCard: View {
     let capture: CaptureSummary
 
+    @State private var ocrSnippet: String? = nil
+
+    /// Pick a stable paper tone per capture id so the wall of cards
+    /// looks like a varied stack of notebooks rather than one tone
+    /// repeating. Hash → 0..2 selector.
+    private var paperTone: Color {
+        let seed = abs(capture.id.hashValue)
+        return QuickInkColors.paper(for: seed)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+        VStack(alignment: .leading, spacing: 0) {
+            // Lined-paper preview
             ZStack(alignment: .topTrailing) {
-                if let image = loadedPreview {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    placeholder
+                QuickInkLinedPaper(tone: paperTone)
+                    .clipped()
+
+                // Handwritten preview text — OCR snippet when loaded,
+                // friendly placeholder while the .task fetches it.
+                Text(displayedPreview)
+                    .font(QuickInkText.handwritten)
+                    .italic()
+                    .foregroundStyle(QuickInkColors.ink.opacity(0.78))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal, QuickInkSpacing.s3)
+                    .padding(.top, QuickInkSpacing.s3)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                HStack(spacing: 4) {
+                    Image(systemName: capture.source == "import" ? "photo" : "camera.fill")
+                        .font(.system(size: 10))
+                    Text(capture.source == "import" ? "Import" : "Scan")
+                        .font(QuickInkText.caption)
                 }
+                .foregroundStyle(capture.source == "import" ? QuickInkColors.textOnAccent : QuickInkColors.ink.opacity(0.7))
+                .padding(.horizontal, QuickInkSpacing.s2)
+                .padding(.vertical, 3)
+                .background(capture.source == "import" ? QuickInkColors.accent : QuickInkColors.surface.opacity(0.9))
+                .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous))
+                .padding(QuickInkSpacing.s2)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
 
                 if capture.pageCount > 1 {
-                    Text("\(capture.pageCount) pages")
+                    Text("\(capture.pageCount)p")
                         .font(QuickInkText.caption)
-                        .foregroundStyle(QuickInkColors.textOnAccent)
+                        .foregroundStyle(QuickInkColors.ink.opacity(0.65))
                         .padding(.horizontal, QuickInkSpacing.s2)
-                        .padding(.vertical, 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
-                                .fill(QuickInkColors.ink.opacity(0.55))
-                        )
+                        .padding(.vertical, 3)
+                        .background(QuickInkColors.surface.opacity(0.85))
+                        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous))
                         .padding(QuickInkSpacing.s2)
                 }
             }
-            .frame(height: 180)
-            .frame(maxWidth: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                    .stroke(QuickInkColors.border, lineWidth: 1)
-            )
+            .frame(height: 175)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(capture.category ?? "Scan")
-                    .font(QuickInkText.label)
+            // White footer with title + tag + date. Library card
+            // titles render in Inter (UI sans), not the editorial
+            // Fraunces — card titles are functional (scannable,
+            // dense grid) and the editorial serif felt precious for
+            // the file-list context. Size dropped to 10pt so the
+            // title sits closer to the meta-tier scale on the same
+            // card and stops competing with the thumbnail for focus.
+            VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+                // `.capitalized` is Swift's per-word Title Case —
+                // first letter upper, rest lower, word boundary is
+                // whitespace. Normalises whatever case OCR / the
+                // user supplied. Note: brand-cased words like
+                // "iPhone" come out "Iphone"; accept that for now,
+                // OCR rarely surfaces them as the first line.
+                // SwiftUI has no `.textCase(.titleCase)` modifier,
+                // so we transform the string itself rather than the
+                // render — fine for VoiceOver since the human-
+                // readable title is the same word.
+                Text(displayedTitle.capitalized)
+                    .font(QuickInkFont.ui(14, weight: .semibold))
                     .foregroundStyle(QuickInkColors.ink)
                     .lineLimit(1)
-                Text(friendlyMonthDay(capture.createdAt))
-                    .font(QuickInkText.caption)
-                    .foregroundStyle(QuickInkColors.muted)
+
+                HStack {
+                    if let cat = capture.category, !cat.isEmpty {
+                        Text(cat)
+                            .font(QuickInkText.caption)
+                            .foregroundStyle(QuickInkColors.accent)
+                            .padding(.horizontal, QuickInkSpacing.s2)
+                            .padding(.vertical, 3)
+                            .background(QuickInkColors.accentSoft)
+                            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous))
+                    }
+                    Spacer()
+                    Text(relativeDate(capture.createdAt))
+                        .font(QuickInkText.caption)
+                        .foregroundStyle(QuickInkColors.muted)
+                }
             }
+            .padding(QuickInkSpacing.s3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(QuickInkColors.surface)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                .stroke(QuickInkColors.border, lineWidth: 1)
+        )
+        .task(id: capture.id) {
+            await loadOcrSnippet()
         }
     }
 
-    private var loadedPreview: UIImage? {
-        guard let raw = capture.previewUri, !raw.isEmpty else { return nil }
-        let path: String? = {
-            if let url = URL(string: raw), url.isFileURL { return url.path }
-            return raw
-        }()
-        guard let path else { return nil }
-        return UIImage(contentsOfFile: path)
+    /// First useful OCR snippet for the handwritten preview area.
+    /// Truncated on the view side via `lineLimit(2)`. While the
+    /// async fetch is in flight the card shows a soft placeholder
+    /// — the `.task` is throttled by id so it runs once per card
+    /// per appear, not on every recomposition.
+    private var displayedPreview: String {
+        if let snippet = ocrSnippet, !snippet.isEmpty {
+            return snippet
+        }
+        return "Tap to read scan…"
     }
 
-    @ViewBuilder
-    private var placeholder: some View {
-        ZStack {
-            QuickInkColors.paper2
-            Image(systemName: "doc.text.fill")
-                .font(.system(size: 36))
-                .foregroundStyle(QuickInkColors.muted)
+    /// Title shown in the white footer. Cascade:
+    /// (1) the user-set `capture.title` (trimmed, non-empty) —
+    ///     explicit user intent always wins;
+    /// (2) the OCR snippet's first line (≤40 chars) — gives the wall
+    ///     a handwritten preview when the user hasn't titled the scan;
+    /// (3) the category; (4) "Untitled scan".
+    private var displayedTitle: String {
+        if let raw = capture.title?.trimmingCharacters(in: .whitespaces),
+           !raw.isEmpty {
+            return raw
+        }
+        if let snippet = ocrSnippet,
+           let firstLine = snippet
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .first
+                .map({ String($0).trimmingCharacters(in: .whitespaces) }),
+           !firstLine.isEmpty {
+            return String(firstLine.prefix(40))
+        }
+        if let cat = capture.category, !cat.isEmpty {
+            return cat
+        }
+        return "Untitled scan"
+    }
+
+    /// Lazy fetch of the first OCR row for this capture. One-shot
+    /// SELECT, no observation — OCR text doesn't change after capture.
+    /// Failures fall back silently to the placeholder; the user can
+    /// tap into ScanDetailScreen for a richer view either way.
+    private func loadOcrSnippet() async {
+        if ocrSnippet != nil { return }
+        let captureId = capture.id
+        let dbQueue = QuickInkDatabase.shared.dbQueue
+        do {
+            let text = try await dbQueue.read { db -> String? in
+                try String.fetchOne(db, sql: """
+                    SELECT text
+                    FROM ocr_results
+                    WHERE capture_id = ? AND deleted_at IS NULL
+                    ORDER BY page_index ASC
+                    LIMIT 1
+                    """, arguments: [captureId])
+            }
+            await MainActor.run { self.ocrSnippet = text }
+        } catch {
+            // Silent — placeholder text remains.
+            print("LibraryNoteCard.loadOcrSnippet failed: \(error)")
         }
     }
 }
 
-/// Dense list-layout row for scans. Same data as the grid card but
+// MARK: - Library list row (used when viewMode == .list)
+
+/// Dense list-layout row for scans. Same data as the card but
 /// stacked horizontally so users see more entries per scroll.
 struct LibraryScanListRow: View {
     let capture: CaptureSummary
@@ -352,13 +652,25 @@ struct LibraryScanListRow: View {
             )
 
             VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
-                Text(capture.category ?? "Scan")
+                // `.capitalized` → Title Case. Same normalisation as
+                // the grid view card title; keeps grid and list
+                // views consistent.
+                Text(rowDisplayTitle.capitalized)
                     .font(QuickInkText.label)
                     .foregroundStyle(QuickInkColors.ink)
                     .lineLimit(1)
 
                 HStack(spacing: QuickInkSpacing.s2) {
-                    Text(friendlyMonthDay(capture.createdAt))
+                    Text(capture.source == "import" ? "Import" : "Scan")
+                        .font(QuickInkText.caption)
+                        .foregroundStyle(capture.source == "import" ? QuickInkColors.textOnAccent : QuickInkColors.muted)
+                        .padding(.horizontal, QuickInkSpacing.s2)
+                        .padding(.vertical, 1)
+                        .background(
+                            RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
+                                .fill(capture.source == "import" ? QuickInkColors.accent : QuickInkColors.borderSoft)
+                        )
+                    Text(relativeDate(capture.createdAt))
                         .font(QuickInkText.caption)
                         .foregroundStyle(QuickInkColors.muted)
                     if capture.pageCount > 1 {
@@ -393,106 +705,126 @@ struct LibraryScanListRow: View {
         guard let path else { return nil }
         return UIImage(contentsOfFile: path)
     }
+
+    /// List-mode row title cascade: user-set title → category → "Scan".
+    /// OCR snippet isn't fetched in list mode (rows are dense — no
+    /// per-row Flow), so we don't include it here.
+    private var rowDisplayTitle: String {
+        if let raw = capture.title?.trimmingCharacters(in: .whitespaces),
+           !raw.isEmpty {
+            return raw
+        }
+        return capture.category ?? "Scan"
+    }
 }
 
-/// `2026-05-02T14:30:00.000Z` → `May 2`. Falls back to the raw
-/// timestamp's date prefix on parse failures. Shared by the
-/// Library's two cards + (eventually) the Search timeline.
-fileprivate func friendlyMonthDay(_ iso: String) -> String {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let date = formatter.date(from: iso) {
-        let f = DateFormatter()
+// MARK: - Date formatting
+
+/// "Today" / "Yesterday" / weekday for the current week / `MMM d`
+/// otherwise. Used in the card footer for compact relative dates,
+/// matching the mock's "Today / May 1 / Apr 28" treatment.
+fileprivate func relativeDate(_ iso: String) -> String {
+    let isoFractional = ISO8601DateFormatter()
+    isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let isoBasic = ISO8601DateFormatter()
+    isoBasic.formatOptions = [.withInternetDateTime]
+    guard let date = isoFractional.date(from: iso) ?? isoBasic.date(from: iso) else {
+        return String(iso.prefix(10))
+    }
+    let calendar = Calendar.current
+    if calendar.isDateInToday(date)     { return "Today" }
+    if calendar.isDateInYesterday(date) { return "Yesterday" }
+
+    let f = DateFormatter()
+    if calendar.isDate(date, equalTo: Date(), toGranularity: .weekOfYear) {
+        f.dateFormat = "EEE" // weekday short
+    } else {
         f.dateFormat = "MMM d"
-        return f.string(from: date)
     }
-    return String(iso.prefix(10))
+    return f.string(from: date)
 }
 
-// MARK: - WrappingHStack
+// ────────────────────────────────────────────────────────────────────
+// Date-range picker sheet
+// ────────────────────────────────────────────────────────────────────
 
-/// Flow layout that wraps children onto multiple rows when the
-/// container width is exceeded. Counterpart to Compose's `FlowRow`
-/// on Android, which is what the chip row above uses. Children keep
-/// their intrinsic widths; spacing/lineSpacing control the gap
-/// between adjacent items and between rows.
-struct WrappingHStack: Layout {
-    var spacing: CGFloat = 8
-    var lineSpacing: CGFloat = 8
+/// Two `DatePicker`s wrapped in a sheet — start, then end. SwiftUI
+/// has no native date-range picker as a single component (unlike
+/// Material3's `DateRangePicker` on Android), so we hand-roll this.
+/// End is constrained to `>= start`, so an inverted range can't
+/// happen. Apply commits both endpoints; Clear resets to no filter.
+private struct DateRangePickerSheet: View {
+    let initialStart: Date?
+    let initialEnd:   Date?
+    let onApply: (_ start: Date?, _ end: Date?) -> Void
+    let onClear: () -> Void
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let maxWidth = proposal.width ?? .infinity
-        let rows = layoutRows(maxWidth: maxWidth, subviews: subviews)
-        let height = rows.reduce(0) { $0 + $1.height } +
-            CGFloat(max(0, rows.count - 1)) * lineSpacing
-        let usedWidth = rows.map(\.width).max() ?? 0
-        // Hand back the proposed width so the layout fills its
-        // container horizontally — chips stay left-aligned within.
-        let width = proposal.width ?? usedWidth
-        return CGSize(width: width, height: height)
+    @State private var start: Date
+    @State private var end:   Date
+    @Environment(\.dismiss) private var dismiss
+
+    init(
+        initialStart: Date?,
+        initialEnd: Date?,
+        onApply: @escaping (Date?, Date?) -> Void,
+        onClear: @escaping () -> Void
+    ) {
+        self.initialStart = initialStart
+        self.initialEnd   = initialEnd
+        self.onApply      = onApply
+        self.onClear      = onClear
+        // Seed the pickers with the existing range, falling back to
+        // "today" so the user has something to anchor against on
+        // first open.
+        let today = Calendar.current.startOfDay(for: Date())
+        _start = State(initialValue: initialStart ?? today)
+        _end   = State(initialValue: initialEnd ?? (initialStart ?? today))
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let rows = layoutRows(maxWidth: bounds.width, subviews: subviews)
-        var y = bounds.minY
-        for row in rows {
-            var x = bounds.minX
-            for index in row.indices {
-                let size = row.sizes[index - row.startIndex]
-                subviews[index].place(
-                    at: CGPoint(x: x, y: y),
-                    anchor: .topLeading,
-                    proposal: ProposedViewSize(size)
-                )
-                x += size.width + spacing
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Filter scans by date range")) {
+                    DatePicker(
+                        "Start",
+                        selection: $start,
+                        displayedComponents: .date
+                    )
+                    DatePicker(
+                        "End",
+                        selection: $end,
+                        in: start...,
+                        displayedComponents: .date
+                    )
+                }
             }
-            y += row.height + lineSpacing
-        }
-    }
-
-    private struct Row {
-        let indices: Range<Int>
-        let sizes: [CGSize]
-        let width: CGFloat
-        let height: CGFloat
-        var startIndex: Int { indices.lowerBound }
-    }
-
-    private func layoutRows(maxWidth: CGFloat, subviews: Subviews) -> [Row] {
-        var rows: [Row] = []
-        var currentSizes: [CGSize] = []
-        var currentStart = 0
-        var currentWidth: CGFloat = 0
-        var currentHeight: CGFloat = 0
-
-        for (index, subview) in subviews.enumerated() {
-            let size = subview.sizeThatFits(.unspecified)
-            let prospective = currentWidth == 0 ? size.width : currentWidth + spacing + size.width
-            if prospective > maxWidth, !currentSizes.isEmpty {
-                rows.append(Row(
-                    indices: currentStart..<index,
-                    sizes: currentSizes,
-                    width: currentWidth,
-                    height: currentHeight
-                ))
-                currentSizes = [size]
-                currentStart = index
-                currentWidth = size.width
-                currentHeight = size.height
-            } else {
-                currentSizes.append(size)
-                currentWidth = prospective
-                currentHeight = max(currentHeight, size.height)
+            .navigationTitle("Date range")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Clear", action: onClear)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") { onApply(start, end) }
+                }
             }
         }
-        if !currentSizes.isEmpty {
-            rows.append(Row(
-                indices: currentStart..<(currentStart + currentSizes.count),
-                sizes: currentSizes,
-                width: currentWidth,
-                height: currentHeight
-            ))
-        }
-        return rows
+    }
+}
+
+/// Render an active date-range filter as a compact label like
+/// "May 1 – May 4". Falls back to a single-side label when only one
+/// endpoint is set ("From May 1" / "Until May 4").
+private func formatDateRange(_ start: Date?, _ end: Date?) -> String {
+    let f = DateFormatter()
+    f.dateFormat = "MMM d"
+    let s = start.map { f.string(from: $0) }
+    let e = end.map   { f.string(from: $0) }
+    switch (s, e) {
+    case let (.some(a), .some(b)) where a == b: return a
+    case let (.some(a), .some(b)):              return "\(a) – \(b)"
+    case let (.some(a), .none):                 return "From \(a)"
+    case let (.none,    .some(b)):              return "Until \(b)"
+    default:                                    return ""
     }
 }

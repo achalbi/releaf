@@ -9,12 +9,24 @@
 
 package app.quickink.mobile.data.ocr
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
+
+/**
+ * Projection: first-page OCR snippet keyed by capture id. Used by
+ * the Library screen to preload all snippets in one query so cards
+ * render in their final state without a per-card swap.
+ */
+data class CaptureFirstSnippet(
+    @ColumnInfo(name = "capture_id") val captureId: String,
+    @ColumnInfo(name = "text")       val text: String?,
+)
 
 @Dao
 interface OcrResultDao {
@@ -25,8 +37,36 @@ interface OcrResultDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(entities: List<OcrResultEntity>)
 
+    /**
+     * Insert if no row with this id exists. Returns rowId on insert,
+     * `-1L` on id conflict. Paired with [update] in [upsertFromRemote]
+     * for a real UPSERT without REPLACE's clobber-everything semantics.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(entity: OcrResultEntity): Long
+
     @Update
     suspend fun update(entity: OcrResultEntity)
+
+    /**
+     * Upsert from a remote payload, last-write-wins on `updated_at`.
+     *
+     * Mirror of [CaptureDao.upsertFromRemote] — see that doc for the
+     * full rationale. Short version: `@Insert(REPLACE)` was a stale
+     * footgun (DELETE-then-INSERT cascades unrelated FKs and silently
+     * clobbers newer local edits); this two-step pattern does a real
+     * UPDATE under the hood and gates on `updated_at` so a slow
+     * restore can't overwrite a faster local edit.
+     */
+    @Transaction
+    suspend fun upsertFromRemote(entity: OcrResultEntity) {
+        val rowId = insertIfAbsent(entity)
+        if (rowId != -1L) return
+        val existing = findById(entity.id) ?: return
+        if (existing.updatedAt < entity.updatedAt) {
+            update(entity)
+        }
+    }
 
     @Query("SELECT * FROM ocr_results WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): OcrResultEntity?
@@ -42,6 +82,60 @@ interface OcrResultDao {
         ORDER BY page_index ASC
     """)
     fun observeForCapture(captureId: String): Flow<List<OcrResultEntity>>
+
+    /**
+     * One-shot lookup of the first page's OCR text for a capture.
+     * Used by the Library card to render the handwritten preview
+     * snippet without spinning up a per-card Flow. Returns `null`
+     * when the capture has no OCR rows yet (in-flight scan or
+     * blank pages).
+     */
+    @Query("""
+        SELECT text FROM ocr_results
+        WHERE capture_id = :captureId AND deleted_at IS NULL
+        ORDER BY page_index ASC
+        LIMIT 1
+    """)
+    suspend fun findFirstTextForCapture(captureId: String): String?
+
+    /**
+     * Replace the OCR text for a single page row. Used by the scan
+     * detail editor when the user corrects the recognised text. Sets
+     * the dirty bit + bumps `updated_at` so the next sync pass mirrors
+     * the change to Drive. The FTS5 virtual table watches the same
+     * column and rebuilds its index automatically.
+     */
+    @Query("""
+        UPDATE ocr_results
+        SET text = :text, updated_at = :timestamp, dirty = 1
+        WHERE id = :id
+    """)
+    suspend fun setText(id: String, text: String, timestamp: String)
+
+    /**
+     * Live first-page snippets for every active capture belonging to
+     * [userId]. Returned as one row per capture (the row whose
+     * `page_index` is the minimum among that capture's non-deleted
+     * OCR results). Captures with no OCR rows yet are simply absent
+     * from the result — callers treat absence as "no snippet".
+     *
+     * Wins over the per-card one-shot fetch the Library card used to
+     * do: cards render in their final state on first frame instead
+     * of swapping when each card's `LaunchedEffect` resolves.
+     */
+    @Query("""
+        SELECT o.capture_id AS capture_id, o.text AS text
+        FROM ocr_results o
+        INNER JOIN captures c ON c.id = o.capture_id
+        WHERE c.user_id = :userId
+          AND c.deleted_at IS NULL
+          AND o.deleted_at IS NULL
+          AND o.page_index = (
+              SELECT MIN(page_index) FROM ocr_results
+              WHERE capture_id = o.capture_id AND deleted_at IS NULL
+          )
+    """)
+    fun observeFirstSnippetsForUser(userId: String): Flow<List<CaptureFirstSnippet>>
 
     // FTS5 search over `fts_ocr_text` lands with the search-using
     // screen (Slice 4 — Notes list / OCR review). Room's KSP

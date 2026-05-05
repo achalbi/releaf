@@ -36,6 +36,15 @@ struct ScanDetailScreen: View {
     /// single-page captures keep using `PDFKitView` (cheaper, comes
     /// with pinch-zoom for free).
     @State private var pageImages: [UIImage] = []
+    /// Title editor — the Save button persists `titleDraft` via
+    /// [CaptureRepository.setTitle]; Cancel discards it.
+    @State private var showTitleEditor = false
+    @State private var titleDraft = ""
+    /// Per-page OCR edit state. `editingPageId` is the row currently
+    /// in edit mode (only one at a time); `ocrDraft` is the in-flight
+    /// text. Both reset when Save commits or Cancel discards.
+    @State private var editingPageId: String? = nil
+    @State private var ocrDraft = ""
 
     init(captureId: String, userId: String, onBack: @escaping () -> Void) {
         self.captureId = captureId
@@ -54,6 +63,7 @@ struct ScanDetailScreen: View {
                 VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
                     if let capture {
                         previewBlock(for: capture)
+                        titleSection(for: capture)
                         metaBlock(for: capture)
                         ocrSection
                     } else {
@@ -110,6 +120,28 @@ struct ScanDetailScreen: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        // Title editor — system-styled alert with an inline TextField.
+        // Save persists via `CaptureRepository.setTitle(...)`; Cancel
+        // drops the draft. Trimming-blank-to-nil keeps the Library
+        // card's OCR/category/"Untitled" fallback chain intact.
+        .alert("Edit title", isPresented: $showTitleEditor) {
+            TextField("Untitled scan", text: $titleDraft)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                Task { await applyTitle(titleDraft) }
+            }
+        }
+    }
+
+    /// Computed top-bar title — prefers the user-set `title`, falls
+    /// back to the category, then to the generic "Scan" label so the
+    /// header is never empty.
+    private var displayedTopBarTitle: String {
+        if let t = capture?.title?.trimmingCharacters(in: .whitespaces),
+           !t.isEmpty {
+            return t
+        }
+        return capture?.category ?? "Scan"
     }
 
     // MARK: - Top bar
@@ -125,9 +157,11 @@ struct ScanDetailScreen: View {
             }
             .accessibilityLabel("Back")
 
-            Text(capture?.category ?? "Scan")
+            Text(displayedTopBarTitle)
                 .font(QuickInkText.pageTitle)
                 .foregroundStyle(QuickInkColors.ink)
+                .lineLimit(1)
+                .truncationMode(.tail)
 
             Spacer()
 
@@ -317,6 +351,44 @@ struct ScanDetailScreen: View {
         return URL(fileURLWithPath: raw)
     }
 
+    /// Editable title row, sitting between the preview and the
+    /// metadata pills. Shows the persisted title when one is set;
+    /// otherwise renders an "Untitled scan" placeholder in muted ink
+    /// so the empty state is clearly an affordance, not a label.
+    /// Whole row is a Button — tap opens the title editor alert.
+    @ViewBuilder
+    private func titleSection(for capture: CaptureSummary) -> some View {
+        let displayed: String? = {
+            let trimmed = capture.title?.trimmingCharacters(in: .whitespaces) ?? ""
+            return trimmed.isEmpty ? nil : trimmed
+        }()
+        Button {
+            titleDraft = capture.title ?? ""
+            showTitleEditor = true
+        } label: {
+            HStack(spacing: QuickInkSpacing.s3) {
+                Text(displayed ?? "Untitled scan")
+                    .font(QuickInkText.heading)
+                    .foregroundStyle(displayed != nil ? QuickInkColors.ink : QuickInkColors.muted)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "pencil")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(QuickInkColors.muted)
+            }
+            .padding(QuickInkSpacing.s4)
+            .background(QuickInkColors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                    .stroke(QuickInkColors.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Edit title")
+    }
+
     @ViewBuilder
     private func metaBlock(for capture: CaptureSummary) -> some View {
         HStack(spacing: QuickInkSpacing.s2) {
@@ -408,30 +480,95 @@ struct ScanDetailScreen: View {
                         .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
                 } else {
                     VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
-                        ForEach(ocrPages, id: \.pageIndex) { page in
-                            VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
-                                Text("Page \(page.pageIndex + 1)")
-                                    .font(QuickInkText.eyebrow)
-                                    .tracking(QuickInkLetterSpacing.eyebrow)
-                                    .foregroundStyle(QuickInkColors.muted)
-                                Text(page.text)
-                                    .font(QuickInkText.body)
-                                    .foregroundStyle(QuickInkColors.ink)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .textSelection(.enabled)
-                            }
-                            .padding(QuickInkSpacing.s4)
-                            .background(QuickInkColors.surface)
-                            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                                    .stroke(QuickInkColors.border, lineWidth: 1)
-                            )
+                        ForEach(ocrPages) { page in
+                            ocrPageCard(for: page)
                         }
                     }
                 }
             }
         }
+    }
+
+    /// One page card inside [ocrSection]. Read mode renders the OCR
+    /// text with `.textSelection(.enabled)` so the user can copy it;
+    /// tapping the pencil flips into edit mode where the text becomes
+    /// a `TextEditor`. Save persists via
+    /// [CaptureRepository.setOcrText]; Cancel discards the draft and
+    /// returns to read mode. Local edit state lives at the screen
+    /// level (only one row editable at a time) so navigating between
+    /// pages doesn't bleed drafts.
+    @ViewBuilder
+    private func ocrPageCard(for page: OcrPagePreview) -> some View {
+        let isEditing = (editingPageId == page.id)
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+            HStack(spacing: QuickInkSpacing.s2) {
+                Text("Page \(page.pageIndex + 1)")
+                    .font(QuickInkText.eyebrow)
+                    .tracking(QuickInkLetterSpacing.eyebrow)
+                    .foregroundStyle(QuickInkColors.muted)
+                Spacer()
+                if isEditing {
+                    Button {
+                        editingPageId = nil
+                        ocrDraft = ""
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(QuickInkColors.muted)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Cancel edit")
+                    Button {
+                        let snapshot = ocrDraft
+                        Task { await applyOcrEdit(pageId: page.id, text: snapshot) }
+                    } label: {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(QuickInkColors.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Save text")
+                } else {
+                    Button {
+                        ocrDraft = page.text
+                        editingPageId = page.id
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(QuickInkColors.muted)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Edit text")
+                }
+            }
+
+            if isEditing {
+                TextEditor(text: $ocrDraft)
+                    .font(QuickInkText.body)
+                    .foregroundStyle(QuickInkColors.ink)
+                    .frame(minHeight: 120)
+                    .scrollContentBackground(.hidden)
+                    .background(QuickInkColors.bg)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
+                            .stroke(QuickInkColors.borderSoft, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous))
+            } else {
+                Text(page.text)
+                    .font(QuickInkText.body)
+                    .foregroundStyle(QuickInkColors.ink)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(QuickInkSpacing.s4)
+        .background(QuickInkColors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                .stroke(QuickInkColors.border, lineWidth: 1)
+        )
     }
 
     private func toggleOcr() {
@@ -479,12 +616,48 @@ struct ScanDetailScreen: View {
         }
     }
 
+    /// Persist a title edit. Empty / whitespace-only input is stored
+    /// as `nil` so the Library card falls back to its OCR/category/
+    /// "Untitled" cascade. Refreshes `capture` after the write so the
+    /// header + title row update without a manual reload.
+    private func applyTitle(_ raw: String) async {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        let next: String? = trimmed.isEmpty ? nil : trimmed
+        do {
+            try await CaptureRepository().setTitle(
+                captureId: captureId,
+                title:     next
+            )
+            await loadCapture()
+        } catch {
+            print("ScanDetailScreen.applyTitle failed: \(error)")
+        }
+    }
+
+    /// Persist an OCR text edit for a single page row. Refreshes
+    /// `ocrPages` after the write so the page card flips back to
+    /// read mode with the new content. Best-effort — a transient
+    /// failure leaves the draft visible so the user can retry.
+    private func applyOcrEdit(pageId: String, text: String) async {
+        do {
+            try await CaptureRepository().setOcrText(
+                ocrResultId: pageId,
+                text:        text
+            )
+            editingPageId = nil
+            ocrDraft = ""
+            await loadOcr()
+        } catch {
+            print("ScanDetailScreen.applyOcrEdit failed: \(error)")
+        }
+    }
+
     private func loadCapture() async {
         let dbQueue = QuickInkDatabase.shared.dbQueue
         do {
             let result = try await dbQueue.read { db -> CaptureSummary? in
                 try CaptureSummary.fetchOne(db, sql: """
-                    SELECT id, preview_uri, pdf_uri, category, page_count, created_at
+                    SELECT id, title, preview_uri, pdf_uri, category, page_count, created_at, source
                     FROM captures
                     WHERE id = ? AND deleted_at IS NULL
                     LIMIT 1
@@ -504,7 +677,7 @@ struct ScanDetailScreen: View {
         do {
             let pages = try await dbQueue.read { db -> [OcrPagePreview] in
                 try OcrPagePreview.fetchAll(db, sql: """
-                    SELECT page_index, text
+                    SELECT id, page_index, text
                     FROM ocr_results
                     WHERE capture_id = ? AND deleted_at IS NULL
                     ORDER BY page_index ASC
@@ -540,13 +713,16 @@ struct ScanDetailScreen: View {
 }
 
 /// Lightweight projection of `ocr_results` rows used by the
-/// detail viewer's OCR section. The full row carries `blocks_json`
-/// and engine metadata which we don't surface here.
-private struct OcrPagePreview: Codable, FetchableRecord, Sendable {
+/// detail viewer's OCR section. Carries `id` so per-page edits
+/// can persist back via `CaptureRepository.setOcrText(...)`. The
+/// full row's `blocks_json` and engine metadata aren't surfaced.
+private struct OcrPagePreview: Codable, FetchableRecord, Identifiable, Sendable {
+    let id: String
     let pageIndex: Int
     let text: String
 
     enum CodingKeys: String, CodingKey {
+        case id
         case pageIndex = "page_index"
         case text
     }

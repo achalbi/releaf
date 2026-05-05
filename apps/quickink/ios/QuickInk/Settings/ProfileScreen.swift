@@ -288,7 +288,15 @@ struct ProfileScreen: View {
                                         .clipShape(Circle())
                                 } else if let initial = displayNameInitial {
                                     Text(initial)
-                                        .font(QuickInkFont.serif(48, weight: .light))
+                                        // App screen — Fraunces, not Cormorant.
+                                        // (Cormorant `serif(...)` is reserved
+                                        // for onboarding.) Light weight isn't
+                                        // bundled at 72pt optical, so the
+                                        // mapper falls back to Regular —
+                                        // slightly heavier than the previous
+                                        // Cormorant Light, but reads cleaner
+                                        // at the 48pt avatar size.
+                                        .font(QuickInkFont.appSerif(48, weight: .light))
                                         .foregroundStyle(QuickInkColors.accent)
                                 } else {
                                     Image(systemName: "person.crop.circle.fill")

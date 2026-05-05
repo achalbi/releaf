@@ -18,15 +18,32 @@ struct SettingsScreen: View {
     let onBack: () -> Void
     @ObservedObject var authStore: AuthStore
     let onManageCategories: (() -> Void)?
+    /// Tab navigation callbacks for the floating bottom nav. Settings
+    /// paints itself active; tapping it is a no-op.
+    let onHome: () -> Void
+    let onLibrary: () -> Void
+    let onScan: () -> Void
+    let onSearch: () -> Void
+    let onSettings: () -> Void
 
     init(
         onBack: @escaping () -> Void,
         authStore: AuthStore,
-        onManageCategories: (() -> Void)? = nil
+        onManageCategories: (() -> Void)? = nil,
+        onHome: @escaping () -> Void = {},
+        onLibrary: @escaping () -> Void = {},
+        onScan: @escaping () -> Void = {},
+        onSearch: @escaping () -> Void = {},
+        onSettings: @escaping () -> Void = {}
     ) {
         self.onBack = onBack
         self.authStore = authStore
         self.onManageCategories = onManageCategories
+        self.onHome = onHome
+        self.onLibrary = onLibrary
+        self.onScan = onScan
+        self.onSearch = onSearch
+        self.onSettings = onSettings
     }
 
     @StateObject private var settings = SettingsState()
@@ -53,6 +70,11 @@ struct SettingsScreen: View {
 
             ScrollView {
                 VStack(spacing: QuickInkSpacing.s5) {
+                    section(title: "Appearance") {
+                        themeModeRow
+                        primaryColorRow
+                    }
+
                     section(title: "Account") {
                         accountRow
                         // Display-name override row — what the Home
@@ -137,6 +159,16 @@ struct SettingsScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(QuickInkColors.bg.ignoresSafeArea())
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            QuickInkBottomNavBar(
+                activeTab:  .settings,
+                onHome:     onHome,
+                onLibrary:  onLibrary,
+                onScan:     onScan,
+                onSearch:   onSearch,
+                onSettings: { /* current tab */ }
+            )
+        }
     }
 
     /// Inline TextField for the user's preferred display name. Edits
@@ -463,6 +495,84 @@ struct SettingsScreen: View {
             Text("QuickInk by Releaf — scans go to your own Google Drive folder. Nothing leaves the device until you sign in and turn Drive backup on.")
                 .font(QuickInkText.meta)
                 .foregroundStyle(QuickInkColors.inkSoft)
+        }
+    }
+
+    // MARK: - Appearance section
+
+    /// Three-segment toggle for the user's theme override (System /
+    /// Light / Dark). The active segment paints `accent` over
+    /// `accentSoft`; inactive segments stay transparent on the
+    /// section's white card. Bound directly to
+    /// `settings.themeMode`; QuickInkRoot reads it on every render
+    /// to apply `.preferredColorScheme(...)` to the whole tree.
+    @ViewBuilder
+    private var themeModeRow: some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+            Text("Theme")
+                .font(QuickInkText.label)
+                .foregroundStyle(QuickInkColors.ink)
+            HStack(spacing: 4) {
+                ForEach(ThemeMode.allCases, id: \.self) { mode in
+                    let active = mode == settings.themeMode
+                    Button(action: { settings.themeMode = mode }) {
+                        Text(mode.displayName)
+                            .font(QuickInkText.label)
+                            .foregroundStyle(active ? QuickInkColors.textOnAccent : QuickInkColors.ink)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, QuickInkSpacing.s2)
+                            .background(
+                                RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous)
+                                    .fill(active ? QuickInkColors.accent : Color.clear)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(4)
+            .background(
+                RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous)
+                    .fill(QuickInkColors.borderSoft)
+            )
+        }
+    }
+
+    /// Row of swatch circles, one per `PrimaryColor`. The picked
+    /// swatch gets a thicker ring; the others are flat discs. Each
+    /// swatch displays the family's DEEP variant — that's the
+    /// variant that lights up in light mode (where most users are),
+    /// so the picker preview matches what you'll see on FAB / CTAs.
+    @ViewBuilder
+    private var primaryColorRow: some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+            HStack {
+                Text("Primary color")
+                    .font(QuickInkText.label)
+                    .foregroundStyle(QuickInkColors.ink)
+                Spacer()
+                Text(settings.primaryColor.displayName)
+                    .font(QuickInkText.meta)
+                    .foregroundStyle(QuickInkColors.inkSoft)
+            }
+            HStack(spacing: QuickInkSpacing.s3) {
+                ForEach(PrimaryColor.allCases, id: \.self) { hue in
+                    let active = hue == settings.primaryColor
+                    Button(action: { settings.primaryColor = hue }) {
+                        Circle()
+                            .fill(hue.deep)
+                            .frame(width: 40, height: 40)
+                            .overlay(
+                                Circle().stroke(
+                                    active ? hue.deep : QuickInkColors.border,
+                                    lineWidth: active ? 3 : 1
+                                )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(hue.displayName))
+                    .accessibilityAddTraits(active ? [.isSelected] : [])
+                }
+            }
         }
     }
 }

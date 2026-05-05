@@ -113,7 +113,9 @@ fun SignInScreen(
 
         Text(
             text     = "Your notebook follows you across devices. We never see your pages.",
-            style    = type.body,
+            // Cormorant editorial body — onboarding's showroom feel.
+            // App body (Inter) is `type.body`.
+            style    = type.onboardingBody,
             color    = colors.inkSoft,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = QuickInkSpacing.s7),

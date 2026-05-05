@@ -155,24 +155,42 @@ public final class QuickInkSyncEnvironment {
             // honest. We log to Console so dev / TestFlight builds
             // surface what went wrong instead of silently degrading.
             do {
+                // Upload-only sync. QuickInk treats Drive as a
+                // one-way backup of local-first data — pull-down is
+                // only needed when the user explicitly taps Restore
+                // from Drive. Skipping pullDelta on every pass cuts
+                // the round-trip cost roughly in half and avoids
+                // surprise cross-device data appearing in the
+                // background.
                 let result = try await repo.sync(
                     deviceId:    DeviceIdentity.get(),
-                    accessToken: activeSession.accessToken
+                    accessToken: activeSession.accessToken,
+                    pullRemote:  false
                 )
-                print("[QuickInkSync] metadata pass done — uploaded=\(result.uploaded) " +
+                print("[QuickInkSync] metadata pass done (push-only) — uploaded=\(result.uploaded) " +
                       "tombstoned=\(result.tombstoned) downloaded=\(result.downloaded) " +
                       "failed=\(result.failed) versionBlocked=\(result.versionBlocked)")
+                // Zero the Home pending pill the instant the worker
+                // finishes — without this it would wait up to 60
+                // seconds for the foreground tick to re-poll and
+                // observe that the dirty bits cleared.
+                await MainActor.run { self.stateStore.recordLocalDirtyCount(0) }
             } catch DriveError.unauthenticated {
-                // Drive rejected the (just-refreshed) token. The
-                // refresh token itself is dead — typically because
-                // the user revoked the app's Drive grant in their
-                // Google account, or signed out everywhere. Sign
-                // them out locally so QuickInkRoot's `ReSignInGate`
-                // takes over and prompts a fresh consent + token.
-                // The next sign-in will overwrite this session.
-                print("[QuickInkSync] Drive 401 even after refresh — signing user out so re-sign-in re-issues credentials")
-                await MainActor.run { Task { await authStore.signOut() } }
-                return
+                // Drive rejected the (just-refreshed) token (401 or
+                // 403). DELIBERATELY do NOT sign the user out here —
+                // an earlier version of this code did, but Drive
+                // returns 403 for transient reasons (rate-limit,
+                // regional propagation, server hiccup), not just
+                // "scope not granted", and a single bad response
+                // would bounce the user to the SignIn screen and
+                // re-sign-in could hit the same blip in a loop.
+                //
+                // Conservative posture: log loudly, fall through.
+                // pendingCount surfaces the failure in the UI; the
+                // user can manually re-authenticate via Settings →
+                // Account if needed.
+                print("[QuickInkSync] Drive auth rejected (401/403): falling through. " +
+                      "User can manually sign out + back in if this persists.")
             } catch {
                 print("[QuickInkSync] periodic sync failed: \(error). " +
                       "UI's pendingCount will reflect the failure; lastFullSyncAt will not advance.")
@@ -182,16 +200,13 @@ public final class QuickInkSyncEnvironment {
                 // file id can keep flowing.
             }
 
-            // Phase 6 — back up the actual scanned PDFs + preview
-            // JPEGs to Drive. Runs after the JSON metadata pass so
-            // the captures rows already exist in the manifest, and
-            // a fresh-device restore can find them via the row's
-            // `pdf_drive_file_id`. Best-effort: errors per row are
-            // swallowed inside the helper so a single bad upload
-            // doesn't block the rest. We still log the outer-level
-            // throw (e.g. an unrecoverable network failure that took
-            // out the whole pass) for visibility. Mirror
-            // `QuickInkBinarySync.kt` on Android.
+            // Push-only binary phase. Upload local PDFs + preview
+            // JPEGs that haven't reached Drive yet. The earlier
+            // `restorePending` call (which pulled down binaries
+            // referenced in remote manifest entries) is intentionally
+            // dropped from this path — cross-device restore is now
+            // exclusively a Settings → "Restore from Drive" tap
+            // (handled by `requestRestore` below).
             let binarySync = QuickInkBinarySync(driveClient: self.driveClient)
             do {
                 try await binarySync.uploadAndCascade(
@@ -201,30 +216,98 @@ public final class QuickInkSyncEnvironment {
             } catch {
                 print("[QuickInkSync] binary upload phase failed: \(error)")
             }
-            do {
-                try await binarySync.restorePending(
-                    userId:      activeSession.userId,
-                    accessToken: activeSession.accessToken
-                )
-            } catch {
-                print("[QuickInkSync] binary restore phase failed: \(error)")
-            }
         }
 
-        scheduler.registerBackgroundRefreshHandler()
-
-        // Toggle background refresh + kick off a sync on sign-in.
-        // Same .signedIn / else split Releaf uses; the per-pass
-        // gate handles the "user has Drive backup off" case.
+        // Sync is USER-INITIATED ONLY now. We don't register a
+        // BGAppRefreshTask handler and we don't auto-kick on
+        // sign-in. The user taps Settings → "Sync now" when they
+        // want their captures pushed to Drive. This eliminates
+        // the periodic battery + cellular cost and the surprise
+        // 30-second wait users hit on launch when an auto-sync
+        // started before they could interact with the UI.
+        //
+        // Sign-out still cancels any in-flight pass — the closure
+        // below runs on `.signedOut` only.
         authObserver = authStore.$state.sink { [weak self] state in
             guard let self else { return }
             switch state {
-            case .signedIn:
-                self.scheduler.scheduleBackgroundRefresh()
-                self.scheduler.requestImmediate()
-            case .signedOut, .signingIn, .failed:
+            case .signedOut:
                 self.scheduler.cancelAll()
+                // Clear the dirty count so a stale pill doesn't
+                // hang around after sign-out — the new sign-in
+                // (different user, fresh DB) will reseed it.
+                self.stateStore.recordLocalDirtyCount(0)
+            case .signedIn, .signingIn, .failed:
+                break
             }
+        }
+    }
+
+    // MARK: - Pending-push safety net
+
+    /// Single-flight task running the foreground 60-second tick
+    /// loop. Started by `QuickInkRoot`'s scene-phase observer when
+    /// the app enters `.active`; cancelled when it leaves to
+    /// `.background`. The loop:
+    ///   1. Counts locally-dirty rows via the data source.
+    ///   2. Writes the count to `SyncStateStore.localDirtyCount`
+    ///      (drives the Home pill via `@Published`).
+    ///   3. Calls `scheduler.requestImmediate()` when count > 0.
+    ///      The scheduler's coalesce-while-running guard prevents
+    ///      back-to-back ticks from spamming WorkManager-equivalent
+    ///      task replacement.
+    private var pendingPushTask: Task<Void, Never>?
+
+    /// Idempotent — calling twice while the loop is already
+    /// running just no-ops. Mirror of Android's
+    /// `QuickInkApp.startPendingPushLoopIfNeeded`.
+    @MainActor
+    public func startPendingPushLoop() {
+        if pendingPushTask?.isCancelled == false { return }
+        pendingPushTask = Task { [weak self] in
+            print("[QuickInkSync] pending-push loop started")
+            defer { print("[QuickInkSync] pending-push loop stopped") }
+            // Tick once immediately so the pill updates the moment
+            // the app foregrounds — no 60-second wait.
+            while !Task.isCancelled {
+                await self?.tickPendingPush()
+                try? await Task.sleep(nanoseconds: 60_000_000_000) // 60s
+            }
+        }
+    }
+
+    /// Cancel the loop. Safe to call when not running. Called when
+    /// the app backgrounds and from sign-out cleanup.
+    @MainActor
+    public func stopPendingPushLoop() {
+        pendingPushTask?.cancel()
+        pendingPushTask = nil
+    }
+
+    /// One iteration of the loop. Counts dirty rows, writes the
+    /// total to `SyncStateStore`, and kicks `requestImmediate()`
+    /// when > 0. No-ops gracefully when signed-out, when Drive
+    /// backup is off, or when the data source read throws.
+    private func tickPendingPush() async {
+        guard installed,
+              let store = installedAuthStore,
+              let session = await currentSession(authStore: store)
+        else { return }
+        let defaults = UserDefaults.standard
+        let driveBackupEnabled: Bool = {
+            guard defaults.object(forKey: Self.driveBackupKey) != nil else { return true }
+            return defaults.bool(forKey: Self.driveBackupKey)
+        }()
+        guard driveBackupEnabled else { return }
+
+        let dataSource = QuickInkSyncDataSource(userId: session.userId)
+        let dirty = (try? await dataSource.countDirtyRows(userId: session.userId)) ?? 0
+
+        await MainActor.run { stateStore.recordLocalDirtyCount(dirty) }
+
+        if dirty > 0 {
+            print("[QuickInkSync] pending-push tick: \(dirty) dirty rows — kicking sync")
+            await MainActor.run { scheduler.requestImmediate() }
         }
     }
 
@@ -278,14 +361,17 @@ public final class QuickInkSyncEnvironment {
                     deviceId:    DeviceIdentity.get(),
                     accessToken: activeSession.accessToken
                 )
-            } catch DriveError.unauthenticated {
-                print("[QuickInkSync] restore: Drive 401 — signing user out")
-                await MainActor.run { Task { await store.signOut() } }
             } catch {
                 // Settings → "Restore from Drive" doesn't have a
                 // dedicated error surface yet; logging keeps the
                 // failure recoverable from Console without crashing
-                // the user out of the screen.
+                // the user out of the screen. DriveError.unauthenticated
+                // (401 / 403) is intentionally caught by the same
+                // generic block — auto-signing-out on a transient
+                // Drive blip would log the user out and the
+                // subsequent re-sign-in could hit the same blip in
+                // a loop. Conservative: log, let the user manually
+                // re-auth via Settings if this persists.
                 print("[QuickInkSync] restore failed: \(error)")
             }
         }

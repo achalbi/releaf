@@ -112,7 +112,9 @@ fun NoteEditorScreen(
             userId    = userId,
             dao       = app.database.notepadDao(),
             scope     = scope,
-            onMutated = { QuickInkSyncScheduler.requestImmediate(app) },
+            // Sync is user-initiated only — no auto-kick on note
+            // edits. User taps Settings → "Sync now" to push.
+            onMutated = { /* intentional no-op */ },
         )
     }
 

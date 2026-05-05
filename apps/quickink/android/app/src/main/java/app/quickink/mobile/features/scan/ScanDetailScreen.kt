@@ -40,8 +40,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.LocalOffer
@@ -52,6 +54,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -72,17 +75,22 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.ocr.OcrResultDao
 import app.quickink.mobile.data.ocr.OcrResultEntity
+import app.quickink.mobile.data.sync.QuickInkBinarySync
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import androidx.core.content.FileProvider
+import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.data.common.IsoClock
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -112,6 +120,11 @@ fun ScanDetailScreen(
     // the "Tag scan" affordance for an untagged capture) sets this
     // to true; the sheet's options call into [retagCapture].
     var showRetagSheet by remember { mutableStateOf(false) }
+    // Title editor modal — opens when the user taps the title row.
+    // `titleDraft` is the in-flight string; persisted via setTitle on
+    // Save and discarded on Cancel.
+    var showTitleEditor by remember { mutableStateOf(false) }
+    var titleDraft by remember { mutableStateOf("") }
 
     // Live category list — populated from the same DAO the home
     // grid + review screen read, scoped to the current user. The
@@ -121,6 +134,50 @@ fun ScanDetailScreen(
     }.collectAsState(initial = emptyList())
 
     LaunchedEffect(captureId) {
+        capture = captureDao.findById(captureId)
+    }
+
+    // Self-heal: if the capture row references a local file that
+    // doesn't resolve here (typical after a fresh-device sync —
+    // the row carries the source device's `pdf_uri`, which is a
+    // path on that device's filesystem) AND we have a Drive file
+    // id to fall back on, eagerly download the binary so the
+    // preview renders. Without this the user sees
+    // "open failed: ENOENT" and has no way to recover except
+    // waiting for the next periodic sync's `restorePending` pass.
+    //
+    // Keyed on the capture's id + drive-id pair so the effect
+    // re-runs only when those identities change (not on every
+    // pdf_uri rewrite the heal itself triggers).
+    LaunchedEffect(capture?.id, capture?.pdfDriveFileId, capture?.previewDriveFileId) {
+        val row = capture ?: return@LaunchedEffect
+        val authState = app.authStore.state.value
+        val accessToken = (authState as? AuthState.SignedIn)?.session?.accessToken
+            ?: return@LaunchedEffect
+
+        val needPdf = row.pdfDriveFileId != null &&
+            !localFileExists(row.pdfUri)
+        val needPreview = row.previewDriveFileId != null &&
+            (row.previewUri.isNullOrBlank() || !localFileExists(row.previewUri))
+
+        if (!needPdf && !needPreview) return@LaunchedEffect
+
+        // Run on IO so HTTP + disk write don't block recomposition.
+        // Repository writes go through the existing DAO setters that
+        // QuickInkBinarySync already uses, so the row is reactively
+        // re-read here on the next captureDao.findById() refresh.
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val binarySync = QuickInkBinarySync(
+                    context            = context,
+                    captureDao         = captureDao,
+                    profileSettingsDao = app.database.profileSettingsDao(),
+                    driveClient        = app.driveClient,
+                )
+                binarySync.restorePending(row.userId, accessToken)
+            }
+        }
+        // Refresh the local copy so the UI sees the rewritten URIs.
         capture = captureDao.findById(captureId)
     }
 
@@ -158,10 +215,14 @@ fun ScanDetailScreen(
                 )
             }
             Text(
-                text  = capture?.category ?: "Scan",
+                text  = capture?.title?.takeIf { it.isNotBlank() }
+                    ?: capture?.category
+                    ?: "Scan",
                 style = type.pageTitle,
                 color = colors.ink,
                 modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
 
             // Share button — always visible when there's a capture
@@ -237,6 +298,13 @@ fun ScanDetailScreen(
                 )
             } else {
                 PreviewImage(capture = current)
+                TitleSection(
+                    title    = current.title,
+                    onEdit   = {
+                        titleDraft     = current.title.orEmpty()
+                        showTitleEditor = true
+                    },
+                )
                 MetaBlock(
                     capture  = current,
                     onTagTap = { showRetagSheet = true },
@@ -245,6 +313,7 @@ fun ScanDetailScreen(
                     showOcr   = showOcr,
                     isLoading = showOcr && !ocrLoaded,
                     ocrPages  = ocrPages,
+                    ocrDao    = ocrDao,
                     onToggle  = { showOcr = !showOcr },
                 )
             }
@@ -272,6 +341,52 @@ fun ScanDetailScreen(
                     } catch (_: Exception) { /* best-effort */ }
                 }
             },
+        )
+    }
+
+    // Title editor — modal AlertDialog with a single text field.
+    // Save commits via [CaptureDao.setTitle] (dirty-bit, picked up by
+    // the next sync); Cancel discards the draft. Blank input clears
+    // the title (stored as null), so the Library card falls back to
+    // its OCR/category/"Untitled" cascade.
+    if (showTitleEditor) {
+        AlertDialog(
+            onDismissRequest = { showTitleEditor = false },
+            title            = { Text("Edit title", style = type.body, color = colors.ink) },
+            text             = {
+                OutlinedTextField(
+                    value         = titleDraft,
+                    onValueChange = { titleDraft = it },
+                    placeholder   = { Text("Untitled scan", color = colors.muted) },
+                    singleLine    = true,
+                    modifier      = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton    = {
+                TextButton(
+                    onClick = {
+                        showTitleEditor = false
+                        scope.launch {
+                            try {
+                                captureDao.setTitle(
+                                    captureId,
+                                    titleDraft.trim().takeIf { it.isNotEmpty() },
+                                    IsoClock.nowIso(),
+                                )
+                                capture = captureDao.findById(captureId)
+                            } catch (_: Exception) { /* best-effort */ }
+                        }
+                    },
+                ) {
+                    Text("Save", color = colors.accent)
+                }
+            },
+            dismissButton    = {
+                TextButton(onClick = { showTitleEditor = false }) {
+                    Text("Cancel", color = colors.ink)
+                }
+            },
+            containerColor   = colors.surface,
         )
     }
 }
@@ -433,6 +548,69 @@ private fun shareableUri(context: android.content.Context, raw: String): Uri? {
                 .getOrNull()
         }
         else -> null
+    }
+}
+
+/**
+ * Best-effort check used by the self-heal LaunchedEffect: does the
+ * `pdf_uri` / `preview_uri` on the current row actually point at a
+ * file that exists on this device? `null`/`""`/unparseable counts
+ * as missing so the heal kicks. content:// URIs (rare here — only
+ * for fresh-from-scanner captures the user hasn't fully saved) are
+ * conservatively treated as present so we don't spuriously
+ * re-download.
+ */
+private fun localFileExists(uri: String?): Boolean {
+    if (uri.isNullOrBlank()) return false
+    val parsed = runCatching { Uri.parse(uri) }.getOrNull() ?: return false
+    return runCatching {
+        when (parsed.scheme) {
+            "file" -> parsed.path?.let { File(it).exists() } ?: false
+            null   -> File(uri).exists()
+            else   -> true
+        }
+    }.getOrDefault(false)
+}
+
+/**
+ * Editable title row, sitting between the preview and the metadata
+ * pills. Shows the persisted title when one is set; otherwise renders
+ * an "Untitled scan" placeholder in muted ink so the empty state is
+ * clearly an affordance, not a label. Whole row is clickable — tap
+ * opens the title editor modal owned by [ScanDetailScreen].
+ */
+@Composable
+private fun TitleSection(
+    title: String?,
+    onEdit: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val displayed = title?.takeIf { it.isNotBlank() }
+    Row(
+        modifier              = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
+            .clickable(onClick = onEdit)
+            .padding(QuickInkSpacing.s4),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        Text(
+            text     = displayed ?: "Untitled scan",
+            style    = type.heading,
+            color    = if (displayed != null) colors.ink else colors.muted,
+            modifier = Modifier.weight(1f),
+            maxLines = 2,
+        )
+        Icon(
+            imageVector        = Icons.Filled.Edit,
+            contentDescription = "Edit title",
+            tint               = colors.muted,
+            modifier           = Modifier.size(18.dp),
+        )
     }
 }
 
@@ -617,6 +795,7 @@ private fun OcrSection(
     showOcr: Boolean,
     isLoading: Boolean,
     ocrPages: List<OcrResultEntity>,
+    ocrDao: OcrResultDao,
     onToggle: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
@@ -673,29 +852,116 @@ private fun OcrSection(
                 }
             } else {
                 ocrPages.sortedBy { it.pageIndex }.forEach { page ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(QuickInkRadius.md))
-                            .background(colors.surface)
-                            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
-                            .padding(QuickInkSpacing.s4),
-                        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
-                    ) {
-                        Text(
-                            text  = "PAGE ${page.pageIndex + 1}",
-                            style = type.eyebrow,
-                            color = colors.muted,
-                        )
-                        SelectionContainer {
-                            Text(
-                                text  = page.text,
-                                style = type.body,
-                                color = colors.ink,
-                            )
-                        }
-                    }
+                    OcrPageCard(page = page, ocrDao = ocrDao)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * One page card inside [OcrSection]. Read mode renders the OCR text
+ * inside a [SelectionContainer] so the user can copy it; tapping the
+ * pencil flips into edit mode where the text becomes an
+ * [OutlinedTextField]. Save persists via [OcrResultDao.setText]
+ * (dirty + ts bump → next sync mirrors); Cancel discards the draft
+ * and returns to read mode.
+ *
+ * Local edit state is keyed on [page.id] so navigating between pages
+ * doesn't bleed drafts. While editing, an external `page.text` change
+ * (e.g., sync arrived) is ignored — last-write-wins on Save.
+ */
+@Composable
+private fun OcrPageCard(
+    page: OcrResultEntity,
+    ocrDao: OcrResultDao,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val scope = rememberCoroutineScope()
+
+    var editing by remember(page.id) { mutableStateOf(false) }
+    var draft by remember(page.id) { mutableStateOf(page.text) }
+
+    // Keep the draft synced with the persisted text whenever we're not
+    // actively editing. Without this, a sync that lands a fresh OCR
+    // value while the card sits in read mode would leave the draft
+    // pointing at stale content the next time the user taps Edit.
+    LaunchedEffect(page.text, editing) {
+        if (!editing) draft = page.text
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
+            .padding(QuickInkSpacing.s4),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text     = "PAGE ${page.pageIndex + 1}",
+                style    = type.eyebrow,
+                color    = colors.muted,
+                modifier = Modifier.weight(1f),
+            )
+            if (editing) {
+                IconButton(onClick = {
+                    draft = page.text
+                    editing = false
+                }) {
+                    Icon(
+                        imageVector        = Icons.Filled.Close,
+                        contentDescription = "Cancel edit",
+                        tint               = colors.muted,
+                        modifier           = Modifier.size(18.dp),
+                    )
+                }
+                IconButton(onClick = {
+                    val snapshot = draft
+                    scope.launch {
+                        try {
+                            ocrDao.setText(page.id, snapshot, IsoClock.nowIso())
+                            editing = false
+                        } catch (_: Exception) { /* best-effort */ }
+                    }
+                }) {
+                    Icon(
+                        imageVector        = Icons.Filled.Check,
+                        contentDescription = "Save text",
+                        tint               = colors.accent,
+                        modifier           = Modifier.size(18.dp),
+                    )
+                }
+            } else {
+                IconButton(onClick = { editing = true }) {
+                    Icon(
+                        imageVector        = Icons.Filled.Edit,
+                        contentDescription = "Edit text",
+                        tint               = colors.muted,
+                        modifier           = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+
+        if (editing) {
+            OutlinedTextField(
+                value         = draft,
+                onValueChange = { draft = it },
+                modifier      = Modifier.fillMaxWidth(),
+                minLines      = 3,
+                textStyle     = type.body,
+            )
+        } else {
+            SelectionContainer {
+                Text(
+                    text  = page.text,
+                    style = type.body,
+                    color = colors.ink,
+                )
             }
         }
     }

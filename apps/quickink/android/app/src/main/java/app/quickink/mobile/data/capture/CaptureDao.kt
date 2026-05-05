@@ -15,6 +15,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.RawQuery
 import androidx.room.RoomRawQuery
+import androidx.room.Transaction
 import androidx.room.Update
 import app.quickink.mobile.data.ocr.OcrResultEntity
 import kotlinx.coroutines.flow.Flow
@@ -25,8 +26,59 @@ interface CaptureDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: CaptureEntity)
 
+    /**
+     * Insert if no row with this id exists. Returns the new rowId on
+     * success, or `-1L` when a row with the same id already exists.
+     * Paired with [update] in [upsertFromRemote] to implement a real
+     * UPSERT (no cascade-delete on conflict).
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(entity: CaptureEntity): Long
+
     @Update
     suspend fun update(entity: CaptureEntity)
+
+    /**
+     * Upsert from a remote payload, last-write-wins on `updated_at`.
+     *
+     * Why not `@Insert(REPLACE)`: REPLACE compiles to `INSERT OR REPLACE`,
+     * which DELETEs the conflicting row before inserting the new one.
+     * `ocr_results.capture_id` has `ON DELETE CASCADE`, so every
+     * REPLACE on a capture briefly cascade-deletes its child OCR rows
+     * — which is fine when the same restore pass re-inserts them, but
+     * a footgun if anything goes wrong mid-restore (network blip, FK
+     * failure on a child, app killed). Using `@Update` instead does a
+     * real `UPDATE captures SET … WHERE id = ?`, no cascade-delete.
+     *
+     * Why not just `@Update`: @Update no-ops when the row doesn't
+     * exist, so a fresh-device restore wouldn't insert anything.
+     * Combining `insertIfAbsent` (returns -1 on conflict) + `update`
+     * gives us insert-or-update without REPLACE's destructive
+     * conflict resolution.
+     *
+     * Last-write-wins gate: if a row already exists with `updated_at`
+     * equal-or-newer than the incoming payload, we skip the UPDATE.
+     * This protects local edits made while a slow restore is in
+     * flight. ISO-8601 strings sort lexicographically the same as
+     * chronologically, so a string compare is correct here.
+     *
+     * @Transaction wraps the insert + update in a single SQLite
+     * transaction so a concurrent writer can't see a half-applied
+     * state. Required for correctness on the cross-thread sync path.
+     */
+    @Transaction
+    suspend fun upsertFromRemote(entity: CaptureEntity) {
+        val rowId = insertIfAbsent(entity)
+        if (rowId != -1L) {
+            // Inserted fresh; nothing more to do.
+            return
+        }
+        // Row already exists. Last-write-wins on `updated_at`.
+        val existing = findById(entity.id) ?: return
+        if (existing.updatedAt < entity.updatedAt) {
+            update(entity)
+        }
+    }
 
     @Query("SELECT * FROM captures WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): CaptureEntity?
@@ -56,16 +108,94 @@ interface CaptureDao {
     fun observeRecent(userId: String, limit: Int = 30): Flow<List<CaptureEntity>>
 
     /**
-     * Soft-delete: stamp `deleted_at` and bump `dirty` so the sync
-     * worker mirrors the tombstone to Drive on its next pass. Real
-     * row removal happens on Drive-confirmed cascade.
+     * Soft-delete a capture AND cascade-soft-delete its child
+     * `ocr_results` rows in the same transaction.
+     *
+     * Why the cascade: `ocr_results.capture_id` has `ON DELETE CASCADE`
+     * at the schema level, but that only fires on PHYSICAL DELETE.
+     * Soft-deleting a capture (UPDATE deleted_at = …) leaves its
+     * `ocr_results` rows with `deleted_at IS NULL` and `dirty = 0`.
+     * Result: the sync worker pushes ONLY the capture tombstone to
+     * Drive — the child ocr_result JSON files stay in `entityChecksums`,
+     * orphaned with no parent. Every device that later restores from
+     * that manifest sees ocr_result rows pointing at a capture that's
+     * not in the manifest anymore, trips a FK constraint, and the
+     * pullDelta apply silently swallows it (pre-PR-B/D) or surfaces
+     * it as an `applyFailed` (post-PR-B) / orphan-skip (post-PR-D).
+     *
+     * Cascade-soft-delete here stops new orphans from being born:
+     * children get `deleted_at` stamped in the same transaction, so
+     * the parent and its OCR rows go away together.
+     *
+     * The [markChildrenDirty] flag controls whether the cascaded OCR
+     * rows are also marked `dirty = 1` (i.e. eligible for the next
+     * sync push). Two callers, two answers:
+     *
+     *   1. User-initiated delete (`CaptureRepository.delete`,
+     *      scan-detail delete button) → `markChildrenDirty = true`
+     *      (default). The user wants the deletion mirrored to Drive,
+     *      and pushing child tombstones alongside the parent's
+     *      retires the orphans cleanly.
+     *   2. `QuickInkSyncDataSource.applyRemoteTombstone(KIND_CAPTURE)`
+     *      → `markChildrenDirty = false`. Drive already has the
+     *      parent tombstone (that's how we got here) and either has
+     *      child tombstones too (from a PR-E-aware push) or will get
+     *      them via the orphan-cleanup pass (PR-E part 3) on the
+     *      next restore. Marking the children dirty here would push
+     *      the same tombstones back to Drive AND surface a false
+     *      "pending to sync" banner on Home immediately after a
+     *      Restore-from-Drive run — the children are already in sync
+     *      with what we just pulled.
+     *
+     * @Transaction wraps both UPDATEs so a concurrent reader can't
+     * see a half-applied state where the parent is tombstoned but
+     * the children look live.
+     */
+    @Transaction
+    suspend fun softDelete(
+        id: String,
+        timestamp: String,
+        markChildrenDirty: Boolean = true,
+    ) {
+        softDeleteCaptureRow(id, timestamp)
+        softDeleteChildOcrRows(id, timestamp, dirty = markChildrenDirty)
+    }
+
+    /**
+     * @Query helper for [softDelete]'s parent-row UPDATE. Public on
+     * the interface (Kotlin pre-1.5 doesn't allow `private` interface
+     * members) but callers should use [softDelete] for the cascade —
+     * touching only the captures row would re-introduce the orphan
+     * leak this PR is fixing.
      */
     @Query("""
         UPDATE captures
         SET deleted_at = :timestamp, updated_at = :timestamp, dirty = 1
         WHERE id = :id
     """)
-    suspend fun softDelete(id: String, timestamp: String)
+    suspend fun softDeleteCaptureRow(id: String, timestamp: String)
+
+    /**
+     * Cascade helper for [softDelete]: soft-deletes every active
+     * child OCR row of [id]. The [dirty] flag is forwarded into the
+     * row's `dirty` column — `true` (default) when the local user
+     * deleted the parent (we want the next sync push to mirror the
+     * child tombstones to Drive), `false` when we're applying a
+     * remote tombstone (Drive already has them, and re-pushing them
+     * would surface a false "pending to sync" pill).
+     *
+     * Filtering on `deleted_at IS NULL` keeps an already-tombstoned
+     * child idempotent (no spurious `updated_at` bump).
+     */
+    @Query("""
+        UPDATE ocr_results
+        SET deleted_at = :timestamp,
+            updated_at = :timestamp,
+            dirty      = :dirty
+        WHERE capture_id = :id
+          AND deleted_at IS NULL
+    """)
+    suspend fun softDeleteChildOcrRows(id: String, timestamp: String, dirty: Boolean)
 
     /**
      * Update an existing capture's `category` to the user's pick
@@ -78,6 +208,20 @@ interface CaptureDao {
         WHERE id = :id
     """)
     suspend fun setCategory(id: String, category: String?, timestamp: String)
+
+    /**
+     * Update the user-editable title on a capture. Same dirty-bit
+     * pattern as [setCategory] — the next sync pass mirrors the new
+     * value to Drive. Pass `null` to clear the title (which makes
+     * the Library card fall back to OCR snippet → category →
+     * "Untitled scan").
+     */
+    @Query("""
+        UPDATE captures
+        SET title = :title, updated_at = :timestamp, dirty = 1
+        WHERE id = :id
+    """)
+    suspend fun setTitle(id: String, title: String?, timestamp: String)
 
     /**
      * Bulk-update [oldName] → [newName] across every capture for

@@ -52,7 +52,9 @@ struct SignInScreen: View {
                     .padding(.horizontal, QuickInkSpacing.s5)
 
                 Text("Your notebook follows you across devices. We never see your pages.")
-                    .font(QuickInkText.body)
+                    // Cormorant editorial body — keep onboarding's
+                    // showroom feel. App body (Inter) is `body`.
+                    .font(QuickInkText.onboardingBody)
                     .foregroundStyle(QuickInkColors.inkSoft)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, QuickInkSpacing.s7)

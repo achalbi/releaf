@@ -82,12 +82,20 @@ public final class SyncRepository: @unchecked Sendable {
         self.appVersion = appVersion
     }
 
-    /// Full sync pass — push local dirty rows and tombstones, pull
-    /// remote changes, write manifest last.
+    /// Full sync pass — push local dirty rows and tombstones,
+    /// optionally pull remote changes, write manifest last.
+    ///
+    /// Pass `pullRemote: false` for QuickInk's upload-only path.
+    /// The push half still consults the remote manifest for
+    /// checksum dedupe (so we don't re-upload a row whose remote
+    /// sha matches local) — only the inbound apply is dropped.
+    /// Cross-device download is then exclusively a Restore-from-Drive
+    /// action via [restore].
     @discardableResult
     public func sync(
         deviceId: String,
-        accessToken: String
+        accessToken: String,
+        pullRemote: Bool = true
     ) async throws -> SyncResult {
         // 1. Ensure root folder exists. The folder name comes from
         // the data source so each app gets its own top-level folder
@@ -241,9 +249,10 @@ public final class SyncRepository: @unchecked Sendable {
         } while tombCursor != nil
 
         // 6. Pull remote delta (entries the local device doesn't have
-        // or has at an older sha256).
+        // or has at an older sha256). Skipped when `pullRemote` is
+        // false — QuickInk's upload-only path. Push still ran above.
         var downloaded = 0
-        if let rm = remoteManifest {
+        if pullRemote, let rm = remoteManifest {
             downloaded = try await pullDelta(
                 remoteManifest: rm,
                 rootFolderId: root.id,

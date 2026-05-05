@@ -77,7 +77,10 @@ struct OnboardingScaffold<Illustration: View>: View {
                     .padding(.horizontal, QuickInkSpacing.s5)
 
                 Text(subtitle)
-                    .font(QuickInkText.body)
+                    // Cormorant-Garamond editorial body — onboarding
+                    // is the showroom moment. App screens use
+                    // `body` (Inter); see TYPE_SYSTEM in repo root.
+                    .font(QuickInkText.onboardingBody)
                     .foregroundStyle(QuickInkColors.inkSoft)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, QuickInkSpacing.s7)

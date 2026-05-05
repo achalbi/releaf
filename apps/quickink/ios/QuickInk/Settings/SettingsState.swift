@@ -68,6 +68,54 @@ public final class SettingsState: ObservableObject {
         didSet { UserDefaults.standard.set(personalityPunchline, forKey: Keys.personalityPunchline) }
     }
 
+    /// MRU list of recent search queries — surfaced as pills under
+    /// the Search screen's input. Newest-first, capped at
+    /// `maxRecentSearches`. Mutated through `pushRecentSearch` so
+    /// dedupe + cap stay centralised. Stored as a `[String]` array
+    /// in UserDefaults (small enough to avoid the JSON overhead).
+    @Published public private(set) var recentSearches: [String] {
+        didSet { UserDefaults.standard.set(recentSearches, forKey: Keys.recentSearches) }
+    }
+
+    /// Push `query` to the front of the recent-searches list, drop
+    /// any prior occurrence (case-insensitive), cap at
+    /// `maxRecentSearches`. Empty / whitespace-only queries are
+    /// ignored — typing a character then deleting it shouldn't
+    /// pollute the pill row.
+    public func pushRecentSearch(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var next = recentSearches.filter { $0.caseInsensitiveCompare(trimmed) != .orderedSame }
+        next.insert(trimmed, at: 0)
+        if next.count > Self.maxRecentSearches {
+            next = Array(next.prefix(Self.maxRecentSearches))
+        }
+        recentSearches = next
+    }
+
+    /// Wipe the recent-searches list. Bound to a "Clear" affordance.
+    public func clearRecentSearches() {
+        recentSearches = []
+    }
+
+    private static let maxRecentSearches = 10
+
+    /// User's picked primary color (Coral / Leaf Green / Leaf Yellow /
+    /// Leaf Dry). The QuickInkRoot view reads this every render and
+    /// applies an `.accentColor()` overlay tinted to the picked
+    /// family's resolved variant (light → deep, dark → base).
+    /// Stored as the enum's raw value so the keyspace stays stable.
+    @Published public var primaryColor: PrimaryColor {
+        didSet { UserDefaults.standard.set(primaryColor.rawValue, forKey: Keys.primaryColor) }
+    }
+
+    /// User's theme override. `system` (default) follows the OS
+    /// setting; `light` / `dark` force the corresponding mode by
+    /// passing a non-nil ColorScheme to the root content.
+    @Published public var themeMode: ThemeMode {
+        didSet { UserDefaults.standard.set(themeMode.rawValue, forKey: Keys.themeMode) }
+    }
+
     public init() {
         let defaults = UserDefaults.standard
         // Drive backup defaults to true — Drive sync is the value
@@ -91,6 +139,18 @@ public final class SettingsState: ObservableObject {
         self.phoneNumber          = defaults.string(forKey: Keys.phoneNumber) ?? ""
         self.profilePhotoUri      = defaults.string(forKey: Keys.profilePhotoUri) ?? ""
         self.personalityPunchline = defaults.string(forKey: Keys.personalityPunchline) ?? ""
+        // Recent searches — `array(forKey:)` returns `[Any]?` so we
+        // narrow defensively. A non-string entry (corrupted prefs,
+        // older write format) is silently dropped rather than
+        // crashing the screen.
+        self.recentSearches = (defaults.array(forKey: Keys.recentSearches) as? [String]) ?? []
+        // Appearance — primaryColor defaults to coral, themeMode to
+        // system. Both round-trip through their enum's `rawValue`
+        // so unknown / corrupted strings fall back gracefully.
+        self.primaryColor = PrimaryColor(rawValue: defaults.string(forKey: Keys.primaryColor) ?? "")
+            ?? .coral
+        self.themeMode    = ThemeMode(rawValue: defaults.string(forKey: Keys.themeMode) ?? "")
+            ?? .system
     }
 
     /// Called from the onboarding sign-in screen after
@@ -109,5 +169,8 @@ public final class SettingsState: ObservableObject {
         static let phoneNumber          = "quickink.settings.phone_number"
         static let profilePhotoUri      = "quickink.settings.profile_photo_uri"
         static let personalityPunchline = "quickink.settings.personality_punchline"
+        static let recentSearches       = "quickink.settings.recent_searches"
+        static let primaryColor         = "quickink.settings.primary_color"
+        static let themeMode            = "quickink.settings.theme_mode"
     }
 }

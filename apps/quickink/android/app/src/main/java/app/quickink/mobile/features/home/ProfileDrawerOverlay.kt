@@ -56,11 +56,14 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.quickink.mobile.R
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkSpacing
@@ -73,6 +76,22 @@ import coil.request.ImageRequest
  * sibling of the main content; visibility is animated by the parent
  * (the inner views render at full opacity). Tapping the right-side
  * scrim invokes [onClose]; the inner sheet is fixed at 300dp wide.
+ *
+ * Menu order:
+ *   1. Profile   — photo / phone / punchline editor.
+ *   2. Library   — full scan gallery (same destination as the
+ *                  bottom-nav Library tab; redundant on purpose so
+ *                  the user can reach it without dismissing the
+ *                  drawer first).
+ *   3. Search    — OCR search (same destination as the bottom-nav
+ *                  Search tab).
+ *   4. Settings  — theme / sync / account.
+ *
+ * Library + Search use the same brand drawable assets as the bottom
+ * nav (`R.drawable.ic_note` / `R.drawable.ic_search`) so the icons
+ * match across the two surfaces. Profile + Settings keep their
+ * Material vector icons because the bottom nav doesn't surface
+ * Profile and uses a different (Material) Settings icon too.
  */
 @Composable
 fun ProfileDrawerOverlay(
@@ -81,6 +100,8 @@ fun ProfileDrawerOverlay(
     profilePhotoUri: String,
     onClose: () -> Unit,
     onOpenProfile: () -> Unit,
+    onOpenLibrary: () -> Unit,
+    onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -111,6 +132,22 @@ fun ProfileDrawerOverlay(
                     onClick    = onOpenProfile,
                 )
                 DashedInkSeparator()
+                DrawerRowAsset(
+                    glyphTint   = colors.accent,
+                    drawableId  = R.drawable.ic_note,
+                    label       = "Library",
+                    meta        = "all your scans · grid · search",
+                    onClick     = onOpenLibrary,
+                )
+                DashedInkSeparator()
+                DrawerRowAsset(
+                    glyphTint   = colors.accent,
+                    drawableId  = R.drawable.ic_search,
+                    label       = "Search",
+                    meta        = "find by OCR text · category",
+                    onClick     = onOpenSearch,
+                )
+                DashedInkSeparator()
                 DrawerRow(
                     glyphTint  = colors.accentDeep,
                     glyphIcon  = Icons.Filled.Settings,
@@ -137,10 +174,12 @@ fun ProfileDrawerOverlay(
 // ================================================================== Banner header
 
 /**
- * Deep coral banner with faint ruled-paper lines drawn behind the
- * avatar/name row. Mirror of Releaf's forest canopy (deep-green +
- * tree silhouettes) — same job, different brand. Bleeds behind the
- * status bar via [statusBarsPadding] on the inner row.
+ * Deep coral banner with faint ruled-paper lines drawn behind a
+ * centered avatar + name + email column. Avatar bumped from 44dp →
+ * 88dp (2×) so it reads as the banner's anchor rather than a leading
+ * chip; banner height bumped from 175 → 240dp to fit the larger
+ * avatar + stacked text without crowding. Mirror of iOS
+ * [ProfileDrawerOverlay.swift]'s `bannerHeader`.
  */
 @Composable
 private fun BannerHeader(
@@ -158,16 +197,18 @@ private fun BannerHeader(
             .background(colors.accentDeep),
     ) {
         // Faint ruled lines + a tiny "ink mark" behind the avatar
-        // row — the QuickInk equivalent of Releaf's tree silhouettes.
+        // column — the QuickInk equivalent of Releaf's tree
+        // silhouettes. Line count bumped 9 → 11 to keep the same
+        // visual cadence in the taller (240dp) banner.
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .height(175.dp),
+                .height(240.dp),
         ) {
             val w = size.width
             val h = size.height
-            val lineCount = 9
+            val lineCount = 11
             for (i in 1..lineCount) {
                 val y = h * i.toFloat() / (lineCount + 1).toFloat()
                 drawLine(
@@ -179,6 +220,7 @@ private fun BannerHeader(
                 )
             }
             // Stylised inkblot — soft squircle in the bottom-right.
+            // Kept off-axis so it doesn't fight the centered avatar.
             val markPath = Path().apply {
                 addRoundRect(
                     androidx.compose.ui.geometry.RoundRect(
@@ -194,20 +236,32 @@ private fun BannerHeader(
             drawPath(markPath, Color.White.copy(alpha = 0.10f))
         }
 
-        // Avatar + name overlay.
-        Row(
+        // Centered avatar + name + email column. Sits inside the
+        // status-bar inset so the avatar clears the notch / clock.
+        //
+        // Outer Column spacing widened from s2 → s4 so the 132dp
+        // avatar gets visible breathing room before the name —
+        // tight 8dp spacing made the heading kiss the avatar's
+        // bottom edge. Inner Column hosts name + email so they stay
+        // close to each other without the whole stack inheriting the
+        // outer spacing.
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = QuickInkSpacing.s5)
+                .padding(horizontal = QuickInkSpacing.s4)
                 .padding(top = QuickInkSpacing.s4),
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s4),
         ) {
             // Avatar — coral-soft disc with photo / initial / glyph.
+            // 132dp = 3× the original 44dp so it reads as the
+            // banner's anchor. Inner glyph + initial sizes scaled
+            // accordingly (~60% of the disc) so the figure doesn't
+            // float in an oversized halo.
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(132.dp)
                     .clip(CircleShape)
                     .background(colors.accentSoft)
                     .border(1.dp, Color.White.copy(alpha = 0.6f), CircleShape),
@@ -232,18 +286,21 @@ private fun BannerHeader(
                 } else {
                     val initial = displayName.trim().firstOrNull()?.uppercase()
                     if (initial != null) {
-                        Text(text = initial, color = colors.accent, fontSize = 18.sp)
+                        Text(text = initial, color = colors.accent, fontSize = 54.sp)
                     } else {
                         Icon(
                             imageVector       = Icons.Filled.AccountCircle,
                             contentDescription = null,
                             tint              = colors.accent,
-                            modifier          = Modifier.size(28.dp),
+                            modifier          = Modifier.size(84.dp),
                         )
                     }
                 }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 Text(
                     text  = displayName.ifBlank { "QuickInk" },
                     style = type.heading,
@@ -295,6 +352,52 @@ private fun DrawerRow(
                 contentDescription = null,
                 tint              = glyphTint,
                 modifier          = Modifier.size(16.dp),
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(text = label, style = type.body, color = colors.ink)
+            Text(text = meta,  style = type.meta, color = colors.inkSoft)
+        }
+    }
+}
+
+/**
+ * Drawable-asset variant of [DrawerRow]. Same row layout (coral disc
+ * glyph + label + meta), but the icon is a `painterResource` from
+ * `res/drawable/ic_*.xml` rather than a Material `ImageVector`. Used
+ * by the Library / Search rows so their glyphs match the QuickInk
+ * brand assets the bottom nav already uses.
+ */
+@Composable
+private fun DrawerRowAsset(
+    glyphTint: Color,
+    drawableId: Int,
+    label: String,
+    meta: String,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = QuickInkSpacing.s5, vertical = QuickInkSpacing.s3),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(glyphTint.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter            = painterResource(id = drawableId),
+                contentDescription = null,
+                tint               = glyphTint,
+                modifier           = Modifier.size(16.dp),
             )
         }
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {

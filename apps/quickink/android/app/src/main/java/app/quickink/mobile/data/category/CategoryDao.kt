@@ -16,6 +16,8 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -23,6 +25,39 @@ interface CategoryDao {
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(entity: CategoryEntity): Long
+
+    @Update
+    suspend fun update(entity: CategoryEntity)
+
+    /**
+     * Single-row lookup. Used by [upsertFromRemote] to compare local
+     * vs remote `updated_at` before updating, and useful elsewhere as
+     * a one-shot fetch. Mirrors [CaptureDao.findById].
+     */
+    @Query("SELECT * FROM categories WHERE id = :id LIMIT 1")
+    suspend fun findById(id: String): CategoryEntity?
+
+    /**
+     * Upsert from a remote payload, last-write-wins on `updated_at`.
+     *
+     * Why this exists: the existing [insert] uses
+     * `OnConflictStrategy.IGNORE`, which means a remote payload with
+     * the same id as an existing local row is **silently dropped on
+     * the floor**. That works for the user-facing rename / move flows
+     * (callers want a no-op on UNIQUE-name collision), but it silently
+     * loses cross-device updates on the restore path. This method
+     * inserts when missing AND updates when remote is newer, in a
+     * single transaction.
+     */
+    @Transaction
+    suspend fun upsertFromRemote(entity: CategoryEntity) {
+        val rowId = insert(entity)
+        if (rowId != -1L) return
+        val existing = findById(entity.id) ?: return
+        if (existing.updatedAt < entity.updatedAt) {
+            update(entity)
+        }
+    }
 
     /**
      * Live list of a user's active categories, ordered by `position`

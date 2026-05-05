@@ -14,6 +14,8 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.RawQuery
 import androidx.room.RoomRawQuery
+import androidx.room.Transaction
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -89,6 +91,46 @@ interface NotepadDao {
     /** Insert-or-replace. Callers are responsible for bumping updated_at. */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entry: NotepadEntry)
+
+    /**
+     * Insert if no row with this id exists. Returns rowId on insert,
+     * `-1L` on id conflict. Paired with [update] in [upsertFromRemote]
+     * for a real UPSERT without REPLACE's clobber-everything semantics.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(entry: NotepadEntry): Long
+
+    @Update
+    suspend fun update(entry: NotepadEntry)
+
+    /**
+     * Upsert from a remote payload, last-write-wins on `updated_at`.
+     *
+     * Use this from the sync data source's `applyRemoteUpsert` path
+     * instead of [upsert]. The existing [upsert] uses
+     * `OnConflictStrategy.REPLACE` which compiles to `INSERT OR
+     * REPLACE`: it DELETEs the conflicting row before inserting,
+     * which both (a) silently clobbers a newer local edit if the
+     * remote payload is stale, and (b) trips any FK cascades pointing
+     * at this row's id. Neither matters for the local user-edit path
+     * (where [upsert] is fine — the caller owns updated_at and
+     * cascades aren't a concern), but on a cross-device restore both
+     * are real footguns.
+     *
+     * Last-write-wins: skip the UPDATE when the local row's
+     * `updated_at` is equal-or-newer than the incoming remote
+     * payload. ISO-8601 strings sort lexicographically the same as
+     * chronologically, so a string compare is correct.
+     */
+    @Transaction
+    suspend fun upsertFromRemote(entry: NotepadEntry) {
+        val rowId = insertIfAbsent(entry)
+        if (rowId != -1L) return
+        val existing = findById(entry.id) ?: return
+        if (existing.updatedAt < entry.updatedAt) {
+            update(entry)
+        }
+    }
 
     /**
      * Bulk rename — sets `category = :newName` on every active row

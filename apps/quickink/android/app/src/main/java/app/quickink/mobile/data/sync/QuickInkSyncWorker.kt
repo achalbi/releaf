@@ -43,10 +43,12 @@ import app.quickink.mobile.features.settings.SettingsPreferences
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.data.drive.DriveError
 import app.releaf.mobile.data.sync.DeviceIdentity
+import app.releaf.mobile.data.sync.SyncErrorCodes
 import app.releaf.mobile.data.sync.SyncRepository
 import app.releaf.mobile.data.sync.SyncStateEntity
 import app.releaf.mobile.data.sync.SyncStateKeys
 import app.releaf.mobile.data.common.IsoClock
+import kotlinx.coroutines.CancellationException
 import java.time.Instant
 
 class QuickInkSyncWorker(
@@ -102,11 +104,12 @@ class QuickInkSyncWorker(
         // userId — when the user signs out and back in as a
         // different account, the next worker run uses fresh objects.
         val dataSource = QuickInkSyncDataSource(
-            notepadDao    = app.database.notepadDao(),
-            captureDao    = app.database.captureDao(),
-            ocrResultDao  = app.database.ocrResultDao(),
-            categoryDao   = app.database.categoryDao(),
-            userId        = session.userId,
+            notepadDao         = app.database.notepadDao(),
+            captureDao         = app.database.captureDao(),
+            ocrResultDao       = app.database.ocrResultDao(),
+            categoryDao        = app.database.categoryDao(),
+            profileSettingsDao = app.database.profileSettingsDao(),
+            userId             = session.userId,
         )
         val syncRepository = SyncRepository(
             dataSource   = dataSource,
@@ -116,10 +119,20 @@ class QuickInkSyncWorker(
         )
 
         return try {
-            Log.i(TAG, "sync: starting metadata pass")
+            // Upload-only sync. QuickInk treats Drive as a one-way
+            // backup of local-first data — pull-down is only needed
+            // when the user explicitly taps "Restore from Drive"
+            // (handled by QuickInkRestoreWorker, not this path). The
+            // earlier bidirectional behaviour was both slow (every
+            // pass downloaded remote changes even when nothing
+            // changed) and surprising (cross-device data appeared
+            // automatically in the background). Sync-now now means
+            // "push my pending changes to Drive."
+            Log.i(TAG, "sync: starting metadata pass (push-only)")
             val result = syncRepository.sync(
                 deviceId    = DeviceIdentity.get(applicationContext),
                 accessToken = session.accessToken,
+                pullRemote  = false,
             )
             Log.i(TAG, "sync: metadata pass done — " +
                 "uploaded=${result.uploaded} tombstoned=${result.tombstoned} " +
@@ -134,17 +147,28 @@ class QuickInkSyncWorker(
             // are swallowed inside the helper. Mirror
             // `QuickInkBinarySync.swift` on iOS.
             val binarySync = QuickInkBinarySync(
-                context     = applicationContext,
-                captureDao  = app.database.captureDao(),
-                driveClient = app.driveClient,
+                context            = applicationContext,
+                captureDao         = app.database.captureDao(),
+                profileSettingsDao = app.database.profileSettingsDao(),
+                driveClient        = app.driveClient,
             )
+            // Push-only binary phase. Upload local PDFs + previews
+            // that haven't reached Drive yet. The earlier
+            // `restorePending` call (which pulled down binaries
+            // referenced in remote manifest entries) is intentionally
+            // dropped from this path — it's part of the bidirectional
+            // sync we're moving away from. Cross-device restore is
+            // now exclusively a Settings → "Restore from Drive" tap
+            // (QuickInkRestoreWorker), and ScanDetailScreen still
+            // has its on-demand self-heal that downloads a single
+            // capture's binary when the user opens it.
+            Log.i(TAG, "sync: starting binary upload pass")
             runCatching {
-                Log.i(TAG, "sync: starting binary pass")
                 binarySync.uploadAndCascade(session.userId, session.accessToken)
-                binarySync.restorePending(session.userId, session.accessToken)
-                Log.i(TAG, "sync: binary pass done")
+            }.onSuccess {
+                Log.i(TAG, "sync: binary upload pass done")
             }.onFailure { e ->
-                Log.w(TAG, "sync: binary pass failed (best-effort, continuing): $e")
+                Log.w(TAG, "sync: binary upload pass failed: $e")
             }
 
             when {
@@ -154,49 +178,253 @@ class QuickInkSyncWorker(
                 // (future) Settings block banner will surface it.
                 result.versionBlocked -> {
                     Log.w(TAG, "sync: result=FAILURE (version-blocked by future schema)")
+                    writeSyncErrorCode(app, SyncErrorCodes.UNKNOWN)
                     Result.failure()
                 }
                 result.failed > 0 -> {
                     Log.w(TAG, "sync: result=RETRY (${result.failed} rows failed)")
+                    writeSyncErrorCode(app, SyncErrorCodes.TRANSIENT)
                     Result.retry()
                 }
                 else -> {
                     Log.i(TAG, "sync: result=SUCCESS")
+                    // Clear any previous error code on success so the
+                    // Settings re-auth banner stops showing once the
+                    // user fixes the underlying issue.
+                    writeSyncErrorCode(app, "")
+                    // Zero the local-dirty counter immediately so
+                    // the Home pill clears the same instant the
+                    // worker finishes — without this, the pill would
+                    // wait up to 60 seconds for the foreground
+                    // pending-push tick to refresh it.
+                    writeLocalDirtyCount(app, 0)
                     Result.success()
                 }
             }
         } catch (e: DriveError.Unauthenticated) {
-            // Token rejected server-side (revoked, scope removed,
-            // or genuinely expired with no in-process refresh path).
-            // The Android Credential Manager flow doesn't surface a
-            // refresh_token to the worker, so background refresh
-            // isn't possible here — instead, sign the user out so
-            // QuickInkRoot's ReSignInGate takes over and prompts a
-            // fresh consent + new access token. The next periodic
-            // tick (or the user re-tapping Sync now) then runs with
-            // a healthy token. This breaks the silent-retry loop
-            // that used to leave "Last synced" at "Never" forever
-            // for users whose Drive grant had lapsed.
-            Log.w(TAG, "sync: result=FAILURE (Drive 401 — token rejected). " +
-                "Signing user out so re-sign-in re-issues credentials. $e")
+            // Drive rejected the token (401 or 403). DELIBERATELY do
+            // NOT sign the user out here — that triggered a logout
+            // loop because Drive returns 403 for transient reasons
+            // (rate-limit, regional propagation, occasional server
+            // hiccups), not just for "scope not granted". A single
+            // bad response would bounce the user to the SignIn
+            // screen and re-sign-in could hit the same blip and
+            // bounce them again.
+            //
+            // Conservative posture: log loudly, mark the pass as
+            // permanently-failed (no retry — repeating won't help
+            // if the auth is actually dead), and let the user
+            // manually re-authenticate via Settings → Account if
+            // they notice "Last synced" not updating. The pending-
+            // count surfaces the issue without destroying their
+            // session.
+            Log.w(TAG, "sync: result=FAILURE (Drive auth rejected — 401/403). " +
+                "User can manually sign out + back in via Settings if " +
+                "this persists. $e")
+            // Definitive diagnostic — call Google's tokeninfo endpoint
+            // and log the actual scopes attached to this access token.
+            // This tells us apart:
+            //   - "drive.file" missing       → user didn't grant Drive
+            //                                  consent OR Cloud project
+            //                                  doesn't authorize the
+            //                                  scope. Sign-out + fresh
+            //                                  consent fixes the first;
+            //                                  Cloud Console fixes the
+            //                                  second.
+            //   - "drive.file" present       → Drive API is disabled in
+            //                                  the Cloud project
+            //                                  (returns 403 for any call
+            //                                  with a properly-scoped
+            //                                  token). Enable at
+            //                                  console.cloud.google.com.
+            //   - tokeninfo itself 400s      → token is genuinely
+            //                                  invalid / expired beyond
+            //                                  the local TTL.
+            // Best-effort — silent failure here doesn't change the
+            // user-facing outcome.
+            runCatching {
+                logTokenInfo(session.accessToken)
+            }.onFailure { Log.w(TAG, "tokeninfo diagnostic failed: $it") }
             recordPendingFromError(app)
-            // Fire-and-forget sign-out. Don't block on it — the
-            // worker just needs to flag the AuthStore so the UI
-            // observer flips to ReSignInGate; the actual Google
-            // SDK signOut runs on AuthStore's own scope.
-            app.authStore.signOut()
+            writeSyncErrorCode(app, SyncErrorCodes.AUTH_REJECTED)
             Result.failure()
         } catch (e: DriveError) {
             // Transient (network, 5xx). Back off and retry.
             Log.w(TAG, "sync: result=RETRY (Drive transient error): $e")
             recordPendingFromError(app)
+            writeSyncErrorCode(app, SyncErrorCodes.TRANSIENT)
             Result.retry()
+        } catch (e: CancellationException) {
+            // Cancellation = caller asked us to stop, OR the OS tore
+            // the worker down (BACKGROUND_RESTRICTION, PREEMPT,
+            // TIMEOUT, CONSTRAINT_CONNECTIVITY dropping, etc.). The
+            // app cancels its own ONESHOT_WORK on background, so most
+            // cancellations land here from there.
+            //
+            // Return Result.failure() (not retry) so WorkManager
+            // doesn't auto-reschedule with backoff — the next time
+            // the user opens the app, the foreground pending-push
+            // tick fires immediately, sees the still-dirty rows, and
+            // re-kicks `requestImmediate`. This breaks the prior
+            // cancel/retry loop on ROMs that kill backgrounded work.
+            //
+            // Still log at INFO (not ERROR) and skip writing the
+            // UNKNOWN error code — cancellation isn't a sync fault.
+            val stopReason = runCatching { stopReason }.getOrDefault(-999)
+            val stopReasonName = stopReasonName(stopReason)
+            Log.i(TAG,
+                "sync: result=FAILURE (worker cancelled, will retry on foreground): " +
+                "stopReason=$stopReason ($stopReasonName)"
+            )
+            recordPendingFromError(app)
+            // Intentionally NOT writing an error code — cancellation
+            // isn't a sync failure; the previous code (if any) stays.
+            Result.failure()
         } catch (e: Exception) {
             // Anything else (I/O, serialization) — retry.
-            Log.e(TAG, "sync: result=RETRY (unexpected exception): $e", e)
+            // Stop-reason gives the OS-level reason WorkManager tore
+            // the worker down: PREEMPT (replaced by REPLACE), TIMEOUT,
+            // CONSTRAINT_CONNECTIVITY (network dropped), QUOTA,
+            // ESTIMATED_APP_LAUNCH_TIME_CHANGED, etc. Cancellation is
+            // handled in the catch block above; this branch only sees
+            // genuine failures.
+            val stopReason = runCatching { stopReason }.getOrDefault(-999)
+            val stopReasonName = stopReasonName(stopReason)
+            Log.e(TAG,
+                "sync: result=RETRY (unexpected exception): " +
+                "exception=$e " +
+                "stopReason=$stopReason ($stopReasonName)",
+                e,
+            )
             recordPendingFromError(app)
+            writeSyncErrorCode(app, SyncErrorCodes.UNKNOWN)
             Result.retry()
         }
+    }
+
+    /**
+     * Translate WorkManager's `getStopReason()` int into a readable
+     * label so the worker's catch-block log tells us at a glance why
+     * the OS / WorkManager pulled the rug out. Constants from
+     * `androidx.work.WorkInfo.STOP_REASON_*` (added in WorkManager
+     * 2.9). When the int isn't one of the documented values we just
+     * print it raw — better than dropping the signal entirely.
+     */
+    private fun stopReasonName(reason: Int): String = when (reason) {
+        -256 -> "NOT_STOPPED"   // androidx.work.WorkInfo.STOP_REASON_NOT_STOPPED
+        -1   -> "UNKNOWN"
+        1    -> "CANCELLED_BY_APP"   // someone called cancelUniqueWork / REPLACE
+        2    -> "PREEMPT"            // a higher-priority job displaced this one
+        3    -> "TIMEOUT"            // exceeded execution-time budget
+        4    -> "DEVICE_STATE"       // battery / charging / idle constraint flipped
+        5    -> "CONSTRAINT_BATTERY_NOT_LOW"
+        6    -> "CONSTRAINT_CHARGING"
+        7    -> "CONSTRAINT_CONNECTIVITY"   // network requirement broken
+        8    -> "CONSTRAINT_DEVICE_IDLE"
+        9    -> "CONSTRAINT_STORAGE_NOT_LOW"
+        10   -> "QUOTA"
+        11   -> "BACKGROUND_RESTRICTION"
+        12   -> "APP_STANDBY"
+        13   -> "USER"
+        14   -> "SYSTEM_PROCESSING"
+        15   -> "ESTIMATED_APP_LAUNCH_TIME_CHANGED"
+        16   -> "FOREGROUND_SERVICE_LAUNCH"
+        -999 -> "stopReason API unavailable"
+        else -> "raw=$reason"
+    }
+
+    /**
+     * Diagnostic: call Google's `oauth2.googleapis.com/tokeninfo`
+     * with the current access token, parse the response, and log
+     * the granted scopes + audience. Intended to be called from
+     * the auth-rejection catch path so the user (and any future
+     * dev investigating "sync stuck on AUTH_REJECTED") sees
+     * definitively whether the token has `drive.file` granted —
+     * separating "Drive API disabled in Cloud project" from
+     * "Drive scope not granted at consent".
+     *
+     * Synchronous OkHttp call inside a suspend block; runs on
+     * Dispatchers.IO via the worker's coroutine context (CoroutineWorker
+     * already pins doWork to IO).
+     */
+    private suspend fun logTokenInfo(accessToken: String) {
+        val client = okhttp3.OkHttpClient.Builder()
+            .callTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        val req = okhttp3.Request.Builder()
+            .url("https://oauth2.googleapis.com/tokeninfo?access_token=$accessToken")
+            .get()
+            .build()
+        client.newCall(req).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) {
+                Log.w(TAG, "tokeninfo: HTTP ${resp.code} body=$body. " +
+                    "Token likely invalid/expired beyond what local TTL says.")
+                return
+            }
+            // Body is JSON like: {"azp":"...","aud":"...","scope":"...drive.file...","exp":"...","email":"..."}
+            // We only care about `scope` for the diagnostic; print the
+            // whole body too so the dev sees aud (which Cloud project)
+            // and exp (server-side expiry).
+            Log.w(TAG, "tokeninfo: HTTP 200 body=$body")
+            val scopeMatch = Regex("\"scope\"\\s*:\\s*\"([^\"]+)\"").find(body)
+            val scopes = scopeMatch?.groupValues?.get(1)?.split(' ').orEmpty()
+            val hasDrive = scopes.any {
+                it == "https://www.googleapis.com/auth/drive.file" ||
+                it == "https://www.googleapis.com/auth/drive"
+            }
+            if (hasDrive) {
+                Log.w(TAG, "tokeninfo: drive.file IS in granted scopes — " +
+                    "401/403 means Drive API is likely DISABLED in the " +
+                    "Google Cloud project. Enable at " +
+                    "console.cloud.google.com/apis/api/drive.googleapis.com")
+            } else {
+                Log.w(TAG, "tokeninfo: drive.file is NOT in granted scopes (got=$scopes). " +
+                    "User didn't tick the Drive checkbox at consent, OR the OAuth " +
+                    "consent screen doesn't list drive.file as an authorized scope. " +
+                    "Sign out, revoke at myaccount.google.com/permissions, sign in fresh.")
+            }
+        }
+    }
+
+    /**
+     * Persist the latest sync outcome's error code (or empty string
+     * to clear) to `sync_state[LAST_SYNC_ERROR_CODE]`. The Settings
+     * screen observes this key and surfaces a re-auth banner when
+     * the value is [SyncErrorCodes.AUTH_REJECTED]. Best-effort —
+     * silent failure leaves the previous code in place.
+     */
+    private suspend fun writeSyncErrorCode(app: QuickInkApp, code: String) {
+        runCatching {
+            val nowIso = IsoClock.nowIso()
+            app.database.syncStateDao().upsert(
+                SyncStateEntity(
+                    key       = SyncStateKeys.LAST_SYNC_ERROR_CODE,
+                    value     = code,
+                    updatedAt = nowIso,
+                )
+            )
+        }.onFailure { Log.w(TAG, "writeSyncErrorCode($code): $it") }
+    }
+
+    /**
+     * Persist [count] to `sync_state[LOCAL_DIRTY_COUNT]`. The Home
+     * screen "N pending" pill observes this key via Room Flow.
+     * Worker calls this with `0` on a successful push so the pill
+     * clears instantly instead of waiting for QuickInkApp's 60s
+     * foreground ticker to re-poll. Best-effort.
+     */
+    private suspend fun writeLocalDirtyCount(app: QuickInkApp, count: Int) {
+        runCatching {
+            val nowIso = IsoClock.nowIso()
+            app.database.syncStateDao().upsert(
+                SyncStateEntity(
+                    key       = SyncStateKeys.LOCAL_DIRTY_COUNT,
+                    value     = count.toString(),
+                    updatedAt = nowIso,
+                )
+            )
+        }.onFailure { Log.w(TAG, "writeLocalDirtyCount($count): $it") }
     }
 
     /**

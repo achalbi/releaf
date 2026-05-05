@@ -106,38 +106,49 @@ class DocumentScannerLauncher internal constructor(
  *   - The `StartIntentSenderForResult` activity-result launcher
  *   - The result extraction (PDF + first-page JPEG → AttachmentStorage)
  *
- * `onResult` and `onError` are wrapped through `rememberUpdatedState`
- * so the launcher captures the lambdas-as-of-the-current-recomposition
- * without re-creating itself when the lambda identity changes — the
- * common-case caller passes lambdas that close over view-model state,
+ * `onResult`, `onError`, `pageLimit`, and `galleryImportAllowed`
+ * are wrapped through `rememberUpdatedState` so the launcher
+ * captures the values-as-of-the-current-recomposition without
+ * re-creating itself when the caller flips modes — the common-
+ * case caller passes lambdas that close over view-model state,
  * which would otherwise cause the launcher to thrash.
+ *
+ * @param pageLimit when non-null, caps the scanner at that many
+ *   pages — `1` makes the scanner a single-shot capture with no
+ *   in-UI Add-page affordance, matching QuickInk's "Single" mode.
+ *   `null` (default) leaves ML Kit at its unlimited-pages default,
+ *   which is what Releaf ships and what QuickInk uses for
+ *   Multi-page / Auto. Built into options at launch time, not at
+ *   composition time, so the latest value wins even when the
+ *   caller flips mode without re-mounting.
+ * @param galleryImportAllowed when `true` (default) ML Kit shows
+ *   its in-scanner gallery picker so the user can import a photo
+ *   instead of capturing one. QuickInk passes `false` so the only
+ *   gallery path is its own dedicated Import button — that way the
+ *   `source` we stamp on the resulting capture row is unambiguous
+ *   ("scan" vs "import"), since ML Kit doesn't expose the source
+ *   per-page in its result. Releaf keeps the default to preserve
+ *   the unified flow it ships.
  */
 @Composable
 fun rememberDocumentScannerLauncher(
     onResult: (DocumentScanResult) -> Unit,
     onError: (DocumentScanError) -> Unit = {},
+    pageLimit: Int? = null,
+    galleryImportAllowed: Boolean = true,
 ): DocumentScannerLauncher {
     val context = LocalContext.current
     val activity = context as? Activity
 
-    // Hold the latest lambdas so the launcher doesn't have to be
-    // re-created every recomposition. The Composable factory itself
-    // recomposes; the inner `onLaunch` / result handler keep reading
-    // through these state proxies.
-    val currentOnResult = rememberUpdatedState(onResult)
-    val currentOnError  = rememberUpdatedState(onError)
+    // Hold the latest lambdas / params so the launcher doesn't have
+    // to be re-created every recomposition. The Composable factory
+    // itself recomposes; the inner `onLaunch` / result handler keep
+    // reading through these state proxies.
+    val currentOnResult     = rememberUpdatedState(onResult)
+    val currentOnError      = rememberUpdatedState(onError)
+    val currentPageLimit    = rememberUpdatedState(pageLimit)
+    val currentGalleryAllow = rememberUpdatedState(galleryImportAllowed)
 
-    val options = remember {
-        GmsDocumentScannerOptions.Builder()
-            .setGalleryImportAllowed(true)
-            .setResultFormats(
-                GmsDocumentScannerOptions.RESULT_FORMAT_JPEG,
-                GmsDocumentScannerOptions.RESULT_FORMAT_PDF,
-            )
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
-            .build()
-    }
-    val scannerClient = remember { GmsDocumentScanning.getClient(options) }
     val isLaunching = remember { mutableStateOf(false) }
 
     val scanLauncher = rememberLauncherForActivityResult(
@@ -184,6 +195,24 @@ fun rememberDocumentScannerLauncher(
         }
         if (isLaunching.value) return@launch
         isLaunching.value = true
+
+        // Build options + client per-launch so a freshly-flipped
+        // `pageLimit` takes effect on the next shutter tap. Both
+        // calls are cheap (the builder/client are config holders;
+        // the real work happens in `getStartScanIntent`), and per-
+        // launch construction sidesteps the staleness bug from the
+        // earlier reverted experiment that cached options at first
+        // composition and never updated them.
+        val builder = GmsDocumentScannerOptions.Builder()
+            .setGalleryImportAllowed(currentGalleryAllow.value)
+            .setResultFormats(
+                GmsDocumentScannerOptions.RESULT_FORMAT_JPEG,
+                GmsDocumentScannerOptions.RESULT_FORMAT_PDF,
+            )
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+        currentPageLimit.value?.let { builder.setPageLimit(it) }
+        val scannerClient = GmsDocumentScanning.getClient(builder.build())
+
         scannerClient.getStartScanIntent(act)
             .addOnSuccessListener { sender ->
                 // Clear loading before launching the scanner Activity

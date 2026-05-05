@@ -30,6 +30,7 @@ import android.content.Context
 import android.net.Uri
 import app.quickink.mobile.data.capture.CaptureDao
 import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.profile.ProfileSettingsDao
 import app.releaf.mobile.data.common.AttachmentStorage
 import app.releaf.mobile.data.common.Uuidv7
 import app.releaf.mobile.data.drive.DriveClient
@@ -40,6 +41,7 @@ import java.io.File
 class QuickInkBinarySync(
     private val context: Context,
     private val captureDao: CaptureDao,
+    private val profileSettingsDao: ProfileSettingsDao,
     private val driveClient: DriveClient,
     private val driveRootFolderName: String = "Thoughtbasics/QuickInk",
 ) {
@@ -51,7 +53,12 @@ class QuickInkBinarySync(
      */
     suspend fun uploadAndCascade(userId: String, accessToken: String) {
         val pending = captureDao.pendingBinaryRows(userId)
-        if (pending.isEmpty()) return
+        val profile = profileSettingsDao.findByUser(userId)
+        val profileNeedsUpload = profile != null
+            && profile.deletedAt == null
+            && profile.photoLocalUri != null
+            && profile.photoDriveFileId == null
+        if (pending.isEmpty() && !profileNeedsUpload && profile?.deletedAt == null) return
 
         val root = driveClient.ensureRootFolder(driveRootFolderName, accessToken)
 
@@ -61,6 +68,50 @@ class QuickInkBinarySync(
             } else {
                 uploadLive(row, root.id, accessToken)
             }
+        }
+
+        // Profile photo binary mirrors the capture flow but lives at
+        // `<root>/profile_settings/<userId>.jpg`. Single per-user file,
+        // so we don't need a date-bucket directory.
+        if (profile != null) {
+            uploadProfilePhotoIfNeeded(profile.id, profile, root.id, accessToken)
+        }
+    }
+
+    private suspend fun uploadProfilePhotoIfNeeded(
+        profileId: String,
+        profile: app.quickink.mobile.data.profile.ProfileSettingsEntity,
+        rootFolderId: String,
+        accessToken: String,
+    ) {
+        // Tombstone path: row was soft-deleted but still has a Drive
+        // file. Trash it on Drive and clear the local id so the row
+        // can be marked synced.
+        if (profile.deletedAt != null) {
+            profile.photoDriveFileId?.let { id ->
+                runCatching { driveClient.trash(id, accessToken) }
+                profileSettingsDao.markPhotoBinarySynced(profileId, null)
+            }
+            return
+        }
+
+        // Live upload path: a new photo was picked locally but hasn't
+        // hit Drive yet. Reads the file, uploads, stamps the Drive
+        // file id back onto the row.
+        if (profile.photoLocalUri == null) return
+        if (profile.photoDriveFileId != null) return
+
+        val bytes = readLocalBytes(profile.photoLocalUri) ?: return
+        runCatching {
+            driveClient.uploadBinaryAtPath(
+                data         = bytes,
+                contentType  = "image/jpeg",
+                relativePath = "profile_settings/${profileId}.jpg",
+                rootFolderId = rootFolderId,
+                accessToken  = accessToken,
+            )
+        }.getOrNull()?.let { driveFile ->
+            profileSettingsDao.markPhotoBinarySynced(profileId, driveFile.id)
         }
     }
 
@@ -123,7 +174,6 @@ class QuickInkBinarySync(
      */
     suspend fun restorePending(userId: String, accessToken: String) {
         val rows = captureDao.activeRows(userId)
-        if (rows.isEmpty()) return
 
         for (row in rows) {
             if (row.pdfDriveFileId != null && !localFileExists(row.pdfUri)) {
@@ -144,6 +194,34 @@ class QuickInkBinarySync(
                     if (newUri != null) {
                         captureDao.setPreviewUri(row.id, newUri.toString())
                     }
+                }
+            }
+        }
+
+        // Profile photo restore — same shape as captures, single row.
+        // If we have a metadata row with a Drive id but no readable
+        // local file, pull the binary down and rewrite photo_local_uri.
+        // Writes the binary to a stable filename inside the app's
+        // attachments dir so future restores can detect the existing
+        // local file via `localFileExists` and skip re-downloading.
+        val profile = profileSettingsDao.findByUser(userId)
+        if (profile != null
+            && profile.deletedAt == null
+            && profile.photoDriveFileId != null
+            && !localFileExists(profile.photoLocalUri)
+        ) {
+            runCatching {
+                driveClient.downloadBytes(profile.photoDriveFileId, accessToken)
+            }.getOrNull()?.let { bytes ->
+                val newUri = writeBytes(bytes, "jpg")
+                if (newUri != null) {
+                    // Use upsertLocal rather than a dedicated DAO
+                    // method — this is a one-shot post-restore stamp,
+                    // no need to add another suspend Query just for
+                    // this path. Preserves dirty=false (we don't
+                    // want to re-upload) and updates only the local
+                    // URI.
+                    profileSettingsDao.upsertLocal(profile.copy(photoLocalUri = newUri.toString()))
                 }
             }
         }

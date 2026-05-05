@@ -33,6 +33,7 @@ package app.quickink.mobile.data.sync
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.category.CategoryEntity
 import app.quickink.mobile.data.ocr.OcrResultEntity
+import app.quickink.mobile.data.profile.ProfileSettingsEntity
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.sync.SyncJson
 import kotlinx.serialization.SerialName
@@ -140,6 +141,14 @@ data class CapturePayloadV2(
     @SerialName("pdf_drive_file_id")     val pdfDriveFileId: String? = null,
     /** Drive file id of the per-row preview-JPEG binary upload. */
     @SerialName("preview_drive_file_id") val previewDriveFileId: String? = null,
+    /**
+     * How the capture was created — `"scan"` (the document scanner)
+     * or `"import"` (the system photo picker). Defaulted to "scan"
+     * for back-compat with rows synced from older clients that
+     * didn't write the field; the column-level default in the
+     * captures schema mirrors this.
+     */
+    @SerialName("source")                val source: String = "scan",
     @SerialName("created_at")            val createdAt: String,
     @SerialName("updated_at")            val updatedAt: String,
 )
@@ -154,6 +163,7 @@ fun CaptureEntity.toV2Payload(): CapturePayloadV2 = CapturePayloadV2(
     category           = category,
     pdfDriveFileId     = pdfDriveFileId,
     previewDriveFileId = previewDriveFileId,
+    source             = source,
     createdAt          = createdAt,
     updatedAt          = updatedAt,
 )
@@ -166,6 +176,7 @@ fun CapturePayloadV2.toEntity(driveFileId: String?): CaptureEntity = CaptureEnti
     previewUri         = previewUri,
     pageCount          = pageCount,
     category           = category,
+    source             = source,
     conflictStub       = null,
     driveFileId        = driveFileId,
     pdfDriveFileId     = pdfDriveFileId,
@@ -210,6 +221,66 @@ fun CategoryPayloadV1.toEntity(driveFileId: String?): CategoryEntity = CategoryE
     updatedAt    = updatedAt,
     dirty        = false,
     deletedAt    = null,
+)
+
+// =====================================================================
+// profile_settings — QuickInk-only. One row per user; carries the
+// custom display-name override, phone, personality punchline, and
+// the photo's Drive-file linkage. The actual photo binary travels
+// via QuickInkBinarySync (same path captures take); this payload
+// only carries the metadata reference (`photo_drive_file_id`).
+// `photo_local_uri` is deliberately NOT in the wire shape — it's a
+// device-local file:// URI that wouldn't make sense on a different
+// device. The restore side fills it in after re-downloading the
+// binary.
+// =====================================================================
+
+@Serializable
+data class ProfileSettingsPayloadV1(
+    @SerialName("id")                    val id: String,
+    @SerialName("user_id")               val userId: String,
+    @SerialName("display_name")          val displayName: String? = null,
+    @SerialName("phone_number")          val phoneNumber: String? = null,
+    @SerialName("personality_punchline") val personalityPunchline: String? = null,
+    @SerialName("photo_drive_file_id")   val photoDriveFileId: String? = null,
+    @SerialName("photo_updated_at")      val photoUpdatedAt: String? = null,
+    @SerialName("created_at")            val createdAt: String,
+    @SerialName("updated_at")            val updatedAt: String,
+)
+
+fun ProfileSettingsEntity.toV1Payload(): ProfileSettingsPayloadV1 = ProfileSettingsPayloadV1(
+    id                   = id,
+    userId               = userId,
+    displayName          = displayName,
+    phoneNumber          = phoneNumber,
+    personalityPunchline = personalityPunchline,
+    photoDriveFileId     = photoDriveFileId,
+    photoUpdatedAt       = photoUpdatedAt,
+    createdAt            = createdAt,
+    updatedAt            = updatedAt,
+)
+
+/**
+ * Build a fresh entity from a remote payload. `photoLocalUri` is
+ * left null on the receive side — the binary-restore step
+ * downloads the file and writes the local URI back in a separate
+ * pass. Until that lands, the Profile screen shows the initial /
+ * default avatar.
+ */
+fun ProfileSettingsPayloadV1.toEntity(driveFileId: String?): ProfileSettingsEntity = ProfileSettingsEntity(
+    id                   = id,
+    userId               = userId,
+    displayName          = displayName,
+    phoneNumber          = phoneNumber,
+    personalityPunchline = personalityPunchline,
+    photoLocalUri        = null,
+    photoDriveFileId     = photoDriveFileId,
+    photoUpdatedAt       = photoUpdatedAt,
+    driveFileId          = driveFileId,
+    createdAt            = createdAt,
+    updatedAt            = updatedAt,
+    dirty                = false,
+    deletedAt            = null,
 )
 
 // =====================================================================

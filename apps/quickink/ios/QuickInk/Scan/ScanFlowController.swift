@@ -82,11 +82,16 @@ public final class ScanFlowController: ObservableObject {
     /// JPEG list — DocumentScannerView's onComplete carries
     /// pdfURL + previewURL today; the per-page list comes from
     /// the same successful scan path).
+    /// - Parameter source: `"scan"` when the result came from the
+    ///   document scanner (default), `"import"` when it came from
+    ///   the system photo picker. Persisted on the capture row so
+    ///   the Library cards can render an "Import" pill.
     public func onScanComplete(
         pdfURL: URL?,
         previewURL: URL?,
         pageURLs: [URL],
-        category: String? = nil
+        category: String? = nil,
+        source: String = "scan"
     ) {
         // Cancel any previous in-flight pass before starting a new
         // one. The user could conceivably tap Scan twice in quick
@@ -118,7 +123,8 @@ public final class ScanFlowController: ObservableObject {
                     pdfURL:     pdfURL,
                     previewURL: previewURL,
                     pageCount:  totalPages,
-                    category:   category
+                    category:   category,
+                    source:     source
                 )
             } catch {
                 self?.state = .failed(message: "Couldn't save scan: \(error.localizedDescription)")
@@ -209,7 +215,24 @@ public final class ScanFlowController: ObservableObject {
                 }
             }
 
-            // 4. Append the recognized text into today's
+            // 4. Auto-populate the capture's title now that category
+            //    + OCR are both settled. Priority:
+            //      (a) the picked category, when present;
+            //      (b) otherwise, the first two words of the
+            //          earliest non-blank OCR page.
+            //    The user can edit the title later from the scan
+            //    detail screen — that write also goes through
+            //    `setTitle`, so the latest value wins. Best-effort:
+            //    a SQL failure here leaves the title null and the
+            //    Library card falls back to its existing cascade.
+            if let autoTitle = Self.computeInitialTitle(
+                category:  self?.selectedCategory,
+                pageTexts: pageTexts
+            ) {
+                try? await repository.setTitle(captureId: captureId, title: autoTitle)
+            }
+
+            // 5. Append the recognized text into today's
             //    `notepad_entries` row so the home recents rail
             //    surfaces it immediately. One entry per (user, day);
             //    multiple captures append to the same row. The
@@ -313,6 +336,42 @@ public final class ScanFlowController: ObservableObject {
             return "## Page \(idx + 1)\n\n\(text)"
         }
         return parts.joined(separator: "\n\n")
+    }
+
+    /// Compute the initial title to stamp on a freshly-captured row.
+    /// Priority:
+    ///   (1) the picked / auto-matched `category`, trimmed —
+    ///       explicit tagging is the strongest signal of intent;
+    ///   (2) the first two words of the earliest non-blank OCR page —
+    ///       gives every untagged capture a readable preview header.
+    /// Returns `nil` when neither signal is available; the caller
+    /// leaves the title column at NULL so the Library card's existing
+    /// "Untitled scan" fallback handles it.
+    private static func computeInitialTitle(
+        category: String?,
+        pageTexts: [Int: String]
+    ) -> String? {
+        if let raw = category?.trimmingCharacters(in: .whitespaces),
+           !raw.isEmpty {
+            return raw
+        }
+
+        let firstKey = pageTexts.keys.sorted().first { idx in
+            let t = pageTexts[idx]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return !t.isEmpty
+        }
+        guard let key = firstKey,
+              let raw = pageTexts[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else {
+            return nil
+        }
+
+        let words = raw
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        guard !words.isEmpty else { return nil }
+        return words.prefix(2).joined(separator: " ")
     }
 
     /// Reset back to `.idle` — typically called when the user

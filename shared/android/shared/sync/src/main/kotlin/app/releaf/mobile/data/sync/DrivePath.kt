@@ -48,6 +48,8 @@ object DrivePath {
     const val KIND_PAGE_TEMPLATE  = "page_template"
     /** QuickInk-only — user-configurable category for [`captures.category`]. */
     const val KIND_CATEGORY       = "category"
+    /** QuickInk-only — per-user profile-settings row (display name, photo, etc.). */
+    const val KIND_PROFILE_SETTINGS = "profile_settings"
 
     // ---- folder names (no trailing slash; join with `/`) ----
     const val FOLDER_NOTEBOOKS       = "notebooks"
@@ -60,6 +62,8 @@ object DrivePath {
     const val FOLDER_OCR             = "ocr"
     /** QuickInk's category list — `categories/{id}.json`. */
     const val FOLDER_CATEGORIES      = "categories"
+    /** QuickInk's profile-settings folder — `profile_settings/{userId}.json`. */
+    const val FOLDER_PROFILE_SETTINGS = "profile_settings"
     const val FOLDER_TASKS           = "tasks"
     const val FOLDER_TOMBSTONES      = "tombstones"
 
@@ -118,6 +122,13 @@ object DrivePath {
 
     /** QuickInk's per-category file — `categories/{id}.json`. */
     fun category(id: String): String = "$FOLDER_CATEGORIES/$id.json"
+
+    /**
+     * QuickInk's per-user profile-settings file —
+     * `profile_settings/{userId}.json`. Single row per user; the
+     * filename is the row's id (which equals the user id).
+     */
+    fun profileSettings(id: String): String = "$FOLDER_PROFILE_SETTINGS/$id.json"
 
     /**
      * `YYYY/MM/DD` triplet derived from an ISO-8601 timestamp's date

@@ -57,6 +57,20 @@ data class CaptureEntity(
     @ColumnInfo(name = "category")
     val category: String?,
 
+    /**
+     * How the capture was created. `"scan"` (default) — went through
+     * the ML Kit / VisionKit document scanner. `"import"` — was
+     * brought in from the system photo picker (single image, no
+     * edge detection, single-page PDF synthesised app-side). Drives
+     * the "Import" pill in the Library cards. Stored as a free-form
+     * TEXT so a later third source ("share-extension", etc.) can
+     * land without another migration. Defaulted at the column level
+     * so legacy rows synced down from Drive (without this field)
+     * read back as scans.
+     */
+    @ColumnInfo(name = "source", defaultValue = "scan")
+    val source: String = "scan",
+
     @ColumnInfo(name = "conflict_stub")
     val conflictStub: String?,
 
@@ -94,3 +108,17 @@ data class CaptureEntity(
     @ColumnInfo(name = "deleted_at")
     val deletedAt: String?,
 )
+
+/**
+ * Display title for [CaptureEntity] across the app's lists and
+ * thumbnails. Priority: user-set [title] (trimmed, non-empty) →
+ * [category] → [fallback]. Centralised so the Library, Home recents,
+ * Search hits, and Category drill-down all surface the same string.
+ */
+fun CaptureEntity.displayTitle(fallback: String = "Scan"): String {
+    val titled = title?.trim().orEmpty()
+    if (titled.isNotEmpty()) return titled
+    val cat = category?.trim().orEmpty()
+    if (cat.isNotEmpty()) return cat
+    return fallback
+}

@@ -7,6 +7,7 @@
 package app.releaf.mobile.auth
 
 import android.content.Context
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.CoroutineScope
@@ -59,7 +60,15 @@ class AuthStore private constructor(
 
     fun signOut() {
         scope.launch {
-            runCatching { client.signOut() }
+            // Snapshot the current access token BEFORE clearing prefs
+            // so the client can revoke it server-side. Clearing prefs
+            // first would lose the token and leave Google's
+            // AuthorizationClient holding a cached grant — the next
+            // sign-in would silently restore the same dead token.
+            val tokenForRevoke: String? = (_state.value as? AuthState.SignedIn)
+                ?.session?.accessToken
+                ?: prefs.getString(KEY_ACCESS, null)
+            runCatching { client.signOut(tokenForRevoke) }
             prefs.edit().clear().apply()
             _state.value = AuthState.SignedOut
         }
@@ -107,6 +116,52 @@ class AuthStore private constructor(
         val expiresAt   = prefs.getLong(KEY_EXPIRES, 0L).takeIf { it > 0 }?.let(Instant::ofEpochSecond)
             ?: return AuthState.SignedOut
 
+        // Stub-poisoning guard. If a previous build was wired to
+        // `StubGoogleAuthClient` and the user signed in, EncryptedSharedPreferences
+        // is now holding the literal sentinel strings the stub returns
+        // (see `StubGoogleAuthClient.signIn` — `accessToken =
+        // "stub-access-token"`, `userId = "stub-user"`). On upgrade to a
+        // build with a real `GoogleAuthClient`, naively restoring those
+        // values would let the worker hand the literal stub string to
+        // Drive on every pass — Drive 401s every time and the user is
+        // stuck behind an AUTH_REJECTED banner that re-sign-in fixes
+        // permanently. Detect the sentinel and clear, so the upgrade
+        // path lands on the SignIn screen cleanly.
+        if (access == STUB_ACCESS_TOKEN_SENTINEL || userId == STUB_USER_ID_SENTINEL) {
+            Log.w(
+                "QuickInkAuth",
+                "restore: detected stub session in prefs (access='$STUB_ACCESS_TOKEN_SENTINEL' " +
+                    "or userId='$STUB_USER_ID_SENTINEL') — clearing and forcing SignedOut so " +
+                    "the user re-signs in with a real client."
+            )
+            prefs.edit().clear().apply()
+            return AuthState.SignedOut
+        }
+
+        // [DRIVE-401-DIAG] Throwaway diagnostic — REMOVE before merge.
+        // Logs the cached access token's prefix + expiry so we can tell
+        // which 401/403 path is firing on this device:
+        //   - prefix "stub-access" → stub-poisoning from an earlier
+        //     dev/preview build. AuthStore.restore should have cleared
+        //     the prefs but didn't, and the worker is now sending the
+        //     literal stub string to Drive on every pass.
+        //   - prefix "ya29." + expiresAt in the past → real token, just
+        //     expired. Foreground refresh hook is the fix.
+        //   - prefix "ya29." + expiresAt in the future → either Drive
+        //     scope was never granted (user skipped the checkbox), or
+        //     the grant was revoked server-side. Sign-out + re-consent
+        //     is the only path.
+        // Filter with: adb logcat -s QuickInkAuth
+        Log.w(
+            "QuickInkAuth",
+            "restore: tokenPrefix=${access.take(12)}… " +
+                "userIdPrefix=${userId.take(8)}… " +
+                "emailDomain=${email.substringAfter('@', missingDelimiterValue = "?")} " +
+                "expiresAtEpoch=${expiresAt.epochSecond} " +
+                "nowEpoch=${Instant.now().epochSecond} " +
+                "secondsUntilExpiry=${expiresAt.epochSecond - Instant.now().epochSecond}"
+        )
+
         return AuthState.SignedIn(
             GoogleAuthSession(
                 userId = userId,
@@ -137,6 +192,14 @@ class AuthStore private constructor(
         private const val KEY_ACCESS  = "access_token"
         private const val KEY_REFRESH = "refresh_token"
         private const val KEY_EXPIRES = "expires_at"
+
+        // Sentinels written by `StubGoogleAuthClient.signIn`. Used
+        // by [restore] to detect a stale stub session in prefs after
+        // an upgrade to a real-client build and force a clean
+        // sign-out instead of restoring a session whose access
+        // token Google will instantly 401.
+        private const val STUB_ACCESS_TOKEN_SENTINEL = "stub-access-token"
+        private const val STUB_USER_ID_SENTINEL      = "stub-user"
 
         @Volatile private var instance: AuthStore? = null
 

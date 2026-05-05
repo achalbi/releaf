@@ -45,12 +45,24 @@ public struct DocumentScannerView: UIViewControllerRepresentable {
     /// reason. No bytes written in that case.
     let onCancel: () -> Void
 
+    /// When non-nil, only the first `pageLimit` captured pages are
+    /// rendered into the PDF + JPEGs. VisionKit itself doesn't
+    /// expose a page-limit option (the user can always tap Add Page
+    /// inside `VNDocumentCameraViewController`), so we enforce the
+    /// cap on the result side: extra pages past the limit are
+    /// dropped before any bytes are written. `nil` (default) keeps
+    /// every captured page — Releaf's behaviour and QuickInk's
+    /// Multi-page / Auto modes. QuickInk's Single mode passes `1`.
+    let pageLimit: Int?
+
     public init(
         onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void,
-        onCancel: @escaping () -> Void
+        onCancel: @escaping () -> Void,
+        pageLimit: Int? = nil
     ) {
         self.onComplete = onComplete
         self.onCancel = onCancel
+        self.pageLimit = pageLimit
     }
 
     public func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
@@ -62,26 +74,36 @@ public struct DocumentScannerView: UIViewControllerRepresentable {
     public func updateUIViewController(_ controller: VNDocumentCameraViewController, context: Context) {}
 
     public func makeCoordinator() -> Coordinator {
-        Coordinator(onComplete: onComplete, onCancel: onCancel)
+        Coordinator(onComplete: onComplete, onCancel: onCancel, pageLimit: pageLimit)
     }
 
     public final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
         private let onComplete: (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void
         private let onCancel: () -> Void
+        private let pageLimit: Int?
 
         init(
             onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void,
-            onCancel: @escaping () -> Void
+            onCancel: @escaping () -> Void,
+            pageLimit: Int?
         ) {
             self.onComplete = onComplete
             self.onCancel = onCancel
+            self.pageLimit = pageLimit
         }
 
         public func documentCameraViewController(
             _ controller: VNDocumentCameraViewController,
             didFinishWith scan: VNDocumentCameraScan
         ) {
-            let pages = (0..<scan.pageCount).map { scan.imageOfPage(at: $0) }
+            // Truncate to `pageLimit` before any bytes hit disk so
+            // a stray extra capture from the user doesn't leave an
+            // orphan JPEG in attachments. VisionKit allows the
+            // user to add as many pages as they like inside the
+            // sheet; the caller's intent (Single mode) wins here.
+            let total = scan.pageCount
+            let kept = pageLimit.map { min(total, max(0, $0)) } ?? total
+            let pages = (0..<kept).map { scan.imageOfPage(at: $0) }
 
             // PDF is the canonical artifact. Per-page JPEGs are
             // written so QuickInk's OCR pipeline can address each
@@ -156,13 +178,16 @@ public struct DocumentScannerView: UIViewControllerRepresentable {
 public struct DocumentScannerView: View {
     let onComplete: (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void
     let onCancel: () -> Void
+    let pageLimit: Int?
 
     public init(
         onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void,
-        onCancel: @escaping () -> Void
+        onCancel: @escaping () -> Void,
+        pageLimit: Int? = nil
     ) {
         self.onComplete = onComplete
         self.onCancel = onCancel
+        self.pageLimit = pageLimit
     }
 
     public var body: some View {

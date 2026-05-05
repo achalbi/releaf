@@ -46,6 +46,12 @@ class CaptureRepository(
         previewUri: String?,
         pageCount: Int,
         category: String? = null,
+        /**
+         * Capture origin. `"scan"` (default) — went through the ML
+         * Kit scanner. `"import"` — picked from the system photo
+         * picker. Drives the "Import" pill in the Library cards.
+         */
+        source: String = "scan",
     ) {
         val now = IsoClock.nowIso()
         captureDao.insert(
@@ -57,6 +63,7 @@ class CaptureRepository(
                 previewUri   = previewUri,
                 pageCount    = pageCount,
                 category     = category,
+                source       = source,
                 conflictStub = null,
                 driveFileId  = null,
                 createdAt    = now,
@@ -74,6 +81,17 @@ class CaptureRepository(
      */
     suspend fun setCategory(captureId: String, category: String?) {
         captureDao.setCategory(captureId, category, IsoClock.nowIso())
+    }
+
+    /**
+     * Update an existing capture's user-editable `title`. Same dirty-
+     * bit pattern as [setCategory]. Pass `null` to clear the title
+     * (the Library card then falls back to OCR snippet → category →
+     * "Untitled scan"). Used both by the scan-flow auto-populator
+     * and the scan-detail editor modal.
+     */
+    suspend fun setTitle(captureId: String, title: String?) {
+        captureDao.setTitle(captureId, title, IsoClock.nowIso())
     }
 
     /**

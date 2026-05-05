@@ -102,6 +102,12 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                     category:           row["category"] as String?,
                     pdfDriveFileId:     row["pdf_drive_file_id"] as String?,
                     previewDriveFileId: row["preview_drive_file_id"] as String?,
+                    // Older rows pre-v4 had no source column; the
+                    // ALTER TABLE default (`'scan'`) means SELECT
+                    // always returns a value, but tolerate a nil
+                    // read for safety so an unexpected schema state
+                    // doesn't crash the sync export.
+                    source:             (row["source"] as String?) ?? "scan",
                     createdAt:          row["created_at"],
                     updatedAt:          row["updated_at"]
                 )
@@ -332,6 +338,42 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
         // No-op until v2 etag tracking lands.
     }
 
+    /// Cheap aggregate count of every locally-dirty row that the
+    /// sync worker would push on its next pass — across notepad
+    /// entries, captures, ocr_results, and categories. Drives the
+    /// "N pending" pill on Home and the auto-safety-net's decision
+    /// to fire `requestImmediate`. Mirror of Android's
+    /// `QuickInkApp.countLocalDirty(userId:)`.
+    ///
+    /// `ocr_results` is intentionally NOT user-scoped here — the
+    /// table doesn't carry a `user_id` column (rows FK into
+    /// `captures` and inherit user via that join). The dirty count
+    /// across all OCR rows is a tight upper bound; in single-user
+    /// installs it equals the per-user count, and the result is
+    /// only ever shown as "N pending", so a small over-count is
+    /// fine.
+    public func countDirtyRows(userId: String) async throws -> Int {
+        try await database.dbQueue.read { db -> Int in
+            let notepad: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM notepad_entries
+                WHERE user_id = ? AND dirty = 1
+                """, arguments: [userId])) ?? 0
+            let captures: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM captures
+                WHERE user_id = ? AND dirty = 1
+                """, arguments: [userId])) ?? 0
+            let ocr: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM ocr_results
+                WHERE dirty = 1
+                """)) ?? 0
+            let categories: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM categories
+                WHERE user_id = ? AND dirty = 1
+                """, arguments: [userId])) ?? 0
+            return notepad + captures + ocr + categories
+        }
+    }
+
     // MARK: - Helpers
 
     private static func tableFor(kind: String) -> String {
@@ -387,12 +429,53 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
     /// Upsert a captures row from a remote payload. Raw SQL because we
     /// don't have a typed `CaptureRow` GRDB record yet — see file header.
     private static func upsertCaptureRow(_ db: Database, payload: CapturePayloadV2, driveFileId: String?) throws {
+        // CRITICAL: `pdf_uri` and `preview_uri` are device-local
+        // file:// paths. The remote payload carries the SOURCE
+        // device's path, which is meaningless on this device.
+        // Naively replacing the row with the remote URIs is what
+        // produced the "open failed: ENOENT" symptom for cross-
+        // device synced captures.
+        //
+        // Reconcile:
+        //   - If we already have this capture locally with a working
+        //     file://, keep our URIs (the local binary is correct).
+        //   - Otherwise, accept the remote payload but blank out
+        //     URIs that won't resolve here. The next restorePending
+        //     pass / on-demand open will download from Drive using
+        //     pdfDriveFileId.
+        let existing: (pdfUri: String, previewUri: String?)? = try Row.fetchOne(
+            db,
+            sql: "SELECT pdf_uri, preview_uri FROM captures WHERE id = ? LIMIT 1",
+            arguments: [payload.id]
+        ).map { ($0["pdf_uri"], $0["preview_uri"] as String?) }
+
+        let resolvedPdfUri: String = {
+            if let cur = existing, Self.fileExistsAt(cur.pdfUri) {
+                return cur.pdfUri
+            }
+            if payload.pdfDriveFileId != nil {
+                return "" // wait for restorePending
+            }
+            return payload.pdfUri
+        }()
+        let resolvedPreviewUri: String? = {
+            if let cur = existing,
+               let p = cur.previewUri,
+               Self.fileExistsAt(p) {
+                return p
+            }
+            if payload.previewDriveFileId != nil {
+                return nil
+            }
+            return payload.previewUri
+        }()
+
         try db.execute(sql: """
             INSERT INTO captures (
                 id, user_id, title, pdf_uri, preview_uri, page_count,
-                category, drive_file_id, pdf_drive_file_id, preview_drive_file_id,
+                category, source, drive_file_id, pdf_drive_file_id, preview_drive_file_id,
                 created_at, updated_at, dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ON CONFLICT(id) DO UPDATE SET
                 user_id               = excluded.user_id,
                 title                 = excluded.title,
@@ -400,6 +483,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 preview_uri           = excluded.preview_uri,
                 page_count            = excluded.page_count,
                 category              = excluded.category,
+                source                = excluded.source,
                 drive_file_id         = excluded.drive_file_id,
                 pdf_drive_file_id     = excluded.pdf_drive_file_id,
                 preview_drive_file_id = excluded.preview_drive_file_id,
@@ -408,11 +492,24 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             WHERE captures.updated_at < excluded.updated_at
             """, arguments: [
                 payload.id, payload.userId, payload.title,
-                payload.pdfUri, payload.previewUri, payload.pageCount,
-                payload.category, driveFileId,
+                resolvedPdfUri, resolvedPreviewUri, payload.pageCount,
+                payload.category, payload.source, driveFileId,
                 payload.pdfDriveFileId, payload.previewDriveFileId,
                 payload.createdAt, payload.updatedAt,
             ])
+    }
+
+    /// Best-effort filesystem-resolution check used by the cross-
+    /// device URI reconciliation in [upsertCaptureRow]. Mirror of
+    /// Android's `QuickInkSyncDataSource.fileExistsAt`.
+    private static func fileExistsAt(_ uri: String?) -> Bool {
+        guard let uri, !uri.isEmpty else { return false }
+        let path: String? = {
+            if let url = URL(string: uri), url.isFileURL { return url.path }
+            return uri
+        }()
+        guard let path else { return false }
+        return FileManager.default.fileExists(atPath: path)
     }
 
     /// Upsert an ocr_results row. Same raw-SQL story; `blocks_json` is

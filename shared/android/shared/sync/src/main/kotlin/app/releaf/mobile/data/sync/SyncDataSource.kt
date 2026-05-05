@@ -129,7 +129,49 @@ interface SyncDataSource {
 
     /** Persist the etag of the manifest the worker just applied. */
     suspend fun setLastAppliedManifestEtag(etag: String)
+
+    // ─── Drive-side cleanup ────────────────────────────────────────────
+
+    /**
+     * Identify entities in [manifest] whose parent isn't in the same
+     * manifest's `entityChecksums` — i.e. orphans where the child JSON
+     * file is still listed but the parent is gone. Used by
+     * [SyncRepository.cleanupOrphans] to retire those entries on Drive.
+     *
+     * Typical example (QuickInk): an `ocr_result` whose `capture_id`
+     * isn't in the manifest. Old builds soft-deleted captures without
+     * cascading to children, so the next sync uploaded the parent
+     * tombstone but left the child JSON in `entityChecksums` forever.
+     * Every subsequent restore on any device sees the orphan and
+     * either silently fails the FK insert (pre-PR-B/D) or harmlessly
+     * skips it (post-PR-D). This hook lets us actually clean Drive
+     * up.
+     *
+     * Default implementation returns an empty list — apps without
+     * parent-child relationships in their synced kinds (or apps that
+     * don't care about Drive-side cleanup) get no-op behaviour.
+     */
+    suspend fun findOrphanIds(manifest: ManifestV2): List<OrphanInfo> = emptyList()
 }
+
+/**
+ * Pointer to a single orphan entity on Drive — the manifest's child
+ * record whose parent isn't in the same manifest. Returned by
+ * [SyncDataSource.findOrphanIds] and consumed by
+ * [SyncRepository.cleanupOrphans].
+ */
+data class OrphanInfo(
+    /** The orphan entity's id (UUIDv7). */
+    val id: String,
+    /** The orphan's kind — e.g. `DrivePath.KIND_OCR_RESULT`. */
+    val kind: String,
+    /**
+     * The id of the parent that's missing from the manifest.
+     * Logged for diagnostics; not strictly needed by the cleanup
+     * path itself.
+     */
+    val missingParentId: String,
+)
 
 // ─── Outbound types ────────────────────────────────────────────────────
 

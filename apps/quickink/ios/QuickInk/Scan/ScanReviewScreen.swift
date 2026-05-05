@@ -121,14 +121,19 @@ struct ScanReviewScreen: View {
             // un-categorised. Tapping a different one switches.
             controller.setCategory(selected ? nil : name)
         }) {
+            // Compact button — was minHeight 64 / padding s3 /
+            // QuickInkText.heading, which made the picker feel like a
+            // hero grid. Shrunk to 44pt with cardTitle so the page
+            // reads as a scan review with categories beneath, not a
+            // category-picker hero. Mirrors Android.
             Text(name)
-                .font(QuickInkText.heading)
+                .font(QuickInkText.cardTitle)
                 .foregroundStyle(selected ? QuickInkColors.textOnAccent : QuickInkColors.ink)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
-                .frame(maxWidth: .infinity, minHeight: 64)
-                .padding(.horizontal, QuickInkSpacing.s3)
-                .padding(.vertical, QuickInkSpacing.s3)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .padding(.horizontal, QuickInkSpacing.s2)
+                .padding(.vertical, QuickInkSpacing.s2)
                 .background(
                     RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
                         .fill(selected ? QuickInkColors.accent : QuickInkColors.surface)

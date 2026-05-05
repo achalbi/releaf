@@ -89,7 +89,11 @@ import android.net.Uri
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.R
 import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.capture.displayTitle
 import app.quickink.mobile.data.category.CategoryEntity
+import app.quickink.mobile.features.nav.NavTab
+import app.quickink.mobile.features.nav.QuickInkBottomNavBar
+import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.features.scan.QuickCaptureScreen
 import app.quickink.mobile.features.scan.ScanFlowController
 import coil.compose.AsyncImage
@@ -103,11 +107,6 @@ import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import app.quickink.mobile.ui.theme.quickInkLinedPaper
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.sync.SyncStateKeys
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.hazeSource
-import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
-import dev.chrisbanes.haze.materials.HazeMaterials
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
@@ -198,15 +197,6 @@ fun HomeScreen(
     // (also inside this Box) is not shifted by it.
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
-    // Haze state — links the scrolling content (`Modifier.haze`) to
-    // the bottom nav bar (`Modifier.hazeChild` inside BottomNavBar).
-    // Haze captures pixels from the source on every frame the source
-    // is visible, runs them through a `RenderEffect` blur (API 32+;
-    // tint-only fallback on lower APIs), and composes the result
-    // beneath the child's content. Hoisted here so the same instance
-    // is shared across the source ↔ child pair.
-    val hazeState = remember { HazeState() }
-
     // Live sync state — same source the Settings → Sync section
     // reads. Both keys land via `SyncStateDao.upsert` from the
     // sync worker, so a fresh pass updates the pill in real time.
@@ -218,6 +208,15 @@ fun HomeScreen(
         .observe(SyncStateKeys.PENDING_COUNT)
         .collectAsState(initial = null)
     val pendingCount = pendingRow?.value?.toIntOrNull() ?: 0
+    // Locally-dirty rows that haven't been pushed to Drive yet —
+    // refreshed by `QuickInkApp`'s 60-second foreground ticker and
+    // zeroed by the worker on a successful push. Drives the
+    // [PendingSyncPill] right under the greeting; the existing
+    // bottom-of-page sync pill stays for "Last synced" context.
+    val localDirtyRow by syncStateDao
+        .observe(SyncStateKeys.LOCAL_DIRTY_COUNT)
+        .collectAsState(initial = null)
+    val localDirtyCount = localDirtyRow?.value?.toIntOrNull() ?: 0
     val syncPillState: SyncPillState = if (pendingCount > 0) {
         SyncPillState.Pending(pendingCount)
     } else {
@@ -228,7 +227,6 @@ fun HomeScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .hazeSource(hazeState)
                 .verticalScroll(rememberScrollState())
                 .padding(
                     start  = QuickInkSpacing.s5,
@@ -246,6 +244,17 @@ fun HomeScreen(
                 profilePhotoUri = profilePhotoUri,
                 onTapAvatar     = { showProfileDrawer = true },
             )
+            // "N pending" pill — one tap kicks the upload-only sync
+            // (REPLACE policy via `requestUserSync`). Visible only
+            // when there's actual local work to push, so the home
+            // surface stays clean for the common up-to-date state.
+            if (localDirtyCount > 0) {
+                Spacer(Modifier.size(QuickInkSpacing.s4))
+                PendingSyncPill(
+                    count   = localDirtyCount,
+                    onTap   = { QuickInkSyncScheduler.requestUserSync(context) },
+                )
+            }
             Spacer(Modifier.size(QuickInkSpacing.s5))
             RecentRail(
                 captures    = recentCaptures.take(6),
@@ -270,13 +279,13 @@ fun HomeScreen(
             }
         }
 
-        BottomNavBar(
+        QuickInkBottomNavBar(
+            activeTab  = NavTab.Home,
             onHome     = { /* current */ },
             onLibrary  = onOpenNotes,
             onScan     = { showQuickCapture = true },
             onSearch   = { onOpenSearch?.invoke() },
             onSettings = onOpenSettings,
-            hazeState  = hazeState,
             modifier   = Modifier.align(Alignment.BottomCenter),
         )
 
@@ -297,6 +306,18 @@ fun HomeScreen(
                 onOpenProfile   = {
                     showProfileDrawer = false
                     (onOpenProfile ?: onOpenSettings)()
+                },
+                // Library + Search routes: same destinations the
+                // bottom-nav Library / Search tabs go to. Close the
+                // drawer first so the caller's nav doesn't fight
+                // with a half-dismissed sheet animation.
+                onOpenLibrary   = {
+                    showProfileDrawer = false
+                    onOpenNotes()
+                },
+                onOpenSearch    = {
+                    showProfileDrawer = false
+                    onOpenSearch?.invoke()
                 },
                 onOpenSettings  = {
                     showProfileDrawer = false
@@ -421,6 +442,65 @@ private fun HomeHeader(
     }
 }
 
+// MARK: - Pending-sync pill
+
+/**
+ * Small accent pill rendered between the greeting and the recent
+ * rail when there are local rows that haven't been pushed to
+ * Drive yet. Tap kicks `requestUserSync`. The count is sourced
+ * from `sync_state[LOCAL_DIRTY_COUNT]`, refreshed every 60 seconds
+ * by `QuickInkApp`'s foreground pending-push ticker (which also
+ * auto-kicks the sync when count > 0 — the pill is the visible
+ * surface of that mechanism).
+ */
+@Composable
+private fun PendingSyncPill(count: Int, onTap: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.pill))
+            .background(colors.accentSoft)
+            .border(1.dp, colors.accent.copy(alpha = 0.55f), RoundedCornerShape(QuickInkRadius.pill))
+            .clickable(onClick = onTap)
+            .padding(horizontal = QuickInkSpacing.s4, vertical = QuickInkSpacing.s3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(colors.accent),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text  = if (count > 99) "99+" else count.toString(),
+                style = type.label,
+                color = colors.textOnAccent,
+            )
+        }
+        Spacer(Modifier.size(QuickInkSpacing.s3))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text  = if (count == 1) "1 item pending" else "$count items pending",
+                style = type.body,
+                color = colors.ink,
+            )
+            Text(
+                text  = "Tap to back up to Drive now",
+                style = type.meta,
+                color = colors.inkSoft,
+            )
+        }
+        Text(
+            text  = "Sync →",
+            style = type.label,
+            color = colors.accent,
+        )
+    }
+}
+
 // MARK: - Search bar
 
 @Composable
@@ -529,7 +609,7 @@ private fun RecentScanThumb(capture: CaptureEntity, onTap: () -> Unit) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     val context = LocalContext.current
-    val title = capture.category?.takeIf { it.isNotEmpty() } ?: "Scan"
+    val title = capture.displayTitle()
     val displayDate = friendlyMonthDay(capture.createdAt)
 
     Column(
@@ -568,6 +648,25 @@ private fun RecentScanThumb(capture: CaptureEntity, onTap: () -> Unit) {
                 )
             }
 
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(QuickInkSpacing.s2)
+                    .background(
+                        color = if (capture.source == "import") colors.accent else colors.surface.copy(alpha = 0.9f),
+                        shape = RoundedCornerShape(QuickInkRadius.sm),
+                    )
+                    .padding(horizontal = QuickInkSpacing.s2, vertical = 2.dp),
+            ) {
+                Text(
+                    text  = if (capture.source == "import") "Import" else "Scan",
+                    style = type.caption,
+                    color = if (capture.source == "import") colors.textOnAccent else colors.ink.copy(alpha = 0.7f),
+                )
+            }
+
             if (capture.pageCount > 1) {
                 Text(
                     text  = "${capture.pageCount} pages",
@@ -588,8 +687,15 @@ private fun RecentScanThumb(capture: CaptureEntity, onTap: () -> Unit) {
         Spacer(Modifier.size(QuickInkSpacing.s2))
 
         Text(
-            text     = title,
-            style    = type.label,
+            // Title Case — matches the library grid/list/search
+            // normalisation. Per-word: split on whitespace, lower
+            // then titlecase first char.
+            text     = title
+                .split(' ')
+                .joinToString(" ") { word ->
+                    word.lowercase().replaceFirstChar(Char::titlecaseChar)
+                },
+            style    = type.cardTitle,
             color    = colors.ink,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -798,314 +904,3 @@ private fun CategoryTile(
     }
 }
 
-// MARK: - Bottom nav with Zap FAB
-
-/**
- * Floating glass-morphism bottom nav — frosted card hovering over
- * the canvas with the Zap FAB lifted in the center. Mirror of
- * iOS [HomeScreen.swift]'s `bottomNavBar`.
- *
- * The frosted-glass effect is provided by Haze: [hazeChild] captures
- * pixels from the [hazeState] source (the scrolling Column behind),
- * runs them through a `RenderEffect` blur (API 32+; tint-only
- * fallback below), and composes the result beneath this row. The
- * paired `Modifier.haze(hazeState)` lives on the source Column in
- * [HomeScreen]. [HazeMaterials.regular] supplies the blur radius +
- * warm-cream tint preset — `colors.surface` is the container colour
- * so the brand cream reads through the frost rather than system gray.
- */
-@OptIn(ExperimentalHazeMaterialsApi::class)
-@Composable
-private fun BottomNavBar(
-    onHome: () -> Unit,
-    onLibrary: () -> Unit,
-    onScan: () -> Unit,
-    onSearch: () -> Unit,
-    onSettings: () -> Unit,
-    hazeState: HazeState,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalQuickInkColors.current
-    val barShape = RoundedCornerShape(QuickInkRadius.lg)
-
-    // Bright-top-to-warm-bottom gradient stroke — emulates light
-    // reflecting off a glass edge. Mirrors the iOS bar's
-    // `LinearGradient` border.
-    val borderBrush = Brush.verticalGradient(
-        colors = listOf(
-            Color.White.copy(alpha = 0.55f),
-            colors.border.copy(alpha = 0.40f),
-        ),
-    )
-
-    // Two-layer composition: a backdrop Box that owns the shadow +
-    // surface + haze + border (all on a SINGLE composable so the
-    // shadow has an opaque tint to cast from), and a content Row
-    // that sits on top *unclipped* so the lifted Zap FAB can render
-    // above the bar's top edge.
-    //
-    // Why one Box instead of multiple sibling shadow layers: Compose's
-    // `Modifier.shadow` only renders when the composable has opaque
-    // drawn content — an empty Box with just `.shadow()` produces no
-    // visible shadow because the RenderNode has nothing to elevate.
-    // The earlier two-Box version had an empty "border halo" sibling
-    // that was effectively invisible for that reason. Folding the
-    // shadow + tint together on one element fixes both the missing
-    // halo and the washed-out border.
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(
-                start  = QuickInkSpacing.s4,
-                end    = QuickInkSpacing.s4,
-                bottom = QuickInkSpacing.s3,
-            ),
-    ) {
-        // Border-halo layer — a tight, very dark shadow right at the
-        // bar's edge. Lives BEHIND the backdrop so its solid surface
-        // tint is hidden by the backdrop's tint above; only its
-        // shadow (which extends past the bar's bounds via
-        // `clip = false`) survives in the visible region. This adds
-        // the requested "darker border shadow" on top of the soft
-        // diffuse drop the backdrop already casts.
-        //
-        // The opaque `.background(colors.surface, barShape)` is
-        // load-bearing — Compose's `Modifier.shadow` renders nothing
-        // when the RenderNode has no opaque content. Without the
-        // tint this Box would cast no shadow at all.
-        // Inner border halo — even tighter, hugs the border line. Same
-        // opaque-tint trick to keep the shadow rendering. Stacks with
-        // the spread halo + soft drop below, so the cumulative effect
-        // is: dark stripe right at the edge → fading dark band → soft
-        // diffuse falloff far out.
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .shadow(
-                    elevation     = 8.dp,
-                    shape         = barShape,
-                    clip          = false,
-                    ambientColor  = colors.ink.copy(alpha = 1.00f),
-                    spotColor     = colors.ink.copy(alpha = 1.00f),
-                )
-                .background(colors.surface, barShape),
-        )
-
-        // Spread halo — wider, still very dark.
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .shadow(
-                    elevation     = 22.dp,
-                    shape         = barShape,
-                    clip          = false,
-                    ambientColor  = colors.ink.copy(alpha = 0.95f),
-                    spotColor     = colors.ink.copy(alpha = 0.95f),
-                )
-                .background(colors.surface, barShape),
-        )
-
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                // 1. Shadow first — soft diffuse drop, the bar's
-                //    overall lift away from the canvas. `clip = false`
-                //    lets the shadow extend past the bar's bounds.
-                //    The tighter, darker border halo above provides
-                //    the embossed-edge cue; this one provides depth.
-                .shadow(
-                    elevation     = 32.dp,
-                    shape         = barShape,
-                    clip          = false,
-                    ambientColor  = colors.ink.copy(alpha = 0.75f),
-                    spotColor     = colors.ink.copy(alpha = 0.75f),
-                )
-                // 2. Opaque-ish cream tint — gives the shadow a real
-                //    surface to cast from AND warms the haze so the
-                //    bar reads as QuickInk cream, not system gray.
-                //    0.85 alpha is the sweet spot between "haze still
-                //    shows the page scrolling underneath" and "border
-                //    has enough contrast to read".
-                .background(colors.surface.copy(alpha = 0.85f), barShape)
-                // 3. Clip to the rounded shape so the haze and any
-                //    overdraw stay inside the silhouette.
-                .clip(barShape)
-                // 4. Haze on top of the tint — the `.thin` preset adds
-                //    just enough blur for the glass cue without
-                //    swallowing the cream tint.
-                .hazeEffect(
-                    state = hazeState,
-                    style = HazeMaterials.thin(containerColor = colors.surface),
-                )
-                // 5. Border last so it draws crisply over both the
-                //    tint and the haze, against the now-opaque surface.
-                .border(width = 1.dp, brush = borderBrush, shape = barShape),
-        )
-
-        // Content layer — the cells. Sits on top of the backdrop and
-        // is NOT clipped, so the lifted Zap FAB at `offset(y = -16dp)`
-        // can render above the bar's top edge.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    horizontal = QuickInkSpacing.s1,
-                    vertical   = QuickInkSpacing.s1,
-                ),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            NavIcon(icon = Icons.Filled.Home,               label = "Home",     active = true,  onClick = onHome,     modifier = Modifier.weight(1f))
-            NavIconAsset(drawableId = R.drawable.ic_note,   label = "Library",  active = false, onClick = onLibrary,  modifier = Modifier.weight(1f))
-            ZapFab(onClick = onScan, modifier = Modifier.weight(1f))
-            NavIconAsset(drawableId = R.drawable.ic_search, label = "Search",   active = false, onClick = onSearch,   modifier = Modifier.weight(1f))
-            NavIcon(icon = Icons.Filled.Settings,           label = "Settings", active = false, onClick = onSettings, modifier = Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun NavIcon(
-    icon: ImageVector,
-    label: String,
-    active: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalQuickInkColors.current
-    val type = LocalQuickInkTypography.current
-    val tint = if (active) colors.accent else colors.ink
-    val pillBg = if (active) colors.accentSoft else Color.Transparent
-
-    // Outer Column owns the click + weighted cell so the whole cell
-    // is tappable. Inner Column carries the active-pill background +
-    // padding so the pill hugs icon+label, not the full cell. Same
-    // posture as Releaf's BottomNav RegularTab.
-    Column(
-        modifier            = modifier.clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Column(
-            modifier = Modifier
-                .background(color = pillBg, shape = RoundedCornerShape(QuickInkRadius.md))
-                .padding(horizontal = QuickInkSpacing.s2, vertical = QuickInkSpacing.s2),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Icon(
-                imageVector        = icon,
-                contentDescription = label,
-                tint               = tint,
-                modifier           = Modifier.size(20.dp),
-            )
-            Text(text = label, style = type.caption, color = tint)
-        }
-    }
-}
-
-/**
- * Asset-backed nav icon — same shape as [NavIcon] but renders a
- * QuickInk vector drawable from `res/drawable/ic_*.xml`. Used for
- * Library / Search where we have brand-specific icons; Home and
- * Settings still use Material symbols where there's no brand
- * equivalent in the icon set.
- */
-@Composable
-private fun NavIconAsset(
-    drawableId: Int,
-    label: String,
-    active: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalQuickInkColors.current
-    val type = LocalQuickInkTypography.current
-    val tint = if (active) colors.accent else colors.ink
-    val pillBg = if (active) colors.accentSoft else Color.Transparent
-
-    Column(
-        modifier            = modifier.clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Column(
-            modifier = Modifier
-                .background(color = pillBg, shape = RoundedCornerShape(QuickInkRadius.md))
-                .padding(horizontal = QuickInkSpacing.s2, vertical = QuickInkSpacing.s2),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Icon(
-                painter            = painterResource(id = drawableId),
-                contentDescription = label,
-                tint               = tint,
-                modifier           = Modifier.size(20.dp),
-            )
-            Text(text = label, style = type.caption, color = tint)
-        }
-    }
-}
-
-/**
- * The signature ⚡ Zap FAB — coral disc with a top→bottom gradient,
- * lifted ~16dp above the bar's top edge so it reads as a hovering
- * brand mark. Counterpart to iOS's `zapFab`.
- */
-@Composable
-private fun ZapFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val colors = LocalQuickInkColors.current
-    val gradient = Brush.verticalGradient(
-        colors = listOf(colors.accent, colors.accentDeep),
-    )
-    Box(
-        modifier         = modifier,
-        contentAlignment = Alignment.Center,
-    ) {
-        // Canvas ring — bg-coloured disc 8dp larger than the FAB (4dp
-        // ring on each side), with its own drop shadow. Punches through
-        // the glass bar so the lifted brand mark sits on a canvas moat
-        // instead of looking pasted onto the bar surface. Mirror of
-        // iOS's three-layer `zapFab` ZStack.
-        // Canvas ring border-shadow elevation bumped (16→26) and
-        // darkened further (alpha 0.58→0.85) so the lift around the
-        // FAB matches the bar's deeper border-halo treatment. The
-        // ring still uses bg (canvas) fill so the FAB sits on a
-        // moat punched through the glass bar.
-        Box(
-            modifier = Modifier
-                .offset(y = (-16).dp)
-                .size(64.dp)
-                .shadow(
-                    elevation    = 26.dp,
-                    shape        = CircleShape,
-                    clip         = false,
-                    ambientColor = colors.ink.copy(alpha = 0.85f),
-                    spotColor    = colors.ink.copy(alpha = 0.85f),
-                )
-                .clip(CircleShape)
-                .background(colors.bg)
-        )
-        // Gradient FAB disc on top. Accent halo darkened (alpha
-        // 0.55→0.68, elevation 20→24) — slightly more pronounced
-        // coral glow under the brand mark.
-        Box(
-            modifier = Modifier
-                .offset(y = (-16).dp)
-                .size(56.dp)
-                .shadow(
-                    elevation    = 24.dp,
-                    shape        = CircleShape,
-                    clip         = false,
-                    ambientColor = colors.accent.copy(alpha = 0.68f),
-                    spotColor    = colors.accent.copy(alpha = 0.68f),
-                )
-                .clip(CircleShape)
-                .background(brush = gradient, shape = CircleShape)
-                .clickable(onClick = onClick),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector        = Icons.Filled.Bolt,
-                contentDescription = "Scan",
-                tint               = colors.textOnAccent,
-                modifier           = Modifier.size(32.dp),
-            )
-        }
-    }
-}

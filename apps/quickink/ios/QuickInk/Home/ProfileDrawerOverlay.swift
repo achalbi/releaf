@@ -27,6 +27,12 @@ struct ProfileDrawerOverlay: View {
     let profilePhotoUri: String
     let onClose: () -> Void
     let onOpenProfile: () -> Void
+    /// Navigate to the Library tab. Mirrors the Android drawer's
+    /// "Library" row added so the two platforms surface the same
+    /// shortcut set from the avatar drawer.
+    let onOpenLibrary: () -> Void
+    /// Navigate to the Search tab. Same parity as `onOpenLibrary`.
+    let onOpenSearch: () -> Void
     let onOpenSettings: () -> Void
     let onSignOut: () -> Void
 
@@ -55,7 +61,15 @@ struct ProfileDrawerOverlay: View {
     var body: some View {
         HStack(spacing: 0) {
             sheet
-                .frame(maxWidth: 300)
+                // `.frame(width: 300)` (fixed) rather than
+                // `.frame(maxWidth: 300)` (which caps but lets the
+                // sheet shrink to its intrinsic content width). The
+                // SwiftUI intrinsic-size path was rendering the iOS
+                // drawer at ~250pt while Android's `.width(300.dp)`
+                // pinned it at exactly 300dp — same value, different
+                // measurement contract. Pin the iOS frame so the two
+                // platforms hit the same drawer width.
+                .frame(width: 300)
                 .frame(maxHeight: .infinity)
                 .background(QuickInkColors.surface)
 
@@ -84,6 +98,22 @@ struct ProfileDrawerOverlay: View {
                 )
                 DashedInkSeparator()
                 DrawerRow(
+                    glyphTint: QuickInkColors.accent,
+                    glyphSymbol: "doc.text",
+                    label: "Library",
+                    meta:  "all your scans · grid · search",
+                    action: onOpenLibrary
+                )
+                DashedInkSeparator()
+                DrawerRow(
+                    glyphTint: QuickInkColors.accent,
+                    glyphSymbol: "magnifyingglass",
+                    label: "Search",
+                    meta:  "find by OCR text · category",
+                    action: onOpenSearch
+                )
+                DashedInkSeparator()
+                DrawerRow(
                     glyphTint: QuickInkColors.accentDeep,
                     glyphSymbol: "gearshape",
                     label: "Settings",
@@ -101,19 +131,24 @@ struct ProfileDrawerOverlay: View {
 
     // MARK: - Banner header
 
-    /// 175pt + top-inset deep banner: coral-deep background with a
-    /// subtle ruled-paper line pattern drawn behind the avatar row.
-    /// Mirror of Releaf's forest canopy, but the "world" is now a
-    /// page of ruled stationery — same job, different brand.
+    /// 240pt + top-inset deep banner: coral-deep background with a
+    /// subtle ruled-paper line pattern drawn behind a centered avatar
+    /// + name + email column. The earlier layout placed the avatar
+    /// on the leading edge with the name to its right; this revision
+    /// stacks them on the centre axis with the avatar 2× the original
+    /// size (44 → 88pt) so it reads as a "passport-style" identity
+    /// card rather than a leading-aligned chip. Banner height bumped
+    /// 175 → 240pt to accommodate the larger avatar + the stacked
+    /// text without crowding.
     private var bannerHeader: some View {
-        ZStack(alignment: .leading) {
+        ZStack {
             QuickInkColors.accentDeep
             // Faint ruled-paper lines drawn over the coral, so the
             // banner reads as ink-on-page instead of a flat color.
             Canvas { ctx, size in
                 let w = size.width
                 let h = size.height
-                let lineCount = 9
+                let lineCount = 11
                 for i in 1...lineCount {
                     let y = h * CGFloat(i) / CGFloat(lineCount + 1)
                     var line = Path()
@@ -125,9 +160,9 @@ struct ProfileDrawerOverlay: View {
                         style: StrokeStyle(lineWidth: 0.7, lineCap: .round)
                     )
                 }
-                // A small "QI" ink mark in the bottom-right — a tiny
-                // brand stamp echoing how Releaf's banner has tree
-                // silhouettes for personality.
+                // Stylised inkblot in the bottom-right — a tiny brand
+                // stamp. Kept off-axis so it doesn't fight the
+                // centered avatar above.
                 let markRect = CGRect(
                     x: w - 56,
                     y: h - 40,
@@ -135,7 +170,6 @@ struct ProfileDrawerOverlay: View {
                     height: 24
                 )
                 var mark = Path()
-                // Stylised inkblot: a soft squircle.
                 mark.addRoundedRect(in: markRect, cornerSize: CGSize(width: 8, height: 8))
                 ctx.fill(
                     mark,
@@ -143,50 +177,63 @@ struct ProfileDrawerOverlay: View {
                 )
             }
 
-            // Avatar + name — same posture as Releaf.
-            HStack(alignment: .top, spacing: QuickInkSpacing.s3) {
+            // Centered avatar + name + email column. Anchored to the
+            // top of the banner (just below the status-bar inset)
+            // to match the Android mirror's posture.
+            //
+            // VStack spacing widened from s2 → s4 so the larger 132pt
+            // avatar gets visible breathing room before the name —
+            // tight 8pt spacing made the heading kiss the avatar's
+            // bottom edge.
+            VStack(spacing: QuickInkSpacing.s4) {
                 avatarView
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(spacing: 2) {
                     Text(displayName.isEmpty ? "QuickInk" : displayName)
                         .font(QuickInkText.heading)
                         .foregroundStyle(QuickInkColors.textOnAccent)
                         .lineLimit(1)
+                        .multilineTextAlignment(.center)
                     if !email.isEmpty {
                         Text(email)
                             .font(QuickInkText.meta)
                             .foregroundStyle(QuickInkColors.textOnAccent.opacity(0.80))
                             .lineLimit(1)
+                            .multilineTextAlignment(.center)
                     }
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.horizontal, QuickInkSpacing.s5)
+            .padding(.horizontal, QuickInkSpacing.s4)
             .padding(.top, topInset + QuickInkSpacing.s4)
-            .frame(maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(height: 175 + topInset)
+        .frame(height: 240 + topInset)
         .clipped()
     }
 
+    /// Avatar 132pt — bumped again from 88 to give it real presence
+    /// as the banner's anchor. Inner glyph + initial sizes scaled
+    /// proportionally so the figure stays well-balanced inside the
+    /// larger ring (the figure still occupies ~60% of the disc, not
+    /// floating inside an oversized halo).
     @ViewBuilder
     private var avatarView: some View {
         ZStack {
             Circle()
                 .fill(QuickInkColors.accentSoft)
-                .frame(width: 44, height: 44)
+                .frame(width: 132, height: 132)
             if let img = avatarUIImage {
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 44, height: 44)
+                    .frame(width: 132, height: 132)
                     .clipShape(Circle())
             } else if let initial = displayNameInitial {
                 Text(initial)
-                    .font(QuickInkText.heading)
+                    .font(QuickInkFont.serif(54, weight: .light))
                     .foregroundStyle(QuickInkColors.accent)
             } else {
                 Image(systemName: "person.crop.circle.fill")
-                    .font(.system(size: 28))
+                    .font(.system(size: 84))
                     .foregroundStyle(QuickInkColors.accent)
             }
         }

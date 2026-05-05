@@ -47,7 +47,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import app.quickink.mobile.features.settings.SettingsPreferences
 import app.quickink.mobile.features.splash.QuickInkSplash
 import app.quickink.mobile.ui.theme.QuickInkTheme
 
@@ -68,7 +70,22 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         setContent {
-            QuickInkTheme {
+            // Hoist the user's Appearance picks (primary color +
+            // theme mode) up to the activity so the QuickInkTheme
+            // wrapper sees them on every recomposition. The Settings
+            // screen mutates these via callbacks plumbed through
+            // QuickInkRoot — local state + a parallel SP write keeps
+            // the theme reactive across tab switches without a
+            // SharedPreferences observer.
+            val context = LocalContext.current
+            val preferences = remember { SettingsPreferences(context) }
+            var primaryColor by remember { mutableStateOf(preferences.primaryColor) }
+            var themeMode    by remember { mutableStateOf(preferences.themeMode) }
+
+            QuickInkTheme(
+                themeMode    = themeMode,
+                primaryColor = primaryColor,
+            ) {
                 var showSplash by remember { mutableStateOf(true) }
                 if (showSplash) {
                     QuickInkSplash(onFinished = { showSplash = false })
@@ -79,7 +96,18 @@ class MainActivity : ComponentActivity() {
                     // reads from `LocalQuickInkColors` /
                     // `LocalQuickInkTypography`, so the wrapper here is
                     // what makes the whole app look like the mockups.
-                    QuickInkRoot()
+                    QuickInkRoot(
+                        currentPrimaryColor   = primaryColor,
+                        currentThemeMode      = themeMode,
+                        onPrimaryColorChange  = {
+                            primaryColor = it
+                            preferences.primaryColor = it
+                        },
+                        onThemeModeChange     = {
+                            themeMode = it
+                            preferences.themeMode = it
+                        },
+                    )
                 }
             }
         }

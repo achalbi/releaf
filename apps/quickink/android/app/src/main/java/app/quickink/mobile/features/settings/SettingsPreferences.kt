@@ -27,6 +27,8 @@ package app.quickink.mobile.features.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import app.quickink.mobile.ui.theme.PrimaryColor
+import app.quickink.mobile.ui.theme.ThemeMode
 
 class SettingsPreferences(context: Context) {
     private val prefs: SharedPreferences =
@@ -58,7 +60,7 @@ class SettingsPreferences(context: Context) {
      * calls them without rewriting their Google profile.
      */
     var customDisplayName: String
-        get() = prefs.getString(KEY_CUSTOM_DISPLAY_NAME, "") ?: ""
+        get() = prefs.getString(KEY_CUSTOM_DISPLAY_NAME, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_CUSTOM_DISPLAY_NAME, value).apply()
         }
@@ -69,7 +71,7 @@ class SettingsPreferences(context: Context) {
      * cosmetic / for the user's reference.
      */
     var phoneNumber: String
-        get() = prefs.getString(KEY_PHONE_NUMBER, "") ?: ""
+        get() = prefs.getString(KEY_PHONE_NUMBER, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_PHONE_NUMBER, value).apply()
         }
@@ -82,7 +84,7 @@ class SettingsPreferences(context: Context) {
      * survives the original gallery URI being revoked.
      */
     var profilePhotoUri: String
-        get() = prefs.getString(KEY_PROFILE_PHOTO_URI, "") ?: ""
+        get() = prefs.getString(KEY_PROFILE_PHOTO_URI, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_PROFILE_PHOTO_URI, value).apply()
         }
@@ -93,9 +95,70 @@ class SettingsPreferences(context: Context) {
      * for now.
      */
     var personalityPunchline: String
-        get() = prefs.getString(KEY_PERSONALITY_PUNCHLINE, "") ?: ""
+        get() = prefs.getString(KEY_PERSONALITY_PUNCHLINE, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_PERSONALITY_PUNCHLINE, value).apply()
+        }
+
+    /**
+     * MRU list of the user's recent search queries — surfaced as
+     * pills under the Search screen's input. Stored as a single
+     * Unit-Separator-delimited string (a 0x01 control char that no
+     * keyboard can produce) to avoid pulling in a JSON
+     * dependency for ten short strings.
+     *
+     * Reads return newest-first and capped at [RECENT_SEARCHES_MAX].
+     * Writes via [pushRecentSearch] dedupe + cap.
+     */
+    val recentSearches: List<String>
+        get() = prefs.getString(KEY_RECENT_SEARCHES, null)
+            ?.split(RECENT_SEARCH_DELIMITER)
+            ?.filter { it.isNotBlank() }
+            ?.take(RECENT_SEARCHES_MAX)
+            ?: emptyList()
+
+    /**
+     * Push [query] to the front of the recent-searches list, remove
+     * any prior occurrence, cap at [RECENT_SEARCHES_MAX]. Trims
+     * whitespace and ignores empty queries — typing one character
+     * then deleting it shouldn't pollute the pill row.
+     */
+    fun pushRecentSearch(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return
+        val current = recentSearches.filter { !it.equals(trimmed, ignoreCase = true) }
+        val next = (listOf(trimmed) + current).take(RECENT_SEARCHES_MAX)
+        prefs.edit().putString(KEY_RECENT_SEARCHES, next.joinToString(RECENT_SEARCH_DELIMITER.toString())).apply()
+    }
+
+    /** Wipe the recent-searches list. Bound to a "Clear" affordance. */
+    fun clearRecentSearches() {
+        prefs.edit().remove(KEY_RECENT_SEARCHES).apply()
+    }
+
+    /**
+     * User's picked primary color (Coral / Leaf Green / Leaf Yellow /
+     * Leaf Dry). The theme entry point reads this every composition
+     * and resolves the actual `accent` / `accentDeep` from the picked
+     * family's (base, deep) pair. Stored as the enum's `name` so the
+     * keyspace stays stable across renames at the value site.
+     */
+    var primaryColor: PrimaryColor
+        get() = PrimaryColor.fromKey(prefs.getString(KEY_PRIMARY_COLOR, null))
+        set(value) {
+            prefs.edit().putString(KEY_PRIMARY_COLOR, value.key).apply()
+        }
+
+    /**
+     * User's theme override. `System` (default) follows the OS setting;
+     * `Light` / `Dark` force the corresponding mode. The theme entry
+     * point reads this and feeds it to `isSystemInDarkTheme()`-equivalent
+     * resolution.
+     */
+    var themeMode: ThemeMode
+        get() = ThemeMode.fromKey(prefs.getString(KEY_THEME_MODE, null))
+        set(value) {
+            prefs.edit().putString(KEY_THEME_MODE, value.key).apply()
         }
 
     companion object {
@@ -106,5 +169,10 @@ class SettingsPreferences(context: Context) {
         private const val KEY_PHONE_NUMBER        = "phone_number"
         private const val KEY_PROFILE_PHOTO_URI   = "profile_photo_uri"
         private const val KEY_PERSONALITY_PUNCHLINE = "personality_punchline"
+        private const val KEY_RECENT_SEARCHES     = "recent_searches"
+        private const val RECENT_SEARCHES_MAX     = 10
+        private const val RECENT_SEARCH_DELIMITER = '\u0001'
+        private const val KEY_PRIMARY_COLOR       = "primary_color"
+        private const val KEY_THEME_MODE          = "theme_mode"
     }
 }
