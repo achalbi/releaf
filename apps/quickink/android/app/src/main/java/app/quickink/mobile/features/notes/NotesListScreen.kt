@@ -118,7 +118,7 @@ import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
 import app.quickink.mobile.ui.components.DateRangePickerSheet
-import app.quickink.mobile.ui.components.MILLIS_PER_DAY
+import app.quickink.mobile.ui.components.isWithinPickedDateRange
 import app.quickink.mobile.ui.components.formatDateRange
 import app.quickink.mobile.ui.components.rememberQuickInkDateRangePickerState
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
@@ -240,21 +240,9 @@ fun NotesListScreen(
             val needle = activeCategory.lowercase()
             captures.filter { (it.category ?: "").lowercase() == needle }
         }
-        val rangeActive = dateRangeStart != null || dateRangeEnd != null
-        if (!rangeActive) return@remember byCategory  // DAO already returns newest-first; nothing further to do.
+        if (dateRangeStart == null && dateRangeEnd == null) return@remember byCategory  // DAO already returns newest-first; nothing further to do.
 
-        // End is widened to "end of day" so a single-day pick (start
-        // == end == midnight) still matches captures from later in
-        // the same calendar day.
-        val rangeEndExclusive = dateRangeEnd?.let { it + MILLIS_PER_DAY }
-        byCategory.filter { capture ->
-            val instant = runCatching { Instant.parse(capture.createdAt) }.getOrNull()
-                ?: return@filter false
-            val captureMillis = instant.toEpochMilli()
-            val afterStart = dateRangeStart?.let { captureMillis >= it } ?: true
-            val beforeEnd = rangeEndExclusive?.let { captureMillis < it } ?: true
-            afterStart && beforeEnd
-        }
+        byCategory.filter { isWithinPickedDateRange(it.createdAt, dateRangeStart, dateRangeEnd) }
     }
 
     val visibleCaptures = remember(filteredSorted, visibleLimit) {

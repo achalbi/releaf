@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -59,6 +60,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.quickink.mobile.QUICKINK_APP_VERSION
 import app.quickink.mobile.QuickInkApp
+import app.quickink.mobile.data.sync.QuickInkRestoreWorker
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.data.sync.QuickInkSyncWorker
 import app.quickink.mobile.features.nav.NavTab
@@ -138,19 +140,28 @@ fun SettingsScreen(
         workManager.getWorkInfosForUniqueWorkFlow(QuickInkSyncWorker.ONESHOT_WORK_NAME)
     }.collectAsState(initial = emptyList())
     val restoreWorkInfos by remember(workManager) {
-        workManager.getWorkInfosForUniqueWorkFlow(
-            app.quickink.mobile.data.sync.QuickInkRestoreWorker.ONESHOT_WORK_NAME
-        )
+        workManager.getWorkInfosForUniqueWorkFlow(QuickInkRestoreWorker.ONESHOT_WORK_NAME)
     }.collectAsState(initial = emptyList())
-    val isWorkerRunning: Boolean = (syncWorkInfos + restoreWorkInfos).any {
+    val isSyncWorkerRunning: Boolean = syncWorkInfos.any {
         it.state == WorkInfo.State.RUNNING
     }
+    val runningSyncInfo = syncWorkInfos.firstOrNull {
+        it.state == WorkInfo.State.RUNNING
+    }
+    val isRestoreWorkerRunning: Boolean = restoreWorkInfos.any {
+        it.state == WorkInfo.State.RUNNING
+    }
+    val runningRestoreInfo = restoreWorkInfos.firstOrNull {
+        it.state == WorkInfo.State.RUNNING
+    }
+    val isWorkerRunning: Boolean = isSyncWorkerRunning || isRestoreWorkerRunning
     // Tap-ack window: when the user taps Sync now we set this to
     // ~6s in the future; until that timestamp passes, the badge
     // stays on regardless of WorkInfo state. After the window
     // expires, we hand off to the WorkInfo-RUNNING signal. 6s is a
     // safe upper bound on `setExpedited` dispatch latency.
     var tapAckUntilMs by remember { mutableStateOf(0L) }
+    var tapAckLabel by remember { mutableStateOf("Syncing now…") }
     var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
     androidx.compose.runtime.LaunchedEffect(tapAckUntilMs) {
         // Only spin while the ack window is open — once it closes
@@ -163,6 +174,39 @@ fun SettingsScreen(
     }
     val isTapAckActive = nowMs < tapAckUntilMs
     val isSyncingFlash: Boolean = isTapAckActive || isWorkerRunning
+    val activeWorkLabel = when {
+        isRestoreWorkerRunning -> "Restoring…"
+        isSyncWorkerRunning    -> "Syncing now…"
+        else                   -> tapAckLabel
+    }
+    val syncProgress: RestoreProgress? = runningSyncInfo?.let {
+        RestoreProgress.fromSync(it)
+    } ?: if (isTapAckActive && tapAckLabel == "Syncing now…") {
+        RestoreProgress(
+            title = "Backup queued",
+            phase = QuickInkSyncWorker.SYNC_PROGRESS_PHASE_QUEUED,
+            label = "Waiting to start backup…",
+            percent = 0,
+            logTitle = "Backup log",
+            logs = listOf("Backup request queued."),
+        )
+    } else {
+        null
+    }
+    val restoreProgress: RestoreProgress? = runningRestoreInfo?.let {
+        RestoreProgress.fromRestore(it)
+    } ?: if (isTapAckActive && tapAckLabel == "Restoring…") {
+        RestoreProgress(
+            title = "Restore queued",
+            phase = QuickInkRestoreWorker.RESTORE_PROGRESS_PHASE_QUEUED,
+            label = "Waiting to start restore…",
+            percent = 0,
+            logTitle = "Restore log",
+            logs = listOf("Restore request queued."),
+        )
+    } else {
+        null
+    }
 
     val authState by authStore.state.collectAsState()
 
@@ -284,6 +328,7 @@ fun SettingsScreen(
                     timestampIso  = lastSyncRow?.value,
                     pendingCount  = pendingCount,
                     isSyncingFlash = isSyncingFlash,
+                    activeLabel   = activeWorkLabel,
                 )
                 // Surface a "needs re-auth" banner when Drive has
                 // been rejecting the token (401/403). The worker
@@ -315,6 +360,7 @@ fun SettingsScreen(
                                 // is driven solely by WorkInfo.RUNNING,
                                 // so a stuck-in-retry worker doesn't
                                 // pin the spinner on forever.
+                                tapAckLabel = "Syncing now…"
                                 tapAckUntilMs = System.currentTimeMillis() + 6_000L
                             }
                         },
@@ -338,7 +384,19 @@ fun SettingsScreen(
                             // its own unique work name + REPLACE
                             // policy so a fresh tap always wins.
                             if (isSignedIn) {
+                                coroutineScope.launch {
+                                    runCatching {
+                                        syncStateDao.upsert(
+                                            SyncStateEntity(
+                                                key       = SyncStateKeys.LAST_RESTORE_OUTCOME,
+                                                value     = "",
+                                                updatedAt = IsoClock.nowIso(),
+                                            )
+                                        )
+                                    }
+                                }
                                 QuickInkSyncScheduler.requestRestore(context)
+                                tapAckLabel = "Restoring…"
                                 tapAckUntilMs = System.currentTimeMillis() + 6_000L
                             }
                         },
@@ -351,6 +409,11 @@ fun SettingsScreen(
                         enabled  = isSignedIn && !isSyncingFlash,
                         modifier = Modifier.weight(1f),
                     )
+                }
+                if (restoreProgress != null) {
+                    DriveProgressBanner(progress = restoreProgress)
+                } else if (syncProgress != null) {
+                    DriveProgressBanner(progress = syncProgress)
                 }
                 // Restore-outcome banner — visible after a Restore
                 // run completes. Surfaces "Restored 73 items, 11
@@ -620,6 +683,180 @@ private data class RestoreOutcome(
     }
 }
 
+private data class RestoreProgress(
+    val title: String,
+    val phase: String,
+    val label: String,
+    val percent: Int,
+    val logTitle: String,
+    val logs: List<String> = emptyList(),
+) {
+    val fraction: Float get() = percent.coerceIn(0, 100) / 100f
+
+    companion object {
+        fun fromRestore(info: WorkInfo): RestoreProgress {
+            val progress = info.progress
+            val phase = progress.getString(QuickInkRestoreWorker.RESTORE_PROGRESS_PHASE_KEY)
+                ?: QuickInkRestoreWorker.RESTORE_PROGRESS_PHASE_PREPARING
+            val label = progress.getString(QuickInkRestoreWorker.RESTORE_PROGRESS_LABEL_KEY)
+                ?: "Preparing Drive restore…"
+            val percent = progress.getInt(
+                QuickInkRestoreWorker.RESTORE_PROGRESS_PERCENT_KEY,
+                3,
+            )
+            val logs = progress
+                .getString(QuickInkRestoreWorker.RESTORE_PROGRESS_LOG_KEY)
+                ?.lineSequence()
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toList()
+                .orEmpty()
+            return RestoreProgress(
+                title = restoreTitle(phase),
+                phase = phase,
+                label = label,
+                percent = percent,
+                logTitle = "Restore log",
+                logs = logs,
+            )
+        }
+
+        fun fromSync(info: WorkInfo): RestoreProgress {
+            val progress = info.progress
+            val phase = progress.getString(QuickInkSyncWorker.SYNC_PROGRESS_PHASE_KEY)
+                ?: QuickInkSyncWorker.SYNC_PROGRESS_PHASE_PREPARING
+            val label = progress.getString(QuickInkSyncWorker.SYNC_PROGRESS_LABEL_KEY)
+                ?: "Preparing Drive backup…"
+            val percent = progress.getInt(
+                QuickInkSyncWorker.SYNC_PROGRESS_PERCENT_KEY,
+                3,
+            )
+            val logs = progress
+                .getString(QuickInkSyncWorker.SYNC_PROGRESS_LOG_KEY)
+                ?.lineSequence()
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toList()
+                .orEmpty()
+            return RestoreProgress(
+                title = syncTitle(phase),
+                phase = phase,
+                label = label,
+                percent = percent,
+                logTitle = "Backup log",
+                logs = logs,
+            )
+        }
+
+        private fun restoreTitle(phase: String): String = when (phase) {
+            QuickInkRestoreWorker.RESTORE_PROGRESS_PHASE_QUEUED    -> "Restore queued"
+            QuickInkRestoreWorker.RESTORE_PROGRESS_PHASE_METADATA  -> "Restoring records"
+            QuickInkRestoreWorker.RESTORE_PROGRESS_PHASE_BINARIES  -> "Downloading files"
+            QuickInkRestoreWorker.RESTORE_PROGRESS_PHASE_CLEANUP   -> "Checking Drive"
+            QuickInkRestoreWorker.RESTORE_PROGRESS_PHASE_FINISHING -> "Finishing restore"
+            QuickInkRestoreWorker.RESTORE_PROGRESS_PHASE_DONE      -> "Restore complete"
+            else                                                   -> "Preparing restore"
+        }
+
+        private fun syncTitle(phase: String): String = when (phase) {
+            QuickInkSyncWorker.SYNC_PROGRESS_PHASE_QUEUED    -> "Backup queued"
+            QuickInkSyncWorker.SYNC_PROGRESS_PHASE_BINARIES  -> "Uploading files"
+            QuickInkSyncWorker.SYNC_PROGRESS_PHASE_METADATA  -> "Updating Drive"
+            QuickInkSyncWorker.SYNC_PROGRESS_PHASE_DONE      -> "Backup complete"
+            else                                             -> "Preparing backup"
+        }
+    }
+}
+
+@Composable
+private fun DriveProgressBanner(progress: RestoreProgress) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    var expanded by remember { mutableStateOf(false) }
+    val percent = progress.percent.coerceIn(0, 100)
+    val barFraction = progress.fraction.coerceIn(0.02f, 1f)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(colors.accentSoft.copy(alpha = 0.35f))
+            .border(1.dp, colors.accent.copy(alpha = 0.35f), RoundedCornerShape(QuickInkRadius.md))
+            .padding(QuickInkSpacing.s4),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text     = progress.title,
+                style    = type.body,
+                color    = colors.ink,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text  = "$percent%",
+                style = type.meta,
+                color = colors.accentDeep,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(QuickInkRadius.pill))
+                .background(colors.borderSoft),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(barFraction)
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(QuickInkRadius.pill))
+                    .background(colors.accent),
+            )
+        }
+        Text(text = progress.label, style = type.meta, color = colors.inkSoft)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(QuickInkRadius.md))
+                .clickable { expanded = !expanded }
+                .padding(vertical = QuickInkSpacing.s2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text     = if (expanded) "Hide log" else progress.logTitle,
+                style    = type.label,
+                color    = colors.accentDeep,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector        = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint               = colors.accentDeep,
+                modifier           = Modifier.size(18.dp),
+            )
+        }
+        if (expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(QuickInkRadius.md))
+                    .background(colors.surface.copy(alpha = 0.72f))
+                    .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
+                    .padding(QuickInkSpacing.s3),
+                verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1),
+            ) {
+                val lines = progress.logs.ifEmpty { listOf(progress.label) }
+                for (line in lines) {
+                    Text(text = "- $line", style = type.meta, color = colors.inkSoft)
+                }
+            }
+        }
+    }
+}
+
 /**
  * Transient banner that surfaces the result of the most recent
  * [QuickInkRestoreWorker] run — number of items restored, orphan
@@ -641,8 +878,7 @@ private fun RestoreOutcomeBanner(
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
 
-    val isError = outcome.status != "ok"
-    val tint    = if (isError) colors.warning else colors.accent
+    val tint    = if (outcome.status == "ok") colors.success else colors.warning
     val border  = tint.copy(alpha = 0.55f)
     val bg      = tint.copy(alpha = 0.12f)
 
@@ -656,7 +892,7 @@ private fun RestoreOutcomeBanner(
         "ok" -> buildString {
             append("Restored ")
             append(outcome.downloaded)
-            append(" item")
+            append(" scan/import item")
             if (outcome.downloaded != 1) append('s')
             append(" from Drive.")
             if (outcome.applyFailed > 0) {
@@ -762,6 +998,7 @@ private fun LastSyncRow(
     timestampIso: String?,
     pendingCount: Int,
     isSyncingFlash: Boolean = false,
+    activeLabel: String = "Syncing now…",
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
@@ -786,7 +1023,7 @@ private fun LastSyncRow(
                     .padding(end = QuickInkSpacing.s2),
             )
             Text(
-                text     = "Syncing now…",
+                text     = activeLabel,
                 style    = type.meta,
                 color    = colors.accent,
             )

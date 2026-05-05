@@ -394,6 +394,17 @@ class QuickInkApp : Application() {
         val prefs = SettingsPreferences(this)
         if (!prefs.driveBackupEnabled) return
 
+        // Piggyback the foreground refresh on every pending-push
+        // tick. The on-resume hook only fires once per Activity
+        // lifecycle event, so a session that expires while the
+        // user is sitting in the app continuously (no resume
+        // events) never gets refreshed and the next sync 401s.
+        // Doing it here covers that gap: every 60s while
+        // foreground we re-check the token's expiry. The hook's
+        // own threshold + single-flight guards keep this cheap
+        // when the token is fresh.
+        topActivityRef?.get()?.let { maybeRefreshTokenInForeground(it) }
+
         val dirty = countLocalDirty(authState.session.userId)
         // Always write — including 0 — so the Home pill clears
         // promptly when the user signs out / pauses backup / a sync
@@ -436,18 +447,21 @@ class QuickInkApp : Application() {
     }
 
     /**
-     * Aggregate dirty-row count across every entity QuickInk pushes
-     * to Drive. Computed by reading each DAO's `dirtyRows()` method
-     * (already-cached suspend reads, all returning small lists in
-     * practice). Returns 0 on any read failure — better than
-     * erroring out the loop entirely.
+     * Count of dirty user-visible items pending sync. Counts only
+     * captures (scans + imports) — what the user thinks of as "an
+     * item I made". OCR result rows and category rows are dirty
+     * too whenever a capture changes, but they're derived metadata
+     * the user didn't create directly; including them in the pill
+     * over-counts (a single 2-page scan becomes "3 pending" when
+     * it's really one scan). The sync worker still pushes those
+     * derived rows on every pass; this number drives the
+     * Settings + Home pending-count surface only.
+     *
+     * Returns 0 on any read failure — better than erroring out
+     * the loop entirely.
      */
     private suspend fun countLocalDirty(userId: String): Int = try {
-        val notepad   = database.notepadDao().dirtyRows().count { it.userId == userId }
-        val captures  = database.captureDao().dirtyRows().count { it.userId == userId }
-        val ocr       = database.ocrResultDao().dirtyRows().size
-        val category  = database.categoryDao().dirtyRows().count { it.userId == userId }
-        notepad + captures + ocr + category
+        database.captureDao().dirtyRows().count { it.userId == userId }
     } catch (e: Exception) {
         Log.w("QuickInkSync", "countLocalDirty failed: $e")
         0
@@ -558,14 +572,68 @@ class QuickInkApp : Application() {
      */
     private var hasClearedLegacyPeriodicWork = false
 
+    /**
+     * Tracks the auth state observed on the previous emission so we
+     * can detect "user just completed a fresh sign-in" — i.e. a
+     * transition into [AuthState.SignedIn] from anything else, OR a
+     * SignedIn→SignedIn switch with a different `userId` (account
+     * change). Used to clear a stale `AUTH_REJECTED` banner whose
+     * underlying token has just been replaced; without this the
+     * banner can persist after Sign out + Sign in until the next
+     * worker pass succeeds, which is confusing when the user has
+     * "already done what the banner asked".
+     *
+     * `null` on the very first emission of this process so a
+     * SignedIn restored from prefs at app start does NOT clear the
+     * flag — that flag may be a legitimate auth issue from the
+     * previous run that the user still needs to address.
+     */
+    private var previousAuthState: AuthState? = null
+
     private fun observeAuthForSyncLifecycle() {
         // StateFlow already dedupes by equality — no
         // distinctUntilChanged needed (and the operator is
         // deprecated on StateFlow as a no-op).
         authStore.state
             .onEach { state ->
+                val prev = previousAuthState
+                previousAuthState = state
                 when (state) {
                     is AuthState.SignedIn -> {
+                        // Fresh sign-in detector — see `previousAuthState`
+                        // doc. Clears any stale AUTH_REJECTED banner so the
+                        // user doesn't see "needs re-auth" right after they
+                        // re-authed. If Drive is still rejecting (real
+                        // Cloud-side issue, not a stale token), the next
+                        // worker pass writes AUTH_REJECTED again — same
+                        // surface as before, just no longer a phantom
+                        // carryover from the previous session.
+                        val isFreshSignIn = when (prev) {
+                            null                                              -> false
+                            is AuthState.SignedOut, is AuthState.SigningIn,
+                            is AuthState.Failed                               -> true
+                            is AuthState.SignedIn                             ->
+                                prev.session.userId != state.session.userId
+                        }
+                        if (isFreshSignIn) {
+                            Log.i("QuickInkSync",
+                                "auth: fresh SignedIn detected — clearing any " +
+                                "stale AUTH_REJECTED banner")
+                            appScope.launch {
+                                runCatching {
+                                    database.syncStateDao().upsert(
+                                        SyncStateEntity(
+                                            key       = SyncStateKeys.LAST_SYNC_ERROR_CODE,
+                                            value     = "",
+                                            updatedAt = IsoClock.nowIso(),
+                                        )
+                                    )
+                                }.onFailure {
+                                    Log.w("QuickInkSync",
+                                        "auth: clearAuthRejected on fresh sign-in failed: $it")
+                                }
+                            }
+                        }
                         // Sync is now USER-INITIATED ONLY. We
                         // intentionally don't schedule a periodic
                         // worker or kick an immediate sync on

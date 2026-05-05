@@ -138,30 +138,6 @@ class AuthStore private constructor(
             return AuthState.SignedOut
         }
 
-        // [DRIVE-401-DIAG] Throwaway diagnostic — REMOVE before merge.
-        // Logs the cached access token's prefix + expiry so we can tell
-        // which 401/403 path is firing on this device:
-        //   - prefix "stub-access" → stub-poisoning from an earlier
-        //     dev/preview build. AuthStore.restore should have cleared
-        //     the prefs but didn't, and the worker is now sending the
-        //     literal stub string to Drive on every pass.
-        //   - prefix "ya29." + expiresAt in the past → real token, just
-        //     expired. Foreground refresh hook is the fix.
-        //   - prefix "ya29." + expiresAt in the future → either Drive
-        //     scope was never granted (user skipped the checkbox), or
-        //     the grant was revoked server-side. Sign-out + re-consent
-        //     is the only path.
-        // Filter with: adb logcat -s QuickInkAuth
-        Log.w(
-            "QuickInkAuth",
-            "restore: tokenPrefix=${access.take(12)}… " +
-                "userIdPrefix=${userId.take(8)}… " +
-                "emailDomain=${email.substringAfter('@', missingDelimiterValue = "?")} " +
-                "expiresAtEpoch=${expiresAt.epochSecond} " +
-                "nowEpoch=${Instant.now().epochSecond} " +
-                "secondsUntilExpiry=${expiresAt.epochSecond - Instant.now().epochSecond}"
-        )
-
         return AuthState.SignedIn(
             GoogleAuthSession(
                 userId = userId,

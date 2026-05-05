@@ -65,9 +65,11 @@ import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -94,6 +96,7 @@ import app.quickink.mobile.data.category.CategoryEntity
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
+import app.quickink.mobile.data.sync.QuickInkSyncWorker
 import app.quickink.mobile.features.scan.QuickCaptureScreen
 import app.quickink.mobile.features.scan.ScanFlowController
 import coil.compose.AsyncImage
@@ -107,6 +110,9 @@ import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import app.quickink.mobile.ui.theme.quickInkLinedPaper
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.sync.SyncStateKeys
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import kotlinx.coroutines.delay
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
@@ -217,10 +223,36 @@ fun HomeScreen(
         .observe(SyncStateKeys.LOCAL_DIRTY_COUNT)
         .collectAsState(initial = null)
     val localDirtyCount = localDirtyRow?.value?.toIntOrNull() ?: 0
-    val syncPillState: SyncPillState = if (pendingCount > 0) {
-        SyncPillState.Pending(pendingCount)
-    } else {
-        SyncPillState.Synced(relativeSyncTimestamp(lastSyncRow?.value))
+
+    // Same WorkManager signal Settings uses for "Sync now" progress.
+    // The tap-ack timestamp bridges the brief enqueue-to-running
+    // window so the home pill flips immediately when tapped.
+    val workManager = remember(context) { WorkManager.getInstance(context) }
+    val syncWorkInfos by remember(workManager) {
+        workManager.getWorkInfosForUniqueWorkFlow(QuickInkSyncWorker.ONESHOT_WORK_NAME)
+    }.collectAsState(initial = emptyList())
+    val runningSyncInfo = syncWorkInfos.firstOrNull {
+        it.state == WorkInfo.State.RUNNING
+    }
+    var syncTapAckUntilMs by remember { mutableStateOf(0L) }
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(syncTapAckUntilMs) {
+        while (System.currentTimeMillis() < syncTapAckUntilMs) {
+            nowMs = System.currentTimeMillis()
+            delay(250L)
+        }
+        nowMs = System.currentTimeMillis()
+    }
+    val isSyncTapAckActive = nowMs < syncTapAckUntilMs
+    val isHomeSyncInFlight = runningSyncInfo != null || isSyncTapAckActive
+    val homeSyncProgressPercent = runningSyncInfo
+        ?.progress
+        ?.getInt(QuickInkSyncWorker.SYNC_PROGRESS_PERCENT_KEY, 0)
+        ?.coerceIn(0, 100)
+    val syncPillState: SyncPillState = when {
+        isHomeSyncInFlight -> SyncPillState.Syncing
+        pendingCount > 0   -> SyncPillState.Pending(pendingCount)
+        else               -> SyncPillState.Synced(relativeSyncTimestamp(lastSyncRow?.value))
     }
 
     Box(modifier = Modifier.fillMaxSize().quickInkDotGridBackground()) {
@@ -248,11 +280,16 @@ fun HomeScreen(
             // (REPLACE policy via `requestUserSync`). Visible only
             // when there's actual local work to push, so the home
             // surface stays clean for the common up-to-date state.
-            if (localDirtyCount > 0) {
+            if (localDirtyCount > 0 || isHomeSyncInFlight) {
                 Spacer(Modifier.size(QuickInkSpacing.s4))
                 PendingSyncPill(
-                    count   = localDirtyCount,
-                    onTap   = { QuickInkSyncScheduler.requestUserSync(context) },
+                    count           = localDirtyCount,
+                    syncing         = isHomeSyncInFlight,
+                    progressPercent = homeSyncProgressPercent,
+                    onTap           = {
+                        QuickInkSyncScheduler.requestUserSync(context)
+                        syncTapAckUntilMs = System.currentTimeMillis() + 6_000L
+                    },
                 )
             }
             Spacer(Modifier.size(QuickInkSpacing.s5))
@@ -454,16 +491,27 @@ private fun HomeHeader(
  * surface of that mechanism).
  */
 @Composable
-private fun PendingSyncPill(count: Int, onTap: () -> Unit) {
+private fun PendingSyncPill(
+    count: Int,
+    syncing: Boolean,
+    progressPercent: Int?,
+    onTap: () -> Unit,
+) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
+    val boundedPercent = progressPercent
+        ?.coerceIn(0, 100)
+        ?.takeIf { syncing && it > 0 }
+    val barFraction = ((boundedPercent ?: 3).coerceIn(3, 100)) / 100f
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(QuickInkRadius.pill))
             .background(colors.accentSoft)
             .border(1.dp, colors.accent.copy(alpha = 0.55f), RoundedCornerShape(QuickInkRadius.pill))
-            .clickable(onClick = onTap)
+            .let { base ->
+                if (syncing) base else base.clickable(onClick = onTap)
+            }
             .padding(horizontal = QuickInkSpacing.s4, vertical = QuickInkSpacing.s3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -474,30 +522,74 @@ private fun PendingSyncPill(count: Int, onTap: () -> Unit) {
                 .background(colors.accent),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text  = if (count > 99) "99+" else count.toString(),
-                style = type.label,
-                color = colors.textOnAccent,
-            )
+            if (syncing) {
+                CircularProgressIndicator(
+                    modifier    = Modifier.size(16.dp),
+                    color       = colors.textOnAccent,
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                Text(
+                    text  = if (count > 99) "99+" else count.toString(),
+                    style = type.label,
+                    color = colors.textOnAccent,
+                )
+            }
         }
         Spacer(Modifier.size(QuickInkSpacing.s3))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text  = if (count == 1) "1 item pending" else "$count items pending",
+                text  = if (syncing) {
+                    "Backing up to Drive"
+                } else if (count == 1) {
+                    "1 item pending"
+                } else {
+                    "$count items pending"
+                },
                 style = type.body,
                 color = colors.ink,
             )
             Text(
-                text  = "Tap to back up to Drive now",
+                text  = if (syncing) {
+                    boundedPercent?.let { "$it% complete" } ?: "Syncing now…"
+                } else {
+                    "Tap to back up to Drive now"
+                },
                 style = type.meta,
                 color = colors.inkSoft,
             )
+            if (syncing) {
+                Spacer(Modifier.size(QuickInkSpacing.s2))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(QuickInkRadius.pill))
+                        .background(colors.borderSoft),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(barFraction)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(QuickInkRadius.pill))
+                            .background(colors.accent),
+                    )
+                }
+            }
         }
-        Text(
-            text  = "Sync →",
-            style = type.label,
-            color = colors.accent,
-        )
+        if (!syncing) {
+            Text(
+                text  = "Sync →",
+                style = type.label,
+                color = colors.accent,
+            )
+        } else if (boundedPercent != null) {
+            Text(
+                text  = "$boundedPercent%",
+                style = type.label,
+                color = colors.accent,
+            )
+        }
     }
 }
 
@@ -903,4 +995,3 @@ private fun CategoryTile(
         )
     }
 }
-

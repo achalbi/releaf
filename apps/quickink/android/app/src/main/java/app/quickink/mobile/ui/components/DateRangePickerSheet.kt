@@ -71,15 +71,46 @@ import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
 import java.time.Instant
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 /**
- * One day in milliseconds — used to widen the user-selected end-of-
- * range to "end of day" so a single-day range (start == end) still
- * matches captures created at any hour that day. Material3's
- * `DateRangePicker` returns midnight UTC for both endpoints.
+ * Decide whether a capture's UTC ISO-8601 timestamp falls inside the
+ * range the user picked. Compares **local** calendar dates so the
+ * filter matches what the user sees on their device:
+ *
+ *  - The picker returns midnight UTC for each endpoint, but the user
+ *    picked those cells thinking "May 4 in my calendar", not "the
+ *    24-hour UTC window starting at 00:00Z May 4". We convert each
+ *    endpoint to its UTC `LocalDate` — which is the date the user
+ *    visually picked.
+ *  - The capture's instant is converted to the device's local zone
+ *    before extracting its date. Without this, a capture created at
+ *    02:00 IST (= 20:30 UTC of the previous day) would be bucketed
+ *    against the previous calendar day and leak into "yesterday"
+ *    filters.
+ *
+ * Returns `true` when no range is active. Returns `false` if the
+ * timestamp string can't be parsed (corrupted row).
  */
-const val MILLIS_PER_DAY: Long = 24L * 60L * 60L * 1000L
+fun isWithinPickedDateRange(
+    createdAtIso: String,
+    startMillis: Long?,
+    endMillis: Long?,
+): Boolean {
+    if (startMillis == null && endMillis == null) return true
+    val instant = runCatching { Instant.parse(createdAtIso) }.getOrNull() ?: return false
+    val captureDate = instant.atZone(ZoneId.systemDefault()).toLocalDate()
+    val startDate = startMillis?.let {
+        Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()
+    }
+    val endDate = endMillis?.let {
+        Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()
+    }
+    val afterStart = startDate?.let { !captureDate.isBefore(it) } ?: true
+    val beforeEnd = endDate?.let { !captureDate.isAfter(it) } ?: true
+    return afterStart && beforeEnd
+}
 
 /**
  * Convenience helper — `rememberDateRangePickerState` with our

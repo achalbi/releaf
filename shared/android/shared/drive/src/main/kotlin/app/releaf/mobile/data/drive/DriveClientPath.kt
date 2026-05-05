@@ -79,6 +79,37 @@ suspend fun DriveClient.uploadBinaryAtPath(
 }
 
 /**
+ * Look up the [DriveFile] at [relativePath] without downloading. Walks
+ * the folder tree using `listChildren` and returns the leaf file (if
+ * one exists with that name and isn't a folder), or `null` when any
+ * folder along the path is missing or no file with the leaf name is
+ * present. Useful for "I expect a file to be at this conventional
+ * path; do I have its id?" — e.g. recovering a lost
+ * `pdf_drive_file_id` link by searching the canonical layout the
+ * uploader writes to.
+ */
+suspend fun DriveClient.findFileAtPath(
+    relativePath: String,
+    rootFolderId: String,
+    accessToken: String,
+): DriveFile? {
+    val segments = relativePath.split('/').filter { it.isNotEmpty() }
+    if (segments.isEmpty()) return null
+
+    var currentId = rootFolderId
+    for (i in 0 until segments.size - 1) {
+        val name = segments[i]
+        val folder = listChildren(currentId, accessToken)
+            .firstOrNull { it.name == name && it.isFolder }
+            ?: return null
+        currentId = folder.id
+    }
+    val filename = segments.last()
+    return listChildren(currentId, accessToken)
+        .firstOrNull { it.name == filename && !it.isFolder }
+}
+
+/**
  * Download the bytes at [relativePath]. Returns null when any folder
  * along the path is missing, or when the leaf file doesn't exist —
  * matches the "not found" contract the sync worker expects.
@@ -138,6 +169,10 @@ suspend fun DriveClient.trashAtPath(
     return try {
         trash(file.id, accessToken)
         true
+    } catch (e: DriveError.Unauthenticated) {
+        throw e
+    } catch (e: DriveError.RateLimited) {
+        throw e
     } catch (_: DriveError) {
         false
     }

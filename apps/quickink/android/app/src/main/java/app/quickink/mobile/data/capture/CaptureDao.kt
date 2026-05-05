@@ -238,17 +238,20 @@ interface CaptureDao {
 
     /**
      * Captures whose category contains the substring (case-
-     * insensitive). Used as the "fast" pass of search. Limited so
-     * the result list stays bounded on a query like "i".
+     * insensitive, space-insensitive). Used as the "fast" pass of
+     * search. Spaces are stripped from both sides of the comparison
+     * so a category named "todo" matches a search for "to do" (and
+     * vice versa). Returns every match — the UI uses LazyColumn so
+     * render cost stays bounded by the visible window, not the
+     * total row count.
      */
     @Query("""
         SELECT * FROM captures
         WHERE user_id = :userId
           AND deleted_at IS NULL
           AND category IS NOT NULL
-          AND lower(category) LIKE lower(:like)
+          AND replace(lower(category), ' ', '') LIKE replace(lower(:like), ' ', '')
         ORDER BY created_at DESC
-        LIMIT 50
     """)
     suspend fun searchByCategory(userId: String, like: String): List<CaptureEntity>
 

@@ -56,12 +56,14 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import app.quickink.mobile.QUICKINK_APP_VERSION
 import app.quickink.mobile.QuickInkApp
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.drive.DriveError
 import app.releaf.mobile.data.sync.DeviceIdentity
+import app.releaf.mobile.data.sync.DrivePath
 import app.releaf.mobile.data.sync.SyncErrorCodes
 import app.releaf.mobile.data.sync.SyncRepository
 import app.releaf.mobile.data.sync.SyncStateEntity
@@ -73,9 +75,16 @@ class QuickInkRestoreWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
 
+    private val restoreLogLines = mutableListOf<String>()
+
     override suspend fun doWork(): Result {
         val app = applicationContext as QuickInkApp
         Log.i(TAG, "restore.doWork: starting restore pass")
+        writeRestoreProgress(
+            phase = RESTORE_PROGRESS_PHASE_PREPARING,
+            label = "Preparing Drive restore…",
+            percent = 3,
+        )
 
         // ---- Gate 1: signed-in? ----
         val authState = app.authStore.state.value
@@ -125,6 +134,11 @@ class QuickInkRestoreWorker(
         return try {
             // ---- Phase 1: JSON metadata pull ----
             Log.i(TAG, "restore: starting metadata pass")
+            writeRestoreProgress(
+                phase = RESTORE_PROGRESS_PHASE_METADATA,
+                label = "Restoring notes and scan records…",
+                percent = 15,
+            )
             val result = syncRepository.restore(
                 deviceId    = DeviceIdentity.get(applicationContext),
                 accessToken = session.accessToken,
@@ -133,16 +147,28 @@ class QuickInkRestoreWorker(
                 "downloaded=${result.downloaded} " +
                 "applyFailed=${result.applyFailed} " +
                 "versionBlocked=${result.versionBlocked}")
+            val restoredItems = result.downloadedUpsertsByKind[DrivePath.KIND_CAPTURE] ?: 0
+            writeRestoreProgress(
+                phase = RESTORE_PROGRESS_PHASE_METADATA,
+                label = "Restored $restoredItems scan/import item${if (restoredItems == 1) "" else "s"}.",
+                percent = if (result.versionBlocked) 100 else 45,
+            )
 
             if (result.versionBlocked) {
                 // Remote manifest is on a newer major schema than this
                 // build. Retrying won't help — the user has to update
                 // the app. Stop WorkManager retries.
                 Log.w(TAG, "restore: result=FAILURE (version-blocked by future schema)")
+                writeRestoreProgress(
+                    phase = RESTORE_PROGRESS_PHASE_DONE,
+                    label = "Restore blocked by a newer backup.",
+                    percent = 100,
+                    logLine = "Restore blocked: Drive backup was written by a newer app version.",
+                )
                 writeRestoreOutcome(
                     app          = app,
                     status       = RESTORE_STATUS_VERSION_BLOCKED,
-                    downloaded   = result.downloaded,
+                    downloaded   = restoredItems,
                     applyFailed  = result.applyFailed,
                     orphanFound  = 0,
                     orphanCleaned = 0,
@@ -169,18 +195,16 @@ class QuickInkRestoreWorker(
             // For every active capture whose row has a Drive file id
             // but no readable local file, pull the bytes into
             // AttachmentStorage and rewrite pdf_uri / preview_uri.
-            // Best-effort: per-row failures are swallowed inside
-            // restorePending so a single bad download doesn't block
-            // the rest. Any outer-level throw (network down, Drive
-            // 401) is caught here and the worker reports retry —
-            // the metadata phase already succeeded so the rows are
-            // durable; the next pass picks up the missing binaries.
+            // Per-row non-auth failures are counted and surfaced in
+            // the restore outcome; auth and rate-limit errors bubble
+            // out so Settings shows the right recovery path instead
+            // of reporting a false success.
             //
             // Without this phase, fresh-device restores leave the
             // user with a Library full of captures whose PDFs aren't
             // on disk yet. Tapping any capture lands on
-            // "open failed: ENOENT" until QuickInkSyncWorker's next
-            // periodic tick (15+ minutes later) runs the same call.
+            // "open failed: ENOENT" until another explicit restore
+            // or an on-demand detail-screen heal runs the same call.
             val binarySync = QuickInkBinarySync(
                 context            = applicationContext,
                 captureDao         = app.database.captureDao(),
@@ -188,17 +212,25 @@ class QuickInkRestoreWorker(
                 driveClient        = app.driveClient,
             )
             Log.i(TAG, "restore: starting binary restore pass")
-            runCatching {
-                binarySync.restorePending(session.userId, session.accessToken)
-            }.onSuccess {
-                Log.i(TAG, "restore: binary restore pass done")
-            }.onFailure { e ->
-                // Swallow — the metadata is already on disk and the
-                // worker's overall outcome is still "we got most of
-                // the way". The next periodic sync will retry the
-                // missing binaries.
-                Log.w(TAG, "restore: binary restore pass failed (continuing): $e")
+            writeRestoreProgress(
+                phase = RESTORE_PROGRESS_PHASE_BINARIES,
+                label = "Downloading PDFs and previews…",
+                percent = 55,
+            )
+            val binaryResult = binarySync.restorePending(session.userId, session.accessToken)
+            Log.i(TAG, "restore: binary restore pass done — " +
+                "completed=${binaryResult.completed}/${binaryResult.attempted} " +
+                "failed=${binaryResult.failed}")
+            val binaryLabel = if (binaryResult.attempted > 0) {
+                "Downloaded ${binaryResult.completed} of ${binaryResult.attempted} files."
+            } else {
+                "No missing files to download."
             }
+            writeRestoreProgress(
+                phase = RESTORE_PROGRESS_PHASE_BINARIES,
+                label = binaryLabel,
+                percent = 80,
+            )
 
             // ---- Phase 3: Drive-side orphan cleanup ----
             // Tombstone manifest entries whose parent isn't in the
@@ -212,6 +244,11 @@ class QuickInkRestoreWorker(
             // user's local data is already restored from phase 1+2;
             // cleanup is purely a Drive-housekeeping side-effect.
             Log.i(TAG, "restore: starting Drive cleanup pass")
+            writeRestoreProgress(
+                phase = RESTORE_PROGRESS_PHASE_CLEANUP,
+                label = "Checking Drive cleanup…",
+                percent = 90,
+            )
             val cleanup = runCatching {
                 syncRepository.cleanupOrphans(
                     deviceId    = DeviceIdentity.get(applicationContext),
@@ -227,14 +264,19 @@ class QuickInkRestoreWorker(
                     "orphansTombstoned=${cleanup.orphansTombstoned} " +
                     "manifestRewritten=${cleanup.manifestRewritten}")
             }
+            writeRestoreProgress(
+                phase = RESTORE_PROGRESS_PHASE_FINISHING,
+                label = "Finishing restore…",
+                percent = 96,
+            )
 
             // ---- Phase 4: clear stale AUTH_REJECTED banner ----
-            // Drive accepted our token end-to-end on this restore —
-            // if the manifest pull or any non-trapped Drive call had
-            // 401'd, we'd be in the catch block below. Clear the
-            // error code so the Settings banner stops showing. Best-
-            // effort: a write failure here just leaves the banner up
-            // until the next successful sync clears it itself.
+            // Drive accepted our token for the restore-critical calls.
+            // If the manifest pull or binary restore had rejected auth,
+            // we'd be in the catch block below. Clear the error code so
+            // the Settings banner stops showing. Best-effort: a write
+            // failure here just leaves the banner up until the next
+            // successful sync clears it itself.
             runCatching {
                 val nowIso = IsoClock.nowIso()
                 app.database.syncStateDao().upsert(
@@ -254,24 +296,52 @@ class QuickInkRestoreWorker(
             writeRestoreOutcome(
                 app           = app,
                 status        = RESTORE_STATUS_OK,
-                downloaded    = result.downloaded,
-                applyFailed   = result.applyFailed,
+                downloaded    = restoredItems,
+                applyFailed   = result.applyFailed + binaryResult.failed,
                 orphanFound   = cleanup?.orphansFound ?: 0,
                 orphanCleaned = cleanup?.orphansTombstoned ?: 0,
             )
 
             Log.i(TAG, "restore: result=SUCCESS")
+            writeRestoreProgress(
+                phase = RESTORE_PROGRESS_PHASE_DONE,
+                label = "Restore complete.",
+                percent = 100,
+            )
             Result.success()
+        } catch (e: DriveError.RateLimited) {
+            Log.w(TAG, "restore: result=RETRY (Drive rate limited): $e")
+            writeRestoreProgress(
+                phase = RESTORE_PROGRESS_PHASE_QUEUED,
+                label = "Drive is rate-limiting restore. Retrying soon…",
+                percent = 0,
+                logLine = "Drive rate limit hit; restore will retry with backoff.",
+            )
+            Result.retry()
         } catch (e: DriveError.Unauthenticated) {
-            // Drive rejected the token (401 or 403). Same conservative
-            // posture as QuickInkSyncWorker — DELIBERATELY do NOT sign
-            // the user out here. The Settings banner observes
+            // Drive rejected the token (401, or a 403 that was not a
+            // rate/quota response). Same conservative posture as
+            // QuickInkSyncWorker — DELIBERATELY do NOT sign the user
+            // out here. The Settings banner observes
             // LAST_SYNC_ERROR_CODE and surfaces the recovery path; the
             // worker writing AUTH_REJECTED here keeps that surface
             // honest even when the failing pass was a Restore.
             Log.w(TAG, "restore: result=FAILURE (Drive auth rejected — 401/403). " +
                 "User can manually sign out + back in via Settings if " +
                 "this persists. $e")
+            writeRestoreProgress(
+                phase = RESTORE_PROGRESS_PHASE_DONE,
+                label = "Restore stopped: Drive needs re-authentication.",
+                percent = 100,
+                logLine = "Restore stopped because Drive rejected the token.",
+            )
+            // Same diagnostic the sync worker runs on 401/403 — hits
+            // Google's tokeninfo endpoint and logs the granted scopes
+            // so we can tell "drive.file not granted" apart from
+            // "drive.file granted but Drive API disabled in Cloud
+            // project". Best-effort; swallow any throw so the catch
+            // path still writes AUTH_REJECTED below.
+            runCatching { logDriveTokenInfo(session.accessToken) }
             runCatching {
                 val nowIso = IsoClock.nowIso()
                 app.database.syncStateDao().upsert(
@@ -294,6 +364,12 @@ class QuickInkRestoreWorker(
         } catch (e: DriveError) {
             // Transient (network blip, 5xx). Back off and retry.
             Log.w(TAG, "restore: result=RETRY (Drive transient error): $e")
+            writeRestoreProgress(
+                phase = RESTORE_PROGRESS_PHASE_QUEUED,
+                label = "Restore paused. Retrying soon…",
+                percent = 0,
+                logLine = "Transient Drive error; restore will retry with backoff.",
+            )
             // Don't write the outcome here — retry means "try again
             // soon"; surfacing a "Restore failed" banner pre-empts
             // the auto-retry's chance at success.
@@ -303,8 +379,40 @@ class QuickInkRestoreWorker(
             // is rarer than auth failures, and the metadata pull is
             // safe to redo.
             Log.e(TAG, "restore: result=RETRY (unexpected exception): $e", e)
+            writeRestoreProgress(
+                phase = RESTORE_PROGRESS_PHASE_QUEUED,
+                label = "Restore paused. Retrying soon…",
+                percent = 0,
+                logLine = "Unexpected restore error; restore will retry with backoff.",
+            )
             Result.retry()
         }
+    }
+
+    private suspend fun writeRestoreProgress(
+        phase: String,
+        label: String,
+        percent: Int,
+        logLine: String? = label,
+    ) {
+        val cleanLogLine = logLine
+            ?.replace('…', '.')
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+        if (cleanLogLine != null && restoreLogLines.lastOrNull() != cleanLogLine) {
+            restoreLogLines += cleanLogLine
+            if (restoreLogLines.size > RESTORE_PROGRESS_MAX_LOG_LINES) {
+                restoreLogLines.removeAt(0)
+            }
+        }
+        setProgress(
+            workDataOf(
+                RESTORE_PROGRESS_PHASE_KEY to phase,
+                RESTORE_PROGRESS_LABEL_KEY to label,
+                RESTORE_PROGRESS_PERCENT_KEY to percent.coerceIn(0, 100),
+                RESTORE_PROGRESS_LOG_KEY to restoreLogLines.joinToString("\n"),
+            )
+        )
     }
 
     /**
@@ -363,5 +471,20 @@ class QuickInkRestoreWorker(
         const val RESTORE_STATUS_OK              = "ok"
         const val RESTORE_STATUS_FAILED          = "failed"
         const val RESTORE_STATUS_VERSION_BLOCKED = "version_blocked"
+
+        const val RESTORE_PROGRESS_PHASE_KEY   = "phase"
+        const val RESTORE_PROGRESS_LABEL_KEY   = "label"
+        const val RESTORE_PROGRESS_PERCENT_KEY = "percent"
+        const val RESTORE_PROGRESS_LOG_KEY     = "log"
+
+        const val RESTORE_PROGRESS_PHASE_QUEUED    = "queued"
+        const val RESTORE_PROGRESS_PHASE_PREPARING = "preparing"
+        const val RESTORE_PROGRESS_PHASE_METADATA  = "metadata"
+        const val RESTORE_PROGRESS_PHASE_BINARIES  = "binaries"
+        const val RESTORE_PROGRESS_PHASE_CLEANUP   = "cleanup"
+        const val RESTORE_PROGRESS_PHASE_FINISHING = "finishing"
+        const val RESTORE_PROGRESS_PHASE_DONE      = "done"
+
+        private const val RESTORE_PROGRESS_MAX_LOG_LINES = 40
     }
 }

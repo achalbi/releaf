@@ -170,7 +170,6 @@ class CaptureRepository(
               AND  c.deleted_at IS NULL
               AND  c.user_id = ?
             ORDER BY rank
-            LIMIT 50
         """.trimIndent()
         val rawQuery = RoomRawQuery(sql = rawSql) { stmt ->
             stmt.bindText(1, ftsQuery)
@@ -213,7 +212,7 @@ class CaptureRepository(
         // Pass 3 — substring fallback over `ocr_results.text`. Only
         // runs when the FTS pass produced no OCR hits (malformed
         // MATCH expr, FTS index empty because triggers haven't fired,
-        // etc.). O(rows × text length); bounded by LIMIT 50.
+        // etc.). O(rows × text length).
         if (hits.none { it.ocrSnippet != null }) {
             val likeSql = """
                 SELECT c.id            AS id,
@@ -231,7 +230,6 @@ class CaptureRepository(
                   AND  c.user_id = ?
                   AND  lower(r.text) LIKE lower(?)
                 ORDER BY c.created_at DESC
-                LIMIT 50
             """.trimIndent()
             val likeQuery = RoomRawQuery(sql = likeSql) { stmt ->
                 stmt.bindText(1, trimmed)

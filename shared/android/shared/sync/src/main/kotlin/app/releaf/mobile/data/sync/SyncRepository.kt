@@ -53,6 +53,11 @@ data class SyncResult(
      */
     val failed: Int,
     /**
+     * Successful pull-side upserts grouped by manifest kind. Separate
+     * from [downloaded], which also includes remote tombstones.
+     */
+    val downloadedUpsertsByKind: Map<String, Int> = emptyMap(),
+    /**
      * Pull-side apply failures — counts rows whose
      * [SyncDataSource.applyRemoteUpsert] threw mid-restore (parse
      * error, FK constraint, schema mismatch, write conflict). Was
@@ -187,6 +192,10 @@ class SyncRepository(
                         driveFileId = driveFile.id,
                     )
                     uploaded++
+                } catch (e: DriveError.Unauthenticated) {
+                    throw e
+                } catch (e: DriveError.RateLimited) {
+                    throw e
                 } catch (_: DriveError) {
                     failed++
                 }
@@ -232,6 +241,10 @@ class SyncRepository(
                         driveFileId = driveFile.id,
                     )
                     tombstoned++
+                } catch (e: DriveError.Unauthenticated) {
+                    throw e
+                } catch (e: DriveError.RateLimited) {
+                    throw e
                 } catch (_: DriveError) {
                     failed++
                 }
@@ -280,6 +293,10 @@ class SyncRepository(
                 rootFolderId = root.id,
                 accessToken = accessToken,
             )
+        } catch (e: DriveError.Unauthenticated) {
+            throw e
+        } catch (e: DriveError.RateLimited) {
+            throw e
         } catch (_: DriveError) {
             failed++
             // Manifest failed — payloads are durable; next pass recovers.
@@ -392,6 +409,7 @@ class SyncRepository(
             tombstoned  = 0,
             downloaded  = pullStats.downloaded,
             failed      = 0,
+            downloadedUpsertsByKind = pullStats.upsertsByKind,
             applyFailed = pullStats.applyFailed,
         )
     }
@@ -536,8 +554,11 @@ class SyncRepository(
 
     // ─── Pull ──────────────────────────────────────────────────────────
 
-    /** Pair-shaped result from [pullDelta]: (downloaded, applyFailed). */
-    private data class PullStats(val downloaded: Int, val applyFailed: Int)
+    private data class PullStats(
+        val downloaded: Int,
+        val applyFailed: Int,
+        val upsertsByKind: Map<String, Int>,
+    )
 
     /**
      * FK-rank for each entity kind, lower = "apply earlier". The
@@ -573,6 +594,7 @@ class SyncRepository(
     ): PullStats {
         var downloaded = 0
         var applyFailed = 0
+        val upsertsByKind = mutableMapOf<String, Int>()
 
         // Stable-sort by FK rank so parents land before children.
         // Without this, `entityChecksums` iterates in HashMap order
@@ -619,6 +641,7 @@ class SyncRepository(
                     )
                 )
                 downloaded++
+                upsertsByKind[remoteChecksum.kind] = (upsertsByKind[remoteChecksum.kind] ?: 0) + 1
             } catch (e: Exception) {
                 // Per-row apply failure — log with enough context to
                 // diagnose without dumping the full payload (which may
@@ -663,7 +686,11 @@ class SyncRepository(
             }
         }
 
-        return PullStats(downloaded = downloaded, applyFailed = applyFailed)
+        return PullStats(
+            downloaded = downloaded,
+            applyFailed = applyFailed,
+            upsertsByKind = upsertsByKind,
+        )
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────

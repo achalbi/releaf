@@ -37,6 +37,7 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import app.quickink.mobile.QUICKINK_APP_VERSION
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.features.settings.SettingsPreferences
@@ -51,14 +52,95 @@ import app.releaf.mobile.data.common.IsoClock
 import kotlinx.coroutines.CancellationException
 import java.time.Instant
 
+/**
+ * Diagnostic: call Google's `oauth2.googleapis.com/tokeninfo` with
+ * the current access token, parse the response, and log the granted
+ * scopes + audience. Intended to be called from a sync/restore
+ * worker's auth-rejection catch path so the user (and any future
+ * dev investigating "sync stuck on AUTH_REJECTED") sees definitively
+ * whether the token has `drive.file` granted — separating "Drive
+ * API disabled in Cloud project" from "Drive scope not granted at
+ * consent".
+ *
+ * Logs under tag `QuickInkSync` so the existing
+ * `adb logcat -s QuickInkSync` filter picks it up.
+ *
+ * `internal` so it's reachable from sibling workers (e.g.
+ * [QuickInkRestoreWorker]) without exposing it across modules.
+ */
+internal suspend fun logDriveTokenInfo(accessToken: String) {
+    val tag = "QuickInkSync"
+    Log.w(tag, "tokeninfo: about to call — " +
+        "tokenLen=${accessToken.length} " +
+        "looksGoogleish=${accessToken.startsWith("ya29.")}")
+    val client = okhttp3.OkHttpClient.Builder()
+        .callTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+    // URL-encode the access token. Google access tokens are
+    // typically base64url (no `+/=`) so this rarely matters, but
+    // any whitespace/control char in a corrupted token would
+    // otherwise break the URL parser before the token even
+    // reaches Google's validator.
+    val encoded = java.net.URLEncoder.encode(accessToken, "UTF-8")
+    val req = okhttp3.Request.Builder()
+        .url("https://oauth2.googleapis.com/tokeninfo?access_token=$encoded")
+        .get()
+        .build()
+    client.newCall(req).execute().use { resp ->
+        val body = resp.body?.string().orEmpty()
+        if (!resp.isSuccessful) {
+            Log.w(tag, "tokeninfo: HTTP ${resp.code} body=$body. " +
+                "Token likely invalid/expired beyond what local TTL says.")
+            return
+        }
+        // Body is JSON like:
+        // {"azp":"...","aud":"...","scope":"...drive.file...","exp":"...","email":"..."}
+        // Avoid logging the raw body because it can include the
+        // account email address.
+        val scopeMatch = Regex("\"scope\"\\s*:\\s*\"([^\"]+)\"").find(body)
+        val scopes = scopeMatch?.groupValues?.get(1)?.split(' ').orEmpty()
+        val aud = Regex("\"aud\"\\s*:\\s*\"([^\"]+)\"").find(body)
+            ?.groupValues
+            ?.getOrNull(1)
+            .orEmpty()
+        val exp = Regex("\"exp\"\\s*:\\s*\"?([^\",}]+)\"?").find(body)
+            ?.groupValues
+            ?.getOrNull(1)
+            .orEmpty()
+        Log.w(tag, "tokeninfo: HTTP 200 aud=$aud exp=$exp scopes=$scopes")
+        val hasDrive = scopes.any {
+            it == "https://www.googleapis.com/auth/drive.file" ||
+            it == "https://www.googleapis.com/auth/drive"
+        }
+        if (hasDrive) {
+            Log.w(tag, "tokeninfo: drive.file IS in granted scopes — " +
+                "401/403 means Drive API is likely DISABLED in the " +
+                "Google Cloud project. Enable at " +
+                "console.cloud.google.com/apis/api/drive.googleapis.com")
+        } else {
+            Log.w(tag, "tokeninfo: drive.file is NOT in granted scopes (got=$scopes). " +
+                "User didn't tick the Drive checkbox at consent, OR the OAuth " +
+                "consent screen doesn't list drive.file as an authorized scope. " +
+                "Sign out, revoke at myaccount.google.com/permissions, sign in fresh.")
+        }
+    }
+}
+
 class QuickInkSyncWorker(
     appContext: Context,
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
 
+    private val syncLogLines = mutableListOf<String>()
+
     override suspend fun doWork(): Result {
         val app = applicationContext as QuickInkApp
         Log.i(TAG, "doWork: starting sync pass")
+        writeSyncProgress(
+            phase = SYNC_PROGRESS_PHASE_PREPARING,
+            label = "Preparing Drive backup…",
+            percent = 3,
+        )
 
         // ---- Gate 1: signed-in? ----
         val authState = app.authStore.state.value
@@ -119,6 +201,39 @@ class QuickInkSyncWorker(
         )
 
         return try {
+            // Upload scanned PDFs / previews BEFORE metadata so the
+            // payload written in this same Sync-now tap carries fresh
+            // `pdf_drive_file_id` / `preview_drive_file_id` values.
+            // Previous ordering wrote JSON first and binaries second;
+            // a one-tap backup could therefore leave Drive metadata
+            // pointing at null binary ids until the next sync pass.
+            val binarySync = QuickInkBinarySync(
+                context            = applicationContext,
+                captureDao         = app.database.captureDao(),
+                profileSettingsDao = app.database.profileSettingsDao(),
+                driveClient        = app.driveClient,
+            )
+            Log.i(TAG, "sync: starting binary upload pass")
+            writeSyncProgress(
+                phase = SYNC_PROGRESS_PHASE_BINARIES,
+                label = "Uploading PDFs and previews…",
+                percent = 20,
+            )
+            val binaryResult = binarySync.uploadAndCascade(session.userId, session.accessToken)
+            Log.i(TAG, "sync: binary upload pass done — " +
+                "completed=${binaryResult.completed}/${binaryResult.attempted} " +
+                "failed=${binaryResult.failed}")
+            val binaryLabel = if (binaryResult.attempted > 0) {
+                "Uploaded ${binaryResult.completed} of ${binaryResult.attempted} files."
+            } else {
+                "No new files to upload."
+            }
+            writeSyncProgress(
+                phase = SYNC_PROGRESS_PHASE_BINARIES,
+                label = binaryLabel,
+                percent = 55,
+            )
+
             // Upload-only sync. QuickInk treats Drive as a one-way
             // backup of local-first data — pull-down is only needed
             // when the user explicitly taps "Restore from Drive"
@@ -129,6 +244,11 @@ class QuickInkSyncWorker(
             // automatically in the background). Sync-now now means
             // "push my pending changes to Drive."
             Log.i(TAG, "sync: starting metadata pass (push-only)")
+            writeSyncProgress(
+                phase = SYNC_PROGRESS_PHASE_METADATA,
+                label = "Updating Drive records…",
+                percent = 70,
+            )
             val result = syncRepository.sync(
                 deviceId    = DeviceIdentity.get(applicationContext),
                 accessToken = session.accessToken,
@@ -138,38 +258,11 @@ class QuickInkSyncWorker(
                 "uploaded=${result.uploaded} tombstoned=${result.tombstoned} " +
                 "downloaded=${result.downloaded} failed=${result.failed} " +
                 "versionBlocked=${result.versionBlocked}")
-
-            // Phase 6 — back up the actual scanned PDFs + preview
-            // JPEGs to Drive. Runs after the JSON metadata pass so
-            // the capture rows already exist in the manifest; a
-            // fresh-device restore can then find binaries via the
-            // row's `pdf_drive_file_id`. Best-effort: per-row errors
-            // are swallowed inside the helper. Mirror
-            // `QuickInkBinarySync.swift` on iOS.
-            val binarySync = QuickInkBinarySync(
-                context            = applicationContext,
-                captureDao         = app.database.captureDao(),
-                profileSettingsDao = app.database.profileSettingsDao(),
-                driveClient        = app.driveClient,
+            writeSyncProgress(
+                phase = SYNC_PROGRESS_PHASE_METADATA,
+                label = "Updated ${result.uploaded + result.tombstoned} Drive record${if (result.uploaded + result.tombstoned == 1) "" else "s"}.",
+                percent = 92,
             )
-            // Push-only binary phase. Upload local PDFs + previews
-            // that haven't reached Drive yet. The earlier
-            // `restorePending` call (which pulled down binaries
-            // referenced in remote manifest entries) is intentionally
-            // dropped from this path — it's part of the bidirectional
-            // sync we're moving away from. Cross-device restore is
-            // now exclusively a Settings → "Restore from Drive" tap
-            // (QuickInkRestoreWorker), and ScanDetailScreen still
-            // has its on-demand self-heal that downloads a single
-            // capture's binary when the user opens it.
-            Log.i(TAG, "sync: starting binary upload pass")
-            runCatching {
-                binarySync.uploadAndCascade(session.userId, session.accessToken)
-            }.onSuccess {
-                Log.i(TAG, "sync: binary upload pass done")
-            }.onFailure { e ->
-                Log.w(TAG, "sync: binary upload pass failed: $e")
-            }
 
             when {
                 // Remote manifest is on a newer major schema than
@@ -181,8 +274,9 @@ class QuickInkSyncWorker(
                     writeSyncErrorCode(app, SyncErrorCodes.UNKNOWN)
                     Result.failure()
                 }
-                result.failed > 0 -> {
-                    Log.w(TAG, "sync: result=RETRY (${result.failed} rows failed)")
+                result.failed > 0 || binaryResult.failed > 0 -> {
+                    Log.w(TAG, "sync: result=RETRY " +
+                        "(metadataFailed=${result.failed}, binaryFailed=${binaryResult.failed})")
                     writeSyncErrorCode(app, SyncErrorCodes.TRANSIENT)
                     Result.retry()
                 }
@@ -198,18 +292,31 @@ class QuickInkSyncWorker(
                     // wait up to 60 seconds for the foreground
                     // pending-push tick to refresh it.
                     writeLocalDirtyCount(app, 0)
+                    writeSyncProgress(
+                        phase = SYNC_PROGRESS_PHASE_DONE,
+                        label = "Backup complete.",
+                        percent = 100,
+                    )
                     Result.success()
                 }
             }
+        } catch (e: DriveError.RateLimited) {
+            Log.w(TAG, "sync: result=RETRY (Drive rate limited): $e")
+            writeSyncProgress(
+                phase = SYNC_PROGRESS_PHASE_QUEUED,
+                label = "Drive is rate-limiting backup. Retrying soon…",
+                percent = 0,
+                logLine = "Drive rate limit hit; backup will retry with backoff.",
+            )
+            recordPendingFromError(app)
+            writeSyncErrorCode(app, SyncErrorCodes.TRANSIENT)
+            Result.retry()
         } catch (e: DriveError.Unauthenticated) {
-            // Drive rejected the token (401 or 403). DELIBERATELY do
-            // NOT sign the user out here — that triggered a logout
-            // loop because Drive returns 403 for transient reasons
-            // (rate-limit, regional propagation, occasional server
-            // hiccups), not just for "scope not granted". A single
-            // bad response would bounce the user to the SignIn
-            // screen and re-sign-in could hit the same blip and
-            // bounce them again.
+            // Drive rejected the token (401, or a 403 that was not a
+            // rate/quota response). DELIBERATELY do NOT sign the user
+            // out here — a single bad response should not bounce the
+            // user to the SignIn screen and risk another loop. The
+            // Settings banner gives them an explicit recovery path.
             //
             // Conservative posture: log loudly, mark the pass as
             // permanently-failed (no retry — repeating won't help
@@ -221,6 +328,12 @@ class QuickInkSyncWorker(
             Log.w(TAG, "sync: result=FAILURE (Drive auth rejected — 401/403). " +
                 "User can manually sign out + back in via Settings if " +
                 "this persists. $e")
+            writeSyncProgress(
+                phase = SYNC_PROGRESS_PHASE_DONE,
+                label = "Backup stopped: Drive needs re-authentication.",
+                percent = 100,
+                logLine = "Backup stopped because Drive rejected the token.",
+            )
             // Definitive diagnostic — call Google's tokeninfo endpoint
             // and log the actual scopes attached to this access token.
             // This tells us apart:
@@ -243,7 +356,7 @@ class QuickInkSyncWorker(
             // Best-effort — silent failure here doesn't change the
             // user-facing outcome.
             runCatching {
-                logTokenInfo(session.accessToken)
+                logDriveTokenInfo(session.accessToken)
             }.onFailure { Log.w(TAG, "tokeninfo diagnostic failed: $it") }
             recordPendingFromError(app)
             writeSyncErrorCode(app, SyncErrorCodes.AUTH_REJECTED)
@@ -251,6 +364,12 @@ class QuickInkSyncWorker(
         } catch (e: DriveError) {
             // Transient (network, 5xx). Back off and retry.
             Log.w(TAG, "sync: result=RETRY (Drive transient error): $e")
+            writeSyncProgress(
+                phase = SYNC_PROGRESS_PHASE_QUEUED,
+                label = "Backup paused. Retrying soon…",
+                percent = 0,
+                logLine = "Transient Drive error; backup will retry with backoff.",
+            )
             recordPendingFromError(app)
             writeSyncErrorCode(app, SyncErrorCodes.TRANSIENT)
             Result.retry()
@@ -296,10 +415,42 @@ class QuickInkSyncWorker(
                 "stopReason=$stopReason ($stopReasonName)",
                 e,
             )
+            writeSyncProgress(
+                phase = SYNC_PROGRESS_PHASE_QUEUED,
+                label = "Backup paused. Retrying soon…",
+                percent = 0,
+                logLine = "Unexpected backup error; backup will retry with backoff.",
+            )
             recordPendingFromError(app)
             writeSyncErrorCode(app, SyncErrorCodes.UNKNOWN)
             Result.retry()
         }
+    }
+
+    private suspend fun writeSyncProgress(
+        phase: String,
+        label: String,
+        percent: Int,
+        logLine: String? = label,
+    ) {
+        val cleanLogLine = logLine
+            ?.replace('…', '.')
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+        if (cleanLogLine != null && syncLogLines.lastOrNull() != cleanLogLine) {
+            syncLogLines += cleanLogLine
+            if (syncLogLines.size > SYNC_PROGRESS_MAX_LOG_LINES) {
+                syncLogLines.removeAt(0)
+            }
+        }
+        setProgress(
+            workDataOf(
+                SYNC_PROGRESS_PHASE_KEY to phase,
+                SYNC_PROGRESS_LABEL_KEY to label,
+                SYNC_PROGRESS_PERCENT_KEY to percent.coerceIn(0, 100),
+                SYNC_PROGRESS_LOG_KEY to syncLogLines.joinToString("\n"),
+            )
+        )
     }
 
     /**
@@ -331,60 +482,6 @@ class QuickInkSyncWorker(
         16   -> "FOREGROUND_SERVICE_LAUNCH"
         -999 -> "stopReason API unavailable"
         else -> "raw=$reason"
-    }
-
-    /**
-     * Diagnostic: call Google's `oauth2.googleapis.com/tokeninfo`
-     * with the current access token, parse the response, and log
-     * the granted scopes + audience. Intended to be called from
-     * the auth-rejection catch path so the user (and any future
-     * dev investigating "sync stuck on AUTH_REJECTED") sees
-     * definitively whether the token has `drive.file` granted —
-     * separating "Drive API disabled in Cloud project" from
-     * "Drive scope not granted at consent".
-     *
-     * Synchronous OkHttp call inside a suspend block; runs on
-     * Dispatchers.IO via the worker's coroutine context (CoroutineWorker
-     * already pins doWork to IO).
-     */
-    private suspend fun logTokenInfo(accessToken: String) {
-        val client = okhttp3.OkHttpClient.Builder()
-            .callTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-            .build()
-        val req = okhttp3.Request.Builder()
-            .url("https://oauth2.googleapis.com/tokeninfo?access_token=$accessToken")
-            .get()
-            .build()
-        client.newCall(req).execute().use { resp ->
-            val body = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) {
-                Log.w(TAG, "tokeninfo: HTTP ${resp.code} body=$body. " +
-                    "Token likely invalid/expired beyond what local TTL says.")
-                return
-            }
-            // Body is JSON like: {"azp":"...","aud":"...","scope":"...drive.file...","exp":"...","email":"..."}
-            // We only care about `scope` for the diagnostic; print the
-            // whole body too so the dev sees aud (which Cloud project)
-            // and exp (server-side expiry).
-            Log.w(TAG, "tokeninfo: HTTP 200 body=$body")
-            val scopeMatch = Regex("\"scope\"\\s*:\\s*\"([^\"]+)\"").find(body)
-            val scopes = scopeMatch?.groupValues?.get(1)?.split(' ').orEmpty()
-            val hasDrive = scopes.any {
-                it == "https://www.googleapis.com/auth/drive.file" ||
-                it == "https://www.googleapis.com/auth/drive"
-            }
-            if (hasDrive) {
-                Log.w(TAG, "tokeninfo: drive.file IS in granted scopes — " +
-                    "401/403 means Drive API is likely DISABLED in the " +
-                    "Google Cloud project. Enable at " +
-                    "console.cloud.google.com/apis/api/drive.googleapis.com")
-            } else {
-                Log.w(TAG, "tokeninfo: drive.file is NOT in granted scopes (got=$scopes). " +
-                    "User didn't tick the Drive checkbox at consent, OR the OAuth " +
-                    "consent screen doesn't list drive.file as an authorized scope. " +
-                    "Sign out, revoke at myaccount.google.com/permissions, sign in fresh.")
-            }
-        }
     }
 
     /**
@@ -463,5 +560,18 @@ class QuickInkSyncWorker(
          * is failing — pre-fix, the entire flow returned silently.
          */
         private const val TAG = "QuickInkSync"
+
+        const val SYNC_PROGRESS_PHASE_KEY   = "phase"
+        const val SYNC_PROGRESS_LABEL_KEY   = "label"
+        const val SYNC_PROGRESS_PERCENT_KEY = "percent"
+        const val SYNC_PROGRESS_LOG_KEY     = "log"
+
+        const val SYNC_PROGRESS_PHASE_QUEUED    = "queued"
+        const val SYNC_PROGRESS_PHASE_PREPARING = "preparing"
+        const val SYNC_PROGRESS_PHASE_BINARIES  = "binaries"
+        const val SYNC_PROGRESS_PHASE_METADATA  = "metadata"
+        const val SYNC_PROGRESS_PHASE_DONE      = "done"
+
+        private const val SYNC_PROGRESS_MAX_LOG_LINES = 40
     }
 }

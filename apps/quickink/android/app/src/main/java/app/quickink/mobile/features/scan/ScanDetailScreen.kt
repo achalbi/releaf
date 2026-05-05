@@ -395,18 +395,35 @@ fun ScanDetailScreen(
  * Best preview surface for the capture, in priority order:
  *   1. Multi-page PDF render via [PdfPagesView] (preferred —
  *      pinch-to-zoom + every page).
- *   2. The first-page JPEG `preview_uri` via Coil (when no PDF URI).
- *   3. A paper-toned placeholder (when the file is missing entirely).
+ *   2. The first-page JPEG `preview_uri` via Coil (when the PDF
+ *      isn't on disk).
+ *   3. A friendly placeholder — either "restoring from Drive" (when
+ *      a Drive backup exists and the self-heal effect can recover
+ *      it) or "file isn't available" (no Drive backup to recover
+ *      from). Replaces the raw "open failed: ENOENT" the system
+ *      message we used to surface when the URI pointed at a path
+ *      that no longer exists.
  */
 @Composable
 private fun PreviewImage(capture: CaptureEntity) {
     val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
     val context = LocalContext.current
     val pdfUri = capture.pdfUri.takeIf { it.isNotBlank() }?.let(Uri::parse)
     val previewUri = capture.previewUri
 
+    // Verify the URIs actually resolve to files on disk before
+    // handing them to the PDF renderer / image loader. The DB row
+    // can outlive the file (cleared app data, attachment-folder
+    // migration mid-run, manual delete, never-uploaded scan whose
+    // file got pruned). Without this check the renderer crashes
+    // out with the platform's `open failed: ENOENT (No such file
+    // or directory)` and the user has no way to interpret it.
+    val pdfPresent = pdfUri != null && localFileExists(capture.pdfUri)
+    val previewPresent = !previewUri.isNullOrBlank() && localFileExists(previewUri)
+
     when {
-        pdfUri != null -> {
+        pdfPresent && pdfUri != null -> {
             // Multi-page captures get the swipe + page-turn viewer;
             // single-page captures keep the scrollable PdfPagesView
             // since it already handles pinch-to-zoom and there's
@@ -430,7 +447,7 @@ private fun PreviewImage(capture: CaptureEntity) {
                 )
             }
         }
-        !previewUri.isNullOrBlank() -> {
+        previewPresent -> {
             AsyncImage(
                 model = ImageRequest.Builder(context)
                     .data(Uri.parse(previewUri))
@@ -446,20 +463,53 @@ private fun PreviewImage(capture: CaptureEntity) {
             )
         }
         else -> {
+            // Neither file is on this device. If we have any Drive
+            // file id, the self-heal effect at the screen's top is
+            // currently downloading the binary — show a loader so
+            // the wait is intentional. Otherwise this scan was
+            // never uploaded and the local file is gone (e.g., app
+            // data cleared between create and first sync) — say so
+            // plainly so the user isn't left guessing what ENOENT
+            // meant.
+            val isRestoringFromDrive =
+                capture.pdfDriveFileId != null || capture.previewDriveFileId != null
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(320.dp)
                     .clip(RoundedCornerShape(QuickInkRadius.md))
-                    .background(colors.borderSoft),
+                    .background(colors.borderSoft)
+                    .padding(QuickInkSpacing.s4),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    imageVector       = Icons.Filled.Description,
-                    contentDescription = null,
-                    tint              = colors.muted,
-                    modifier          = Modifier.size(64.dp),
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+                ) {
+                    if (isRestoringFromDrive) {
+                        CircularProgressIndicator(
+                            color    = colors.accent,
+                            modifier = Modifier.size(32.dp),
+                        )
+                        Text(
+                            text  = "Restoring from Drive…",
+                            style = type.meta,
+                            color = colors.inkSoft,
+                        )
+                    } else {
+                        Icon(
+                            imageVector       = Icons.Filled.Description,
+                            contentDescription = null,
+                            tint              = colors.muted,
+                            modifier          = Modifier.size(64.dp),
+                        )
+                        Text(
+                            text  = "This scan's file isn't on this device or Drive.",
+                            style = type.meta,
+                            color = colors.inkSoft,
+                        )
+                    }
+                }
             }
         }
     }

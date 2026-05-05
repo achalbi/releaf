@@ -27,8 +27,9 @@
  *     out of scope for the first cut.
  *
  * Rate limits: Drive v3 allows 1000 queries per 100 seconds per user
- * by default. 429 / 5xx responses are surfaced as [DriveError.Underlying];
- * the SyncWorker catches those and WorkManager retries with backoff.
+ * by default. 429, plus 403 responses whose body carries a
+ * rate/quota reason, are surfaced as [DriveError.RateLimited];
+ * the worker retries those without showing a re-auth banner.
  *
  * `appProperties.releaf_root = true`:
  *   On every root-folder create (or upsert of `manifest.json`), we stamp
@@ -239,11 +240,7 @@ class OkHttpDriveClient(
             .build()
         http.newCall(req).execute().useSafely { resp ->
             if (resp.code == 404) throw DriveError.NotFound
-            // 403 = Drive scope wasn't granted at sign-in (most
-            // common silent-sync-failure cause), treat the same as
-            // 401 so the worker's auth-error path forces re-sign-in
-            // and the user re-consents with the drive.file checkbox.
-            if (resp.code == 401 || resp.code == 403) throw DriveError.Unauthenticated
+            resp.authOrRateLimitError()?.let { throw it }
             if (!resp.isSuccessful) throw DriveError.Underlying("download failed: ${resp.code}")
             resp.body?.bytes() ?: throw DriveError.Underlying("empty body on download")
         }
@@ -260,11 +257,7 @@ class OkHttpDriveClient(
                 .build()
             http.newCall(req).execute().useSafely { resp ->
                 if (resp.code == 404) throw DriveError.NotFound
-                // 403 = Drive scope wasn't granted at sign-in (most
-            // common silent-sync-failure cause), treat the same as
-            // 401 so the worker's auth-error path forces re-sign-in
-            // and the user re-consents with the drive.file checkbox.
-            if (resp.code == 401 || resp.code == 403) throw DriveError.Unauthenticated
+                resp.authOrRateLimitError()?.let { throw it }
                 if (!resp.isSuccessful) throw DriveError.Underlying("trash failed: ${resp.code}")
             }
         }
@@ -302,11 +295,7 @@ class OkHttpDriveClient(
                 .header("Authorization", "Bearer $accessToken")
                 .build()
             http.newCall(req).execute().useSafely { resp ->
-                // 403 = Drive scope wasn't granted at sign-in (most
-            // common silent-sync-failure cause), treat the same as
-            // 401 so the worker's auth-error path forces re-sign-in
-            // and the user re-consents with the drive.file checkbox.
-            if (resp.code == 401 || resp.code == 403) throw DriveError.Unauthenticated
+                resp.authOrRateLimitError()?.let { throw it }
                 if (!resp.isSuccessful) throw DriveError.Underlying("query failed: ${resp.code}")
                 val body = resp.body?.string() ?: throw DriveError.Underlying("empty query response")
                 val decoded = json.decodeFromString(FileListResponse.serializer(), body)
@@ -340,11 +329,7 @@ class OkHttpDriveClient(
             .header("Authorization", "Bearer $accessToken")
             .build()
         return http.newCall(req).execute().useSafely { resp ->
-            // 403 = Drive scope wasn't granted at sign-in (most
-            // common silent-sync-failure cause), treat the same as
-            // 401 so the worker's auth-error path forces re-sign-in
-            // and the user re-consents with the drive.file checkbox.
-            if (resp.code == 401 || resp.code == 403) throw DriveError.Unauthenticated
+            resp.authOrRateLimitError()?.let { throw it }
             if (!resp.isSuccessful) throw DriveError.Underlying("createFolder failed: ${resp.code}")
             val respBody = resp.body?.string() ?: throw DriveError.Underlying("empty createFolder response")
             json.decodeFromString(FileResource.serializer(), respBody).toDomain()
@@ -383,11 +368,7 @@ class OkHttpDriveClient(
             .header("Authorization", "Bearer $accessToken")
             .build()
         return http.newCall(req).execute().useSafely { resp ->
-            // 403 = Drive scope wasn't granted at sign-in (most
-            // common silent-sync-failure cause), treat the same as
-            // 401 so the worker's auth-error path forces re-sign-in
-            // and the user re-consents with the drive.file checkbox.
-            if (resp.code == 401 || resp.code == 403) throw DriveError.Unauthenticated
+            resp.authOrRateLimitError()?.let { throw it }
             if (!resp.isSuccessful) throw DriveError.Underlying("createFile failed: ${resp.code}")
             val respBody = resp.body?.string() ?: throw DriveError.Underlying("empty createFile response")
             json.decodeFromString(FileResource.serializer(), respBody).toDomain()
@@ -423,15 +404,35 @@ class OkHttpDriveClient(
             .header("Authorization", "Bearer $accessToken")
             .build()
         return http.newCall(req).execute().useSafely { resp ->
-            // 403 = Drive scope wasn't granted at sign-in (most
-            // common silent-sync-failure cause), treat the same as
-            // 401 so the worker's auth-error path forces re-sign-in
-            // and the user re-consents with the drive.file checkbox.
-            if (resp.code == 401 || resp.code == 403) throw DriveError.Unauthenticated
+            resp.authOrRateLimitError()?.let { throw it }
             if (resp.code == 404) throw DriveError.NotFound
             if (!resp.isSuccessful) throw DriveError.Underlying("updateFile failed: ${resp.code}")
             val respBody = resp.body?.string() ?: throw DriveError.Underlying("empty updateFile response")
             json.decodeFromString(FileResource.serializer(), respBody).toDomain()
+        }
+    }
+
+    private fun Response.authOrRateLimitError(): DriveError? = when (code) {
+        401 -> DriveError.Unauthenticated
+        429 -> DriveError.RateLimited
+        403 -> classifyForbidden()
+        else -> null
+    }
+
+    private fun Response.classifyForbidden(): DriveError {
+        val body = runCatching { peekBody(4096).string() }.getOrDefault("")
+        val reasons = runCatching {
+            json.decodeFromString(GoogleErrorResponse.serializer(), body)
+                .error
+                ?.errors
+                ?.mapNotNull { it.reason }
+                .orEmpty()
+        }.getOrDefault(emptyList())
+
+        return if (reasons.any { it in RATE_LIMIT_REASONS }) {
+            DriveError.RateLimited
+        } else {
+            DriveError.Unauthenticated
         }
     }
 
@@ -453,6 +454,14 @@ class OkHttpDriveClient(
             .writeTimeout(60, TimeUnit.SECONDS)
             .callTimeout(120, TimeUnit.SECONDS)
             .build()
+
+        private val RATE_LIMIT_REASONS = setOf(
+            "rateLimitExceeded",
+            "userRateLimitExceeded",
+            "dailyLimitExceeded",
+            "quotaExceeded",
+            "sharingRateLimitExceeded",
+        )
     }
 }
 
@@ -487,6 +496,21 @@ private data class FileResource(
 private data class FileListResponse(
     @SerialName("nextPageToken") val nextPageToken: String? = null,
     @SerialName("files")         val files: List<FileResource> = emptyList(),
+)
+
+@Serializable
+private data class GoogleErrorResponse(
+    @SerialName("error") val error: GoogleErrorBody? = null,
+)
+
+@Serializable
+private data class GoogleErrorBody(
+    @SerialName("errors") val errors: List<GoogleErrorItem> = emptyList(),
+)
+
+@Serializable
+private data class GoogleErrorItem(
+    @SerialName("reason") val reason: String? = null,
 )
 
 // ---- helpers ----

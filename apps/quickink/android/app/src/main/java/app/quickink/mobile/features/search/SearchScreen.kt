@@ -111,7 +111,7 @@ import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
 import app.quickink.mobile.features.settings.SettingsPreferences
 import app.quickink.mobile.ui.components.DateRangePickerSheet
-import app.quickink.mobile.ui.components.MILLIS_PER_DAY
+import app.quickink.mobile.ui.components.isWithinPickedDateRange
 import app.quickink.mobile.ui.components.formatDateRange
 import app.quickink.mobile.ui.components.rememberQuickInkDateRangePickerState
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
@@ -277,24 +277,20 @@ fun SearchScreen(
             )
         }
 
-        // Apply the date filter on top of the live search hits. When
-        // no range is set this is a passthrough; when set, hits whose
-        // capture `createdAt` falls outside the range are dropped.
-        // The same end-of-day widening as Library so a single-day
-        // pick (start == end at midnight) still matches captures
-        // created later that calendar day.
+        // Date filter — applied to both the live search hits and the
+        // empty-query "RECENT NOTES" list so the calendar control
+        // affects every visible row. `isWithinPickedDateRange` does
+        // the local-date conversion so a capture's calendar day
+        // matches what the user sees in the picker, regardless of UTC
+        // offset.
         val filteredHits = remember(hits, dateRangeStart, dateRangeEnd) {
-            val rangeActive = dateRangeStart != null || dateRangeEnd != null
-            if (!rangeActive) return@remember hits
-            val rangeEndExclusive = dateRangeEnd?.let { it + MILLIS_PER_DAY }
-            hits.filter { hit ->
-                val instant = runCatching { Instant.parse(hit.capture.createdAt) }.getOrNull()
-                    ?: return@filter false
-                val captureMillis = instant.toEpochMilli()
-                val afterStart = dateRangeStart?.let { captureMillis >= it } ?: true
-                val beforeEnd = rangeEndExclusive?.let { captureMillis < it } ?: true
-                afterStart && beforeEnd
-            }
+            if (dateRangeStart == null && dateRangeEnd == null) return@remember hits
+            hits.filter { isWithinPickedDateRange(it.capture.createdAt, dateRangeStart, dateRangeEnd) }
+        }
+
+        val filteredCaptures = remember(captures, dateRangeStart, dateRangeEnd) {
+            if (dateRangeStart == null && dateRangeEnd == null) return@remember captures
+            captures.filter { isWithinPickedDateRange(it.createdAt, dateRangeStart, dateRangeEnd) }
         }
 
         if (liveQuery.isNotEmpty()) {
@@ -314,7 +310,7 @@ fun SearchScreen(
                     preferences.clearRecentSearches()
                     recentSearches = emptyList()
                 },
-                captures = captures,
+                captures = filteredCaptures,
                 onOpen   = { id ->
                     commitToRecents()
                     onOpenScan(id)
@@ -577,7 +573,7 @@ private fun EmptyQueryView(
             item("timeline-header") {
                 SectionEyebrow(icon = Icons.Filled.Description, label = "RECENT NOTES")
             }
-            items(captures.take(8), key = { "tl-${it.id}" }) { capture ->
+            items(captures, key = { "tl-${it.id}" }) { capture ->
                 CompactRow(
                     title    = capture.displayTitle("Untitled scan"),
                     subtitle = relativeDate(capture.createdAt) +

@@ -23,6 +23,7 @@ data class DriveFile(
 
 sealed class DriveError(message: String) : Exception(message) {
     object Unauthenticated : DriveError("Unauthenticated")
+    object RateLimited     : DriveError("Rate limited")
     object NotFound        : DriveError("Not found")
     object NotImplemented  : DriveError("Not implemented")
     class  Underlying(msg: String) : DriveError(msg)
