@@ -1,5 +1,5 @@
 [versions]
-agp                   = "9.2.0"
+agp                   = "9.2.1"
 kotlin                = "2.2.10"
 ksp                   = "2.3.2"
 # 2024.12.01 maps to compose-foundation 1.7.6+. Earlier 2024.09.03 (foundation
