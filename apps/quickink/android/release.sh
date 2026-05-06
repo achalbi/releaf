@@ -25,7 +25,11 @@ ok()   { printf '\033[1;32m✓ %s\033[0m\n' "$1"; }
 fail() { printf '\033[1;31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
 
 step "Bump versionCode and build release AAB"
-( cd "$GRADLE_DIR" && ./gradlew :apps:quickink:bumpVersionCode :apps:quickink:bundleRelease )
+# Two separate Gradle invocations: bumpVersionCode rewrites version.properties
+# at execution time, but defaultConfig.versionCode is captured at configuration
+# time. Running them in one invocation builds the AAB with the pre-bump value.
+( cd "$GRADLE_DIR" && ./gradlew :apps:quickink:bumpVersionCode )
+( cd "$GRADLE_DIR" && ./gradlew :apps:quickink:bundleRelease )
 
 NEW_CODE=$(awk -F= '/^versionCode=/ { print $2 }' "$VERSION_PROPS")
 [[ -n "$NEW_CODE" ]] || fail "Could not read versionCode from $VERSION_PROPS"
