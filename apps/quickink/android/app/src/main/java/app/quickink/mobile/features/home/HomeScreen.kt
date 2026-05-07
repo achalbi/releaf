@@ -280,7 +280,21 @@ fun HomeScreen(
             // (REPLACE policy via `requestUserSync`). Visible only
             // when there's actual local work to push, so the home
             // surface stays clean for the common up-to-date state.
-            if (localDirtyCount > 0 || isHomeSyncInFlight) {
+            //
+            // Gated on `localDirtyCount > 0` ALONE — never on a bare
+            // `isHomeSyncInFlight`. The post-token-refresh auto-sync
+            // in `QuickInkApp` (and the 15-min periodic) flip an
+            // in-flight worker on a fresh install with zero scans;
+            // showing "Backing up to Drive — 0 items pending" in
+            // that state is misleading. The worker still updates
+            // `LAST_FULL_SYNC_AT` silently so the bottom-of-page
+            // sync timestamp keeps pace.
+            //
+            // While count > 0 and a sync is running, the pill's
+            // own [syncing] flag flips it into the "Backing up…"
+            // / progress-bar mode, so the user-tap path still
+            // gets visible feedback.
+            if (localDirtyCount > 0) {
                 Spacer(Modifier.size(QuickInkSpacing.s4))
                 PendingSyncPill(
                     count           = localDirtyCount,
