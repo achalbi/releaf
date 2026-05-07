@@ -30,6 +30,7 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -39,8 +40,13 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -70,6 +76,7 @@ import kotlinx.coroutines.withContext
 fun PdfPagesView(
     pdfUri: Uri,
     modifier: Modifier = Modifier,
+    onFullscreenClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val colors = LocalQuickInkColors.current
@@ -85,58 +92,83 @@ fun PdfPagesView(
         }
     }
 
-    Column(
-        modifier              = modifier,
-        verticalArrangement   = Arrangement.spacedBy(QuickInkSpacing.s3),
-    ) {
-        when {
-            error != null -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 200.dp)
-                        .clip(RoundedCornerShape(QuickInkRadius.md))
-                        .background(colors.borderSoft)
-                        .padding(QuickInkSpacing.s4),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text  = error!!,
-                        style = type.meta,
-                        color = colors.inkSoft,
-                    )
-                }
-            }
-            pages == null -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 200.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(color = colors.accent)
-                }
-            }
-            else -> {
-                pages!!.forEachIndexed { index, bitmap ->
-                    ZoomablePage(
-                        bitmap = bitmap,
+    Box(modifier = modifier) {
+        Column(
+            modifier              = Modifier.fillMaxWidth(),
+            verticalArrangement   = Arrangement.spacedBy(QuickInkSpacing.s3),
+        ) {
+            when {
+                error != null -> {
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .heightIn(min = 200.dp)
                             .clip(RoundedCornerShape(QuickInkRadius.md))
-                            .background(colors.surface),
-                    )
-                    if (pages!!.size > 1) {
+                            .background(colors.borderSoft)
+                            .padding(QuickInkSpacing.s4),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Text(
-                            text  = "Page ${index + 1} of ${pages!!.size}",
-                            style = type.caption,
-                            color = colors.muted,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = QuickInkSpacing.s1),
+                            text  = error!!,
+                            style = type.meta,
+                            color = colors.inkSoft,
                         )
                     }
                 }
+                pages == null -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 200.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(color = colors.accent)
+                    }
+                }
+                else -> {
+                    pages!!.forEachIndexed { index, bitmap ->
+                        ZoomablePage(
+                            bitmap = bitmap,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(QuickInkRadius.md))
+                                .background(colors.surface),
+                        )
+                        if (pages!!.size > 1) {
+                            Text(
+                                text  = "Page ${index + 1} of ${pages!!.size}",
+                                style = type.caption,
+                                color = colors.muted,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = QuickInkSpacing.s1),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fullscreen affordance — top-end pill button. Only renders
+        // once pages are ready so the loader spinner isn't masked by
+        // a button that won't do anything yet.
+        if (onFullscreenClick != null && pages != null && error == null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(QuickInkSpacing.s2)
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(colors.surface.copy(alpha = 0.85f))
+                    .clickable(onClick = onFullscreenClick),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.Filled.Fullscreen,
+                    contentDescription = "View fullscreen",
+                    tint               = colors.ink,
+                    modifier           = Modifier.size(20.dp),
+                )
             }
         }
     }

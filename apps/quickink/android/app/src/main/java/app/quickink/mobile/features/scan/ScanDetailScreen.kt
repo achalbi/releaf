@@ -125,6 +125,10 @@ fun ScanDetailScreen(
     // Save and discarded on Cancel.
     var showTitleEditor by remember { mutableStateOf(false) }
     var titleDraft by remember { mutableStateOf("") }
+    // Fullscreen viewer toggle. Set true by the fullscreen button on
+    // the inline preview; cleared by the dialog's close affordance or
+    // the back press.
+    var showFullscreenViewer by remember(captureId) { mutableStateOf(false) }
 
     // Live category list — populated from the same DAO the home
     // grid + review screen read, scoped to the current user. The
@@ -297,7 +301,10 @@ fun ScanDetailScreen(
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                 )
             } else {
-                PreviewImage(capture = current)
+                PreviewImage(
+                    capture           = current,
+                    onFullscreenClick = { showFullscreenViewer = true },
+                )
                 TitleSection(
                     title    = current.title,
                     onEdit   = {
@@ -389,6 +396,31 @@ fun ScanDetailScreen(
             containerColor   = colors.surface,
         )
     }
+
+    // Fullscreen viewer — opens when the user taps the overlay
+    // fullscreen button on the inline preview. Only meaningful when
+    // we have a real PDF on disk; the dialog itself handles the
+    // load + flipbook flow.
+    if (showFullscreenViewer) {
+        val current = capture
+        val pdfUriString = current?.pdfUri
+        val pdfUri = pdfUriString
+            ?.takeIf { it.isNotBlank() && localFileExists(it) }
+            ?.let(Uri::parse)
+        if (pdfUri != null) {
+            FullscreenPdfDialog(
+                pdfUri    = pdfUri,
+                onDismiss = { showFullscreenViewer = false },
+            )
+        } else {
+            // PDF missing on disk — close the dialog rather than
+            // opening an empty viewer. The inline preview already
+            // surfaces a "file isn't available" placeholder.
+            LaunchedEffect(showFullscreenViewer) {
+                showFullscreenViewer = false
+            }
+        }
+    }
 }
 
 /**
@@ -405,7 +437,10 @@ fun ScanDetailScreen(
  *      that no longer exists.
  */
 @Composable
-private fun PreviewImage(capture: CaptureEntity) {
+private fun PreviewImage(
+    capture: CaptureEntity,
+    onFullscreenClick: (() -> Unit)? = null,
+) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     val context = LocalContext.current
@@ -430,7 +465,8 @@ private fun PreviewImage(capture: CaptureEntity) {
             // nothing to swipe to anyway.
             if (capture.pageCount > 1) {
                 PageTurnPdfView(
-                    pdfUri   = pdfUri,
+                    pdfUri            = pdfUri,
+                    onFullscreenClick = onFullscreenClick,
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(0.707f) // A4-ish portrait until pages render
@@ -440,7 +476,8 @@ private fun PreviewImage(capture: CaptureEntity) {
                 )
             } else {
                 PdfPagesView(
-                    pdfUri   = pdfUri,
+                    pdfUri            = pdfUri,
+                    onFullscreenClick = onFullscreenClick,
                     modifier = Modifier
                         .fillMaxWidth()
                         .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md)),

@@ -19,6 +19,13 @@
  * direction it's exiting — simple book-flip cue without splitting
  * the page geometry. `cameraDistance` adds depth so the rotation
  * reads as 3D, not flat.
+ *
+ * Gesture handling: a custom `awaitEachGesture` detector only claims
+ * the pointer stream when there are 2+ fingers down (pinch) OR the
+ * page is already zoomed (pan). Single-finger drags at 1× fall
+ * through to the HorizontalPager so swipe-to-flip works as expected
+ * — without this, `detectTransformGestures` ate the slop and the
+ * pager never saw the swipe.
  */
 
 package app.quickink.mobile.features.scan
@@ -27,8 +34,12 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
@@ -38,10 +49,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -92,6 +107,7 @@ private fun clampPan(pan: Offset, scale: Float, layoutSize: IntSize): Offset {
 fun PageTurnPdfView(
     pdfUri: Uri,
     modifier: Modifier = Modifier,
+    onFullscreenClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val colors = LocalQuickInkColors.current
@@ -123,14 +139,20 @@ fun PageTurnPdfView(
                 CircularProgressIndicator(color = colors.accent)
             }
             else -> {
-                PageTurnPager(pages = pages!!)
+                PageTurnPager(
+                    pages             = pages!!,
+                    onFullscreenClick = onFullscreenClick,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun PageTurnPager(pages: List<Bitmap>) {
+private fun PageTurnPager(
+    pages: List<Bitmap>,
+    onFullscreenClick: (() -> Unit)? = null,
+) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     val density = LocalDensity.current
@@ -185,26 +207,42 @@ private fun PageTurnPager(pages: List<Bitmap>) {
                         // Pinch + pan handler. Only the active page
                         // accepts these — non-active pages are mid-
                         // swipe so we'd rather they finish exiting
-                        // before any zoom kicks in. Pan is bounds-
-                        // clamped so the scaled page can't drift
-                        // past the page-frame edge in either axis.
+                        // before any zoom kicks in.
+                        //
+                        // Custom `awaitEachGesture` so single-finger
+                        // drags at 1× fall through to the
+                        // HorizontalPager. We only consume events
+                        // when the user has 2+ fingers down (real
+                        // pinch) or the page is already zoomed
+                        // (pan-while-zoomed). `detectTransformGestures`
+                        // would have eaten the slop for any drag,
+                        // including the horizontal swipes the pager
+                        // needs to flip pages.
                         if (!isActive) return@pointerInput
-                        // `size` is a property of PointerInputScope
-                        // (this), not of the inner gesture callback's
-                        // scope — capture it here so the clamp call
-                        // can read it.
-                        val pointerScope = this
-                        detectTransformGestures { _, panDelta, zoomDelta, _ ->
-                            zoomScale = (zoomScale * zoomDelta).coerceIn(1f, 4f)
-                            panOffset = if (zoomScale <= 1.01f) {
-                                Offset.Zero
-                            } else {
-                                clampPan(
-                                    pan        = panOffset + panDelta,
-                                    scale      = zoomScale,
-                                    layoutSize = pointerScope.size,
-                                )
-                            }
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            do {
+                                val event = awaitPointerEvent()
+                                val pointerCount = event.changes.count { it.pressed }
+                                val shouldHandle = pointerCount >= 2 || zoomScale > 1.01f
+                                if (shouldHandle) {
+                                    val zoomDelta = event.calculateZoom()
+                                    val panDelta = event.calculatePan()
+                                    if (zoomDelta != 1f || panDelta != Offset.Zero) {
+                                        zoomScale = (zoomScale * zoomDelta).coerceIn(1f, 4f)
+                                        panOffset = if (zoomScale <= 1.01f) {
+                                            Offset.Zero
+                                        } else {
+                                            clampPan(
+                                                pan        = panOffset + panDelta,
+                                                scale      = zoomScale,
+                                                layoutSize = size,
+                                            )
+                                        }
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                }
+                            } while (event.changes.any { it.pressed })
                         }
                     }
                     .pointerInput(pageIndex) {
@@ -262,6 +300,30 @@ private fun PageTurnPager(pages: List<Bitmap>) {
                     .background(colors.surface.copy(alpha = 0.85f))
                     .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s1),
             )
+        }
+
+        // Fullscreen affordance — top-end pill button. Shown only
+        // when the parent passed an [onFullscreenClick]; previews
+        // and other call sites that don't want a fullscreen path
+        // can omit the callback and the button drops out.
+        if (onFullscreenClick != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(QuickInkSpacing.s2)
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(colors.surface.copy(alpha = 0.85f))
+                    .clickable(onClick = onFullscreenClick),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.Filled.Fullscreen,
+                    contentDescription = "View fullscreen",
+                    tint               = colors.ink,
+                    modifier           = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }
