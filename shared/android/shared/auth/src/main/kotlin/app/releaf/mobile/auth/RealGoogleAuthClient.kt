@@ -41,6 +41,7 @@
 
 package app.releaf.mobile.auth
 
+import android.accounts.Account
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -102,7 +103,13 @@ class RealGoogleAuthClient(
 
     override suspend fun signIn(): GoogleAuthSession {
         val identity = requestIdentity()
-        val authResult = authorize()
+        // Pin the second authorize() call to the account the user
+        // just picked in Credential Manager. Without this,
+        // AuthorizationClient on multi-account devices shows ITS
+        // OWN account chooser before the consent sheet — the user
+        // ends up picking the same account twice for one sign-in.
+        // `identity.id` is the email per GoogleIdTokenCredential.
+        val authResult = authorize(email = identity.id)
 
         if (authResult.hasResolution()) {
             throw ConsentRequiredException(
@@ -114,7 +121,10 @@ class RealGoogleAuthClient(
     }
 
     override suspend fun refresh(session: GoogleAuthSession): GoogleAuthSession {
-        val authResult = authorize()
+        // Pin to the signed-in account so the silent refresh path
+        // never surfaces an account picker on multi-account devices
+        // (same reasoning as signIn() — see comment above).
+        val authResult = authorize(email = session.email)
         if (authResult.hasResolution()) {
             // Revoked / needs re-consent. Caller should sign out and back in.
             throw GoogleAuthError.Underlying("Drive scope no longer granted")
@@ -331,11 +341,23 @@ class RealGoogleAuthClient(
     private suspend fun requestCredential(request: GetCredentialRequest): GetCredentialResponse =
         credentialManager.getCredential(context = activity, request = request)
 
-    private suspend fun authorize(): AuthorizationResult {
-        val request = AuthorizationRequest.Builder()
+    /**
+     * Run the second-phase Drive scope authorization. When [email] is
+     * non-blank, pin the request to that Google account via
+     * `setAccount(...)` — without it, AuthorizationClient on
+     * multi-account devices shows its own account chooser, even when
+     * the user just picked an account in the Credential Manager
+     * step. Empty string falls back to the default behaviour (used
+     * when the caller has no identity hint, e.g. a refresh against a
+     * session that pre-dates the email field).
+     */
+    private suspend fun authorize(email: String? = null): AuthorizationResult {
+        val builder = AuthorizationRequest.Builder()
             .setRequestedScopes(listOf(Scope(DRIVE_FILE_SCOPE)))
-            .build()
-        return authorizationClient.authorize(request).awaitTask()
+        if (!email.isNullOrBlank()) {
+            builder.setAccount(Account(email, GOOGLE_ACCOUNT_TYPE))
+        }
+        return authorizationClient.authorize(builder.build()).awaitTask()
     }
 
     private fun buildSession(identity: GoogleIdTokenInfo, result: AuthorizationResult): GoogleAuthSession {
@@ -373,6 +395,16 @@ class RealGoogleAuthClient(
 
         /** The only scope Releaf ever requests. See `PROMPT.md` §Hard constraints #5. */
         const val DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+
+        /**
+         * Standard `Account.type` for Google accounts on Android —
+         * matches what AccountManager surfaces and what
+         * AuthorizationClient expects. Hard-coded to "com.google" per
+         * the platform contract; [GoogleAuthUtil.GOOGLE_ACCOUNT_TYPE]
+         * holds the same value but pulling it in adds a transitive
+         * dep this module otherwise doesn't need.
+         */
+        private const val GOOGLE_ACCOUNT_TYPE = "com.google"
 
         /**
          * Conservative local TTL. The real token lifetime varies but is
