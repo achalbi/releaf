@@ -151,23 +151,26 @@ fun PdfPagesView(
 
         // Fullscreen affordance — top-end pill button. Only renders
         // once pages are ready so the loader spinner isn't masked by
-        // a button that won't do anything yet.
+        // a button that won't do anything yet. Dark-on-light contrast
+        // (ink @ 55% alpha) so the chip is readable on top of the
+        // white page surface — see [PageTurnPdfView] for the same
+        // rationale.
         if (onFullscreenClick != null && pages != null && error == null) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(QuickInkSpacing.s2)
-                    .size(36.dp)
+                    .padding(QuickInkSpacing.s3)
+                    .size(40.dp)
                     .clip(CircleShape)
-                    .background(colors.surface.copy(alpha = 0.85f))
+                    .background(colors.ink.copy(alpha = 0.55f))
                     .clickable(onClick = onFullscreenClick),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector        = Icons.Filled.Fullscreen,
                     contentDescription = "View fullscreen",
-                    tint               = colors.ink,
-                    modifier           = Modifier.size(20.dp),
+                    tint               = colors.textOnAccent,
+                    modifier           = Modifier.size(22.dp),
                 )
             }
         }

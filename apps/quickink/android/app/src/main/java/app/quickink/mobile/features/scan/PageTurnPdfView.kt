@@ -306,22 +306,29 @@ private fun PageTurnPager(
         // when the parent passed an [onFullscreenClick]; previews
         // and other call sites that don't want a fullscreen path
         // can omit the callback and the button drops out.
+        //
+        // Dark-on-light contrast deliberately: pages render as a
+        // white surface, so a translucent-white pill (like the
+        // page-count chip at the bottom) disappears entirely. The
+        // dark `ink` fill at ~80% alpha keeps the page readable
+        // through the chip while the icon stays unmistakeably
+        // tappable.
         if (onFullscreenClick != null) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(QuickInkSpacing.s2)
-                    .size(36.dp)
+                    .padding(QuickInkSpacing.s3)
+                    .size(40.dp)
                     .clip(CircleShape)
-                    .background(colors.surface.copy(alpha = 0.85f))
+                    .background(colors.ink.copy(alpha = 0.55f))
                     .clickable(onClick = onFullscreenClick),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector        = Icons.Filled.Fullscreen,
                     contentDescription = "View fullscreen",
-                    tint               = colors.ink,
-                    modifier           = Modifier.size(20.dp),
+                    tint               = colors.textOnAccent,
+                    modifier           = Modifier.size(22.dp),
                 )
             }
         }
