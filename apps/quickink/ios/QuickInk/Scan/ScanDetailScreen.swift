@@ -45,6 +45,10 @@ struct ScanDetailScreen: View {
     /// text. Both reset when Save commits or Cancel discards.
     @State private var editingPageId: String? = nil
     @State private var ocrDraft = ""
+    /// Drives the fullscreen flipbook viewer (`FullscreenPdfViewer`).
+    /// Set true by the overlay button on the inline preview; cleared
+    /// by the cover's close affordance or a system back-swipe.
+    @State private var showFullscreenViewer = false
 
     init(captureId: String, userId: String, onBack: @escaping () -> Void) {
         self.captureId = captureId
@@ -131,6 +135,28 @@ struct ScanDetailScreen: View {
                 Task { await applyTitle(titleDraft) }
             }
         }
+        // Fullscreen flipbook viewer — opens when the user taps the
+        // overlay fullscreen button on the inline preview. Only
+        // meaningful when a real PDF resolves on disk; the
+        // `pdfURL(from:)` helper returns nil when the file isn't
+        // there, so we guard the cover behind the same check the
+        // inline view uses (otherwise an opened cover could land on
+        // an empty `FullscreenPdfViewer` and hang on its loader).
+        .fullScreenCover(isPresented: $showFullscreenViewer) {
+            if let pdfURL = pdfURL(from: capture) {
+                FullscreenPdfViewer(
+                    pdfURL: pdfURL,
+                    onDismiss: { showFullscreenViewer = false }
+                )
+            } else {
+                // Defensive — cover was opened against a vanished
+                // file. Auto-close so the user isn't stuck on a
+                // black screen with no visible affordance to bail.
+                Color.black
+                    .ignoresSafeArea()
+                    .onAppear { showFullscreenViewer = false }
+            }
+        }
     }
 
     /// Computed top-bar title — prefers the user-set `title`, falls
@@ -207,6 +233,7 @@ struct ScanDetailScreen: View {
         if let pdfURL = pdfURL(from: capture) {
             if capture.pageCount > 1 {
                 pageTurnViewer(for: pdfURL, capture: capture)
+                    .overlay(alignment: .topTrailing) { fullscreenChip }
             } else {
                 PDFKitView(url: pdfURL, backgroundColor: QuickInkColors.surface)
                     .frame(maxWidth: .infinity)
@@ -217,6 +244,7 @@ struct ScanDetailScreen: View {
                         RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
                             .stroke(QuickInkColors.border, lineWidth: 1)
                     )
+                    .overlay(alignment: .topTrailing) { fullscreenChip }
             }
         } else if let image = loadedPreviewImage(for: capture) {
             Image(uiImage: image)
@@ -257,6 +285,27 @@ struct ScanDetailScreen: View {
             .frame(height: 320)
             .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
         }
+    }
+
+    /// Top-trailing pill button that opens [showFullscreenViewer]
+    /// against the current capture's PDF. Mirror of Android's
+    /// `Icons.Filled.Fullscreen` chip on `PageTurnPdfView` /
+    /// `PdfPagesView` — same dark-on-light contrast (ink @ 55% with
+    /// a white icon) so the chip stays unmistakeable on top of the
+    /// white scan surface.
+    @ViewBuilder
+    private var fullscreenChip: some View {
+        Button(action: { showFullscreenViewer = true }) {
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(QuickInkColors.textOnAccent)
+                .frame(width: 40, height: 40)
+                .background(QuickInkColors.ink.opacity(0.55))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .padding(QuickInkSpacing.s3)
+        .accessibilityLabel("View fullscreen")
     }
 
     /// Heuristic height for the embedded PDFView. Single-page scans
