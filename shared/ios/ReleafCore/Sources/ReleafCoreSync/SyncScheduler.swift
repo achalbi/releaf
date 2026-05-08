@@ -32,12 +32,26 @@
  * Settings "Sync now" button + every mutation site will call.
  */
 
+import Combine
 import Foundation
 #if os(iOS)
 import BackgroundTasks
 #endif
 
-public final class SyncScheduler: @unchecked Sendable {
+public final class SyncScheduler: ObservableObject, @unchecked Sendable {
+
+    /// Whether a sync pass is currently in flight. Published so SwiftUI
+    /// surfaces (Home pending pill, Settings status row) can flip into
+    /// a "Backing up…" state without polling. Mirror of how the Android
+    /// home screen reads `WorkManager.getWorkInfosForUniqueWorkFlow(...)`
+    /// to know when its `ONESHOT_WORK_NAME` job is RUNNING.
+    ///
+    /// Always toggled from the main actor so the `@Published` write is
+    /// safe for SwiftUI consumers — the actual sync work still runs on
+    /// a detached background Task; only the bool flip hops back to main.
+    /// Set via `private(set)` so external callers can subscribe but only
+    /// the scheduler itself drives the value.
+    @Published public private(set) var isRunning: Bool = false
 
     /// Default identifier used by Releaf's `SyncEnvironment.shared`
     /// — the one-arg `init()` falls back to this so Releaf wiring
@@ -77,12 +91,22 @@ public final class SyncScheduler: @unchecked Sendable {
 
     /// Fire a single sync pass on a background Task. Coalesces bursts
     /// into one run via a simple in-flight check.
+    ///
+    /// The `isRunning` flip happens on the main actor (so SwiftUI views
+    /// observing it via `@ObservedObject` recompose) but brackets the
+    /// detached `runOnce` call, not the queue.async hop — the brief
+    /// dispatch-queue serialisation isn't user-visible work. If a
+    /// second `requestImmediate` lands while the first is in flight
+    /// the in-flight check drops it; `isRunning` stays true for the
+    /// duration of the actual pass.
     public func requestImmediate() {
         queue.async { [weak self] in
             guard let self else { return }
             if self.currentTask != nil { return }
             self.currentTask = Task.detached(priority: .utility) { [weak self] in
+                await MainActor.run { self?.isRunning = true }
                 await self?.runOnce?()
+                await MainActor.run { self?.isRunning = false }
                 self?.queue.async { self?.currentTask = nil }
             }
         }
@@ -109,8 +133,15 @@ public final class SyncScheduler: @unchecked Sendable {
 
     private func handleBackgroundRefresh(_ task: BGAppRefreshTask) {
         scheduleBackgroundRefresh() // reschedule for next window
+        // Same isRunning bracketing as `requestImmediate` — observers
+        // get a "Backing up…" state for the duration of the BG pass
+        // (it's brief and rarely seen in foreground, but keeps the
+        // signal honest if the user happens to bring the app forward
+        // mid-refresh).
         let sync = Task.detached(priority: .utility) { [weak self] in
+            await MainActor.run { self?.isRunning = true }
             await self?.runOnce?()
+            await MainActor.run { self?.isRunning = false }
             task.setTaskCompleted(success: true)
         }
         task.expirationHandler = { sync.cancel() }

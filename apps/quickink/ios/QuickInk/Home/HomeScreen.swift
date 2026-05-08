@@ -79,6 +79,22 @@ struct HomeScreen: View {
     @StateObject private var capturesVM: CaptureListViewModel
     @StateObject private var categoriesVM: CategoryListViewModel
     @ObservedObject private var syncState = SyncStateStore.shared
+    /// Watches the scheduler's published `isRunning` so the pending-
+    /// sync pill can flip into its "Backing up…" state mid-pass. Mirror
+    /// of Android's WorkInfo observation in `HomeScreen.kt:230` — same
+    /// signal, different infra.
+    @ObservedObject private var syncScheduler = QuickInkSyncEnvironment.shared.scheduler
+    /// Tap-ack window: when the user taps the pill, we hold the
+    /// "Syncing now…" state for ~6s even if the underlying scheduler
+    /// hasn't flipped `isRunning` yet (queue.async hop + Task spin-up
+    /// adds a tens-of-millis delay where the user would otherwise see
+    /// the pill not respond). Mirror of Android's `syncTapAckUntilMs`
+    /// debounce. `Date.distantPast` = inactive.
+    @State private var syncTapAckUntil: Date = .distantPast
+    /// Drives the tap-ack expiry — bumped on every tap, ticked by a
+    /// 250ms timer while active so the pill flips back to its
+    /// at-rest state without waiting for the next render.
+    @State private var nowForTapAck: Date = Date()
 
     init(
         controller: ScanFlowController,
@@ -346,41 +362,79 @@ struct HomeScreen: View {
 
     // MARK: - Pending-sync pill
 
+    /// True when either the underlying scheduler is mid-pass OR we're
+    /// inside the post-tap acknowledgement window. The tap-ack covers
+    /// the queue.async + Task spin-up gap where `isRunning` hasn't
+    /// flipped yet — without it the pill would look unresponsive on
+    /// tap. Mirror of Android's `isHomeSyncInFlight`.
+    private var isSyncInFlight: Bool {
+        syncScheduler.isRunning || nowForTapAck < syncTapAckUntil
+    }
+
     /// Coral pill shown between the greeting and the recent rail
     /// when there are local rows that haven't reached Drive yet.
     /// One tap kicks `QuickInkSyncEnvironment.scheduler.requestImmediate()` —
-    /// the same entry point Settings → "Sync now" uses. The
-    /// `localDirtyCount` is refreshed every 60 seconds by the
-    /// foreground pending-push loop (and the loop ALSO auto-kicks
-    /// the sync, so this pill is mostly a visible surface +
-    /// manual-override path for users who want the sync to fire
-    /// before the next 60-second tick).
+    /// the same entry point Settings → "Sync now" uses.
+    ///
+    /// Pill morphs into a "Backing up to Drive" state while the sync
+    /// is in flight (mirror of Android's `PendingSyncPill` — circular
+    /// spinner replaces the count badge, subtitle flips to "Syncing
+    /// now…", and an indeterminate linear bar appears under the
+    /// subtitle). iOS doesn't have WorkManager-style granular %
+    /// progress today, so the bar is indeterminate; granular % is a
+    /// follow-up that needs `SyncRepository` to publish a counter.
     @ViewBuilder
     private var pendingSyncPill: some View {
         let count = syncState.state.localDirtyCount
-        Button(action: {
-            QuickInkSyncEnvironment.shared.scheduler.requestImmediate()
-        }) {
+        let syncing = isSyncInFlight
+        Button(action: handleSyncTap) {
             HStack(spacing: QuickInkSpacing.s3) {
                 ZStack {
                     Circle().fill(QuickInkColors.accent)
                         .frame(width: 28, height: 28)
-                    Text(count > 99 ? "99+" : "\(count)")
-                        .font(QuickInkText.label)
-                        .foregroundStyle(QuickInkColors.textOnAccent)
+                    if syncing {
+                        // Circular spinner replaces the count badge —
+                        // tinted onto-accent so it reads against the
+                        // coral fill, same treatment Android uses
+                        // with `colors.textOnAccent`.
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .controlSize(.small)
+                            .tint(QuickInkColors.textOnAccent)
+                    } else {
+                        Text(count > 99 ? "99+" : "\(count)")
+                            .font(QuickInkText.label)
+                            .foregroundStyle(QuickInkColors.textOnAccent)
+                    }
                 }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(count == 1 ? "1 item pending" : "\(count) items pending")
+                    Text(syncing
+                         ? "Backing up to Drive"
+                         : (count == 1 ? "1 item pending" : "\(count) items pending"))
                         .font(QuickInkText.body)
                         .foregroundStyle(QuickInkColors.ink)
-                    Text("Tap to back up to Drive now")
+                    Text(syncing ? "Syncing now…" : "Tap to back up to Drive now")
                         .font(QuickInkText.meta)
                         .foregroundStyle(QuickInkColors.inkSoft)
+                    if syncing {
+                        // Linear indeterminate progress bar — slim
+                        // (4pt) and tinted accent so it doesn't
+                        // crowd the existing pill geometry. Sits
+                        // under the subtitle, matching Android's
+                        // bar position inside the same VStack.
+                        ProgressView()
+                            .progressViewStyle(.linear)
+                            .tint(QuickInkColors.accent)
+                            .frame(height: 4)
+                            .padding(.top, 4)
+                    }
                 }
                 Spacer()
-                Text("Sync →")
-                    .font(QuickInkText.label)
-                    .foregroundStyle(QuickInkColors.accent)
+                if !syncing {
+                    Text("Sync →")
+                        .font(QuickInkText.label)
+                        .foregroundStyle(QuickInkColors.accent)
+                }
             }
             .padding(.horizontal, QuickInkSpacing.s4)
             .padding(.vertical, QuickInkSpacing.s3)
@@ -394,11 +448,41 @@ struct HomeScreen: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Disable the button mid-sync — re-tapping while a pass is
+        // already running just lands a duplicate `requestImmediate`
+        // that the scheduler's in-flight check drops anyway, so
+        // disabling makes the visual state honest.
+        .disabled(syncing)
         .accessibilityLabel(Text(
-            count == 1
-                ? "1 item pending. Tap to back up to Drive."
-                : "\(count) items pending. Tap to back up to Drive."
+            syncing
+                ? "Backing up to Drive. \(count) item\(count == 1 ? "" : "s") pending."
+                : (count == 1
+                    ? "1 item pending. Tap to back up to Drive."
+                    : "\(count) items pending. Tap to back up to Drive.")
         ))
+    }
+
+    /// Tap handler — kicks the sync and arms the tap-ack window so
+    /// the pill flips into "Syncing now…" the instant the user taps,
+    /// even before the scheduler's `isRunning` flag flips. Spawns a
+    /// 6-second sleep that bumps `nowForTapAck` once at expiry so
+    /// the computed `isSyncInFlight` re-evaluates and the pill flips
+    /// back when the scheduler is also idle.
+    private func handleSyncTap() {
+        QuickInkSyncEnvironment.shared.scheduler.requestImmediate()
+        let until = Date().addingTimeInterval(6.0)
+        syncTapAckUntil = until
+        nowForTapAck = Date()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            // Only bump if our window is still the active one — a
+            // later tap may have extended `syncTapAckUntil` past
+            // `until`, in which case its own sleep will do the
+            // refresh.
+            if syncTapAckUntil == until {
+                nowForTapAck = Date()
+            }
+        }
     }
 
     // MARK: - Sync status pill
