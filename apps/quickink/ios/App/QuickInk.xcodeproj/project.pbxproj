@@ -72,6 +72,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = E4D0C9802FA5C99600B17F4A /* Build configuration list for PBXNativeTarget "QuickInk" */;
 			buildPhases = (
+				E4D0C9F02FA5C99500B17F4A /* Strip SPM shadow files */,
 				E4D0C9712FA5C99500B17F4A /* Sources */,
 				E4D0C9722FA5C99500B17F4A /* Frameworks */,
 				E4D0C9732FA5C99500B17F4A /* Resources */,
@@ -138,6 +139,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		E4D0C9F02FA5C99500B17F4A /* Strip SPM shadow files */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Strip SPM shadow files";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "# Wipes macOS AppleDouble (._*) shadow files from SwiftPM\n# checkouts before swiftc tries to parse them as headers. See\n# apps/quickink/scripts/strip-spm-shadow-files.sh for the full\n# rationale; surfaces when DerivedData lives on ExFAT/network volumes.\n\"$SRCROOT/../../scripts/strip-spm-shadow-files.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		E4D0C9712FA5C99500B17F4A /* Sources */ = {
