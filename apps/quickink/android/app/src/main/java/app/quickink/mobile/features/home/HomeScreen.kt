@@ -454,17 +454,9 @@ private fun HomeHeader(
             // Outer ring + shadow disc. The drawBehind block paints
             // the same two stacked drop shadows BrandTab uses
             // (ambient: wider/softer, contact: tighter/darker), then
-            // a surface-coloured ring sits on top so the coral inner
-            // reads as cleanly punched out of the page.
-            //
-            // Ring colour intentionally diverges from BrandTab's:
-            // BrandTab uses `colors.bg` because the FAB sits on the
-            // nav bar's white surface, so a bg-coloured ring reads
-            // as the page punching through the bar. The avatar sits
-            // *on* the page itself, so it needs the inverted
-            // relationship — `colors.surface` (the white card tone)
-            // gives the same "punched out" effect against the warm
-            // beige canvas.
+            // a canvas-coloured ring sits on top — same `colors.bg`
+            // tone the FAB uses, kept consistent for cross-element
+            // coherence on the home screen.
             //
             // Critical: the parent Box deliberately does NOT
             // `.clip(CircleShape)`. The ambient shadow extends ~8dp
@@ -509,7 +501,7 @@ private fun HomeHeader(
                             center = Offset(cx, cy + 1.dp.toPx()),
                         )
                     }
-                    .background(colors.surface, CircleShape),
+                    .background(colors.bg, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
@@ -534,21 +526,25 @@ private fun HomeHeader(
                             // where `type.display` would render blank
                             // on first cold launch. The avatar is a
                             // primary affordance; it can't ghost.
-                            // Centering this single glyph takes both:
-                            //   1. `includeFontPadding = false` +
-                            //      LineHeightStyle Center/Trim — strips
-                            //      Android's legacy font padding and
-                            //      tightens the line box to the glyph.
-                            //   2. A 1.5dp upward visual nudge — even
-                            //      with the line box trimmed, the
-                            //      font's metric box reserves descender
-                            //      space the "A" doesn't actually use,
-                            //      so geometric centering still leaves
-                            //      the glyph visually low. The offset
-                            //      is small enough to be invisible if
-                            //      the user types a descender-bearing
-                            //      first character (rare for an
-                            //      uppercased initial).
+                            // Centering an uppercase single-glyph in
+                            // a circle is the classic "metric vs
+                            // optical center" problem. Compose centers
+                            // the text's *layout box* (ascender to
+                            // descender), but for a cap-only letter
+                            // like "A" the visible ink lives in the
+                            // upper third of that box — descender
+                            // space below the baseline is reserved
+                            // but unused. Net effect: layout-centered
+                            // text appears visibly HIGH.
+                            //
+                            // Compensation: a +2dp downward offset.
+                            // Math: cap-only visual center sits at
+                            // ~36% of the trimmed layout box; geometric
+                            // center is 50%; the gap is ~3.6dp at
+                            // 26sp. +2dp is a slightly conservative
+                            // pick that still reads centered for any
+                            // descender-bearing first character a
+                            // user might pick.
                             Text(
                                 text  = initial,
                                 style = TextStyle(
@@ -565,7 +561,7 @@ private fun HomeHeader(
                                     ),
                                 ),
                                 color    = colors.textOnAccent,
-                                modifier = Modifier.offset(y = (-1.5).dp),
+                                modifier = Modifier.offset(y = 2.dp),
                             )
                         } else {
                             Icon(
