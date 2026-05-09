@@ -27,6 +27,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -434,10 +435,20 @@ private fun HomeHeader(
         // person glyph fills in for the signed-out / no-name case.
         // Tap slides the profile drawer in from the leading edge —
         // same pattern as Releaf's home avatar → home drawer.
+        // No ripple — the coral disc + canvas ring + drop shadow
+        // already read as pressable, and the default rectangular
+        // ripple paints in the four corners outside the circular
+        // disc (since the layout box is 64dp square, not a circle).
+        // Mirror of BrandTab's interactionSource pattern.
+        val avatarInteraction = remember { MutableInteractionSource() }
         Box(
             modifier = Modifier
                 .size(avatarOuter)
-                .clickable(onClick = onTapAvatar),
+                .clickable(
+                    interactionSource = avatarInteraction,
+                    indication        = null,
+                    onClick           = onTapAvatar,
+                ),
             contentAlignment = Alignment.Center,
         ) {
             // Outer ring + shadow disc. The drawBehind block paints
@@ -523,13 +534,21 @@ private fun HomeHeader(
                             // where `type.display` would render blank
                             // on first cold launch. The avatar is a
                             // primary affordance; it can't ghost.
-                            // includeFontPadding=false + LineHeightStyle
-                            // Center/Trim is what actually centers the
-                            // glyph inside the disc. Without these, Text
-                            // adds asymmetric leading on top/bottom from
-                            // the font's metrics, so even inside a
-                            // `contentAlignment = Center` Box the "A"
-                            // sits visibly above the geometric centre.
+                            // Centering this single glyph takes both:
+                            //   1. `includeFontPadding = false` +
+                            //      LineHeightStyle Center/Trim — strips
+                            //      Android's legacy font padding and
+                            //      tightens the line box to the glyph.
+                            //   2. A 1.5dp upward visual nudge — even
+                            //      with the line box trimmed, the
+                            //      font's metric box reserves descender
+                            //      space the "A" doesn't actually use,
+                            //      so geometric centering still leaves
+                            //      the glyph visually low. The offset
+                            //      is small enough to be invisible if
+                            //      the user types a descender-bearing
+                            //      first character (rare for an
+                            //      uppercased initial).
                             Text(
                                 text  = initial,
                                 style = TextStyle(
@@ -545,7 +564,8 @@ private fun HomeHeader(
                                         trim      = LineHeightStyle.Trim.Both,
                                     ),
                                 ),
-                                color = colors.textOnAccent,
+                                color    = colors.textOnAccent,
+                                modifier = Modifier.offset(y = (-1.5).dp),
                             )
                         } else {
                             Icon(
