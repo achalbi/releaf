@@ -780,7 +780,7 @@ private fun RecentRail(
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text     = "View all →",
+                text     = "View all",
                 style    = type.meta,
                 color    = colors.accent,
                 modifier = Modifier.clickable(onClick = onAllNotes),
