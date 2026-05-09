@@ -42,10 +42,41 @@
         <activity
             android:name=".MainActivity"
             android:theme="@style/Theme.QuickInk.Splash"
+            android:launchMode="singleTask"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+              Share-target intents — surface QuickInk in the system
+              share sheet for images and PDFs. Sharing flows through
+              the same `buildImportArtifacts` / `buildPdfImportArtifact`
+              path as the in-app Import button: each picked file is
+              copied into AttachmentStorage, OCR runs, and the
+              resulting capture is tagged `source = "import"` so the
+              Library card renders the Import pill.
+
+              `singleTask` (above) keeps share invocations from
+              spawning a duplicate MainActivity over an existing one;
+              `onNewIntent` consumes the share when the activity is
+              already alive.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
             </intent-filter>
         </activity>
 

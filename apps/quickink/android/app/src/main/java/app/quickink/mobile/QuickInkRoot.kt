@@ -45,10 +45,13 @@ import app.quickink.mobile.features.onboarding.OnboardingFlow
 import app.quickink.mobile.features.onboarding.OnboardingPreferences
 import app.quickink.mobile.features.onboarding.OnboardingState
 import app.quickink.mobile.features.onboarding.SignInScreen
+import app.quickink.mobile.features.scan.PendingShare
 import app.quickink.mobile.features.scan.QuickCaptureScreen
 import app.quickink.mobile.features.scan.ScanDetailScreen
 import app.quickink.mobile.features.scan.ScanFlowController
 import app.quickink.mobile.features.scan.ScanReviewScreen
+import app.quickink.mobile.features.scan.buildImportArtifacts
+import app.quickink.mobile.features.scan.buildPdfImportArtifact
 import app.quickink.mobile.features.search.SearchScreen
 import app.quickink.mobile.features.settings.CategoriesSettingsScreen
 import app.quickink.mobile.features.settings.ProfileScreen
@@ -58,6 +61,8 @@ import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
 import app.releaf.shared.scan.MlKitTextRecognizer
 import app.releaf.shared.scan.OcrPipeline
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun QuickInkRoot(
@@ -72,6 +77,15 @@ fun QuickInkRoot(
         app.quickink.mobile.ui.theme.ThemeMode.System,
     onPrimaryColorChange: (app.quickink.mobile.ui.theme.PrimaryColor) -> Unit = {},
     onThemeModeChange: (app.quickink.mobile.ui.theme.ThemeMode) -> Unit = {},
+    /// Share-target plumbing — populated by `MainActivity` from the
+    /// system share-sheet intent (image/* or application/pdf).
+    /// Forwarded into `MainShell`, which only kicks the import
+    /// after the auth/onboarding gates pass and the scan flow is
+    /// idle. Held in activity-scoped state so a share delivered
+    /// while the user is on the sign-in gate survives until the
+    /// gate clears.
+    pendingShare: PendingShare? = null,
+    onPendingShareConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val app     = context.applicationContext as QuickInkApp
@@ -97,11 +111,13 @@ fun QuickInkRoot(
 
         // Signed in — the main shell takes over.
         else -> MainShell(
-            userId               = (authState as AuthState.SignedIn).session.userId,
-            currentPrimaryColor  = currentPrimaryColor,
-            currentThemeMode     = currentThemeMode,
-            onPrimaryColorChange = onPrimaryColorChange,
-            onThemeModeChange    = onThemeModeChange,
+            userId                  = (authState as AuthState.SignedIn).session.userId,
+            currentPrimaryColor     = currentPrimaryColor,
+            currentThemeMode        = currentThemeMode,
+            onPrimaryColorChange    = onPrimaryColorChange,
+            onThemeModeChange       = onThemeModeChange,
+            pendingShare            = pendingShare,
+            onPendingShareConsumed  = onPendingShareConsumed,
         )
     }
 }
@@ -196,6 +212,10 @@ private fun MainShell(
         app.quickink.mobile.ui.theme.ThemeMode.System,
     onPrimaryColorChange: (app.quickink.mobile.ui.theme.PrimaryColor) -> Unit = {},
     onThemeModeChange: (app.quickink.mobile.ui.theme.ThemeMode) -> Unit = {},
+    /// Share-target import — see [QuickInkRoot] doc. Consumed via a
+    /// LaunchedEffect below.
+    pendingShare: PendingShare? = null,
+    onPendingShareConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val app     = context.applicationContext as QuickInkApp
@@ -257,6 +277,44 @@ private fun MainShell(
     if (scanState !is ScanFlowController.State.Idle) {
         ScanReviewScreen(controller, userId = userId)
         return
+    }
+
+    // Share-target import. Mirrors the in-app Import button on
+    // QuickCaptureScreen — same `buildImportArtifacts` (images) /
+    // `buildPdfImportArtifact` (PDFs) bridges, same
+    // `controller.onScanComplete(..., source = "import")` hand-off,
+    // so the resulting capture row is indistinguishable from a
+    // photo-picker import.
+    //
+    // Placement: after the `scanState !is Idle` early-return
+    // above, so the effect only mounts when the controller is
+    // idle. A share delivered while the user is in
+    // ScanReviewScreen waits in the activity-scoped state until
+    // they dismiss the review; controller transitions to Idle,
+    // MainShell re-renders the rest of its body, this effect
+    // mounts, and the queued share kicks off.
+    //
+    // Once `controller.onScanComplete` fires, the controller flips
+    // to Recognizing on the next composition, the early-return
+    // triggers, and ScanReviewScreen owns the screen for the rest
+    // of the OCR pass.
+    LaunchedEffect(pendingShare) {
+        val share = pendingShare ?: return@LaunchedEffect
+        val result = withContext(Dispatchers.IO) {
+            if (share.isPdf) {
+                buildPdfImportArtifact(context, share.uris.first())
+            } else {
+                buildImportArtifacts(context, share.uris)
+            }
+        }
+        if (result != null) {
+            controller.onScanComplete(result, source = "import")
+        }
+        // Always clear the pending share — even on a null result
+        // (corrupt PDF, all-images-failed-to-decode), so a retry
+        // doesn't loop on the same broken input. The user can
+        // re-share if they want another attempt.
+        onPendingShareConsumed()
     }
 
     // Lifted out of HomeScreen so the ⚡ FAB on Library / Search /
