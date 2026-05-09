@@ -57,6 +57,25 @@ interface GoogleAuthClient {
      * revoke call is logged but doesn't propagate.
      */
     suspend fun signOut(accessToken: String? = null)
+
+    /**
+     * Return a Google ID token (RS256 JWT) for the currently
+     * signed-in user. Used by the QuickInk analytics backend to
+     * authenticate `/v1/identify` and `/v1/events/capture/batch`
+     * POSTs without forcing the worker to re-prompt for consent
+     * — the silent Credential Manager path returns a fresh JWT
+     * as long as the user's prior session is intact.
+     *
+     * Implementations should cache the token and refresh on the
+     * "less than ~60s of TTL remaining" threshold so the analytics
+     * worker doesn't pay the silent-fetch round-trip on every flush.
+     *
+     * Throws [GoogleAuthError.Underlying] if no signed-in user is
+     * available (e.g. Credential Manager cache cleared) — the
+     * caller should leave outbox rows queued and let the next sign-
+     * in pass produce a fresh token.
+     */
+    suspend fun idToken(): String
 }
 
 /**
@@ -80,4 +99,13 @@ class StubGoogleAuthClient : GoogleAuthClient {
         session.copy(expiresAt = Instant.now().plusSeconds(3_600))
 
     override suspend fun signOut(accessToken: String?) = Unit
+
+    /**
+     * Sentinel that the QuickInk analytics backend will reject as a
+     * malformed JWT — the verifier looks for three base64-encoded
+     * segments. Surfacing the specific string in logs makes "is
+     * the device on the stub or the real client?" trivial to
+     * answer when triaging an analytics 401.
+     */
+    override suspend fun idToken(): String = "stub-id-token-not-a-real-jwt"
 }

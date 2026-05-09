@@ -85,7 +85,21 @@ data class GoogleIdTokenInfo(
 )
 
 class RealGoogleAuthClient(
-    private val activity: Activity,
+    /**
+     * Plain `Context` rather than `Activity` so this client can be
+     * constructed from `applicationContext` for paths that don't
+     * surface UI — namely the analytics flush worker's
+     * `authStore.idToken()` call, which runs inside a CoroutineWorker
+     * with no Activity available. Activity-bound flows (sign-in,
+     * authorization consent, foreground refresh) still need an
+     * Activity; they go through [requireActivity] which throws if
+     * the stored context isn't one.
+     *
+     * The convenience `(Activity, String)` ctor below lets existing
+     * callers (QuickInkApp foreground refresh, QuickInkAuthBinding
+     * sign-in) continue to pass an Activity unchanged.
+     */
+    private val context: Context,
     /**
      * OAuth 2.0 **Web** client ID for the Releaf Google Cloud project.
      * Credential Manager requires the Web Client ID (not the Android
@@ -94,8 +108,129 @@ class RealGoogleAuthClient(
     private val webClientId: String,
 ) : GoogleAuthClient {
 
-    private val credentialManager: CredentialManager = CredentialManager.create(activity)
-    private val authorizationClient = Identity.getAuthorizationClient(activity)
+    /**
+     * Activity-flavoured convenience constructor. Existing call sites
+     * pass an Activity; the cast `activity as Context` keeps that
+     * working without forcing every caller to widen their type.
+     */
+    constructor(activity: Activity, webClientId: String) :
+        this(activity as Context, webClientId)
+
+    private val credentialManager: CredentialManager = CredentialManager.create(context)
+
+    /**
+     * Activity-bound — `Identity.getAuthorizationClient` requires an
+     * Activity. Lazy so an analytics-only construction (with
+     * `applicationContext`) doesn't trip the require until the
+     * caller actually reaches a UI-bound code path.
+     */
+    private val authorizationClient by lazy {
+        Identity.getAuthorizationClient(requireActivity("authorize"))
+    }
+
+    /**
+     * Pull the Activity out of [context], or throw a clear error
+     * if the construction context was application-only. Names the
+     * UI-bound operation that needed the Activity so the error
+     * message tells the developer exactly which call site to fix.
+     */
+    private fun requireActivity(operation: String): Activity =
+        (context as? Activity) ?: throw GoogleAuthError.Underlying(
+            "RealGoogleAuthClient: $operation requires an Activity context " +
+                "(got ${context::class.java.simpleName}). Construct with " +
+                "RealGoogleAuthClient(activity, webClientId) for UI-bound flows."
+        )
+
+    // ------------------------------------------------------------------
+    // ID token caching for analytics auth
+    // ------------------------------------------------------------------
+
+    private val idTokenLock = Any()
+
+    @Volatile private var cachedIdToken: String? = null
+
+    /** Epoch seconds parsed from the cached JWT's `exp` claim. */
+    @Volatile private var cachedIdTokenExpiresAt: Long = 0L
+
+    override suspend fun idToken(): String {
+        synchronized(idTokenLock) {
+            val cached = cachedIdToken
+            if (cached != null) {
+                val secondsLeft = cachedIdTokenExpiresAt - Instant.now().epochSecond
+                if (secondsLeft > MIN_TTL_SECONDS) return cached
+            }
+        }
+        val fresh = fetchFreshIdToken()
+        synchronized(idTokenLock) {
+            cachedIdToken = fresh
+            // Fall back to a 60-min default if we can't parse the exp
+            // claim — better than 0 (which would make every call
+            // re-fetch). The verifier will still gate by the real exp
+            // server-side; this is just a local hint.
+            cachedIdTokenExpiresAt = parseJwtExp(fresh)
+                ?: (Instant.now().epochSecond + 3_600)
+        }
+        return fresh
+    }
+
+    /**
+     * Silent-only Credential Manager fetch. Falls through to
+     * [GoogleAuthError.Underlying] if no cached credential is
+     * available — by definition the analytics worker can only run
+     * after the user has signed in interactively elsewhere, so the
+     * silent path always succeeds in production. Failures here are
+     * swallowed by the worker (it leaves rows queued).
+     */
+    private suspend fun fetchFreshIdToken(): String {
+        val response = try {
+            requestCredential(buildSilentOption())
+        } catch (e: NoCredentialException) {
+            throw GoogleAuthError.Underlying(
+                "ID-token fetch: no cached credential — sign in required " +
+                    "(${e.localizedMessage ?: e::class.java.simpleName})"
+            )
+        } catch (_: GetCredentialCancellationException) {
+            throw GoogleAuthError.Cancelled
+        } catch (e: GetCredentialException) {
+            throw GoogleAuthError.Underlying(
+                e.localizedMessage ?: "ID-token fetch failed"
+            )
+        }
+        val cred = response.credential
+        if (cred !is CustomCredential ||
+            cred.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+        ) {
+            throw GoogleAuthError.Underlying(
+                "ID-token fetch: unexpected credential type ${cred::class.java.simpleName}"
+            )
+        }
+        return GoogleIdTokenCredential.createFrom(cred.data).idToken
+    }
+
+    /**
+     * Decode the JWT's middle segment as base64url, scan for the
+     * `exp` claim, return its epoch-seconds value. Returns null on
+     * any parse failure — the caller falls back to a synthetic TTL.
+     * Keeping this regex-based avoids pulling in a JSON parser just
+     * for a single integer claim.
+     */
+    private fun parseJwtExp(jwt: String): Long? = runCatching {
+        val parts = jwt.split('.')
+        if (parts.size < 2) return@runCatching null
+        val decoded = String(
+            android.util.Base64.decode(
+                parts[1],
+                android.util.Base64.URL_SAFE or
+                    android.util.Base64.NO_PADDING or
+                    android.util.Base64.NO_WRAP,
+            )
+        )
+        Regex(""""exp"\s*:\s*(\d+)""")
+            .find(decoded)
+            ?.groupValues
+            ?.get(1)
+            ?.toLong()
+    }.getOrNull()
 
     // ------------------------------------------------------------------
     // GoogleAuthClient
@@ -337,9 +472,17 @@ class RealGoogleAuthClient(
         return GetCredentialRequest.Builder().addCredentialOption(option).build()
     }
 
-    /** Thin wrapper so [requestIdentity]'s two phases share one call site. */
+    /**
+     * Thin wrapper so [requestIdentity]'s two phases share one call
+     * site. Passes [context] (Activity OR Application) — the
+     * silent-only `idToken()` path uses the application context;
+     * the interactive sign-in path uses an Activity. Credential
+     * Manager needs an Activity-bound context only when it has to
+     * surface UI (the button-fallback path); silent paths run fine
+     * with an application context.
+     */
     private suspend fun requestCredential(request: GetCredentialRequest): GetCredentialResponse =
-        credentialManager.getCredential(context = activity, request = request)
+        credentialManager.getCredential(context = context, request = request)
 
     /**
      * Run the second-phase Drive scope authorization. When [email] is
