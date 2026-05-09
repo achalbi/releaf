@@ -412,8 +412,14 @@ private fun HomeHeader(
     // gradient brush, same canvas-coloured outer ring + ambient/
     // contact drop shadows. Only difference: no upward `lift`,
     // since the avatar isn't floating above a bar surface.
-    val avatarInner  = 56.dp
-    val avatarRing   = 4.dp
+    // Halved from 56/4 to 28/2 (per "reduce size + weight by 2x"):
+    // outer disc 32dp, inner coral 28dp, 2dp canvas-coloured ring.
+    // Shadow values below halve in step (8→4 ambient radius offset,
+    // 3→1.5 contact, 3→1.5 vertical offsets) to stay proportional —
+    // a half-size avatar with full-size shadows would read like a
+    // small disc dropped on a big shadow puddle.
+    val avatarInner  = 28.dp
+    val avatarRing   = 2.dp
     val avatarOuter  = avatarInner + avatarRing * 2
     val coralGradient = Brush.verticalGradient(
         colors = listOf(colors.accent, colors.accentDeep),
@@ -431,7 +437,7 @@ private fun HomeHeader(
         // No ripple — the coral disc + canvas ring + drop shadow
         // already read as pressable, and the default rectangular
         // ripple paints in the four corners outside the circular
-        // disc (since the layout box is 64dp square, not a circle).
+        // disc (since the layout box is square, not a circle).
         // Mirror of BrandTab's interactionSource pattern.
         val avatarInteraction = remember { MutableInteractionSource() }
         Box(
@@ -462,8 +468,10 @@ private fun HomeHeader(
                         val cy = size.height / 2f
                         val r  = size.width / 2f
 
-                        // Ambient — wider, softer.
-                        val ambientR    = r + 8.dp.toPx()
+                        // Ambient — wider, softer. Halved from FAB
+                        // values (8dp/3dp → 4dp/1.5dp) to stay
+                        // proportional with the half-size disc.
+                        val ambientR    = r + 4.dp.toPx()
                         val ambientStop = r / ambientR
                         drawCircle(
                             brush = Brush.radialGradient(
@@ -471,15 +479,16 @@ private fun HomeHeader(
                                     ambientStop to Color.Black.copy(alpha = 0.06f),
                                     1f          to Color.Transparent,
                                 ),
-                                center = Offset(cx, cy + 3.dp.toPx()),
+                                center = Offset(cx, cy + 1.5.dp.toPx()),
                                 radius = ambientR,
                             ),
                             radius = ambientR,
-                            center = Offset(cx, cy + 3.dp.toPx()),
+                            center = Offset(cx, cy + 1.5.dp.toPx()),
                         )
 
-                        // Contact — tighter, darker.
-                        val contactR    = r + 3.dp.toPx()
+                        // Contact — tighter, darker. Halved from
+                        // 3dp/1dp → 1.5dp/0.5dp.
+                        val contactR    = r + 1.5.dp.toPx()
                         val contactStop = r / contactR
                         drawCircle(
                             brush = Brush.radialGradient(
@@ -487,11 +496,11 @@ private fun HomeHeader(
                                     contactStop to Color.Black.copy(alpha = 0.14f),
                                     1f          to Color.Transparent,
                                 ),
-                                center = Offset(cx, cy + 1.dp.toPx()),
+                                center = Offset(cx, cy + 0.5.dp.toPx()),
                                 radius = contactR,
                             ),
                             radius = contactR,
-                            center = Offset(cx, cy + 1.dp.toPx()),
+                            center = Offset(cx, cy + 0.5.dp.toPx()),
                         )
                     }
                     .background(colors.bg, CircleShape),
@@ -522,7 +531,7 @@ private fun HomeHeader(
                             imageVector        = Icons.Outlined.Person,
                             contentDescription = "Open profile menu",
                             tint               = colors.textOnAccent,
-                            modifier           = Modifier.size(30.dp),
+                            modifier           = Modifier.size(15.dp),
                         )
                     }
 
