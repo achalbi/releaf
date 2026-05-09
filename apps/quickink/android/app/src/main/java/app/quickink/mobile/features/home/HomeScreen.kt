@@ -1055,14 +1055,14 @@ private fun CategoryTile(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text     = name,
-                style    = type.cardTitle.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                style    = type.cardTitle.copy(fontSize = 11.sp, lineHeight = 14.sp),
                 color    = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text  = if (count == 0) "No scans yet" else "$count scan${if (count == 1) "" else "s"}",
-                style = type.caption,
+                style = type.caption.copy(fontSize = 9.sp, lineHeight = 12.sp),
                 color = colors.muted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
