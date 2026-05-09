@@ -39,7 +39,6 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -91,11 +90,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -526,43 +527,50 @@ private fun HomeHeader(
                             // where `type.display` would render blank
                             // on first cold launch. The avatar is a
                             // primary affordance; it can't ghost.
-                            // Centering an uppercase single-glyph in
-                            // a circle is the classic "metric vs
-                            // optical center" problem. Compose centers
-                            // the text's *layout box* (ascender to
-                            // descender), but for a cap-only letter
-                            // like "A" the visible ink lives in the
-                            // upper third of that box — descender
-                            // space below the baseline is reserved
-                            // but unused. Net effect: layout-centered
-                            // text appears visibly HIGH.
+                            // Bulletproof centering via TextMeasurer +
+                            // Canvas drawText. Every previous pass
+                            // (LineHeightStyle, includeFontPadding,
+                            // hand-tuned offsets) failed because they
+                            // all centered the *layout box* — which
+                            // for a cap-only letter like "A" includes
+                            // unused descender space below the
+                            // baseline, leaving the visible glyph
+                            // visibly high.
                             //
-                            // Compensation: a +2dp downward offset.
-                            // Math: cap-only visual center sits at
-                            // ~36% of the trimmed layout box; geometric
-                            // center is 50%; the gap is ~3.6dp at
-                            // 26sp. +2dp is a slightly conservative
-                            // pick that still reads centered for any
-                            // descender-bearing first character a
-                            // user might pick.
-                            Text(
-                                text  = initial,
-                                style = TextStyle(
-                                    fontFamily = FontFamily.SansSerif,
-                                    fontSize   = 26.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    lineHeight = 26.sp,
-                                    platformStyle = PlatformTextStyle(
-                                        includeFontPadding = false,
-                                    ),
-                                    lineHeightStyle = LineHeightStyle(
-                                        alignment = LineHeightStyle.Alignment.Center,
-                                        trim      = LineHeightStyle.Trim.Both,
-                                    ),
-                                ),
-                                color    = colors.textOnAccent,
-                                modifier = Modifier.offset(y = 2.dp),
+                            // This path measures the actual glyph
+                            // bounding box (cap-top → baseline for
+                            // "A"), computes its visual center, and
+                            // draws the layout offset so that the
+                            // visual center lands exactly at the
+                            // canvas (= disc) center. Works correctly
+                            // for any first character — descender-
+                            // bearing letters get measured and
+                            // centered the same way.
+                            val measurer = rememberTextMeasurer()
+                            val initialStyle = TextStyle(
+                                fontFamily = FontFamily.SansSerif,
+                                fontSize   = 26.sp,
+                                fontWeight = FontWeight.Bold,
+                                color      = colors.textOnAccent,
                             )
+                            Canvas(modifier = Modifier.size(avatarInner)) {
+                                val layout = measurer.measure(
+                                    text  = AnnotatedString(initial),
+                                    style = initialStyle,
+                                )
+                                val bounds = layout.getBoundingBox(0)
+                                // bounds.top = cap-top, bounds.bottom = baseline
+                                // (or descender for letters that have one)
+                                val glyphCenterX = (bounds.left + bounds.right) / 2f
+                                val glyphCenterY = (bounds.top + bounds.bottom) / 2f
+                                drawText(
+                                    textLayoutResult = layout,
+                                    topLeft = Offset(
+                                        x = size.width  / 2f - glyphCenterX,
+                                        y = size.height / 2f - glyphCenterY,
+                                    ),
+                                )
+                            }
                         } else {
                             Icon(
                                 imageVector        = Icons.Filled.AccountCircle,
