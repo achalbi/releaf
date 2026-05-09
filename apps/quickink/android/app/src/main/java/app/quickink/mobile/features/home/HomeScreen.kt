@@ -1060,12 +1060,12 @@ private fun CategoryTile(
             .background(colors.surface)
             .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
             .clickable(onClick = onTap)
-            .padding(QuickInkSpacing.s3),
+            .padding(QuickInkSpacing.s4),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .size(28.dp)
+                .size(32.dp)
                 .clip(RoundedCornerShape(QuickInkRadius.sm))
                 .background(colors.accentSoft),
             contentAlignment = Alignment.Center,
@@ -1074,10 +1074,10 @@ private fun CategoryTile(
                 imageVector        = icon,
                 contentDescription = null,
                 tint               = colors.accent,
-                modifier           = Modifier.size(13.dp),
+                modifier           = Modifier.size(14.dp),
             )
         }
-        Spacer(Modifier.size(QuickInkSpacing.s2))
+        Spacer(Modifier.size(QuickInkSpacing.s3))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text     = name,
