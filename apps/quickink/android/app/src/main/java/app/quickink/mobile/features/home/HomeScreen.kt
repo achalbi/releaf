@@ -90,9 +90,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -521,13 +523,27 @@ private fun HomeHeader(
                             // where `type.display` would render blank
                             // on first cold launch. The avatar is a
                             // primary affordance; it can't ghost.
+                            // includeFontPadding=false + LineHeightStyle
+                            // Center/Trim is what actually centers the
+                            // glyph inside the disc. Without these, Text
+                            // adds asymmetric leading on top/bottom from
+                            // the font's metrics, so even inside a
+                            // `contentAlignment = Center` Box the "A"
+                            // sits visibly above the geometric centre.
                             Text(
                                 text  = initial,
                                 style = TextStyle(
                                     fontFamily = FontFamily.SansSerif,
                                     fontSize   = 26.sp,
                                     fontWeight = FontWeight.Bold,
-                                    lineHeight = 30.sp,
+                                    lineHeight = 26.sp,
+                                    platformStyle = PlatformTextStyle(
+                                        includeFontPadding = false,
+                                    ),
+                                    lineHeightStyle = LineHeightStyle(
+                                        alignment = LineHeightStyle.Alignment.Center,
+                                        trim      = LineHeightStyle.Trim.Both,
+                                    ),
                                 ),
                                 color = colors.textOnAccent,
                             )
