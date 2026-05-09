@@ -190,9 +190,9 @@ object QuickInkTextStyle {
      * for `QuickInkTextStyle.Display`: only home + profile.
      */
     val Display: TextStyle = TextStyle(
-        fontFamily = QuickInkFonts.appSerif,
+        fontFamily = QuickInkFonts.serif,
         fontSize   = 40.sp,
-        fontWeight = FontWeight.Normal,
+        fontWeight = FontWeight.Bold,
         lineHeight = 48.sp,
     )
 

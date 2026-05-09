@@ -1050,7 +1050,7 @@ private fun CategoryTile(
     ) {
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(32.dp)
                 .clip(RoundedCornerShape(QuickInkRadius.sm))
                 .background(colors.accentSoft),
             contentAlignment = Alignment.Center,
@@ -1059,14 +1059,14 @@ private fun CategoryTile(
                 imageVector        = icon,
                 contentDescription = null,
                 tint               = colors.accent,
-                modifier           = Modifier.size(18.dp),
+                modifier           = Modifier.size(14.dp),
             )
         }
         Spacer(Modifier.size(QuickInkSpacing.s3))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text     = name,
-                style    = type.heading,
+                style    = type.cardTitle,
                 color    = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
