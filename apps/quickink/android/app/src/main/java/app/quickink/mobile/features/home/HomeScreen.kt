@@ -90,6 +90,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import android.net.Uri
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.R
@@ -456,7 +457,7 @@ private fun HomeHeader(
             } else if (initial != null) {
                 Text(
                     text  = initial,
-                    style = type.heading,
+                    style = type.display.copy(fontSize = 22.sp, lineHeight = 26.sp),
                     color = colors.accent,
                 )
             } else {
@@ -764,7 +765,7 @@ private fun RecentRail(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text  = "Recent Scans",
-                style = type.heading,
+                style = type.display.copy(fontSize = 26.sp, lineHeight = 32.sp),
                 color = colors.ink,
             )
             Spacer(Modifier.weight(1f))
@@ -980,7 +981,11 @@ private fun CategoryGrid(
     }
 
     Column {
-        Text(text = "Quick Categories", style = type.heading, color = colors.ink)
+        Text(
+            text  = "Quick Categories",
+            style = type.display.copy(fontSize = 26.sp, lineHeight = 32.sp),
+            color = colors.ink,
+        )
         Spacer(Modifier.size(QuickInkSpacing.s3))
         // 2-column grid sized to the live category count. Number of
         // rows grows with the user's library; LazyVGrid still isn't
