@@ -90,6 +90,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import android.net.Uri
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.R
@@ -965,27 +966,15 @@ private fun CategoryGrid(
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
 
-    // Sort by the most recent capture in each category. ISO-8601
-    // `created_at` strings sort lexicographically by timeline, so no
-    // parse step needed. Categories with no captures in the loaded
-    // window fall to the end (empty-string key sorts smallest in
-    // descending order); among those, the DAO's
-    // (position ASC, name ASC) ordering carries through because
-    // `sortedByDescending` is stable.
-    val sorted = remember(categories, captures) {
-        val latestByName: Map<String, String> = captures
-            .groupBy { (it.category ?: "").lowercase() }
-            .mapValues { (_, list) -> list.maxOf { it.createdAt } }
-        categories.sortedByDescending { latestByName[it.name.lowercase()] ?: "" }
-    }
-
     Column {
         Text(text = "Quick Categories", style = type.heading, color = colors.ink)
         Spacer(Modifier.size(QuickInkSpacing.s3))
-        // 2-column grid sized to the live category count. Number of
-        // rows grows with the user's library; LazyVGrid still isn't
-        // worth it for the typical handful.
-        sorted.chunked(2).forEachIndexed { i, pair ->
+        // 2-column grid sized to the live category count. The DAO
+        // hands these back ordered by (position ASC, name ASC) — the
+        // same order shown in Categories settings — so tiles stay put
+        // as the user adds captures. LazyVGrid still isn't worth it
+        // for the typical handful.
+        categories.chunked(2).forEachIndexed { i, pair ->
             if (i > 0) Spacer(Modifier.size(QuickInkSpacing.s2))
             Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
                 pair.forEach { cat ->
@@ -1066,7 +1055,7 @@ private fun CategoryTile(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text     = name,
-                style    = type.cardTitle,
+                style    = type.cardTitle.copy(fontSize = 12.sp, lineHeight = 16.sp),
                 color    = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
