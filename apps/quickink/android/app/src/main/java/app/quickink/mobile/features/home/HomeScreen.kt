@@ -53,7 +53,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.automirrored.filled.ListAlt
-import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CheckCircle
@@ -413,7 +413,7 @@ private fun HomeHeader(
     // same ambient/contact drop shadow stack. Differs in two
     // intentional ways: no upward `lift` (the avatar isn't floating
     // above a bar surface), and the inner glyph is dialled down
-    // from the FAB's 30dp Bolt to a 16dp Outlined.Person — the
+    // from the FAB's 30dp Bolt to a 16dp Outlined.Face — the
     // FAB is the primary action; the avatar is a secondary
     // identity tap and reads quieter.
     val avatarInner  = 56.dp
@@ -428,7 +428,7 @@ private fun HomeHeader(
         // the centre Zap FAB's chrome so the two read as siblings:
         // user's space on the left, action space on the right.
         // Profile photo (when picked) is the primary visual; the
-        // Person silhouette is the default fallback. Tap slides the
+        // Face glyph is the default fallback. Tap slides the
         // profile drawer in from the leading edge — same pattern
         // as Releaf's home avatar → home drawer.
         // No ripple — the coral disc + canvas ring + drop shadow
@@ -507,7 +507,7 @@ private fun HomeHeader(
                         .background(coralGradient),
                     contentAlignment = Alignment.Center,
                 ) {
-                    // Default fallback: a white person silhouette on
+                    // Default fallback: a white face glyph on
                     // the coral disc. Used directly when there's no
                     // profile photo AND as the loading/error slot
                     // for SubcomposeAsyncImage below — a stale URI
@@ -522,7 +522,7 @@ private fun HomeHeader(
                     // with a descender / non-Latin / emoji" question.
                     val fallback: @Composable () -> Unit = {
                         Icon(
-                            imageVector        = Icons.Outlined.Person,
+                            imageVector        = Icons.Outlined.Face,
                             contentDescription = "Open profile menu",
                             tint               = colors.textOnAccent,
                             modifier           = Modifier.size(16.dp),
@@ -532,7 +532,7 @@ private fun HomeHeader(
                     if (profilePhotoUri.isNotEmpty()) {
                         // SubcomposeAsyncImage (not AsyncImage) so a
                         // stale URI / missing file falls through to
-                        // the Person icon fallback instead of leaving
+                        // the Face icon fallback instead of leaving
                         // the coral disc empty. profilePhotoUri
                         // persists in SharedPreferences across
                         // reinstalls, so pointing at a vanished file
