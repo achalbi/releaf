@@ -406,18 +406,7 @@ private fun HomeHeader(
     val initial = displayName?.trim()?.firstOrNull()?.uppercase()
 
     Row(verticalAlignment = Alignment.Top) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = greeting, style = type.body, color = colors.muted)
-            Spacer(Modifier.size(QuickInkSpacing.s1))
-            Text(
-                text     = resolvedName,
-                style    = type.display,
-                color    = colors.ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        // Top-right profile pill — renders the user's profile photo
+        // Top-left profile pill — renders the user's profile photo
         // (when picked), the user's initial (when we have a name),
         // or a default person glyph. Tap slides the profile drawer
         // in from the leading edge — same pattern as Releaf's home
@@ -462,6 +451,18 @@ private fun HomeHeader(
                     modifier          = Modifier.size(28.dp),
                 )
             }
+        }
+        Spacer(Modifier.size(QuickInkSpacing.s3))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = greeting, style = type.body, color = colors.muted)
+            Spacer(Modifier.size(QuickInkSpacing.s1))
+            Text(
+                text     = resolvedName,
+                style    = type.display,
+                color    = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
