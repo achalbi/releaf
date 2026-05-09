@@ -850,7 +850,7 @@ private fun LibraryNoteCard(
                         word.lowercase().replaceFirstChar(Char::titlecaseChar)
                     },
                 // Library card titles render in Inter (UI sans), not
-                // the editorial Fraunces. Card titles are functional
+                // the editorial serif. Card titles are functional
                 // (scannable, dense grid) — the editorial serif felt
                 // precious for the file-list context.
                 style    = type.heading.copy(

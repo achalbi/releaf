@@ -1,59 +1,26 @@
 /*
  * QuickInkTypography.kt
  *
- * QuickInk's editorial type system (post type-system pass — see
- * TYPE_SYSTEM in repo root):
+ * QuickInk's editorial type system:
  *
- *   - Onboarding headings: Cormorant Garamond (high-contrast didone,
- *     reads "showroom"; reserved for the welcome flow only)
- *   - App headings & editorial italic: Fraunces (warmer modern
- *     serif, optically tuned for mobile display sizes — Library,
- *     Settings titles, card titles, italic taglines)
+ *   - All serif headings (onboarding + app): Cormorant Garamond
+ *     (high-contrast didone, editorial showroom feel — used by
+ *     onboarding heroes, page titles, section headings, italic
+ *     taglines, and the home greeting name)
  *   - Body & UI: Inter (replaces system sans so iOS and Android
  *     render identically)
  *   - Handwritten previews: Caveat
  *
- * Two-serif rule: Cormorant and Fraunces never appear on the same
- * screen. The handoff happens once when the user finishes onboarding
- * and lands on Home. Onboarding screens use `serif` via `Display`,
- * `OnboardingTitle`, `OnboardingBody`, and `CtaSerif`. Every other
- * screen uses `appSerif` — wired up via the rerouted styles
- * (`PageTitle`, `Heading`, `CardTitle`, `BodyItalic`).
+ * Single-serif system. Heading weight steps up to Bold/SemiBold so
+ * Cormorant carries the visual heft Fraunces previously gave the
+ * app screens — see weight notes on each style below.
  *
- * Required font resources (drop into `app/src/main/res/font/`).
- * Source files come from Google Fonts' newer multi-axis build,
- * which names static instances like `Fraunces_72pt-Regular.ttf`.
- * scripts/install-fonts.sh extracts the 72pt-optical Fraunces
- * variants and 18pt-optical Inter variants and renames them to
- * the short Android resource names below. (Android resource
- * naming requires lowercase + underscore, no hyphens or
- * camelcase. Keeping the resource name flat means existing R.font.*
- * call sites don't change when we swap optical sizes or weight
- * pins — encode those decisions in the install script's file
- * picker instead.)
+ * Required font resources (drop into `app/src/main/res/font/`):
  *
- *   cormorant_garamond_*       (already present)
- *   caveat_medium              (already present)
- *   fraunces_regular.ttf       (= Fraunces_72pt-Regular)
- *   fraunces_medium.ttf        (= Fraunces_72pt-SemiBold) *
- *   fraunces_italic.ttf        (= Fraunces_72pt-Italic)
- *   fraunces_medium_italic.ttf (= Fraunces_72pt-SemiBoldItalic) *
- *   inter_regular.ttf          (= Inter_18pt-Regular)
- *   inter_medium.ttf           (= Inter_18pt-Medium)
- *
- * * The "medium" Android resource ID is fed by the SemiBold static
- *   instance because Fraunces 72pt skips Medium in its static set
- *   (Light → Regular → SemiBold → Bold). SemiBold (CSS weight 600)
- *   is the spec call for headings anyway, so this is intentional.
- *   Compose resolves FontWeight.Medium against R.font.fraunces_medium
- *   correctly — the file's internal weight class doesn't matter,
- *   the resource ID + Compose's FontWeight tag do.
- *
- * Fraunces 72pt is the display-optical — chosen for the boutique
- * magazine feel (high contrast, airy hairlines). If small-size
- * text reads thin during QA, the right fix is the variable font
- * with opsz pinned per text level — not overweighting the static
- * instance.
+ *   cormorant_garamond_*  (Light/Regular/Medium/SemiBold/Bold + italics)
+ *   caveat_medium
+ *   inter_regular         (= Inter_18pt-Regular)
+ *   inter_medium          (= Inter_18pt-Medium)
  *
  * Mirror of iOS `QuickInkText` styles in `QuickInkTheme.swift`.
  */
@@ -71,11 +38,9 @@ import app.quickink.mobile.R
 /**
  * Font families QuickInk uses.
  *
- * - `serif` → Cormorant Garamond (onboarding only).
- * - `appSerif` → Fraunces (app screens). Bundles only Regular +
- *   Medium (and italics) to keep the font payload small. Any heavier
- *   request from a call site lands on Medium thanks to Compose's
- *   own family resolution + the explicit registrations below.
+ * - `serif` → Cormorant Garamond. The single editorial serif —
+ *   onboarding heroes, page titles, section headings, italic
+ *   taglines, and the home greeting name all resolve here.
  * - `ui` → Inter, replacing the previous `FontFamily.Default` so iOS
  *   and Android render identically. Only Regular and Medium are
  *   bundled — that's everything the type system uses.
@@ -89,9 +54,9 @@ import app.quickink.mobile.R
  */
 object QuickInkFonts {
     /**
-     * Cormorant Garamond — RESERVED for onboarding screens. Used
-     * by `Display`, `OnboardingTitle`, `OnboardingBody`, `CtaSerif`.
-     * App screens reach for `appSerif` instead.
+     * Cormorant Garamond — the only serif in the system. Used by
+     * every serif token: `Display`, `PageTitle`, `Heading`,
+     * `BodyItalic`, `OnboardingTitle`, `OnboardingBody`, `CtaSerif`.
      */
     val serif: FontFamily = FontFamily(
         // Upright
@@ -106,33 +71,6 @@ object QuickInkFonts {
         Font(R.font.cormorant_garamond_medium_italic,   FontWeight.Medium,   FontStyle.Italic),
         Font(R.font.cormorant_garamond_semibold_italic, FontWeight.SemiBold, FontStyle.Italic),
         Font(R.font.cormorant_garamond_bold_italic,     FontWeight.Bold,     FontStyle.Italic),
-    )
-
-    /**
-     * Fraunces — the app screens' editorial serif. Used by every
-     * QuickInkTextStyle app token (`PageTitle`, `Heading`,
-     * `CardTitle`, `BodyItalic`). 72pt-optical static instances
-     * picked for the magazine display feel; we bundle Regular +
-     * SemiBold (plus their italics) — that's enough for the type
-     * system. Heavier weight requests (Bold/Heavy/Black) fall back
-     * to SemiBold because the 72pt static set skips Medium and
-     * SemiBold is the spec call (CSS weight 600) for headings.
-     */
-    val appSerif: FontFamily = FontFamily(
-        // Fraunces 72pt static instances. Files in res/font/ are:
-        //   fraunces_regular.ttf       — content: Fraunces_72pt-Regular
-        //   fraunces_medium.ttf        — content: Fraunces_72pt-SemiBold
-        //   fraunces_italic.ttf        — content: Fraunces_72pt-Italic
-        //   fraunces_medium_italic.ttf — content: Fraunces_72pt-SemiBoldItalic
-        // (See scripts/install-fonts.sh — fraunces_medium is fed by
-        // SemiBold because Fraunces 72pt skips Medium in its static
-        // set; Compose's FontWeight.Medium → R.font.fraunces_medium
-        // binding does the right thing regardless of the file's
-        // internal weight class.)
-        Font(R.font.fraunces_regular,       FontWeight.Normal),
-        Font(R.font.fraunces_medium,        FontWeight.Medium),
-        Font(R.font.fraunces_italic,        FontWeight.Normal, FontStyle.Italic),
-        Font(R.font.fraunces_medium_italic, FontWeight.Medium, FontStyle.Italic),
     )
 
     /**
@@ -166,28 +104,24 @@ object QuickInkFonts {
  * instead of constructing `TextStyle` calls inline — a brand pass
  * tweak lands in one place.
  *
- * Two-context contract (post type-system pass):
- *   - Onboarding tokens (`Display`, `OnboardingTitle`,
- *     `OnboardingBody`, `CtaSerif`) → resolve to Cormorant Garamond
- *     via [QuickInkFonts.serif].
- *   - App tokens (`PageTitle`, `Heading`, `CardTitle`, `BodyItalic`)
- *     → resolve to Fraunces via [QuickInkFonts.appSerif].
- *   - `Body` → resolves to Inter via [QuickInkFonts.ui]. App screens
- *     use it directly; onboarding screens explicitly reach for
+ * Family contract:
+ *   - All serif tokens (`Display`, `PageTitle`, `Heading`,
+ *     `BodyItalic`, `OnboardingTitle`, `OnboardingBody`, `CtaSerif`)
+ *     → Cormorant Garamond via [QuickInkFonts.serif].
+ *   - `Body` → Inter via [QuickInkFonts.ui]. App screens use it
+ *     directly; onboarding screens explicitly reach for
  *     [OnboardingBody] instead.
- *   - UI tokens (`Eyebrow`, `Label`, `Meta`, `Caption`) → Inter
- *     for both contexts (UI sans is the same family everywhere).
+ *   - UI tokens (`Eyebrow`, `Label`, `CardTitle`, `Meta`, `Caption`)
+ *     → Inter (UI sans).
  *
  * Mirror of iOS `QuickInkText` enum.
  */
 object QuickInkTextStyle {
     /**
      * App-tier large display serif — used for the Home greeting
-     * name ("Achal B I") and the Profile screen header. Fraunces
-     * 72pt at 40sp rendering. Despite the legacy name, this is
-     * NOT used in onboarding — the onboarding wordmark goes
-     * through [OnboardingTitle] (Cormorant). Audited via grep
-     * for `QuickInkTextStyle.Display`: only home + profile.
+     * name ("Achal B I") and the Profile screen header. Cormorant
+     * Garamond Bold at 40sp. Audited via grep for
+     * `QuickInkTextStyle.Display`: only home + profile.
      */
     val Display: TextStyle = TextStyle(
         fontFamily = QuickInkFonts.serif,
@@ -223,22 +157,29 @@ object QuickInkTextStyle {
     )
 
     /**
-     * App page title (Settings, Library, Detail, etc.) — Fraunces
-     * medium. Switched from Cormorant in the type-system pass:
-     * Fraunces is warmer and reads better at small mobile sizes.
+     * App page title (Settings, Library, Detail, etc.) — Cormorant
+     * Garamond SemiBold. Bumped from Medium when Fraunces was
+     * dropped: Cormorant runs lighter than Fraunces at the same
+     * weight, so SemiBold is needed to match the Fraunces-Medium
+     * visual heft on small mobile displays.
      */
     val PageTitle: TextStyle = TextStyle(
-        fontFamily = QuickInkFonts.appSerif,
+        fontFamily = QuickInkFonts.serif,
         fontSize   = 28.sp,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         lineHeight = 34.sp,
     )
 
-    /** App section heading — smaller than PageTitle. Fraunces semibold. */
+    /**
+     * App section heading — smaller than PageTitle. Cormorant
+     * Garamond Bold. Bumped from SemiBold when Fraunces was dropped
+     * for the same reason as [PageTitle] — Cormorant Bold is the
+     * weight that carries against pale tile backgrounds.
+     */
     val Heading: TextStyle = TextStyle(
-        fontFamily = QuickInkFonts.appSerif,
+        fontFamily = QuickInkFonts.serif,
         fontSize   = 20.sp,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Bold,
         lineHeight = 26.sp,
     )
 
@@ -264,9 +205,9 @@ object QuickInkTextStyle {
         lineHeight = 24.sp,
     )
 
-    /** Italic accent body — taglines, smart suggestions. Fraunces italic medium. */
+    /** Italic accent body — taglines, smart suggestions. Cormorant italic medium. */
     val BodyItalic: TextStyle = TextStyle(
-        fontFamily = QuickInkFonts.appSerif,
+        fontFamily = QuickInkFonts.serif,
         fontSize   = 16.sp,
         fontWeight = FontWeight.Medium,
         fontStyle  = FontStyle.Italic,
@@ -293,13 +234,12 @@ object QuickInkTextStyle {
 
     /**
      * Card title — Inter at body scale (14sp SemiBold), used for
-     * note / scan thumbnail titles. Originally Fraunces, switched
-     * to Inter so the home recent rail matches the library cards'
-     * UI-sans treatment — note titles are functional (scannable in
-     * dense grids) and the editorial serif felt precious for a
-     * file list. Library cards still override with
-     * `heading.copy(...)` because they sit at a different size;
-     * home rail uses this token directly.
+     * note / scan thumbnail titles. Inter (not the serif) so the
+     * home recent rail matches the library cards' UI-sans treatment
+     * — note titles are functional (scannable in dense grids) and
+     * the editorial serif felt precious for a file list. Library
+     * cards still override with `heading.copy(...)` because they
+     * sit at a different size; home rail uses this token directly.
      */
     val CardTitle: TextStyle = TextStyle(
         fontFamily = QuickInkFonts.ui,
