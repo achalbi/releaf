@@ -108,6 +108,19 @@ interface CaptureDao {
     fun observeRecent(userId: String, limit: Int = 30): Flow<List<CaptureEntity>>
 
     /**
+     * Live total pages digitised by the user — the sum of `page_count`
+     * across every active (non-tombstone) capture. Drives the home
+     * sustainability hero ("By going digital — N pages saved"). Returns
+     * `null` when the user has no captures yet, which the UI maps to
+     * the empty-state copy.
+     */
+    @Query("""
+        SELECT SUM(page_count) FROM captures
+        WHERE user_id = :userId AND deleted_at IS NULL
+    """)
+    fun observeTotalPageCount(userId: String): Flow<Int?>
+
+    /**
      * Soft-delete a capture AND cascade-soft-delete its child
      * `ocr_results` rows in the same transaction.
      *

@@ -50,6 +50,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.AccountCircle
@@ -57,10 +58,12 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Eco
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -104,6 +107,7 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
+import app.quickink.mobile.ui.theme.QuickInkColors
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.quickink.mobile.ui.theme.quickInkDotGridBackground
@@ -113,9 +117,7 @@ import app.releaf.mobile.data.sync.SyncStateKeys
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import kotlinx.coroutines.delay
-import java.time.LocalDate
 import java.time.LocalTime
-import java.time.OffsetDateTime
 
 @Composable
 fun HomeScreen(
@@ -187,6 +189,15 @@ fun HomeScreen(
         captureDao.observeRecent(userId, limit = 30)
     }.collectAsState(initial = emptyList())
 
+    // Lifetime page total — drives the sustainability hero. Sums
+    // `page_count` across every active capture in SQL so the figure
+    // is accurate regardless of how many rows the recent rail has
+    // loaded. Returns `null` for the empty-library case (SUM over zero
+    // rows), which the hero maps to its first-capture copy.
+    val totalPagesSaved by remember(userId, captureDao) {
+        captureDao.observeTotalPageCount(userId)
+    }.collectAsState(initial = 0)
+
     // Live category list — every active category, newest-first.
     // Mirrors iOS's CategoryListViewModel observation. Sort happens
     // in the grid composable (kept close to render so changes to
@@ -207,9 +218,6 @@ fun HomeScreen(
     // reads. Both keys land via `SyncStateDao.upsert` from the
     // sync worker, so a fresh pass updates the pill in real time.
     val syncStateDao = remember(app) { app.database.syncStateDao() }
-    val lastSyncRow by syncStateDao
-        .observe(SyncStateKeys.LAST_FULL_SYNC_AT)
-        .collectAsState(initial = null)
     val pendingRow by syncStateDao
         .observe(SyncStateKeys.PENDING_COUNT)
         .collectAsState(initial = null)
@@ -249,11 +257,6 @@ fun HomeScreen(
         ?.progress
         ?.getInt(QuickInkSyncWorker.SYNC_PROGRESS_PERCENT_KEY, 0)
         ?.coerceIn(0, 100)
-    val syncPillState: SyncPillState = when {
-        isHomeSyncInFlight -> SyncPillState.Syncing
-        pendingCount > 0   -> SyncPillState.Pending(pendingCount)
-        else               -> SyncPillState.Synced(relativeSyncTimestamp(lastSyncRow?.value))
-    }
 
     Box(modifier = Modifier.fillMaxSize().quickInkDotGridBackground()) {
         Column(
@@ -276,6 +279,8 @@ fun HomeScreen(
                 profilePhotoUri = profilePhotoUri,
                 onTapAvatar     = { showProfileDrawer = true },
             )
+            Spacer(Modifier.size(QuickInkSpacing.s4))
+            SustainabilityHero(totalPages = totalPagesSaved ?: 0)
             // "N pending" pill — one tap kicks the upload-only sync
             // (REPLACE policy via `requestUserSync`). Visible only
             // when there's actual local work to push, so the home
@@ -318,16 +323,11 @@ fun HomeScreen(
                 captures      = recentCaptures,
                 onTapCategory = onTapCategory,
             )
-            // Sync pill at the bottom of the scroll content —
-            // scrolls with the page, no floating over content,
-            // centered horizontally.
-            Spacer(Modifier.size(QuickInkSpacing.s5))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                SyncStatusPill(state = syncPillState)
-            }
+            Spacer(Modifier.size(QuickInkSpacing.s4))
+            RecentActivityPill(
+                pendingReviewCount = pendingCount,
+                pendingSyncCount   = localDirtyCount,
+            )
         }
 
         QuickInkBottomNavBar(
@@ -383,34 +383,6 @@ fun HomeScreen(
     }
 }
 
-/**
- * Turn an ISO-8601 timestamp into "moments ago" / "5m ago" /
- * "2h ago" / "yesterday" / "3d ago" / "Apr 28". Null / unparsable
- * returns null so the pill renders "Not yet synced" instead of a
- * misleading bare date.
- */
-private fun relativeSyncTimestamp(iso: String?): String? {
-    if (iso.isNullOrBlank()) return null
-    val instant = try {
-        java.time.Instant.parse(iso)
-    } catch (_: Exception) {
-        return null
-    }
-    val seconds = java.time.Duration.between(instant, java.time.Instant.now())
-        .seconds
-        .coerceAtLeast(0L)
-    return when {
-        seconds < 60        -> "moments ago"
-        seconds < 3600      -> "${seconds / 60}m ago"
-        seconds < 86_400    -> "${seconds / 3600}h ago"
-        seconds < 172_800   -> "yesterday"
-        seconds < 604_800   -> "${seconds / 86_400}d ago"
-        else                -> instant.atZone(java.time.ZoneId.systemDefault())
-            .toLocalDate()
-            .format(java.time.format.DateTimeFormatter.ofPattern("MMM d"))
-    }
-}
-
 // MARK: - Header
 
 @Composable
@@ -442,6 +414,12 @@ private fun HomeHeader(
                 color    = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s1))
+            Text(
+                text  = "Let's get things organized 👋",
+                style = type.body,
+                color = colors.muted,
             )
         }
         // Top-right profile pill — renders the user's profile photo
@@ -489,6 +467,85 @@ private fun HomeHeader(
                     modifier          = Modifier.size(28.dp),
                 )
             }
+        }
+    }
+}
+
+// MARK: - Sustainability hero
+
+/**
+ * Hero card under the greeting that frames QuickInk as a paper-saving
+ * tool. Shows the user's lifetime digitised page count and translates
+ * it into approximate trees + water spared. Static leaf-green palette
+ * (independent of the user's accent picker) so the eco message reads
+ * the same regardless of whether they've picked Coral or Leaf Yellow
+ * for everything else.
+ *
+ * Math: 8,333 sheets per tree (commonly cited industry figure — one
+ * tree yields ~16.67 reams of office paper) and ~10 L of water per
+ * sheet (production + pulp processing). Both are deliberately
+ * conservative; the goal is a directional impact stat, not a precise
+ * lifecycle assessment.
+ */
+@Composable
+private fun SustainabilityHero(totalPages: Int) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+
+    val ecoDeep = QuickInkColors.LeafGreenDeep
+    val ecoBg   = QuickInkColors.LeafGreenBase.copy(alpha = 0.18f)
+    val ecoBorder = QuickInkColors.LeafGreenBase.copy(alpha = 0.40f)
+
+    val trees = totalPages / 8333.0
+    val waterLiters = totalPages * 10
+    val treesLabel = when {
+        trees >= 1.0  -> String.format(java.util.Locale.ROOT, "%.1f trees", trees)
+        trees >  0.0  -> String.format(java.util.Locale.ROOT, "%.2f trees", trees)
+        else          -> "first tree on the way"
+    }
+    val title    = "By going digital"
+    val headline = if (totalPages == 0) {
+        "Start saving paper"
+    } else if (totalPages == 1) {
+        "1 page saved"
+    } else {
+        "$totalPages pages saved"
+    }
+    val sub = if (totalPages == 0) {
+        "Tap the ⚡ to capture your first page"
+    } else {
+        "≈ $treesLabel · ${waterLiters} L water"
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.lg))
+            .background(ecoBg)
+            .border(1.dp, ecoBorder, RoundedCornerShape(QuickInkRadius.lg))
+            .padding(QuickInkSpacing.s4),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(ecoDeep),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.Eco,
+                contentDescription = null,
+                tint               = colors.textOnAccent,
+                modifier           = Modifier.size(26.dp),
+            )
+        }
+        Spacer(Modifier.size(QuickInkSpacing.s3))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = type.meta, color = colors.muted)
+            Text(text = headline, style = type.heading, color = colors.ink)
+            Spacer(Modifier.size(QuickInkSpacing.s1))
+            Text(text = sub, style = type.caption, color = ecoDeep)
         }
     }
 }
@@ -637,7 +694,60 @@ private fun SearchBar(onClick: () -> Unit) {
     }
 }
 
-// MARK: - Sync status pill
+// MARK: - Recent activity pill
+
+/**
+ * Info pill at the bottom of the home scroll. Surfaces a short
+ * status sentence — pending review counts, pending sync counts, or
+ * "all caught up" — without offering a tap action. The actionable
+ * sync surface is [PendingSyncPill] right under the greeting.
+ */
+@Composable
+private fun RecentActivityPill(
+    pendingReviewCount: Int,
+    pendingSyncCount: Int,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+
+    val subtitle = when {
+        pendingReviewCount > 0 ->
+            "You have $pendingReviewCount scan${if (pendingReviewCount == 1) "" else "s"} pending review"
+        pendingSyncCount > 0   ->
+            "$pendingSyncCount item${if (pendingSyncCount == 1) "" else "s"} pending sync"
+        else                   -> "You're all caught up"
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.pill))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.pill))
+            .padding(horizontal = QuickInkSpacing.s4, vertical = QuickInkSpacing.s3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(colors.accentSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.Schedule,
+                contentDescription = null,
+                tint               = colors.accent,
+                modifier           = Modifier.size(16.dp),
+            )
+        }
+        Spacer(Modifier.size(QuickInkSpacing.s3))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = "Recent Activity", style = type.cardTitle, color = colors.ink)
+            Text(text = subtitle, style = type.caption, color = colors.muted)
+        }
+    }
+}
 
 // MARK: - Recent rail
 
@@ -653,13 +763,13 @@ private fun RecentRail(
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text  = "RECENT",
-                style = type.eyebrow,
-                color = colors.muted,
+                text  = "Recent Scans",
+                style = type.heading,
+                color = colors.ink,
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text     = "All scans →",
+                text     = "View all >",
                 style    = type.meta,
                 color    = colors.accent,
                 modifier = Modifier.clickable(onClick = onAllNotes),
@@ -870,7 +980,7 @@ private fun CategoryGrid(
     }
 
     Column {
-        Text(text = "CATEGORIES", style = type.eyebrow, color = colors.muted)
+        Text(text = "Quick Categories", style = type.heading, color = colors.ink)
         Spacer(Modifier.size(QuickInkSpacing.s3))
         // 2-column grid sized to the live category count. Number of
         // rows grows with the user's library; LazyVGrid still isn't
@@ -883,12 +993,11 @@ private fun CategoryGrid(
                         categoryStats(cat.name, captures)
                     }
                     CategoryTile(
-                        name         = cat.name,
-                        icon         = iconForCategory(cat.name),
-                        count        = stats.count,
-                        recencyBadge = stats.recencyBadge,
-                        onTap        = { onTapCategory?.invoke(cat.name) },
-                        modifier     = Modifier.weight(1f),
+                        name     = cat.name,
+                        icon     = iconForCategory(cat.name),
+                        count    = stats.count,
+                        onTap    = { onTapCategory?.invoke(cat.name) },
+                        modifier = Modifier.weight(1f),
                     )
                 }
                 // Pad the trailing row when the count is odd so the
@@ -904,46 +1013,19 @@ private fun CategoryGrid(
 
 /**
  * Per-category aggregate computed from the captures we already have
- * loaded (`recentCaptures`, capped at 30 by the DAO). Returns the
- * match count plus an optional "Today" / "Yesterday" recency hint
- * for the tile's top-right badge.
+ * loaded (`recentCaptures`, capped at 30 by the DAO).
  *
  * At 30 captures the count saturates — fine for the home tile
  * (UI still reads "30 scans"); a dedicated GROUP BY query would lift
  * that ceiling but isn't worth the extra observation while the
  * typical user library stays well under 30.
  */
-private data class CategoryStats(val count: Int, val recencyBadge: String?)
+private data class CategoryStats(val count: Int)
 
 private fun categoryStats(name: String, captures: List<CaptureEntity>): CategoryStats {
     val needle = name.lowercase()
     val matching = captures.filter { (it.category ?: "").lowercase() == needle }
-    val today = LocalDate.now()
-    val yesterday = today.minusDays(1)
-
-    var hasToday = false
-    var hasYesterday = false
-    for (capture in matching) {
-        val date = try {
-            OffsetDateTime.parse(capture.createdAt).toLocalDate()
-        } catch (_: Exception) {
-            null
-        } ?: continue
-        when (date) {
-            today -> {
-                hasToday = true
-                break // Today wins; no point scanning further.
-            }
-            yesterday -> hasYesterday = true
-            else -> { /* older — ignored for the badge */ }
-        }
-    }
-    val badge = when {
-        hasToday     -> "Today"
-        hasYesterday -> "Yesterday"
-        else         -> null
-    }
-    return CategoryStats(count = matching.size, recencyBadge = badge)
+    return CategoryStats(count = matching.size)
 }
 
 @Composable
@@ -951,61 +1033,55 @@ private fun CategoryTile(
     name: String,
     icon: ImageVector,
     count: Int,
-    recencyBadge: String?,
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
 
-    Column(
+    Row(
         modifier = modifier
             .clip(RoundedCornerShape(QuickInkRadius.md))
             .background(colors.surface)
             .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
             .clickable(onClick = onTap)
             .padding(QuickInkSpacing.s4),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Icon + recency badge laid out as a Row so the badge can
-        // sit top-right while the icon stays top-left. Spacer pushes
-        // the badge to the trailing edge.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(colors.accentSoft),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector        = icon,
-                    contentDescription = null,
-                    tint               = colors.accent,
-                    modifier           = Modifier.size(16.dp),
-                )
-            }
-            Spacer(Modifier.weight(1f))
-            if (recencyBadge != null) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(QuickInkRadius.sm))
-                        .background(colors.accentSoft)
-                        .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
-                ) {
-                    Text(
-                        text  = recencyBadge.uppercase(java.util.Locale.getDefault()),
-                        style = type.caption,
-                        color = colors.accent,
-                    )
-                }
-            }
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(QuickInkRadius.sm))
+                .background(colors.accentSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = icon,
+                contentDescription = null,
+                tint               = colors.accent,
+                modifier           = Modifier.size(18.dp),
+            )
         }
         Spacer(Modifier.size(QuickInkSpacing.s3))
-        Text(text = name, style = type.heading, color = colors.ink)
-        Text(
-            text  = if (count == 0) "No scans yet" else "$count scan${if (count == 1) "" else "s"}",
-            style = type.caption,
-            color = colors.muted,
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text     = name,
+                style    = type.heading,
+                color    = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text  = if (count == 0) "No scans yet" else "$count scan${if (count == 1) "" else "s"}",
+                style = type.caption,
+                color = colors.muted,
+            )
+        }
+        Icon(
+            imageVector        = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint               = colors.muted,
+            modifier           = Modifier.size(18.dp),
         )
     }
 }
