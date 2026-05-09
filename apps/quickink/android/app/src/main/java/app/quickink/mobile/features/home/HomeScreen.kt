@@ -53,7 +53,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.automirrored.filled.ListAlt
-import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CheckCircle
@@ -90,12 +90,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.foundation.Canvas
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.drawText
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -118,7 +112,6 @@ import coil.request.ImageRequest
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkColors
-import app.quickink.mobile.ui.theme.QuickInkFonts
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.quickink.mobile.ui.theme.quickInkDotGridBackground
@@ -413,7 +406,6 @@ private fun HomeHeader(
         }
     }
     val resolvedName = (displayName?.trim().orEmpty()).ifEmpty { "QuickInk" }
-    val initial = displayName?.trim()?.firstOrNull()?.uppercase()
 
     // Avatar pill mirrors the centre Zap FAB exactly (see
     // QuickInkBottomNavBar.BrandTab) — same dimensions, same coral
@@ -512,73 +504,26 @@ private fun HomeHeader(
                         .background(coralGradient),
                     contentAlignment = Alignment.Center,
                 ) {
-                    // Default fallback content: the initial when we
-                    // have a name, the AccountCircle glyph otherwise.
-                    // Used directly when profilePhotoUri is empty AND
-                    // as the loading/error slot for SubcomposeAsyncImage
-                    // below — a stale URI pointing at a deleted file
-                    // would otherwise leave the disc blank.
+                    // Default fallback: a white person silhouette on
+                    // the coral disc. Used directly when there's no
+                    // profile photo AND as the loading/error slot
+                    // for SubcomposeAsyncImage below — a stale URI
+                    // pointing at a deleted file would otherwise
+                    // leave the disc blank.
+                    //
+                    // Earlier passes rendered the user's first
+                    // initial here (Canvas + TextMeasurer to dodge
+                    // metric-vs-optical centering quirks), but the
+                    // person glyph reads more universally and avoids
+                    // the whole "what if the user's name starts
+                    // with a descender / non-Latin / emoji" question.
                     val fallback: @Composable () -> Unit = {
-                        if (initial != null) {
-                            // Roboto Serif Bold — the same editorial
-                            // family the home greeting renders the
-                            // user's name in (`type.display`). Pulls
-                            // the avatar's letterform into harmony
-                            // with the "A" in "Achal B I" above; both
-                            // glyphs read as the same person.
-                            //
-                            // Bulletproof centering via TextMeasurer
-                            // + Canvas drawText: every previous pass
-                            // (LineHeightStyle, includeFontPadding,
-                            // hand-tuned offsets) failed because they
-                            // all centered the *layout box* — which
-                            // for a cap-only letter like "A" includes
-                            // unused descender space below the
-                            // baseline, leaving the glyph visibly
-                            // high. Canvas + glyph-bounds measurement
-                            // centers the actual visible ink.
-                            //
-                            // Async-load note: downloadable Google
-                            // Fonts can take a beat to arrive on cold
-                            // launch. While Roboto Serif loads,
-                            // Compose falls back to the platform
-                            // serif (Noto Serif on Android), so the
-                            // glyph still paints — it just snaps to
-                            // Roboto Serif once cached. Acceptable
-                            // for a non-ghosting transition.
-                            val measurer = rememberTextMeasurer()
-                            val initialStyle = TextStyle(
-                                fontFamily = QuickInkFonts.serif,
-                                fontSize   = 28.sp,
-                                fontWeight = FontWeight.Bold,
-                                color      = colors.textOnAccent,
-                            )
-                            Canvas(modifier = Modifier.size(avatarInner)) {
-                                val layout = measurer.measure(
-                                    text  = AnnotatedString(initial),
-                                    style = initialStyle,
-                                )
-                                val bounds = layout.getBoundingBox(0)
-                                // bounds.top = cap-top, bounds.bottom = baseline
-                                // (or descender for letters that have one)
-                                val glyphCenterX = (bounds.left + bounds.right) / 2f
-                                val glyphCenterY = (bounds.top + bounds.bottom) / 2f
-                                drawText(
-                                    textLayoutResult = layout,
-                                    topLeft = Offset(
-                                        x = size.width  / 2f - glyphCenterX,
-                                        y = size.height / 2f - glyphCenterY,
-                                    ),
-                                )
-                            }
-                        } else {
-                            Icon(
-                                imageVector        = Icons.Filled.AccountCircle,
-                                contentDescription = "Open profile menu",
-                                tint               = colors.textOnAccent,
-                                modifier           = Modifier.size(32.dp),
-                            )
-                        }
+                        Icon(
+                            imageVector        = Icons.Filled.Person,
+                            contentDescription = "Open profile menu",
+                            tint               = colors.textOnAccent,
+                            modifier           = Modifier.size(36.dp),
+                        )
                     }
 
                     if (profilePhotoUri.isNotEmpty()) {
