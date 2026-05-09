@@ -28,13 +28,17 @@ import android.app.Activity
 import android.app.Application
 import android.os.Bundle
 import android.util.Log
+import app.quickink.mobile.data.analytics.AnalyticsFlushWorker
+import app.quickink.mobile.data.analytics.AnalyticsRepository
 import app.quickink.mobile.data.db.QuickInkDatabase
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.data.sync.QuickInkSyncWorker
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
+import app.releaf.mobile.auth.GoogleAuthClient
 import app.releaf.mobile.auth.GoogleAuthSession
 import app.releaf.mobile.auth.RealGoogleAuthClient
+import app.releaf.mobile.auth.StubGoogleAuthClient
 import app.releaf.mobile.data.common.AttachmentStorage
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.drive.DriveClient
@@ -130,7 +134,31 @@ class QuickInkApp : Application() {
         AttachmentStorage.appFolderName = "quickink"
 
         database  = QuickInkDatabase.get(this)
-        authStore = AuthStore.get(this)
+
+        // Resolve the OAuth Web Client ID once and use it for both
+        // the AuthStore wrapped client AND the Drive transport
+        // selection below. When the placeholder is still in
+        // strings.xml, fall back to the in-memory stubs so the app
+        // is still buildable/runnable without QuickInk's Cloud
+        // credentials checked in.
+        val webClientId = getString(R.string.google_web_client_id)
+        val placeholderClientId = webClientId == "REPLACE_WITH_GOOGLE_WEB_CLIENT_ID"
+
+        // AuthStore's wrapped GoogleAuthClient — used by every call
+        // to `authStore.idToken()` (the analytics worker's auth
+        // path). The interactive sign-in flow runs through
+        // `rememberQuickInkSignInAction` against an Activity-bound
+        // RealGoogleAuthClient and returns its session via
+        // `authStore.adoptSession`, so the wrapped client here only
+        // needs the silent-Credential-Manager idToken path. Pass
+        // `applicationContext` so the analytics worker (with no
+        // Activity available) can call `idToken()` safely.
+        val authClient: GoogleAuthClient = if (placeholderClientId) {
+            StubGoogleAuthClient()
+        } else {
+            RealGoogleAuthClient(applicationContext, webClientId)
+        }
+        authStore = AuthStore.get(this, authClient)
 
         // Best-effort one-shot rename of the legacy attachments
         // folder. Idempotent — if `releaf/attachments/` is gone (fresh
@@ -144,14 +172,20 @@ class QuickInkApp : Application() {
         // Web Client ID has been populated, in-memory stub otherwise.
         // Mirror of ReleafApp.onCreate's logic — flips automatically
         // once `strings.xml`'s `google_web_client_id` is filled in.
-        val webClientId = getString(R.string.google_web_client_id)
-        driveClient = if (webClientId == "REPLACE_WITH_GOOGLE_WEB_CLIENT_ID") {
+        driveClient = if (placeholderClientId) {
             InMemoryDriveClient()
         } else {
             OkHttpDriveClient()
         }
 
         observeAuthForSyncLifecycle()
+        observeAuthForAnalytics()
+
+        // Schedule the 30-min periodic analytics flush. Idempotent
+        // (KEEP semantics on the unique work name); gated by
+        // `BuildConfig.ANALYTICS_ENABLED` so a kill-switch build
+        // wires nothing.
+        AnalyticsFlushWorker.scheduleAll(this)
 
         // Foreground token-refresh hook. The sync worker can't call
         // `RealGoogleAuthClient.refresh` itself because that path
@@ -682,6 +716,19 @@ class QuickInkApp : Application() {
                         android.util.Log.i("QuickInkSync",
                             "auth: SignedOut — cancelAll")
                         QuickInkSyncScheduler.cancelAll(this)
+
+                        // Mirror of iOS QuickInkRoot.swift
+                        // `handleAuthStateForSettings`: drop every
+                        // identity-leaking SettingsPreferences override
+                        // so the next account on the same device
+                        // doesn't inherit the previous user's display
+                        // name / phone / photo / punchline / search
+                        // MRU. Theme + Drive-backup + experimental-flag
+                        // prefs are device-level and intentionally
+                        // preserved.
+                        runCatching {
+                            SettingsPreferences(this).clearAllUserOverrides()
+                        }
                     }
                     is AuthState.SigningIn,
                     is AuthState.Failed -> {
@@ -691,6 +738,68 @@ class QuickInkApp : Application() {
                         // perfectly healthy in-flight syncs.
                         android.util.Log.i("QuickInkSync",
                             "auth: $state (transient) — leaving work scheduled")
+                    }
+                }
+            }
+            .launchIn(appScope)
+    }
+
+    /**
+     * Tracks the userId we've already enqueued an `/v1/identify`
+     * row for in this process. A transient re-emission of
+     * `SignedIn` (token refresh, observer rebind) won't re-enqueue
+     * a duplicate identify; an actual account switch will because
+     * the userId differs. Reset on `SignedOut` so the next sign-in
+     * fires a fresh identify.
+     */
+    private var lastIdentifiedUserId: String? = null
+
+    /**
+     * Mirror of iOS QuickInkRoot.swift `handleAuthStateForAnalytics`.
+     * Watches the auth StateFlow and enqueues a `/v1/identify`
+     * outbox row per SignedIn → opportunistically flushes so the
+     * backend's User row exists before the first capture event
+     * arrives (FK constraint on `capture_events.user_uid`).
+     *
+     * Gated by `BuildConfig.ANALYTICS_ENABLED` — a build with the
+     * flag off skips the observer entirely so no rows accumulate
+     * in the outbox and no work fires.
+     */
+    private fun observeAuthForAnalytics() {
+        if (!BuildConfig.ANALYTICS_ENABLED) return
+
+        authStore.state
+            .onEach { state ->
+                when (state) {
+                    is AuthState.SignedIn -> {
+                        val userId = state.session.userId
+                        if (lastIdentifiedUserId == userId) return@onEach
+                        lastIdentifiedUserId = userId
+
+                        appScope.launch(Dispatchers.IO) {
+                            try {
+                                AnalyticsRepository(database.analyticsOutboxDao())
+                                    .enqueueIdentify(
+                                        deviceOs   = "android",
+                                        appVersion = QUICKINK_APP_VERSION,
+                                    )
+                                AnalyticsFlushWorker.requestImmediate(this@QuickInkApp)
+                            } catch (e: Exception) {
+                                Log.w(
+                                    "QuickInkAnalytics",
+                                    "[analytics] enqueueIdentify failed: $e"
+                                )
+                            }
+                        }
+                    }
+                    is AuthState.SignedOut -> {
+                        lastIdentifiedUserId = null
+                    }
+                    is AuthState.SigningIn,
+                    is AuthState.Failed -> {
+                        // Transient — leave the latch alone so a
+                        // brief flicker through SigningIn doesn't
+                        // re-emit identify on the next SignedIn.
                     }
                 }
             }

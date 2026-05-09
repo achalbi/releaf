@@ -31,6 +31,8 @@ import androidx.room.RoomDatabase
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
+import app.quickink.mobile.data.analytics.AnalyticsOutboxDao
+import app.quickink.mobile.data.analytics.AnalyticsOutboxEntity
 import app.quickink.mobile.data.capture.CaptureDao
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.category.CategoryDao
@@ -52,19 +54,24 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         OcrResultEntity::class,
         CategoryEntity::class,
         ProfileSettingsEntity::class,
+        AnalyticsOutboxEntity::class,
     ],
-    // v5 — adds `captures.source` ("scan" / "import") so the
-    // Library cards can flag captures that came in from the system
-    // photo picker rather than the document scanner. v4 — adds the
-    // `profile_settings` table (display name, phone, personality
-    // punchline, photo URI/Drive id) so profile state syncs across
-    // devices instead of being stuck in local SharedPreferences.
-    // v3 — captures.pdf_drive_file_id + captures.preview_drive_file_id
+    // v6 — adds the `analytics_outbox` table that AnalyticsRepository
+    // writes capture / identify events into for the QuickInk backend
+    // (api-quickink.thoughtbasics.com). Mirror of iOS GRDB
+    // `v5_analytics_outbox` migration. v5 — adds `captures.source`
+    // ("scan" / "import") so the Library cards can flag captures
+    // that came in from the system photo picker rather than the
+    // document scanner. v4 — adds the `profile_settings` table
+    // (display name, phone, personality punchline, photo URI/Drive
+    // id) so profile state syncs across devices instead of being
+    // stuck in local SharedPreferences. v3 —
+    // captures.pdf_drive_file_id + captures.preview_drive_file_id
     // (Drive ids of the per-row binary uploads). v2 added the
     // categories table + captures.category column.
     // `fallbackToDestructiveMigration` below handles the rebuild;
     // when real users have data we'll register real Migration objects.
-    version       = 5,
+    version       = 6,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {
@@ -75,6 +82,7 @@ abstract class QuickInkDatabase : RoomDatabase() {
     abstract fun ocrResultDao():         OcrResultDao
     abstract fun categoryDao():          CategoryDao
     abstract fun profileSettingsDao():   ProfileSettingsDao
+    abstract fun analyticsOutboxDao():   AnalyticsOutboxDao
 
     companion object {
         @Volatile

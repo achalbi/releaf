@@ -5,7 +5,33 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>app.quickink.mobile.sync</string>
+		<!--
+		  Analytics outbox flush. Registered + scheduled by
+		  AnalyticsFlushTask.install(...) at app launch. The
+		  identifier MUST match `AnalyticsFlushTask.identifier`
+		  in code or BGTaskScheduler.register traps. Re-running
+		  every ~30 min is the ask; iOS budgets the actual
+		  cadence based on usage patterns.
+		-->
+		<string>app.quickink.analytics.flush</string>
 	</array>
+	<!--
+	  Feature flag the AnalyticsFlushTask reads at every entry
+	  point (install / requestImmediate / scheduleNext). When false
+	  or missing, the task does nothing — the on-disk outbox is
+	  left untouched, so flipping the flag back on later picks up
+	  wherever it stopped.
+	-->
+	<key>AnalyticsEnabled</key>
+	<true/>
+	<!--
+	  Root URL the AnalyticsApiClient appends `/v1/identify` and
+	  `/v1/events/capture/batch` to. Live at the QuickInk backend
+	  (Cloud Run + custom domain). Mirror of Android's
+	  BuildConfig.ANALYTICS_BASE_URL — when one moves, both move.
+	-->
+	<key>AnalyticsBaseURL</key>
+	<string>https://api-quickink.thoughtbasics.com</string>
 	<!--
 	  Required for the profile-photo "Take Photo" flow on the
 	  Profile screen. The system shows this string in the camera-

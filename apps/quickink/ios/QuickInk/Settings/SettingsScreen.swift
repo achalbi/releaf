@@ -17,6 +17,15 @@ struct SettingsScreen: View {
 
     let onBack: () -> Void
     @ObservedObject var authStore: AuthStore
+    /// Owned by `MainShell` so the same SettingsState instance feeds
+    /// the SettingsScreen pickers AND the QuickInkRoot theme-mode /
+    /// primary-color resolver. A previous `@StateObject` here meant
+    /// SettingsScreen built its own SettingsState; the picker change
+    /// updated THAT instance, but MainShell's separate instance kept
+    /// the old values, so the theme bar / accent never flipped.
+    /// Mirror of Android's settings hoist into `MainShell` via
+    /// `app.quickink.mobile.QuickInkRoot.MainShell.settingsPrefs`.
+    @ObservedObject var settings: SettingsState
     let onManageCategories: (() -> Void)?
     /// Tab navigation callbacks for the floating bottom nav. Settings
     /// paints itself active; tapping it is a no-op.
@@ -29,6 +38,7 @@ struct SettingsScreen: View {
     init(
         onBack: @escaping () -> Void,
         authStore: AuthStore,
+        settings: SettingsState,
         onManageCategories: (() -> Void)? = nil,
         onHome: @escaping () -> Void = {},
         onLibrary: @escaping () -> Void = {},
@@ -38,6 +48,7 @@ struct SettingsScreen: View {
     ) {
         self.onBack = onBack
         self.authStore = authStore
+        self.settings = settings
         self.onManageCategories = onManageCategories
         self.onHome = onHome
         self.onLibrary = onLibrary
@@ -45,8 +56,6 @@ struct SettingsScreen: View {
         self.onSearch = onSearch
         self.onSettings = onSettings
     }
-
-    @StateObject private var settings = SettingsState()
 
     /// Slice 4.2b — observes `SyncStateStore.shared` for the
     /// "Last synced" row. The store is a published `ObservableObject`,

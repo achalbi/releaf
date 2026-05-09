@@ -81,6 +81,65 @@ public struct QuickInkRoot: View {
                 break
             }
         }
+        // Analytics outbox: enqueue an `/v1/identify` event whenever
+        // auth resolves to .signedIn. Tracks the last-identified
+        // userId so a transient re-emission (token refresh, observer
+        // rebind) doesn't spam duplicates. Reset on .signedOut.
+        // Settings: drop identity-leaking overrides on sign-out so
+        // the next account on the same device doesn't inherit the
+        // previous user's display name / phone / photo / punchline /
+        // search MRU. Theme + Drive backup + experimental flags are
+        // device-level and intentionally preserved.
+        .onChange(of: authStore.state) { newState in
+            handleAuthStateForAnalytics(newState)
+            handleAuthStateForSettings(newState)
+        }
+    }
+
+    /// Drop identity-leaking SettingsState overrides on sign-out so
+    /// the next account on the same device doesn't inherit the
+    /// previous user's custom photo / display name / phone /
+    /// punchline. Theme + Drive-backup + experimental-flag prefs
+    /// are device-level and intentionally preserved. Mirror of
+    /// Android `SettingsPreferences.clearAllUserOverrides`.
+    private func handleAuthStateForSettings(_ state: AuthStore.State) {
+        if case .signedOut = state {
+            SettingsState.clearAllUserOverrides()
+        }
+    }
+
+    /// Set of userIds for which an identify has been enqueued in
+    /// THIS process. State is per-instance so SwiftUI previews
+    /// don't accidentally mutate it.
+    @State private var lastIdentifiedUserId: String? = nil
+
+    private func handleAuthStateForAnalytics(_ state: AuthStore.State) {
+        guard AnalyticsFlushTask.isEnabled else { return }
+
+        switch state {
+        case .signedIn(let session):
+            if lastIdentifiedUserId == session.userId { return }
+            lastIdentifiedUserId = session.userId
+
+            let appVersion = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0"
+            Task.detached(priority: .background) {
+                do {
+                    try await AnalyticsRepository(
+                        dbQueue: QuickInkDatabase.shared.dbQueue
+                    ).enqueueIdentify(
+                        deviceOs:   "ios",
+                        appVersion: appVersion
+                    )
+                    AnalyticsFlushTask.requestImmediate()
+                } catch {
+                    NSLog("[analytics] enqueueIdentify failed: %@", "\(error)")
+                }
+            }
+        case .signedOut:
+            lastIdentifiedUserId = nil
+        default:
+            break
+        }
     }
 }
 
@@ -208,18 +267,37 @@ private struct MainShell: View {
     init(userId: String, authStore: AuthStore) {
         self.userId = userId
         self.authStore = authStore
-        // Slice 4.2c — kick a one-shot sync at the end of each
-        // scan pass. The scheduler's coalesce-while-running guard
-        // dedupes bursts and the closure no-ops when Drive backup
-        // is off (per QuickInkSyncEnvironment's drive-toggle gate),
-        // so this is safe to fire unconditionally. Captured by
-        // value so the closure doesn't retain `self`.
-        // Sync is user-initiated only — no auto-kick after a scan.
-        // The user taps Settings → "Sync now" when they want
-        // captures pushed to Drive.
+        // Drive sync is user-initiated only — no auto-kick after
+        // a scan. The user taps Settings → "Sync now" when they
+        // want their captures pushed to Drive.
+        //
+        // Analytics outbox runs in parallel (different cadence,
+        // different failure mode, parallel pipeline) and enqueues
+        // a capture event the moment the pass completes. The flush
+        // task itself is gated by Info.plist `AnalyticsEnabled`,
+        // so the enqueue is cheap even when the flag is off.
         _controller = StateObject(wrappedValue: ScanFlowController(
-            userId:         userId,
-            onPassComplete: { /* intentional no-op */ }
+            userId: userId,
+            onPassComplete: { summary in
+                Task.detached(priority: .background) {
+                    do {
+                        try await AnalyticsRepository(
+                            dbQueue: QuickInkDatabase.shared.dbQueue
+                        ).enqueueCapture(
+                            captureId:  summary.captureId,
+                            source:     summary.source,
+                            pageCount:  summary.pageCount,
+                            category:   summary.category,
+                            hasOcr:     summary.hasOcr,
+                            ocrChars:   summary.ocrChars,
+                            capturedAt: summary.capturedAt
+                        )
+                        AnalyticsFlushTask.requestImmediate()
+                    } catch {
+                        NSLog("[analytics] enqueueCapture failed: %@", "\(error)")
+                    }
+                }
+            }
         ))
     }
 
@@ -282,13 +360,49 @@ private struct MainShell: View {
         }
         // Appearance overrides — `preferredColorScheme(nil)` lets
         // the OS decide; passing .light / .dark forces the override
-        // for every descendent view. `tint` paints all system
-        // controls (Toggle, Button, NavigationLink chevrons, etc.)
-        // with the picked primary's resolved variant so the picker's
-        // effect propagates without each screen needing an
+        // for every descendent SwiftUI view. `tint` paints all
+        // system controls (Toggle, Button, NavigationLink chevrons,
+        // etc.) with the picked primary's resolved variant so the
+        // picker's effect propagates without each screen needing an
         // environment lookup.
         .preferredColorScheme(settings.themeMode.colorScheme)
         .tint(resolvedAccent)
+        // ── UIWindow override ───────────────────────────────────
+        // `preferredColorScheme` modifies SwiftUI's environment but
+        // does NOT propagate down into UIKit's UITraitCollection —
+        // and our dynamic colors (`Color(uiColor: UIColor { trait
+        // in ... })`) resolve through UIKit. Without forcing the
+        // window's `overrideUserInterfaceStyle`, the picker's
+        // Light / Dark choice would only flip SwiftUI primitives
+        // (Toggle / NavigationLink chrome) while every QuickInk
+        // color stayed on the OS's trait. Apply at first appear +
+        // on every change.
+        .task(id: settings.themeMode) {
+            applyWindowInterfaceStyle(settings.themeMode)
+        }
+    }
+
+    /// Push the picked theme down into UIKit by mutating every
+    /// connected scene's `overrideUserInterfaceStyle`. This is what
+    /// `UIColor(dynamicProvider:)` reads — without it, the SwiftUI-
+    /// level `.preferredColorScheme()` is invisible to our dynamic
+    /// colors.
+    private func applyWindowInterfaceStyle(_ mode: ThemeMode) {
+        #if canImport(UIKit)
+        let style: UIUserInterfaceStyle = {
+            switch mode {
+            case .system: return .unspecified
+            case .light:  return .light
+            case .dark:   return .dark
+            }
+        }()
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for window in windowScene.windows {
+                window.overrideUserInterfaceStyle = style
+            }
+        }
+        #endif
     }
 
     /// Resolves the picked primary against the effective theme.
@@ -345,6 +459,7 @@ private struct MainShell: View {
             SettingsScreen(
                 onBack:    { path.removeLast() },
                 authStore: authStore,
+                settings:  settings,
                 onManageCategories: { path.append(.manageCategories) },
                 onHome:     { path.removeAll() },
                 onLibrary:  { navToTab(.notesList) },

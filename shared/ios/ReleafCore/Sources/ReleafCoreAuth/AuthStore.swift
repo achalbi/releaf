@@ -84,6 +84,19 @@ public final class AuthStore: ObservableObject {
         state = .signingIn
     }
 
+    /// Pass-through to the underlying ``GoogleAuthClient/idToken()``.
+    /// The QuickInk analytics flush task uses this to authenticate
+    /// every request to api-quickink.thoughtbasics.com — the
+    /// backend's `GoogleTokenVerifier` reads RS256 JWTs minted by
+    /// GoogleSignIn-iOS.
+    ///
+    /// The store doesn't cache here — the SDK owns the cache plus
+    /// `refreshTokensIfNeeded` semantics; calling repeatedly while
+    /// the cached token is fresh is effectively free.
+    public func idToken() async throws -> String {
+        return try await client.idToken()
+    }
+
     // MARK: - Persistence
 
     private func restore() {

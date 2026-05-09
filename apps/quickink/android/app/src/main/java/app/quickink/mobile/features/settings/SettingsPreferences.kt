@@ -137,6 +137,30 @@ class SettingsPreferences(context: Context) {
     }
 
     /**
+     * Drop every identity-leaking override on sign-out so the next
+     * account on the same device doesn't inherit the previous user's
+     * custom display name / phone / photo / punchline / search MRU.
+     * Device-level prefs (theme mode, primary color, drive backup,
+     * experimental flags) are intentionally preserved — those are
+     * "the device's preference", not "this user's preference."
+     *
+     * Mirror of iOS `SettingsState.clearAllUserOverrides()`. Keep the
+     * key list in lockstep with the Android-only fields above —
+     * adding a new identity-leaking pref means adding the matching
+     * `.remove(...)` here AND the matching iOS clear in the iOS
+     * file in the same commit.
+     */
+    fun clearAllUserOverrides() {
+        prefs.edit()
+            .remove(KEY_CUSTOM_DISPLAY_NAME)
+            .remove(KEY_PHONE_NUMBER)
+            .remove(KEY_PROFILE_PHOTO_URI)
+            .remove(KEY_PERSONALITY_PUNCHLINE)
+            .remove(KEY_RECENT_SEARCHES)
+            .apply()
+    }
+
+    /**
      * User's picked primary color (Coral / Leaf Green / Leaf Yellow /
      * Leaf Dry). The theme entry point reads this every composition
      * and resolves the actual `accent` / `accentDeep` from the picked

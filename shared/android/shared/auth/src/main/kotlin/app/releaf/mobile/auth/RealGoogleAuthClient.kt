@@ -555,6 +555,15 @@ class RealGoogleAuthClient(
          * is mostly a sanity upper bound.
          */
         const val ACCESS_TOKEN_TTL_SECONDS = 3_300L  // 55 minutes
+
+        /**
+         * If the cached ID token has fewer than this many seconds of
+         * life left, refetch via the silent Credential Manager path
+         * before returning. 60s is short enough that an in-flight
+         * analytics POST won't expire mid-request, long enough that
+         * we don't refetch on every flush in the steady state.
+         */
+        private const val MIN_TTL_SECONDS = 60L
     }
 }
 

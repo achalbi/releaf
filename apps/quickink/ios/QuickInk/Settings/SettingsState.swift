@@ -162,6 +162,32 @@ public final class SettingsState: ObservableObject {
         UserDefaults.standard.set(driveBackupEnabled, forKey: Keys.driveBackup)
     }
 
+    /// Drop every identity-leaking pref on sign-out so the next
+    /// account on the same device doesn't inherit the previous
+    /// user's custom display name / phone / photo / punchline /
+    /// search MRU. Device-level prefs (theme mode, primary color,
+    /// drive backup, experimental flags) are intentionally
+    /// preserved — those are "the device's preference", not "this
+    /// user's preference."
+    ///
+    /// `static` so QuickInkRoot can call it without holding a live
+    /// SettingsState — the in-flight ObservableObject's @Published
+    /// vars get refreshed lazily on next read since they're backed
+    /// by UserDefaults.
+    ///
+    /// Mirror of Android `SettingsPreferences.clearAllUserOverrides()`.
+    /// Keep the key list in lockstep — adding a new identity-
+    /// leaking pref means adding the matching `.removeObject(...)`
+    /// here AND the matching Android remove in the same commit.
+    public static func clearAllUserOverrides() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: Keys.customDisplayName)
+        defaults.removeObject(forKey: Keys.phoneNumber)
+        defaults.removeObject(forKey: Keys.profilePhotoUri)
+        defaults.removeObject(forKey: Keys.personalityPunchline)
+        defaults.removeObject(forKey: Keys.recentSearches)
+    }
+
     private enum Keys {
         static let driveBackup          = "quickink.settings.drive_backup_enabled"
         static let searchablePdfExport  = "quickink.settings.searchable_pdf_export_enabled"

@@ -34,9 +34,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import app.quickink.mobile.data.analytics.AnalyticsFlushWorker
+import app.quickink.mobile.data.analytics.AnalyticsRepository
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.category.CategoryRepository
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
+import kotlinx.coroutines.launch
 import app.quickink.mobile.features.home.CategoryEntriesScreen
 import app.quickink.mobile.features.home.HomeScreen
 import app.quickink.mobile.features.notes.NoteEditorScreen
@@ -252,10 +255,35 @@ private fun MainShell(
             pipeline       = OcrPipeline(MlKitTextRecognizer(app)),
             notepadDao     = app.database.notepadDao(),
             scope          = scope,
-            // Sync is user-initiated only — no auto-kick after a
-            // scan. The user can tap Settings → "Sync now" when
-            // they want their captures pushed to Drive.
-            onPassComplete = { /* intentional no-op */ },
+            // Drive sync is user-initiated only — no auto-kick after
+            // a scan. The user can tap Settings → "Sync now" when
+            // they want their captures pushed to Drive. The analytics
+            // outbox runs on a separate pipeline (different cadence,
+            // different failure mode) — every pass enqueues a row +
+            // opportunistically flushes so the dashboard reflects
+            // the capture within seconds.
+            onPassComplete = { summary ->
+                scope.launch {
+                    try {
+                        AnalyticsRepository(app.database.analyticsOutboxDao())
+                            .enqueueCapture(
+                                captureId  = summary.captureId,
+                                source     = summary.source,
+                                pageCount  = summary.pageCount,
+                                category   = summary.category,
+                                hasOcr     = summary.hasOcr,
+                                ocrChars   = summary.ocrChars,
+                                capturedAt = summary.capturedAt,
+                            )
+                        AnalyticsFlushWorker.requestImmediate(context)
+                    } catch (e: Exception) {
+                        android.util.Log.w(
+                            "QuickInkAnalytics",
+                            "[analytics] enqueueCapture failed: $e"
+                        )
+                    }
+                }
+            },
             // Powers the OCR-first-word → category auto-pick at
             // the end of each pass. Read-only; controller calls
             // `listActive(userId)` once per pass.

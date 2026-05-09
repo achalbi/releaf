@@ -33,6 +33,20 @@ public final class ScanFlowController: ObservableObject {
         case failed(message: String)
     }
 
+    /// What `onPassComplete` receives. Mirrors the field set
+    /// `AnalyticsRepository.enqueueCapture` consumes — same field
+    /// names so the wiring at the call site reads as a 1:1 forward.
+    public struct PassSummary: Sendable {
+        public let captureId:  String
+        public let source:     String
+        public let pageCount:  Int
+        public let category:   String?
+        public let hasOcr:     Bool
+        public let ocrChars:   Int
+        /// ISO-8601 timestamp the user finished the scan pass.
+        public let capturedAt: String
+    }
+
     @Published public private(set) var state: State = .idle
 
     /// User-selected category for the in-flight capture. Bound to
@@ -50,22 +64,30 @@ public final class ScanFlowController: ObservableObject {
     private let userId: String
     private let repository: CaptureRepository
     private let pipeline: OcrPipeline
-    /// Slice 4.2c — fired once at the end of each scan pass so the
-    /// just-captured rows push to Drive in seconds rather than
-    /// waiting for the 15-min periodic. Wired by
-    /// `QuickInkRoot.MainShell` to call
-    /// `QuickInkSyncEnvironment.shared.scheduler.requestImmediate()`.
-    /// Defaults to a no-op for tests / previews. Fires ONCE per
-    /// pass — at `.complete` or after a partial fail-path — rather
-    /// than per OCR row, so a 30-page scan triggers one sync kick.
-    private let onPassComplete: () -> Void
+    /// Fired once at the end of each scan pass. Wired by
+    /// `QuickInkRoot.MainShell` to enqueue an analytics outbox
+    /// row (drained opportunistically by `AnalyticsFlushTask`).
+    /// Drive-sync used to also fan out from here; that's now
+    /// user-initiated only via Settings → "Sync now". Defaults to
+    /// a no-op for tests / previews.
+    ///
+    /// Fires ONCE per pass — at `.complete` or after a partial
+    /// fail-path — rather than per OCR row, so a 30-page scan
+    /// triggers one analytics enqueue. The outbox dedupes by
+    /// capture id anyway, but firing once at the end avoids
+    /// redundant work + log noise.
+    ///
+    /// The [PassSummary] arg carries every field
+    /// `AnalyticsRepository.enqueueCapture` needs, so the call
+    /// site reads as a 1:1 forward.
+    private let onPassComplete: (PassSummary) -> Void
     private var activeTask: Task<Void, Never>?
 
     public init(
         userId: String,
         repository: CaptureRepository = CaptureRepository(),
         pipeline: OcrPipeline = OcrPipeline(engine: VisionTextRecognizer()),
-        onPassComplete: @escaping () -> Void = {}
+        onPassComplete: @escaping (PassSummary) -> Void = { _ in }
     ) {
         self.userId = userId
         self.repository = repository
@@ -101,6 +123,12 @@ public final class ScanFlowController: ObservableObject {
 
         let captureId = UUID().uuidString.lowercased()
         let totalPages = pageURLs.count
+        // Stamp once at the start of the pass so retries / OCR-pipeline
+        // jitter don't shift the analytics timestamp away from "when
+        // the user actually finished scanning". The capturedAt field
+        // ends up on `analytics_outbox` and on the backend's
+        // `capture_events.captured_at` column.
+        let capturedAt = IsoClock.nowIso()
         // Reset the picker selection so a fresh capture starts with
         // no category. The previous capture's choice was already
         // persisted to its own row.
@@ -251,14 +279,25 @@ public final class ScanFlowController: ObservableObject {
                 successCount: successCount
             )
 
-            // Slice 4.2c — kick an immediate sync so the just-
-            // captured scan + OCR rows land on Drive without
-            // waiting for the 15-min periodic. The capture row
-            // itself was always persisted (we'd have early-returned
-            // to .failed otherwise); some OCR rows may have failed
-            // individually, but those that did persist are still
-            // worth pushing.
-            self?.onPassComplete()
+            // Hand the just-completed pass to the host
+            // (QuickInkRoot.MainShell) so it can enqueue an
+            // analytics-outbox row + opportunistically request a
+            // flush. The `hasOcr` / `ocrChars` fields are computed
+            // from the same `pageTexts` accumulator we built during
+            // the OCR loop. Drive-sync used to also fan out from
+            // here; that's now user-initiated only via Settings →
+            // "Sync now".
+            let totalChars = pageTexts.values.reduce(0) { $0 + $1.count }
+            let summary = PassSummary(
+                captureId:  captureId,
+                source:     source,
+                pageCount:  totalPages,
+                category:   self?.selectedCategory,
+                hasOcr:     successCount > 0,
+                ocrChars:   totalChars,
+                capturedAt: capturedAt
+            )
+            self?.onPassComplete(summary)
         }
     }
 

@@ -51,6 +51,18 @@ public protocol GoogleAuthClient: AnyObject, Sendable {
 
     /// Revokes the token locally + remotely.
     func signOut() async
+
+    /// Return a Google ID token (RS256 JWT) for the currently
+    /// signed-in user. Used by the QuickInk analytics backend to
+    /// authenticate `/v1/identify` and `/v1/events/capture/batch`
+    /// POSTs without forcing the user to re-authenticate — the SDK's
+    /// `refreshTokensIfNeeded` returns a fresh ID token as long as
+    /// the prior session is intact.
+    ///
+    /// Throws `.underlying(...)` if no signed-in user is available
+    /// — the caller leaves outbox rows queued and the next sign-in
+    /// produces a fresh token.
+    func idToken() async throws -> String
 }
 
 /// Default stub — lets the skeleton build + preview without the real SDK.
@@ -82,4 +94,13 @@ public final class StubGoogleAuthClient: GoogleAuthClient, @unchecked Sendable {
     }
 
     public func signOut() async {}
+
+    /// Sentinel that the QuickInk backend's verifier will reject as
+    /// a malformed JWT (it checks for three base64url segments).
+    /// Surfacing the specific string in logs makes "is the device on
+    /// the stub or the real client?" trivial to answer when
+    /// triaging an analytics 401.
+    public func idToken() async throws -> String {
+        return "stub-id-token-not-a-real-jwt"
+    }
 }

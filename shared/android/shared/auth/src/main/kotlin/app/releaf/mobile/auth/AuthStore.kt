@@ -105,6 +105,20 @@ class AuthStore private constructor(
         _state.value = AuthState.SigningIn
     }
 
+    /**
+     * Pass-through to the underlying [GoogleAuthClient.idToken]. The
+     * QuickInk analytics worker uses this to authenticate every
+     * request to api-quickink.thoughtbasics.com — the backend's
+     * `GoogleTokenVerifier` reads RS256 JWTs minted by Google's
+     * Credential Manager.
+     *
+     * The store doesn't cache here — the client implementation owns
+     * the cache + silent-refresh logic. Calling [idToken] from
+     * multiple workers is safe; the client guards with an internal
+     * lock.
+     */
+    suspend fun idToken(): String = client.idToken()
+
     // MARK: — persistence
 
     private fun restore(): AuthState {

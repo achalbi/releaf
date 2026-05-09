@@ -55,22 +55,40 @@ class ScanFlowController(
     /**
      * Slice 4.2c — fired when a scan pass finishes and at least
      * one row has been written. Wired by `QuickInkRoot.MainShell`
-     * to call `QuickInkSyncScheduler.requestImmediate(context)` so
-     * the user's just-completed scan pushes to Drive in seconds
-     * instead of waiting for the 15-minute periodic. Defaults to a
-     * no-op for tests / previews / construction sites that don't
-     * want sync coupling.
+     * to enqueue an analytics outbox row (the analytics-flush
+     * worker drains opportunistically right after) and historically
+     * to kick a Drive-sync push. Defaults to a no-op for tests /
+     * previews / construction sites that don't want either coupling.
      *
      * Fires ONCE per pass — at `.Complete` (or right after a
      * single-row partial fail-path) — rather than per OCR row, so
-     * a 30-page scan triggers one sync kick, not 30. WorkManager's
-     * `ExistingWorkPolicy.KEEP` would coalesce repeated fires
-     * anyway, but firing once at the end avoids the edge case
-     * where row 1's enqueued work runs before row 30 lands and
-     * row 30 misses its window.
+     * a 30-page scan triggers one analytics enqueue, not 30. The
+     * outbox dedupes by capture id anyway, but firing once at the
+     * end avoids redundant work + log noise.
+     *
+     * The [PassSummary] argument carries every field
+     * `AnalyticsRepository.enqueueCapture` needs — keeping it as a
+     * single struct (rather than 7 positional args) means call
+     * sites read top-down without arg-order accidents.
      */
-    private val onPassComplete: () -> Unit = {},
+    private val onPassComplete: (PassSummary) -> Unit = {},
 ) {
+    /**
+     * What [onPassComplete] receives. Mirrors the field set
+     * `AnalyticsRepository.enqueueCapture` consumes — same field
+     * names so the wiring at the call site reads as a 1:1 forward.
+     */
+    data class PassSummary(
+        val captureId:  String,
+        val source:     String,
+        val pageCount:  Int,
+        val category:   String?,
+        val hasOcr:     Boolean,
+        val ocrChars:   Int,
+        /** ISO-8601 timestamp the user finished the scan pass. */
+        val capturedAt: String,
+    )
+
     sealed class State {
         data object Idle : State()
 
@@ -136,6 +154,12 @@ class ScanFlowController(
 
         val captureId  = Uuidv7.generate()
         val totalPages = result.pageUris.size
+        // Stamp once at the start of the pass so retries / OCR-pipeline
+        // jitter don't shift the analytics timestamp away from "when
+        // the user actually finished scanning". The capturedAt field
+        // ends up on `analytics_outbox` and on the backend's
+        // `capture_events.captured_at` column.
+        val capturedAt = IsoClock.nowIso()
         // Reset the picker selection so a fresh capture starts with
         // no category. The previous capture's choice was already
         // persisted to its own row.
@@ -300,14 +324,27 @@ class ScanFlowController(
                 successCount = successCount,
             )
 
-            // Slice 4.2c — kick an immediate sync so the just-
-            // captured scan + OCR rows land on Drive without
-            // waiting for the 15-min periodic. The capture row
-            // itself was always persisted (we'd have early-returned
-            // to State.Failed otherwise); some OCR rows may have
-            // failed individually, but those that did persist are
-            // still worth pushing.
-            onPassComplete()
+            // Hand the just-completed pass to the host
+            // (QuickInkRoot.MainShell) so it can enqueue an
+            // analytics-outbox row + opportunistically kick the
+            // analytics flush worker. The host computes
+            // `hasOcr` / `ocrChars` from the same numbers we
+            // collected during the OCR loop. Drive-sync used to
+            // also fan out from here; that's now user-initiated
+            // only via the Settings → "Sync now" button (see the
+            // QuickInkApp `auth: SignedIn` comment for rationale).
+            val totalChars = pageTexts.values.sumOf { it.length }
+            onPassComplete(
+                PassSummary(
+                    captureId  = captureId,
+                    source     = source,
+                    pageCount  = totalPages,
+                    category   = _selectedCategory.value,
+                    hasOcr     = successCount > 0,
+                    ocrChars   = totalChars,
+                    capturedAt = capturedAt,
+                )
+            )
         }
     }
 

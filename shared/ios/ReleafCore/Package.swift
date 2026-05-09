@@ -61,7 +61,12 @@ let package = Package(
         // RealGoogleAuthClient. Both Releaf and QuickInk consume the
         // same SDK transitively through ReleafCoreAuth — keeps a
         // single OAuth surface across the two apps.
-        .package(url: "https://github.com/google/GoogleSignIn-iOS.git", from: "7.1.0"),
+        //
+        // 8.0.0 (vs the previous 7.1.0) drags in AppAuth-iOS 1.7.6 —
+        // the version that fixes the `OIDExternalUserAgentIOS` main-
+        // thread-checker warnings that surface during sign-in. The
+        // public surface is unchanged for our use sites.
+        .package(url: "https://github.com/google/GoogleSignIn-iOS.git", from: "8.0.0"),
         // GRDB — local SQLite wrapper. Used by ReleafCoreNotes'
         // NotepadRepository (and any future SQLite-backed shared
         // repos). Same version pin as Releaf's Package.swift; SwiftPM

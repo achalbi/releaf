@@ -318,6 +318,38 @@ public final class QuickInkDatabase: @unchecked Sendable {
             try db.execute(sql: "ALTER TABLE captures ADD COLUMN source TEXT NOT NULL DEFAULT 'scan'")
         }
 
+        // ─── v5_analytics_outbox ────────────────────────────────
+        //
+        // Adds the `analytics_outbox` table that AnalyticsRepository
+        // writes capture / identify events into for the QuickInk
+        // backend (api-quickink.thoughtbasics.com). Mirror of
+        // Android's Room v6 entity. Standalone — no FKs to the rest
+        // of the QuickInk schema, so a `captures` row is free to
+        // exist without a matching analytics outbox entry (and vice
+        // versa) without breaking referential integrity.
+        //
+        // Composite index on (next_attempt_at, created_at) covers
+        // the worker's `WHERE next_attempt_at <= now ORDER BY
+        // created_at` read pattern in `AnalyticsRepository.nextBatch`
+        // — without it, every flush full-scans the table.
+        migrator.registerMigration("v5_analytics_outbox") { db in
+            try db.execute(sql: """
+                CREATE TABLE analytics_outbox (
+                    id                  TEXT PRIMARY KEY NOT NULL,
+                    kind                TEXT NOT NULL,
+                    payload_json        TEXT NOT NULL,
+                    created_at          TEXT NOT NULL,
+                    attempts            INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at     TEXT NOT NULL,
+                    last_error          TEXT
+                )
+                """)
+            try db.execute(sql: """
+                CREATE INDEX idx_analytics_outbox_due
+                    ON analytics_outbox (next_attempt_at, created_at)
+                """)
+        }
+
         return migrator
     }
 }

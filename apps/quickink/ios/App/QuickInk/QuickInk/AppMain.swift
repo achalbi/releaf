@@ -34,6 +34,15 @@ struct AppMain: App {
         // listed in Info.plist's `BGTaskSchedulerPermittedIdentifiers`
         // or this call traps at launch.
         QuickInkSyncEnvironment.shared.install(authStore: makeQuickInkAuthStore())
+
+        // Analytics outbox flush — parallel pipeline to Drive sync.
+        // Registers the `app.quickink.analytics.flush` BG task
+        // (also listed in Info.plist's BGTaskSchedulerPermitted-
+        // Identifiers) and schedules the first ~30-min wake-up. No-
+        // ops when Info.plist `AnalyticsEnabled` is false. Reuses
+        // the same AuthStore so `idToken()` calls on the worker
+        // path return the same JWT the rest of the app sees.
+        AnalyticsFlushTask.install(authStore: makeQuickInkAuthStore())
     }
 
     var body: some Scene {

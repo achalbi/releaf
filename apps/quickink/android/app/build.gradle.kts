@@ -102,6 +102,33 @@ android {
 
     buildFeatures {
         compose = true
+        // BuildConfig fields below need this — without it, AGP 9
+        // prunes the generated `BuildConfig` class entirely (the
+        // default flipped to false in 8.x) and references to
+        // `BuildConfig.ANALYTICS_ENABLED` etc. fail to compile.
+        buildConfig = true
+    }
+
+    defaultConfig {
+        // ── Analytics outbox flags ─────────────────────────────────
+        // The QuickInk analytics backend lives at
+        // api-quickink.thoughtbasics.com. Two BuildConfig fields:
+        //
+        //   ANALYTICS_BASE_URL — root URL for the JSON API. The
+        //     AnalyticsApiClient appends `/v1/identify` and
+        //     `/v1/events/capture/batch` for the two POST paths.
+        //
+        //   ANALYTICS_ENABLED  — kill switch. When false, the
+        //     AnalyticsFlushWorker's scheduleAll() / requestImmediate()
+        //     short-circuit, and the worker's doWork() returns
+        //     success() immediately. Outbox enqueue still happens —
+        //     we just don't ship the rows. Flip to true once a build
+        //     is verified end-to-end against the backend.
+        //
+        // For solo-dev we hard-code the URL here. In a real CI
+        // pipeline this would come from a secrets file / env var.
+        buildConfigField("String",  "ANALYTICS_BASE_URL", "\"https://api-quickink.thoughtbasics.com\"")
+        buildConfigField("boolean", "ANALYTICS_ENABLED",  "true")
     }
 
     compileOptions {

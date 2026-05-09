@@ -106,6 +106,41 @@ public final class RealGoogleAuthClient: GoogleAuthClient, @unchecked Sendable {
         GIDSignIn.sharedInstance.signOut()
     }
 
+    /// Hand back a fresh ID token (RS256 JWT) for the current Google
+    /// user. `refreshTokensIfNeeded` is a no-op and returns
+    /// immediately when the cached token is still inside its TTL —
+    /// the QuickInk analytics backend gets a valid token without
+    /// the device paying a refresh round-trip on every flush.
+    ///
+    /// Throws `.underlying("…not signed in")` when there's no
+    /// `currentUser` — the analytics worker swallows the error and
+    /// leaves outbox rows queued for the next sign-in.
+    public func idToken() async throws -> String {
+        guard let user = GIDSignIn.sharedInstance.currentUser else {
+            throw GoogleAuthError.underlying(
+                "ID-token fetch: no signed-in user — sign in required"
+            )
+        }
+        // refreshTokensIfNeeded re-mints both access AND id tokens
+        // from the refresh token when either is close to expiry. The
+        // SDK skips the network call when the cached pair is fresh.
+        let refreshed: GIDGoogleUser = try await withCheckedThrowingContinuation { cont in
+            user.refreshTokensIfNeeded { u, err in
+                if let err = err {
+                    cont.resume(throwing: GoogleAuthError.underlying(err.localizedDescription))
+                } else if let u = u {
+                    cont.resume(returning: u)
+                } else {
+                    cont.resume(throwing: GoogleAuthError.underlying("ID-token refresh returned nil"))
+                }
+            }
+        }
+        guard let token = refreshed.idToken?.tokenString else {
+            throw GoogleAuthError.underlying("ID-token refresh: token missing on GIDGoogleUser")
+        }
+        return token
+    }
+
     /// Attempt to restore a prior session silently — call from app
     /// launch to avoid an extra tap on warm start. Throws `cancelled`
     /// if no prior session exists.
@@ -183,6 +218,10 @@ public final class RealGoogleAuthClient: GoogleAuthClient, @unchecked Sendable {
     public func signOut() async {}
 
     public func restorePreviousSignIn() async throws -> GoogleAuthSession {
+        throw GoogleAuthError.underlying("Google Sign-In is iOS-only")
+    }
+
+    public func idToken() async throws -> String {
         throw GoogleAuthError.underlying("Google Sign-In is iOS-only")
     }
 }
