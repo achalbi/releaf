@@ -35,24 +35,22 @@
  *     (high-contrast didone, editorial showroom feel — used by
  *     onboarding heroes, page titles, section headings, italic
  *     taglines, and the home greeting name)
- *   - Body & UI: Inter (replaces system sans so iOS and Android
- *     render identically — SF Pro vs Roboto drifted)
+ *   - Body & UI: system sans (SF Pro on iOS via `Font.system(...)`;
+ *     Android pairs to `FontFamily.SansSerif`). Inter was bundled
+ *     for cross-platform identical rendering, but the simpler
+ *     system-sans pairing matches the Releaf sibling app and lets
+ *     us drop ~200KB of bundled fonts.
  *   - Handwritten previews: Caveat
  *
  * Single-serif system. Heading weights step up to Bold/SemiBold so
  * Cormorant carries the visual heft Fraunces previously gave the
  * app screens — see weight notes on each `QuickInkText` token.
  *
- * Custom font bundling: Cormorant Garamond, Inter, and Caveat are
- * all Google Fonts (OFL). To bundle:
- *   1. Drop .ttf/.otf files into QuickInk/DesignSystem/Fonts/.
- *      Inter ships at the 18pt optical (`Inter_18pt-Regular.ttf` →
- *      PS: Inter18pt-Regular).
- *   2. Package.swift already declares `.process("DesignSystem/Fonts")`,
- *      so new files are picked up automatically.
- *   3. Registration at launch happens in `QuickInkFont.registerAll()`
- *      and is file-name agnostic (iterates everything in the bundle),
- *      so no code change is needed when new files arrive.
+ * Custom font bundling: Cormorant Garamond + Caveat are Google
+ * Fonts (OFL) committed directly to QuickInk/DesignSystem/Fonts/.
+ * Package.swift declares `.process("DesignSystem/Fonts")`, and
+ * `QuickInkFont.registerAll()` iterates the bundle file-name
+ * agnostically — no code change is needed when new files arrive.
  *
  * Until a given .ttf is bundled, `Font.custom(...)` falls back to the
  * closest system design. Layout + weight hierarchy stay correct;
@@ -247,22 +245,22 @@ private extension UIColor {
 ///
 /// Two font families resolve here:
 ///
-///   - `serif(...)` → Cormorant Garamond. The single editorial
-///     serif — used by onboarding heroes, page titles, section
-///     headings, italic taglines, and the home greeting name.
-///     Heading-tier call sites use `.bold` / `.semibold` so the
-///     glyphs carry visual weight at small mobile rendering sizes.
-///   - `ui(...)` → Inter. Replaces what was previously
-///     `Font.system(...)` so iOS and Android render identically and
-///     the brand carries across platforms. Used for body, labels,
-///     chips, nav, captions.
-///
-/// Both resolve via `Font.custom(...)` with a PostScript-name
-/// selector that maps a `Font.Weight` (and italic flag) to a
-/// specific bundled `.ttf`. SwiftUI's `Font.custom(...).weight(...)`
-/// modifier sometimes synthesizes a faux-bold rather than picking
-/// the matching face — selecting the file directly is the
-/// deterministic approach.
+///   - `serif(...)` → Cormorant Garamond, bundled. The single
+///     editorial serif — used by onboarding heroes, page titles,
+///     section headings, italic taglines, and the home greeting
+///     name. Heading-tier call sites use `.bold` / `.semibold` so
+///     the glyphs carry visual weight at small mobile rendering
+///     sizes. Resolves via `Font.custom(...)` with a PostScript-
+///     name selector — SwiftUI's `Font.custom(...).weight(...)`
+///     modifier sometimes synthesizes a faux-bold rather than
+///     picking the matching face, so selecting the file directly
+///     is the deterministic approach.
+///   - `ui(...)` → system sans (`Font.system(...)`). Used for body,
+///     labels, chips, nav, captions. Inter was bundled here for
+///     iOS↔Android visual parity, but the simpler system-sans
+///     pairing matches the Releaf sibling app and drops ~200KB of
+///     bundled fonts. Kept as `ui(...)` (not `body(...)` etc.) so
+///     existing call sites keep compiling without ripple edits.
 ///
 /// `handwritten(...)` targets Caveat (Medium only).
 public enum QuickInkFont {
@@ -311,34 +309,12 @@ public enum QuickInkFont {
         return "CormorantGaramond-\(weightSuffix)"
     }
 
-    /// Map a SwiftUI `Font.Weight` to the matching bundled Inter
-    /// file at the **18pt optical size** (Inter's smallest optical;
-    /// the right pick for our 11–16pt UI rendering). Bundled
-    /// weights are Regular and Medium — that's all the QuickInk
-    /// type system uses. SemiBold/Bold/Heavy fall back to Medium,
-    /// Light/Thin to Regular.
-    ///
-    /// PostScript name from Google Fonts' new build:
-    /// `Inter_18pt-Regular.ttf` → `Inter18pt-Regular`.
-    private static func interPostScriptName(weight: Font.Weight) -> String {
-        if weight == .medium
-            || weight == .semibold
-            || weight == .bold
-            || weight == .heavy
-            || weight == .black
-        {
-            return "Inter18pt-Medium"
-        }
-        return "Inter18pt-Regular"
-    }
-
-    /// Inter for body, labels, chips, nav, captions. Replaces what
-    /// was previously `Font.system(...)`. Kept as `ui(...)` (not
-    /// `body(...)` etc.) so the rename ripples nowhere — every
-    /// existing call site that asks for `QuickInkFont.ui(...)` now
-    /// transparently gets Inter.
+    /// System sans for body, labels, chips, nav, captions —
+    /// SF Pro on iOS. Routed through `Font.system(...)` so it
+    /// inherits the platform's text-rendering defaults (Dynamic
+    /// Type metrics, ligatures, optical sizing).
     public static func ui(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        return Font.custom(interPostScriptName(weight: weight), size: size)
+        return Font.system(size: size, weight: weight, design: .default)
     }
 
     /// Register all bundled QuickInk font files. Call once at app
@@ -411,11 +387,11 @@ public enum QuickInkFont {
 ///   - All serif tokens (`display`, `pageTitle`, `heading`,
 ///     `bodyItalic`, `onboardingTitle`, `onboardingBody`) →
 ///     Cormorant Garamond via `QuickInkFont.serif(...)`.
-///   - `body` → Inter via `QuickInkFont.ui(...)`. App screens use
-///     it directly; onboarding screens explicitly reach for
-///     `onboardingBody` instead.
+///   - `body` → system sans via `QuickInkFont.ui(...)` (SF Pro on
+///     iOS). App screens use it directly; onboarding screens
+///     explicitly reach for `onboardingBody` instead.
 ///   - UI tokens (`eyebrow`, `label`, `cardTitle`, `meta`,
-///     `caption`) → Inter (UI sans).
+///     `caption`) → system sans via `QuickInkFont.ui(...)`.
 ///
 /// Heading-tier weights step up to Bold/SemiBold so Cormorant
 /// carries the visual heft Fraunces previously gave the small-
@@ -436,7 +412,7 @@ public enum QuickInkText {
     /// Onboarding body — Cormorant Garamond medium. Used by the
     /// onboarding scaffold's tagline + SignInScreen's lead copy
     /// where the editorial showroom feel matters more than density.
-    /// App screens use `body` (Inter) instead.
+    /// App screens use `body` (system sans) instead.
     public static let onboardingBody = QuickInkFont.serif(16, weight: .medium)
 
     /// App page title (Settings, Library, Detail, etc.) — Cormorant
@@ -447,7 +423,7 @@ public enum QuickInkText {
     public static let pageTitle  = QuickInkFont.serif(28, weight: .semibold)
 
     /// Section eyebrow above grouped content (uppercase + tracked).
-    /// Inter semibold.
+    /// System sans semibold.
     public static let eyebrow    = QuickInkFont.ui(11, weight: .semibold)
 
     /// App section heading (smaller than pageTitle). Cormorant
@@ -456,10 +432,11 @@ public enum QuickInkText {
     /// pale tile backgrounds.
     public static let heading    = QuickInkFont.serif(20, weight: .bold)
 
-    /// App body — Inter medium. Reading copy on app screens reads
-    /// as "tool" (sans) while editorial moments stay on the serif
-    /// via `bodyItalic` / `heading` / `pageTitle`. Onboarding
-    /// screens use `onboardingBody` for the Cormorant feel.
+    /// App body — system sans medium (SF Pro on iOS). Reading copy
+    /// on app screens reads as "tool" (sans) while editorial
+    /// moments stay on the serif via `bodyItalic` / `heading` /
+    /// `pageTitle`. Onboarding screens use `onboardingBody` for the
+    /// Cormorant feel.
     public static let body       = QuickInkFont.ui(16, weight: .medium)
 
     /// Italic accent body — taglines, smart suggestions on app
@@ -469,9 +446,9 @@ public enum QuickInkText {
     /// Caveat handwritten — used inside note thumbnails.
     public static let handwritten = QuickInkFont.handwritten(20)
 
-    /// Card title — Inter at body scale (14pt SemiBold), used for
-    /// note / scan thumbnail titles. Inter (not the serif) so the
-    /// home recent rail matches the library cards' UI-sans
+    /// Card title — system sans at body scale (14pt SemiBold), used
+    /// for note / scan thumbnail titles. Sans (not the serif) so
+    /// the home recent rail matches the library cards' UI-sans
     /// treatment — note titles are functional (scannable in dense
     /// grids) and the editorial serif felt precious for a file
     /// list. Library cards still override with `heading.copy(...)`
@@ -480,14 +457,14 @@ public enum QuickInkText {
     public static let cardTitle  = QuickInkFont.ui(14, weight: .semibold)
 
     /// UI label (chip text, nav labels, button text on small CTAs).
-    /// Inter semibold.
+    /// System sans semibold.
     public static let label      = QuickInkFont.ui(14, weight: .semibold)
 
-    /// Meta — timestamps, sync status, helper copy. Inter medium.
+    /// Meta — timestamps, sync status, helper copy. System sans medium.
     public static let meta       = QuickInkFont.ui(12, weight: .medium)
 
     /// Caption — smallest readable size. Used in confidence badges,
-    /// page counters, etc. Inter medium.
+    /// page counters, etc. System sans medium.
     public static let caption    = QuickInkFont.ui(10, weight: .medium)
 }
 

@@ -7,8 +7,11 @@
  *     (high-contrast didone, editorial showroom feel — used by
  *     onboarding heroes, page titles, section headings, italic
  *     taglines, and the home greeting name)
- *   - Body & UI: Inter (replaces system sans so iOS and Android
- *     render identically)
+ *   - Body & UI: system sans (Roboto on Android via
+ *     `FontFamily.SansSerif`; iOS pairs to SF Pro). Inter was
+ *     bundled here for cross-platform identical rendering, but the
+ *     simpler system-sans pairing matches the Releaf sibling app
+ *     and drops ~200KB of bundled fonts.
  *   - Handwritten previews: Caveat
  *
  * Single-serif system. Heading weight steps up to Bold/SemiBold so
@@ -19,8 +22,6 @@
  *
  *   cormorant_garamond_*  (Light/Regular/Medium/SemiBold/Bold + italics)
  *   caveat_medium
- *   inter_regular         (= Inter_18pt-Regular)
- *   inter_medium          (= Inter_18pt-Medium)
  *
  * Mirror of iOS `QuickInkText` styles in `QuickInkTheme.swift`.
  */
@@ -38,12 +39,14 @@ import app.quickink.mobile.R
 /**
  * Font families QuickInk uses.
  *
- * - `serif` → Cormorant Garamond. The single editorial serif —
- *   onboarding heroes, page titles, section headings, italic
- *   taglines, and the home greeting name all resolve here.
- * - `ui` → Inter, replacing the previous `FontFamily.Default` so iOS
- *   and Android render identically. Only Regular and Medium are
- *   bundled — that's everything the type system uses.
+ * - `serif` → Cormorant Garamond, bundled. The single editorial
+ *   serif — onboarding heroes, page titles, section headings,
+ *   italic taglines, and the home greeting name all resolve here.
+ * - `ui` → `FontFamily.SansSerif` (system sans, Roboto on Android).
+ *   Inter was bundled here for cross-platform parity with iOS but
+ *   the simpler system-sans pairing matches the Releaf sibling app
+ *   and drops ~200KB of bundled fonts. Existing call sites still
+ *   reference `QuickInkFonts.ui` so no ripple edits are needed.
  * - `handwritten` → Caveat (Medium only).
  *
  * Android resource naming requires lowercase + underscores, so the
@@ -87,16 +90,11 @@ object QuickInkFonts {
     )
 
     /**
-     * Inter — UI sans for body, labels, chips, nav, captions.
-     * Replaces what was previously `FontFamily.Default` so the
-     * brand carries consistently across iOS and Android. Bundled
-     * weights are Regular and Medium — the only two the type
-     * system uses.
+     * UI sans for body, labels, chips, nav, captions. Aliased to
+     * `FontFamily.SansSerif` (Roboto on Android) so the call sites
+     * that reference `QuickInkFonts.ui` don't need to change.
      */
-    val ui: FontFamily = FontFamily(
-        Font(R.font.inter_regular, FontWeight.Normal),
-        Font(R.font.inter_medium,  FontWeight.Medium),
-    )
+    val ui: FontFamily = FontFamily.SansSerif
 }
 
 /**
@@ -108,11 +106,11 @@ object QuickInkFonts {
  *   - All serif tokens (`Display`, `PageTitle`, `Heading`,
  *     `BodyItalic`, `OnboardingTitle`, `OnboardingBody`, `CtaSerif`)
  *     → Cormorant Garamond via [QuickInkFonts.serif].
- *   - `Body` → Inter via [QuickInkFonts.ui]. App screens use it
- *     directly; onboarding screens explicitly reach for
+ *   - `Body` → system sans via [QuickInkFonts.ui]. App screens use
+ *     it directly; onboarding screens explicitly reach for
  *     [OnboardingBody] instead.
  *   - UI tokens (`Eyebrow`, `Label`, `CardTitle`, `Meta`, `Caption`)
- *     → Inter (UI sans).
+ *     → system sans via [QuickInkFonts.ui].
  *
  * Mirror of iOS `QuickInkText` enum.
  */
@@ -147,7 +145,7 @@ object QuickInkTextStyle {
      * Onboarding body — Cormorant Garamond medium. Used by the
      * onboarding scaffold's tagline + SignInScreen's lead copy
      * where the editorial showroom feel matters more than density.
-     * App screens use [Body] (Inter) instead.
+     * App screens use [Body] (system sans) instead.
      */
     val OnboardingBody: TextStyle = TextStyle(
         fontFamily = QuickInkFonts.serif,
@@ -183,7 +181,7 @@ object QuickInkTextStyle {
         lineHeight = 26.sp,
     )
 
-    /** Eyebrow — uppercase + tracked, used above grouped content. Inter semibold. */
+    /** Eyebrow — uppercase + tracked, used above grouped content. System sans semibold. */
     val Eyebrow: TextStyle = TextStyle(
         fontFamily = QuickInkFonts.ui,
         fontSize   = 11.sp,
@@ -193,10 +191,11 @@ object QuickInkTextStyle {
     )
 
     /**
-     * App body — Inter medium. Reading copy on app screens reads
-     * as "tool" (sans) while editorial moments stay on the serif
-     * via [BodyItalic] / [Heading] / [PageTitle]. Onboarding screens
-     * use [OnboardingBody] for the Cormorant feel.
+     * App body — system sans medium (Roboto on Android). Reading
+     * copy on app screens reads as "tool" (sans) while editorial
+     * moments stay on the serif via [BodyItalic] / [Heading] /
+     * [PageTitle]. Onboarding screens use [OnboardingBody] for the
+     * Cormorant feel.
      */
     val Body: TextStyle = TextStyle(
         fontFamily = QuickInkFonts.ui,
@@ -233,8 +232,8 @@ object QuickInkTextStyle {
     )
 
     /**
-     * Card title — Inter at body scale (14sp SemiBold), used for
-     * note / scan thumbnail titles. Inter (not the serif) so the
+     * Card title — system sans at body scale (14sp SemiBold), used
+     * for note / scan thumbnail titles. Sans (not the serif) so the
      * home recent rail matches the library cards' UI-sans treatment
      * — note titles are functional (scannable in dense grids) and
      * the editorial serif felt precious for a file list. Library
@@ -248,7 +247,7 @@ object QuickInkTextStyle {
         lineHeight = 18.sp,
     )
 
-    /** UI label — chip text, nav labels, small CTAs. Inter semibold. */
+    /** UI label — chip text, nav labels, small CTAs. System sans semibold. */
     val Label: TextStyle = TextStyle(
         fontFamily = QuickInkFonts.ui,
         fontSize   = 14.sp,
@@ -271,7 +270,7 @@ object QuickInkTextStyle {
         lineHeight = 22.sp,
     )
 
-    /** Meta — timestamps, sync status, helper copy. Inter medium. */
+    /** Meta — timestamps, sync status, helper copy. System sans medium. */
     val Meta: TextStyle = TextStyle(
         fontFamily = QuickInkFonts.ui,
         fontSize   = 12.sp,
@@ -279,7 +278,7 @@ object QuickInkTextStyle {
         lineHeight = 16.sp,
     )
 
-    /** Caption — confidence badges, page counters. Inter medium. */
+    /** Caption — confidence badges, page counters. System sans medium. */
     val Caption: TextStyle = TextStyle(
         fontFamily = QuickInkFonts.ui,
         fontSize   = 10.sp,
