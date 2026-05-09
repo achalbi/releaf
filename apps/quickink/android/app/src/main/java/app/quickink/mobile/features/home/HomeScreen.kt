@@ -986,8 +986,8 @@ private fun CategoryGrid(
         // rows grows with the user's library; LazyVGrid still isn't
         // worth it for the typical handful.
         sorted.chunked(2).forEachIndexed { i, pair ->
-            if (i > 0) Spacer(Modifier.size(QuickInkSpacing.s3))
-            Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
+            if (i > 0) Spacer(Modifier.size(QuickInkSpacing.s2))
+            Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
                 pair.forEach { cat ->
                     val stats = remember(cat.name, captures) {
                         categoryStats(cat.name, captures)
@@ -1045,12 +1045,12 @@ private fun CategoryTile(
             .background(colors.surface)
             .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
             .clickable(onClick = onTap)
-            .padding(QuickInkSpacing.s4),
+            .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .size(32.dp)
+                .size(28.dp)
                 .clip(RoundedCornerShape(QuickInkRadius.sm))
                 .background(colors.accentSoft),
             contentAlignment = Alignment.Center,
@@ -1059,10 +1059,10 @@ private fun CategoryTile(
                 imageVector        = icon,
                 contentDescription = null,
                 tint               = colors.accent,
-                modifier           = Modifier.size(14.dp),
+                modifier           = Modifier.size(13.dp),
             )
         }
-        Spacer(Modifier.size(QuickInkSpacing.s3))
+        Spacer(Modifier.size(QuickInkSpacing.s2))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text     = name,
@@ -1075,13 +1075,15 @@ private fun CategoryTile(
                 text  = if (count == 0) "No scans yet" else "$count scan${if (count == 1) "" else "s"}",
                 style = type.caption,
                 color = colors.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         Icon(
             imageVector        = Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
             tint               = colors.muted,
-            modifier           = Modifier.size(18.dp),
+            modifier           = Modifier.size(16.dp),
         )
     }
 }
