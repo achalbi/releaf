@@ -53,7 +53,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.automirrored.filled.ListAlt
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CheckCircle
@@ -519,10 +519,10 @@ private fun HomeHeader(
                     // with a descender / non-Latin / emoji" question.
                     val fallback: @Composable () -> Unit = {
                         Icon(
-                            imageVector        = Icons.Filled.Person,
+                            imageVector        = Icons.Outlined.Person,
                             contentDescription = "Open profile menu",
                             tint               = colors.textOnAccent,
-                            modifier           = Modifier.size(36.dp),
+                            modifier           = Modifier.size(30.dp),
                         )
                     }
 
