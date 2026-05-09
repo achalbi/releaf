@@ -493,23 +493,21 @@ private fun SustainabilityHero(totalPages: Int) {
 
     val trees = totalPages / 8333.0
     val waterLiters = totalPages * 10
-    val treesLabel = when {
-        trees >= 1.0  -> String.format(java.util.Locale.ROOT, "%.1f trees", trees)
-        trees >  0.0  -> String.format(java.util.Locale.ROOT, "%.2f trees", trees)
-        else          -> "first tree on the way"
+    // Refined-warm pass: trees + water are now their own right-aligned
+    // data column to the right of the headline. We always render two
+    // numeric labels (trees, water) so the rhythm stays consistent —
+    // no more "first tree on the way" prose case, the 0.00 figure
+    // does the same job at a glance and reads as a real metric.
+    val treesLabel = if (trees >= 1.0) {
+        String.format(java.util.Locale.ROOT, "%.1f trees", trees)
+    } else {
+        String.format(java.util.Locale.ROOT, "%.2f trees", trees)
     }
     val title    = "By going digital"
-    val headline = if (totalPages == 0) {
-        "Start saving paper"
-    } else if (totalPages == 1) {
-        "1 page saved"
-    } else {
-        "$totalPages pages saved"
-    }
-    val sub = if (totalPages == 0) {
-        "Tap the ⚡ to capture your first page"
-    } else {
-        "≈ $treesLabel · ${waterLiters} L water"
+    val headline = when {
+        totalPages == 0 -> "Start saving paper"
+        totalPages == 1 -> "1 page saved"
+        else            -> "$totalPages pages saved"
     }
 
     Row(
@@ -537,10 +535,28 @@ private fun SustainabilityHero(totalPages: Int) {
         }
         Spacer(Modifier.size(QuickInkSpacing.s3))
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, style = type.meta, color = colors.muted)
+            // Title now sits on the leaf-green deep tone (was a flat
+            // muted gray) so the whole card reads as a coherent green
+            // family rather than gray-on-green.
+            Text(text = title, style = type.meta, color = ecoDeep)
             Text(text = headline, style = type.heading, color = colors.ink)
-            Spacer(Modifier.size(QuickInkSpacing.s1))
-            Text(text = sub, style = type.caption, color = ecoDeep)
+            // Empty-state prompt only — once there's any saved page
+            // the right-hand stat column carries the secondary line.
+            if (totalPages == 0) {
+                Spacer(Modifier.size(QuickInkSpacing.s1))
+                Text(
+                    text  = "Tap the ⚡ to capture your first page",
+                    style = type.caption,
+                    color = ecoDeep,
+                )
+            }
+        }
+        if (totalPages > 0) {
+            Spacer(Modifier.size(QuickInkSpacing.s2))
+            Column(horizontalAlignment = Alignment.End) {
+                Text(text = treesLabel, style = type.meta, color = ecoDeep)
+                Text(text = "$waterLiters L water", style = type.meta, color = ecoDeep)
+            }
         }
     }
 }
@@ -738,7 +754,7 @@ private fun RecentActivityPill(
         }
         Spacer(Modifier.size(QuickInkSpacing.s3))
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = "Recent Activity", style = type.cardTitle, color = colors.ink)
+            Text(text = "Recent activity", style = type.cardTitle, color = colors.ink)
             Text(text = subtitle, style = type.caption, color = colors.muted)
         }
     }
@@ -758,13 +774,13 @@ private fun RecentRail(
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text  = "Recent Scans",
+                text  = "Recent scans",
                 style = type.display.copy(fontSize = 26.sp, lineHeight = 32.sp),
                 color = colors.ink,
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text     = "View all >",
+                text     = "View all →",
                 style    = type.meta,
                 color    = colors.accent,
                 modifier = Modifier.clickable(onClick = onAllNotes),
@@ -976,7 +992,7 @@ private fun CategoryGrid(
 
     Column {
         Text(
-            text  = "Quick Categories",
+            text  = "Quick categories",
             style = type.display.copy(fontSize = 26.sp, lineHeight = 32.sp),
             color = colors.ink,
         )
