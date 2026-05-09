@@ -416,12 +416,6 @@ private fun HomeHeader(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.size(QuickInkSpacing.s1))
-            Text(
-                text  = "Let's get things organized 👋",
-                style = type.body,
-                color = colors.muted,
-            )
         }
         // Top-right profile pill — renders the user's profile photo
         // (when picked), the user's initial (when we have a name),
