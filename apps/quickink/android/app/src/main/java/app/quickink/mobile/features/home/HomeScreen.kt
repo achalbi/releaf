@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Eco
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Home
@@ -106,6 +107,7 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
+import app.quickink.mobile.ui.theme.QuickInkColors
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.quickink.mobile.ui.theme.quickInkDotGridBackground
@@ -186,6 +188,15 @@ fun HomeScreen(
     val recentCaptures by remember(userId, captureDao) {
         captureDao.observeRecent(userId, limit = 30)
     }.collectAsState(initial = emptyList())
+
+    // Lifetime page total — drives the sustainability hero. Sums
+    // `page_count` across every active capture in SQL so the figure
+    // is accurate regardless of how many rows the recent rail has
+    // loaded. Returns `null` for the empty-library case (SUM over zero
+    // rows), which the hero maps to its first-capture copy.
+    val totalPagesSaved by remember(userId, captureDao) {
+        captureDao.observeTotalPageCount(userId)
+    }.collectAsState(initial = 0)
 
     // Live category list — every active category, newest-first.
     // Mirrors iOS's CategoryListViewModel observation. Sort happens
@@ -268,6 +279,8 @@ fun HomeScreen(
                 profilePhotoUri = profilePhotoUri,
                 onTapAvatar     = { showProfileDrawer = true },
             )
+            Spacer(Modifier.size(QuickInkSpacing.s4))
+            SustainabilityHero(totalPages = totalPagesSaved ?: 0)
             // "N pending" pill — one tap kicks the upload-only sync
             // (REPLACE policy via `requestUserSync`). Visible only
             // when there's actual local work to push, so the home
@@ -454,6 +467,85 @@ private fun HomeHeader(
                     modifier          = Modifier.size(28.dp),
                 )
             }
+        }
+    }
+}
+
+// MARK: - Sustainability hero
+
+/**
+ * Hero card under the greeting that frames QuickInk as a paper-saving
+ * tool. Shows the user's lifetime digitised page count and translates
+ * it into approximate trees + water spared. Static leaf-green palette
+ * (independent of the user's accent picker) so the eco message reads
+ * the same regardless of whether they've picked Coral or Leaf Yellow
+ * for everything else.
+ *
+ * Math: 8,333 sheets per tree (commonly cited industry figure — one
+ * tree yields ~16.67 reams of office paper) and ~10 L of water per
+ * sheet (production + pulp processing). Both are deliberately
+ * conservative; the goal is a directional impact stat, not a precise
+ * lifecycle assessment.
+ */
+@Composable
+private fun SustainabilityHero(totalPages: Int) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+
+    val ecoDeep = QuickInkColors.LeafGreenDeep
+    val ecoBg   = QuickInkColors.LeafGreenBase.copy(alpha = 0.18f)
+    val ecoBorder = QuickInkColors.LeafGreenBase.copy(alpha = 0.40f)
+
+    val trees = totalPages / 8333.0
+    val waterLiters = totalPages * 10
+    val treesLabel = when {
+        trees >= 1.0  -> String.format(java.util.Locale.ROOT, "%.1f trees", trees)
+        trees >  0.0  -> String.format(java.util.Locale.ROOT, "%.2f trees", trees)
+        else          -> "first tree on the way"
+    }
+    val title    = "By going digital"
+    val headline = if (totalPages == 0) {
+        "Start saving paper"
+    } else if (totalPages == 1) {
+        "1 page saved"
+    } else {
+        "$totalPages pages saved"
+    }
+    val sub = if (totalPages == 0) {
+        "Tap the ⚡ to capture your first page"
+    } else {
+        "≈ $treesLabel · ${waterLiters} L water"
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.lg))
+            .background(ecoBg)
+            .border(1.dp, ecoBorder, RoundedCornerShape(QuickInkRadius.lg))
+            .padding(QuickInkSpacing.s4),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(ecoDeep),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.Eco,
+                contentDescription = null,
+                tint               = colors.textOnAccent,
+                modifier           = Modifier.size(26.dp),
+            )
+        }
+        Spacer(Modifier.size(QuickInkSpacing.s3))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = type.meta, color = colors.muted)
+            Text(text = headline, style = type.heading, color = colors.ink)
+            Spacer(Modifier.size(QuickInkSpacing.s1))
+            Text(text = sub, style = type.caption, color = ecoDeep)
         }
     }
 }
