@@ -1045,7 +1045,7 @@ private fun CategoryTile(
             .background(colors.surface)
             .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
             .clickable(onClick = onTap)
-            .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
+            .padding(QuickInkSpacing.s3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
