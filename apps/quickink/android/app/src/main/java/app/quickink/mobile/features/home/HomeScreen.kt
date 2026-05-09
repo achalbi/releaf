@@ -524,7 +524,16 @@ private fun HomeHeader(
                         Icon(
                             imageVector        = Icons.Outlined.Face,
                             contentDescription = "Open profile menu",
-                            tint               = colors.textOnAccent,
+                            // Drop the tint to 75% white. The
+                            // Outlined.Face stroke is already the
+                            // thinnest fixed-stroke variant in
+                            // material-icons-extended (no weight
+                            // axis), so the alpha drop is the
+                            // closest equivalent to a "lighter"
+                            // glyph without pulling in Material
+                            // Symbols. Still bright enough to read
+                            // on the coral disc.
+                            tint               = colors.textOnAccent.copy(alpha = 0.75f),
                             modifier           = Modifier.size(16.dp),
                         )
                     }
