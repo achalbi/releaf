@@ -441,15 +441,21 @@ private fun HomeHeader(
             // Outer ring + shadow disc. The drawBehind block paints
             // the same two stacked drop shadows BrandTab uses
             // (ambient: wider/softer, contact: tighter/darker), then
-            // the canvas-coloured ring sits on top so the coral inner
+            // a surface-coloured ring sits on top so the coral inner
             // reads as cleanly punched out of the page.
+            //
+            // Ring colour intentionally diverges from BrandTab's:
+            // BrandTab uses `colors.bg` because the FAB sits on the
+            // nav bar's white surface, so a bg-coloured ring reads
+            // as the page punching through the bar. The avatar sits
+            // *on* the page itself, so it needs the inverted
+            // relationship — `colors.surface` (the white card tone)
+            // gives the same "punched out" effect against the warm
+            // beige canvas.
             //
             // Critical: the parent Box deliberately does NOT
             // `.clip(CircleShape)`. The ambient shadow extends ~8dp
-            // past the disc edge — clipping the parent kills it,
-            // which then makes the canvas-coloured ring blend into
-            // the page (since `colors.bg` IS the page color, the
-            // ring only "reads" because the shadow makes it pop).
+            // past the disc edge — clipping the parent kills it.
             Box(
                 modifier = Modifier
                     .size(avatarOuter)
@@ -490,7 +496,7 @@ private fun HomeHeader(
                             center = Offset(cx, cy + 1.dp.toPx()),
                         )
                     }
-                    .background(colors.bg, CircleShape),
+                    .background(colors.surface, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
