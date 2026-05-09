@@ -457,7 +457,7 @@ private fun HomeHeader(
             } else if (initial != null) {
                 Text(
                     text  = initial,
-                    style = type.display.copy(fontSize = 22.sp, lineHeight = 26.sp),
+                    style = type.heading,
                     color = colors.accent,
                 )
             } else {
