@@ -509,11 +509,11 @@ struct LibraryNoteCard: View {
 
             // White footer with title + tag + date. Library card
             // titles render in Inter (UI sans), not the editorial
-            // Fraunces — card titles are functional (scannable,
-            // dense grid) and the editorial serif felt precious for
-            // the file-list context. Size dropped to 10pt so the
-            // title sits closer to the meta-tier scale on the same
-            // card and stops competing with the thumbnail for focus.
+            // serif — card titles are functional (scannable, dense
+            // grid) and the editorial serif felt precious for the
+            // file-list context. Size dropped to 10pt so the title
+            // sits closer to the meta-tier scale on the same card
+            // and stops competing with the thumbnail for focus.
             VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
                 // `.capitalized` is Swift's per-word Title Case —
                 // first letter upper, rest lower, word boundary is

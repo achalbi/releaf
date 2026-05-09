@@ -2,38 +2,32 @@
 #
 # install-fonts.sh
 #
-# Installs Fraunces and Inter (OFL) into both iOS and Android
-# resource directories with the filenames the QuickInk theme
-# expects. Two modes:
+# Installs Inter (OFL) into both iOS and Android resource directories
+# with the filenames the QuickInk theme expects. Two modes:
 #
 #   1. ZIP MODE — pass a path to a Google Fonts download zip:
 #
 #        ./scripts/install-fonts.sh ~/Downloads/Google_Fonts.zip
 #
 #      Get the zip from https://fonts.google.com/selection after
-#      adding Fraunces + Inter via their specimen pages. The script
-#      extracts the six TTFs we need and copies them into place.
-#      `find` handles both flat zips and ones with `static/`
-#      subfolders.
+#      adding Inter via its specimen page. The script extracts the
+#      two TTFs we need and copies them into place. `find` handles
+#      both flat zips and ones with `static/` subfolders.
 #
 #   2. CDN MODE — no args. Tries to download from jsdelivr's mirror
 #      of `github.com/google/fonts`. Faster when it works, but
 #      occasionally Inter gets restructured in the upstream repo
 #      and the URL 404s. Use ZIP MODE when that happens.
 #
+# Cormorant Garamond and Caveat are committed directly to the repo
+# (Cormorant ships ten files, Caveat one — small enough that pulling
+# them every time isn't worth the script complexity).
+#
 # After running you should see (regardless of mode):
 #
-#   ios/QuickInk/DesignSystem/Fonts/Fraunces-Regular.ttf
-#   ios/QuickInk/DesignSystem/Fonts/Fraunces-Medium.ttf
-#   ios/QuickInk/DesignSystem/Fonts/Fraunces-Italic.ttf
-#   ios/QuickInk/DesignSystem/Fonts/Fraunces-MediumItalic.ttf
-#   ios/QuickInk/DesignSystem/Fonts/Inter-Regular.ttf
-#   ios/QuickInk/DesignSystem/Fonts/Inter-Medium.ttf
+#   ios/QuickInk/DesignSystem/Fonts/Inter_18pt-Regular.ttf
+#   ios/QuickInk/DesignSystem/Fonts/Inter_18pt-Medium.ttf
 #
-#   android/app/src/main/res/font/fraunces_regular.ttf
-#   android/app/src/main/res/font/fraunces_medium.ttf
-#   android/app/src/main/res/font/fraunces_italic.ttf
-#   android/app/src/main/res/font/fraunces_medium_italic.ttf
 #   android/app/src/main/res/font/inter_regular.ttf
 #   android/app/src/main/res/font/inter_medium.ttf
 
@@ -49,35 +43,12 @@ mkdir -p "${IOS_FONTS}" "${ANDROID_FONTS}"
 
 # (zip basename | iOS filename | Android filename)
 #
-# Google Fonts' newer multi-axis build embeds the optical size in
-# the filename and PostScript name. We pin to:
-#   - Fraunces 72pt — the display optical. Picked for the boutique
-#     magazine feel (high contrast, airy hairlines, dramatic
-#     italics). At our smallest rendering size (cardTitle 14pt) the
-#     strokes will read thin — fine on retina, watch in QA on
-#     lower-density Android. To swap to a body-optimised optical
-#     instead, change "_72pt-" → "_14pt-" below and "SemiBold" →
-#     "Medium" in QuickInkFont.frauncesPostScriptName, then re-run.
-#   - Inter 18pt — Inter's smallest optical, perfect for our
-#     11–16pt UI text.
-#
-# Note: Fraunces 72pt's static set goes Light → Regular → SemiBold →
-# Bold (no Medium). The spec calls for SemiBold (CSS weight 600) at
-# H2/page-title sizes, so the "heading weight" maps to SemiBold
-# here. The Android resource still gets named `fraunces_medium.ttf`
-# — the resource ID is what Compose binds to FontWeight.Medium, the
-# file's internal weight class doesn't matter. Renaming the
-# resource would force every R.font.* call site to change.
-#
-# iOS keeps the original names so the bundled file → PostScript
-# name mapping stays obvious (PS name embedded in the file is
-# `Fraunces72pt-Regular`/`Fraunces72pt-SemiBold`, matching what
-# QuickInkFont.appSerif() requests).
+# Inter 18pt is Inter's smallest optical, perfect for our 11–16pt UI
+# text. iOS keeps the original PascalCase filename so the bundled
+# file → PostScript name mapping stays obvious (PS name embedded in
+# the file is `Inter18pt-Regular`/`Inter18pt-Medium`, matching what
+# QuickInkFont.ui() requests).
 declare -a TARGETS=(
-  "Fraunces_72pt-Regular.ttf|Fraunces_72pt-Regular.ttf|fraunces_regular.ttf"
-  "Fraunces_72pt-SemiBold.ttf|Fraunces_72pt-SemiBold.ttf|fraunces_medium.ttf"
-  "Fraunces_72pt-Italic.ttf|Fraunces_72pt-Italic.ttf|fraunces_italic.ttf"
-  "Fraunces_72pt-SemiBoldItalic.ttf|Fraunces_72pt-SemiBoldItalic.ttf|fraunces_medium_italic.ttf"
   "Inter_18pt-Regular.ttf|Inter_18pt-Regular.ttf|inter_regular.ttf"
   "Inter_18pt-Medium.ttf|Inter_18pt-Medium.ttf|inter_medium.ttf"
 )
@@ -135,10 +106,8 @@ install_from_zip() {
 
   if [ "${failed}" -gt 0 ]; then
     echo
-    echo "${failed} file(s) missing from zip. Check that BOTH families"
-    echo "are in your Google Fonts selection:"
-    echo "  Fraunces — needs Regular, Medium, Italic, MediumItalic"
-    echo "  Inter — needs Regular, Medium"
+    echo "${failed} file(s) missing from zip. Check that Inter is in"
+    echo "your Google Fonts selection (needs Regular and Medium)."
     echo "Re-download from https://fonts.google.com/selection and retry."
     exit 1
   fi
@@ -152,10 +121,6 @@ install_from_cdn() {
   local gfonts="https://cdn.jsdelivr.net/gh/google/fonts@main/ofl"
 
   declare -a URLS=(
-    "${gfonts}/fraunces/static/Fraunces_72pt-Regular.ttf"
-    "${gfonts}/fraunces/static/Fraunces_72pt-SemiBold.ttf"
-    "${gfonts}/fraunces/static/Fraunces_72pt-Italic.ttf"
-    "${gfonts}/fraunces/static/Fraunces_72pt-SemiBoldItalic.ttf"
     "${gfonts}/inter/static/Inter_18pt-Regular.ttf"
     "${gfonts}/inter/static/Inter_18pt-Medium.ttf"
   )
@@ -188,13 +153,11 @@ install_from_cdn() {
   if [ "${failed}" -gt 0 ]; then
     echo
     echo "${failed} file(s) failed to download from the CDN. Most"
-    echo "likely the upstream repo path changed (Inter is the usual"
-    echo "culprit). Use ZIP MODE instead:"
+    echo "likely the upstream repo path changed. Use ZIP MODE instead:"
     echo
-    echo "  1. https://fonts.google.com/specimen/Fraunces — Get font"
-    echo "  2. https://fonts.google.com/specimen/Inter — Get font"
-    echo "  3. https://fonts.google.com/selection — Download all"
-    echo "  4. ./scripts/install-fonts.sh ~/Downloads/Google_Fonts.zip"
+    echo "  1. https://fonts.google.com/specimen/Inter — Get font"
+    echo "  2. https://fonts.google.com/selection — Download all"
+    echo "  3. ./scripts/install-fonts.sh ~/Downloads/Google_Fonts.zip"
     exit 1
   fi
 
@@ -222,7 +185,7 @@ Usage:
   install-fonts.sh <path-to-google-fonts-zip>   # ZIP mode
 
 Get the zip from https://fonts.google.com/selection after adding
-Fraunces and Inter via their specimen pages, then "Download all".
+Inter via its specimen page, then "Download all".
 EOF
   exit 0
 else
