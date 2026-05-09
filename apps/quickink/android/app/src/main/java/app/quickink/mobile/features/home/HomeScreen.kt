@@ -109,6 +109,7 @@ import app.quickink.mobile.data.sync.QuickInkSyncWorker
 import app.quickink.mobile.features.scan.QuickCaptureScreen
 import app.quickink.mobile.features.scan.ScanFlowController
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
@@ -434,7 +435,6 @@ private fun HomeHeader(
         Box(
             modifier = Modifier
                 .size(avatarOuter)
-                .clip(CircleShape)
                 .clickable(onClick = onTapAvatar),
             contentAlignment = Alignment.Center,
         ) {
@@ -443,6 +443,13 @@ private fun HomeHeader(
             // (ambient: wider/softer, contact: tighter/darker), then
             // the canvas-coloured ring sits on top so the coral inner
             // reads as cleanly punched out of the page.
+            //
+            // Critical: the parent Box deliberately does NOT
+            // `.clip(CircleShape)`. The ambient shadow extends ~8dp
+            // past the disc edge — clipping the parent kills it,
+            // which then makes the canvas-coloured ring blend into
+            // the page (since `colors.bg` IS the page color, the
+            // ring only "reads" because the shadow makes it pop).
             Box(
                 modifier = Modifier
                     .size(avatarOuter)
@@ -493,8 +500,49 @@ private fun HomeHeader(
                         .background(coralGradient),
                     contentAlignment = Alignment.Center,
                 ) {
+                    // Default fallback content: the initial when we
+                    // have a name, the AccountCircle glyph otherwise.
+                    // Used directly when profilePhotoUri is empty AND
+                    // as the loading/error slot for SubcomposeAsyncImage
+                    // below — a stale URI pointing at a deleted file
+                    // would otherwise leave the disc blank.
+                    val fallback: @Composable () -> Unit = {
+                        if (initial != null) {
+                            // System sans Bold (not the Roboto Serif
+                            // editorial token) so the glyph paints
+                            // immediately — Compose's downloadable
+                            // Google Fonts have an async load window
+                            // where `type.display` would render blank
+                            // on first cold launch. The avatar is a
+                            // primary affordance; it can't ghost.
+                            Text(
+                                text  = initial,
+                                style = TextStyle(
+                                    fontFamily = FontFamily.SansSerif,
+                                    fontSize   = 26.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    lineHeight = 30.sp,
+                                ),
+                                color = colors.textOnAccent,
+                            )
+                        } else {
+                            Icon(
+                                imageVector        = Icons.Filled.AccountCircle,
+                                contentDescription = "Open profile menu",
+                                tint               = colors.textOnAccent,
+                                modifier           = Modifier.size(32.dp),
+                            )
+                        }
+                    }
+
                     if (profilePhotoUri.isNotEmpty()) {
-                        AsyncImage(
+                        // SubcomposeAsyncImage (not AsyncImage) so a
+                        // stale URI / missing file falls through to
+                        // the initial instead of leaving the coral
+                        // disc empty. profilePhotoUri persists in
+                        // SharedPreferences across reinstalls, so
+                        // pointing at a vanished file is a real path.
+                        SubcomposeAsyncImage(
                             model = ImageRequest.Builder(context)
                                 .data(Uri.parse(profilePhotoUri))
                                 // Cache disabled because the user's
@@ -510,32 +558,11 @@ private fun HomeHeader(
                             contentDescription = "Open profile menu",
                             contentScale       = ContentScale.Crop,
                             modifier           = Modifier.fillMaxSize().clip(CircleShape),
-                        )
-                    } else if (initial != null) {
-                        // System sans Bold (not the Roboto Serif
-                        // editorial token) so the glyph paints
-                        // immediately — Compose's downloadable Google
-                        // Fonts have an async load window where text
-                        // styled with `type.display` would render
-                        // blank on first cold launch. The avatar is a
-                        // primary affordance; it can't ghost.
-                        Text(
-                            text  = initial,
-                            style = TextStyle(
-                                fontFamily = FontFamily.SansSerif,
-                                fontSize   = 26.sp,
-                                fontWeight = FontWeight.Bold,
-                                lineHeight = 30.sp,
-                            ),
-                            color = colors.textOnAccent,
+                            loading = { fallback() },
+                            error   = { fallback() },
                         )
                     } else {
-                        Icon(
-                            imageVector        = Icons.Filled.AccountCircle,
-                            contentDescription = "Open profile menu",
-                            tint               = colors.textOnAccent,
-                            modifier           = Modifier.size(32.dp),
-                        )
+                        fallback()
                     }
                 }
             }
