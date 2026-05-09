@@ -81,13 +81,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -405,59 +410,134 @@ private fun HomeHeader(
     val resolvedName = (displayName?.trim().orEmpty()).ifEmpty { "QuickInk" }
     val initial = displayName?.trim()?.firstOrNull()?.uppercase()
 
-    // Same coral vertical gradient the Zap FAB uses (see
-    // QuickInkBottomNavBar.BrandTab). Lighter at top, deeper at
-    // bottom — reads as a subtle 3D lift.
+    // Avatar pill mirrors the centre Zap FAB exactly (see
+    // QuickInkBottomNavBar.BrandTab) — same dimensions, same coral
+    // gradient brush, same canvas-coloured outer ring + ambient/
+    // contact drop shadows. Only difference: no upward `lift`,
+    // since the avatar isn't floating above a bar surface.
+    val avatarInner  = 56.dp
+    val avatarRing   = 4.dp
+    val avatarOuter  = avatarInner + avatarRing * 2
     val coralGradient = Brush.verticalGradient(
         colors = listOf(colors.accent, colors.accentDeep),
     )
 
     Row(verticalAlignment = Alignment.Top) {
-        // Top-left profile pill, styled to mirror the centre Zap FAB:
-        // solid coral gradient disc with white glyph/initial inside,
-        // no border ring. The profile photo (when picked) overrides
-        // both — but the initial is the canonical default visual when
-        // we have a display name. Tap slides the profile drawer in
-        // from the leading edge — same pattern as Releaf's home
-        // avatar → home drawer.
+        // Top-left profile pill — a button, not a label. Styled
+        // identically to the centre Zap FAB to read as its sibling:
+        // the user's space on the left, the action space on the
+        // right. Initial is the canonical default visual when we
+        // have a display name; profile photo overrides when picked;
+        // person glyph fills in for the signed-out / no-name case.
+        // Tap slides the profile drawer in from the leading edge —
+        // same pattern as Releaf's home avatar → home drawer.
         Box(
             modifier = Modifier
-                .size(52.dp)
+                .size(avatarOuter)
                 .clip(CircleShape)
-                .background(coralGradient)
                 .clickable(onClick = onTapAvatar),
             contentAlignment = Alignment.Center,
         ) {
-            if (profilePhotoUri.isNotEmpty()) {
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(Uri.parse(profilePhotoUri))
-                        // Cache disabled because the user's photo
-                        // is overwritten in-place at the same path —
-                        // without this, a fresh pick would keep
-                        // serving the stale bitmap. The avatar is
-                        // small (52dp), so the perf cost is nil.
-                        .memoryCachePolicy(CachePolicy.DISABLED)
-                        .diskCachePolicy(CachePolicy.DISABLED)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = "Open profile menu",
-                    contentScale       = ContentScale.Crop,
-                    modifier           = Modifier.fillMaxSize().clip(CircleShape),
-                )
-            } else if (initial != null) {
-                Text(
-                    text  = initial,
-                    style = type.display.copy(fontSize = 24.sp, lineHeight = 28.sp),
-                    color = colors.textOnAccent,
-                )
-            } else {
-                Icon(
-                    imageVector       = Icons.Filled.AccountCircle,
-                    contentDescription = "Open profile menu",
-                    tint              = colors.textOnAccent,
-                    modifier          = Modifier.size(32.dp),
-                )
+            // Outer ring + shadow disc. The drawBehind block paints
+            // the same two stacked drop shadows BrandTab uses
+            // (ambient: wider/softer, contact: tighter/darker), then
+            // the canvas-coloured ring sits on top so the coral inner
+            // reads as cleanly punched out of the page.
+            Box(
+                modifier = Modifier
+                    .size(avatarOuter)
+                    .drawBehind {
+                        val cx = size.width / 2f
+                        val cy = size.height / 2f
+                        val r  = size.width / 2f
+
+                        // Ambient — wider, softer.
+                        val ambientR    = r + 8.dp.toPx()
+                        val ambientStop = r / ambientR
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colorStops = arrayOf(
+                                    ambientStop to Color.Black.copy(alpha = 0.06f),
+                                    1f          to Color.Transparent,
+                                ),
+                                center = Offset(cx, cy + 3.dp.toPx()),
+                                radius = ambientR,
+                            ),
+                            radius = ambientR,
+                            center = Offset(cx, cy + 3.dp.toPx()),
+                        )
+
+                        // Contact — tighter, darker.
+                        val contactR    = r + 3.dp.toPx()
+                        val contactStop = r / contactR
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colorStops = arrayOf(
+                                    contactStop to Color.Black.copy(alpha = 0.14f),
+                                    1f          to Color.Transparent,
+                                ),
+                                center = Offset(cx, cy + 1.dp.toPx()),
+                                radius = contactR,
+                            ),
+                            radius = contactR,
+                            center = Offset(cx, cy + 1.dp.toPx()),
+                        )
+                    }
+                    .background(colors.bg, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(avatarInner)
+                        .clip(CircleShape)
+                        .background(coralGradient),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (profilePhotoUri.isNotEmpty()) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(Uri.parse(profilePhotoUri))
+                                // Cache disabled because the user's
+                                // photo is overwritten in-place at the
+                                // same path — without this, a fresh
+                                // pick would keep serving the stale
+                                // bitmap. The avatar is small (56dp),
+                                // so the perf cost is nil.
+                                .memoryCachePolicy(CachePolicy.DISABLED)
+                                .diskCachePolicy(CachePolicy.DISABLED)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "Open profile menu",
+                            contentScale       = ContentScale.Crop,
+                            modifier           = Modifier.fillMaxSize().clip(CircleShape),
+                        )
+                    } else if (initial != null) {
+                        // System sans Bold (not the Roboto Serif
+                        // editorial token) so the glyph paints
+                        // immediately — Compose's downloadable Google
+                        // Fonts have an async load window where text
+                        // styled with `type.display` would render
+                        // blank on first cold launch. The avatar is a
+                        // primary affordance; it can't ghost.
+                        Text(
+                            text  = initial,
+                            style = TextStyle(
+                                fontFamily = FontFamily.SansSerif,
+                                fontSize   = 26.sp,
+                                fontWeight = FontWeight.Bold,
+                                lineHeight = 30.sp,
+                            ),
+                            color = colors.textOnAccent,
+                        )
+                    } else {
+                        Icon(
+                            imageVector        = Icons.Filled.AccountCircle,
+                            contentDescription = "Open profile menu",
+                            tint               = colors.textOnAccent,
+                            modifier           = Modifier.size(32.dp),
+                        )
+                    }
+                }
             }
         }
         Spacer(Modifier.size(QuickInkSpacing.s3))
