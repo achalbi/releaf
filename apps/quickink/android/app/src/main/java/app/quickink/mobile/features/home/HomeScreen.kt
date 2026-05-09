@@ -522,7 +522,7 @@ private fun HomeHeader(
                             imageVector        = Icons.Outlined.Person,
                             contentDescription = "Open profile menu",
                             tint               = colors.textOnAccent,
-                            modifier           = Modifier.size(22.dp),
+                            modifier           = Modifier.size(16.dp),
                         )
                     }
 
