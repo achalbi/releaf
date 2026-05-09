@@ -407,11 +407,15 @@ private fun HomeHeader(
     }
     val resolvedName = (displayName?.trim().orEmpty()).ifEmpty { "QuickInk" }
 
-    // Avatar pill mirrors the centre Zap FAB exactly (see
-    // QuickInkBottomNavBar.BrandTab) — same dimensions, same coral
-    // gradient brush, same canvas-coloured outer ring + ambient/
-    // contact drop shadows. Only difference: no upward `lift`,
-    // since the avatar isn't floating above a bar surface.
+    // Avatar pill shares the centre Zap FAB's chrome (see
+    // QuickInkBottomNavBar.BrandTab): same 56/4/64 dimensions,
+    // same coral gradient brush, same canvas-coloured outer ring,
+    // same ambient/contact drop shadow stack. Differs in two
+    // intentional ways: no upward `lift` (the avatar isn't floating
+    // above a bar surface), and the inner glyph is dialled down
+    // from the FAB's 30dp Bolt to a 16dp Outlined.Person — the
+    // FAB is the primary action; the avatar is a secondary
+    // identity tap and reads quieter.
     val avatarInner  = 56.dp
     val avatarRing   = 4.dp
     val avatarOuter  = avatarInner + avatarRing * 2
@@ -420,14 +424,13 @@ private fun HomeHeader(
     )
 
     Row(verticalAlignment = Alignment.Top) {
-        // Top-left profile pill — a button, not a label. Styled
-        // identically to the centre Zap FAB to read as its sibling:
-        // the user's space on the left, the action space on the
-        // right. Initial is the canonical default visual when we
-        // have a display name; profile photo overrides when picked;
-        // person glyph fills in for the signed-out / no-name case.
-        // Tap slides the profile drawer in from the leading edge —
-        // same pattern as Releaf's home avatar → home drawer.
+        // Top-left profile pill — a button, not a label. Mirrors
+        // the centre Zap FAB's chrome so the two read as siblings:
+        // user's space on the left, action space on the right.
+        // Profile photo (when picked) is the primary visual; the
+        // Person silhouette is the default fallback. Tap slides the
+        // profile drawer in from the leading edge — same pattern
+        // as Releaf's home avatar → home drawer.
         // No ripple — the coral disc + canvas ring + drop shadow
         // already read as pressable, and the default rectangular
         // ripple paints in the four corners outside the circular
@@ -529,10 +532,11 @@ private fun HomeHeader(
                     if (profilePhotoUri.isNotEmpty()) {
                         // SubcomposeAsyncImage (not AsyncImage) so a
                         // stale URI / missing file falls through to
-                        // the initial instead of leaving the coral
-                        // disc empty. profilePhotoUri persists in
-                        // SharedPreferences across reinstalls, so
-                        // pointing at a vanished file is a real path.
+                        // the Person icon fallback instead of leaving
+                        // the coral disc empty. profilePhotoUri
+                        // persists in SharedPreferences across
+                        // reinstalls, so pointing at a vanished file
+                        // is a real path.
                         SubcomposeAsyncImage(
                             model = ImageRequest.Builder(context)
                                 .data(Uri.parse(profilePhotoUri))
