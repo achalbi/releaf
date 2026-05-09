@@ -211,6 +211,16 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
 
+    // Compose downloadable Google Fonts. Drives QuickInk's editorial
+    // type stack (Roboto Serif for the New-York-style serif, Inter
+    // for the SF-Pro-style sans). Version is BOM-aligned — no
+    // explicit version literal needed because `compose.bom` above
+    // pins it. Cert hashes for the Play Services font provider live
+    // in `res/values/font_certs.xml` and are referenced via
+    // `R.array.com_google_android_gms_fonts_certs` from
+    // `QuickInkTypography.kt`.
+    implementation("androidx.compose.ui:ui-text-google-fonts")
+
     // Activity + lifecycle + coroutines — minimum for a Compose-only
     // entry point.
     implementation(libs.activity.compose)

@@ -122,18 +122,24 @@ private val DarkQuickInkColors = QuickInkColorScheme(
 
 @Immutable
 data class QuickInkTypographyScheme(
+    /** Roboto Serif Bold — App Name "Hero" tier. */
     val display: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Display,
+    /** Roboto Serif Bold — Sustainability Campaigns "Editorial" tier. */
+    val editorial: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Editorial,
     val onboardingTitle: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.OnboardingTitle,
-    /** Cormorant body — onboarding showroom feel. App screens use [body]. */
+    /** Editorial serif body — onboarding showroom feel. App screens use [body]. */
     val onboardingBody: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.OnboardingBody,
     val pageTitle: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.PageTitle,
     val heading: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Heading,
     val eyebrow: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Eyebrow,
-    /** Inter body — app screens. Onboarding uses [onboardingBody]. */
+    /** Inter sans — Editor Body / AI Summaries. Onboarding uses [onboardingBody]. */
     val body: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Body,
+    /** Roboto Serif Italic — Empty States "Emotional" tier. */
     val bodyItalic: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.BodyItalic,
     val handwritten: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Handwritten,
+    /** Inter SemiBold — note/scan thumbnail titles. */
     val cardTitle: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.CardTitle,
+    /** Inter Medium — Toolbar "Compact" tier. */
     val label: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Label,
     val ctaSerif: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.CtaSerif,
     val meta: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Meta,

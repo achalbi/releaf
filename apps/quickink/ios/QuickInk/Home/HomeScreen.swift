@@ -16,7 +16,7 @@
  * capture mode).
  *
  * Data sources:
- *   - Recent scans: NotepadListViewModel's first 5 entries.
+ *   - Recents: NotepadListViewModel's first 5 entries.
  *   - Sync status: SyncStateStore.shared.
  *
  * Counterpart: Android `HomeScreen.kt`.

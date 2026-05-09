@@ -539,7 +539,11 @@ private fun SustainabilityHero(totalPages: Int) {
             // muted gray) so the whole card reads as a coherent green
             // family rather than gray-on-green.
             Text(text = title, style = type.meta, color = ecoDeep)
-            Text(text = headline, style = type.heading, color = colors.ink)
+            // Sustainability Campaigns sit on the dedicated
+            // [editorial] token (Roboto Serif Bold) per the type
+            // spec — the eco card is the canonical campaign surface.
+            // Sans [heading] would fight the editorial register here.
+            Text(text = headline, style = type.editorial, color = colors.ink)
             // Empty-state prompt only — once there's any saved page
             // the right-hand stat column carries the secondary line.
             if (totalPages == 0) {
@@ -754,7 +758,11 @@ private fun RecentActivityPill(
         }
         Spacer(Modifier.size(QuickInkSpacing.s3))
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = "Recent activity", style = type.cardTitle, color = colors.ink)
+            // Status pill text — sits on the sans Label token rather
+            // than CardTitle (which is now serif Medium per the spec
+            // and reserved for actual notebook/scan titles). "Recent
+            // activity" is functional UI copy, not editorial.
+            Text(text = "Recent activity", style = type.label, color = colors.ink)
             Text(text = subtitle, style = type.caption, color = colors.muted)
         }
     }
@@ -773,15 +781,20 @@ private fun RecentRail(
 
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            // Section heading uses the sans Heading token (with a
+            // small upsize) rather than the serif Display token.
+            // Productivity-app section headings should read as
+            // functional, not editorial — the serif is reserved for
+            // the home greeting name above.
             Text(
-                text  = "Recent scans",
-                style = type.display.copy(fontSize = 26.sp, lineHeight = 32.sp),
+                text  = "Recents",
+                style = type.heading,
                 color = colors.ink,
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text     = "View all",
-                style    = type.meta,
+                text     = "View all →",
+                style    = type.label.copy(fontSize = 13.sp),
                 color    = colors.accent,
                 modifier = Modifier.clickable(onClick = onAllNotes),
             )
@@ -993,7 +1006,7 @@ private fun CategoryGrid(
     Column {
         Text(
             text  = "Quick categories",
-            style = type.display.copy(fontSize = 26.sp, lineHeight = 32.sp),
+            style = type.heading,
             color = colors.ink,
         )
         Spacer(Modifier.size(QuickInkSpacing.s3))
@@ -1079,9 +1092,19 @@ private fun CategoryTile(
         }
         Spacer(Modifier.size(QuickInkSpacing.s3))
         Column(modifier = Modifier.weight(1f)) {
+            // Category tile name uses the Label token (Inter Medium
+            // 14sp) rather than CardTitle (Inter SemiBold 14sp).
+            // Category names are functional UI labels — Medium reads
+            // lighter and more chip-like than SemiBold, which would
+            // make the tiles fight the recent-rail thumbnails for
+            // visual emphasis. (Originally also a width fix when
+            // CardTitle was serif and "Meetings" truncated to
+            // "Meetin..." — that's resolved now that both tokens
+            // sit on Inter, but the weight distinction still earns
+            // its keep.)
             Text(
                 text     = name,
-                style    = type.cardTitle,
+                style    = type.label,
                 color    = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
