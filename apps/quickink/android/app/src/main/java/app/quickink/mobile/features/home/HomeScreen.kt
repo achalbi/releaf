@@ -405,18 +405,26 @@ private fun HomeHeader(
     val resolvedName = (displayName?.trim().orEmpty()).ifEmpty { "QuickInk" }
     val initial = displayName?.trim()?.firstOrNull()?.uppercase()
 
+    // Same coral vertical gradient the Zap FAB uses (see
+    // QuickInkBottomNavBar.BrandTab). Lighter at top, deeper at
+    // bottom — reads as a subtle 3D lift.
+    val coralGradient = Brush.verticalGradient(
+        colors = listOf(colors.accent, colors.accentDeep),
+    )
+
     Row(verticalAlignment = Alignment.Top) {
-        // Top-left profile pill — renders the user's profile photo
-        // (when picked), the user's initial (when we have a name),
-        // or a default person glyph. Tap slides the profile drawer
-        // in from the leading edge — same pattern as Releaf's home
+        // Top-left profile pill, styled to mirror the centre Zap FAB:
+        // solid coral gradient disc with white glyph/initial inside,
+        // no border ring. The profile photo (when picked) overrides
+        // both — but the initial is the canonical default visual when
+        // we have a display name. Tap slides the profile drawer in
+        // from the leading edge — same pattern as Releaf's home
         // avatar → home drawer.
         Box(
             modifier = Modifier
-                .size(44.dp)
+                .size(52.dp)
                 .clip(CircleShape)
-                .background(colors.accentSoft)
-                .border(2.dp, colors.accent, CircleShape)
+                .background(coralGradient)
                 .clickable(onClick = onTapAvatar),
             contentAlignment = Alignment.Center,
         ) {
@@ -425,10 +433,10 @@ private fun HomeHeader(
                     model = ImageRequest.Builder(context)
                         .data(Uri.parse(profilePhotoUri))
                         // Cache disabled because the user's photo
-                        // is overwritten in-place at the same path
-                        // — without this, a fresh pick would keep
+                        // is overwritten in-place at the same path —
+                        // without this, a fresh pick would keep
                         // serving the stale bitmap. The avatar is
-                        // small (44dp), so the perf cost is nil.
+                        // small (52dp), so the perf cost is nil.
                         .memoryCachePolicy(CachePolicy.DISABLED)
                         .diskCachePolicy(CachePolicy.DISABLED)
                         .crossfade(true)
@@ -440,15 +448,15 @@ private fun HomeHeader(
             } else if (initial != null) {
                 Text(
                     text  = initial,
-                    style = type.heading,
-                    color = colors.accent,
+                    style = type.display.copy(fontSize = 24.sp, lineHeight = 28.sp),
+                    color = colors.textOnAccent,
                 )
             } else {
                 Icon(
                     imageVector       = Icons.Filled.AccountCircle,
                     contentDescription = "Open profile menu",
-                    tint              = colors.accent,
-                    modifier          = Modifier.size(28.dp),
+                    tint              = colors.textOnAccent,
+                    modifier          = Modifier.size(32.dp),
                 )
             }
         }
