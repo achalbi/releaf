@@ -94,7 +94,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
@@ -119,6 +118,7 @@ import coil.request.ImageRequest
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkColors
+import app.quickink.mobile.ui.theme.QuickInkFonts
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.quickink.mobile.ui.theme.quickInkDotGridBackground
@@ -520,36 +520,36 @@ private fun HomeHeader(
                     // would otherwise leave the disc blank.
                     val fallback: @Composable () -> Unit = {
                         if (initial != null) {
-                            // System sans Bold (not the Roboto Serif
-                            // editorial token) so the glyph paints
-                            // immediately — Compose's downloadable
-                            // Google Fonts have an async load window
-                            // where `type.display` would render blank
-                            // on first cold launch. The avatar is a
-                            // primary affordance; it can't ghost.
-                            // Bulletproof centering via TextMeasurer +
-                            // Canvas drawText. Every previous pass
+                            // Roboto Serif Bold — the same editorial
+                            // family the home greeting renders the
+                            // user's name in (`type.display`). Pulls
+                            // the avatar's letterform into harmony
+                            // with the "A" in "Achal B I" above; both
+                            // glyphs read as the same person.
+                            //
+                            // Bulletproof centering via TextMeasurer
+                            // + Canvas drawText: every previous pass
                             // (LineHeightStyle, includeFontPadding,
                             // hand-tuned offsets) failed because they
                             // all centered the *layout box* — which
                             // for a cap-only letter like "A" includes
                             // unused descender space below the
-                            // baseline, leaving the visible glyph
-                            // visibly high.
+                            // baseline, leaving the glyph visibly
+                            // high. Canvas + glyph-bounds measurement
+                            // centers the actual visible ink.
                             //
-                            // This path measures the actual glyph
-                            // bounding box (cap-top → baseline for
-                            // "A"), computes its visual center, and
-                            // draws the layout offset so that the
-                            // visual center lands exactly at the
-                            // canvas (= disc) center. Works correctly
-                            // for any first character — descender-
-                            // bearing letters get measured and
-                            // centered the same way.
+                            // Async-load note: downloadable Google
+                            // Fonts can take a beat to arrive on cold
+                            // launch. While Roboto Serif loads,
+                            // Compose falls back to the platform
+                            // serif (Noto Serif on Android), so the
+                            // glyph still paints — it just snaps to
+                            // Roboto Serif once cached. Acceptable
+                            // for a non-ghosting transition.
                             val measurer = rememberTextMeasurer()
                             val initialStyle = TextStyle(
-                                fontFamily = FontFamily.SansSerif,
-                                fontSize   = 26.sp,
+                                fontFamily = QuickInkFonts.serif,
+                                fontSize   = 28.sp,
                                 fontWeight = FontWeight.Bold,
                                 color      = colors.textOnAccent,
                             )
