@@ -283,17 +283,17 @@ private fun BannerHeader(
                     val initial = displayName.trim().firstOrNull()?.uppercase()
                     if (initial != null) {
                         // Strip the platform's default font padding and
-                        // centre the line-height box around the glyph,
-                        // then nudge down by ~8dp to land the cap-height
-                        // on the disc's optical centre. Even with
-                        // Trim.Both, the line box runs from descender
-                        // line to ascender line — for a capital "A"
-                        // (no descender, sits below the ascender slot
-                        // where diacritics like "Á" would land), the
-                        // visible glyph centroid sits above the box
-                        // centre. Offsetting down by ~15% of fontSize
-                        // (54sp × ~0.15 ≈ 8dp) brings the cap-height
-                        // midline onto the disc's geometric centre.
+                        // trim the line-height box to the actual glyph
+                        // bounds (cap-height to baseline). With both
+                        // `includeFontPadding = false` AND
+                        // `LineHeightStyle.Trim.Both` the trimmed
+                        // bounding box runs from cap-height to baseline,
+                        // and `Alignment.Center` plus the parent Box's
+                        // `contentAlignment = Center` plant that box
+                        // centre on the disc's geometric centre. No
+                        // manual offset — the previous +8dp y-offset
+                        // was over-correcting and pushed the "A" below
+                        // optical centre.
                         Text(
                             text     = initial,
                             color    = colors.accent,
@@ -307,7 +307,6 @@ private fun BannerHeader(
                                 ),
                             ),
                             lineHeight = 54.sp,
-                            modifier = Modifier.offset(y = 8.dp),
                         )
                     } else {
                         Icon(
