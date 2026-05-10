@@ -1,150 +1,143 @@
 /*
  * QuickInkLaunchAnimation.kt
  *
- * Splash composable that plays the cinematic Lottie launch animation
- * handed off by design (`design_handoff_quickink_launch/README.md`)
- * when the corresponding After Effects → Lottie export is bundled,
- * and falls through to the minimal-mark [QuickInkSplash] when it
- * isn't.
+ * Splash composable that plays the native cinematic launch animation
+ * — the Compose port of the React/SVG prototype handed off by design
+ * (`design_handoff_quickink_launch/`). Composes:
  *
- * Asset location: drop the JSON export at
- *   `android/app/src/main/assets/quickink_launch.json`
- * The asset is detected at runtime via `AssetManager.list("")`, so a
- * missing file degrades gracefully — the build doesn't depend on it
- * being present, and the user sees the existing minimal-mark splash
- * until design hands the JSON over. The moment the file lands at
- * that path, the cinematic starts playing on next launch.
+ *   - [LaunchScene] — Canvas-rendered SVG scene (sky, sun, mountains,
+ *     family, growing tree, water stream, etc.).
+ *   - [LaunchPointsCounter] / [LaunchLogoLockup] /
+ *     [LaunchHomeFeedTransition] — React-style overlays that ride
+ *     above the Canvas as native Compose composables.
  *
- * Called from `MainActivity` in place of the bare `QuickInkSplash`.
- * On animation completion (or when the safety timeout expires, or
- * when the fallback splash's hold completes) `onFinished` fires and
- * the host swaps in `QuickInkRoot`. The safety timeout (README's
- * stated 5.0s + 500ms slack) covers the rare case where Lottie's
- * progress callback never reaches `1f` — e.g. a malformed JSON that
- * loads as a non-null composition but stalls mid-render — so we
- * never strand the user on the splash.
+ * Time is driven by `withFrameNanos`, which fires once per display
+ * refresh; the scene's per-layer easings derive their `t` from the
+ * seconds elapsed since the composable entered composition. After
+ * the prototype's 5.0 s timeline plus a 250 ms tail (matches the JSX
+ * preview's fade-to-feed buffer), [onFinished] fires and the host
+ * (`MainActivity`) swaps in `QuickInkRoot`.
  *
- * Counterpart: iOS `LaunchAnimationView.swift`. Both load the same
- * JSON file (the README recommends Lottie precisely because one
- * `.json` ships to both platforms unchanged) and both fall back to
- * the minimal-mark splash when the asset is missing.
+ * Reduced motion: when `Settings.Global.TRANSITION_ANIMATION_SCALE`
+ * is 0 (or the OS reports reduced motion), we pin `time` at 2.5 s so
+ * the user sees a single representative frame rather than 5 s of
+ * motion — and we shorten the dismissal so the launch still feels
+ * prompt. This addresses the "prefers-reduced-motion fallback" item
+ * from `design/SPLASH_INTEGRATION.md`'s deferred list.
  *
- * Wiring `target` (the user's lifetime tree-points balance, ticked
- * up by the in-comp counter): TODO. The README documents `target`
- * as one of the animation's three input props. To wire it in
- * Compose-Lottie, override the text layer named in the AE comp via
- * `rememberLottieDynamicProperties` keyed on the layer's name (e.g.
- * `KeyPath("TreePointsCounter", "**")`). Held for a follow-up
- * because (a) the AE layer name isn't fixed yet, and (b) reading
- * the lifetime page count synchronously at splash-time would push
- * the database open before Compose's first frame — needs its own
- * design pass on whether to read it sync, async-with-restart, or
- * just let the comp's baked-in default play through.
+ * [target] is the user's lifetime Tree-points balance — fed into the
+ * counter pill and the home-feed hero. The host passes the resolved
+ * value (default [defaultTarget] while we settle the sync/async
+ * page-count read on the database open path; that's the second item
+ * on the deferred list).
+ *
+ * Counterpart: iOS `LaunchAnimationView.swift`.
  */
 
 package app.quickink.mobile.features.splash
 
-import android.content.Context
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import app.quickink.mobile.features.splash.launch.LaunchHomeFeedTransition
+import app.quickink.mobile.features.splash.launch.LaunchLogoLockup
+import app.quickink.mobile.features.splash.launch.LaunchPalettes
+import app.quickink.mobile.features.splash.launch.LaunchPointsCounter
+import app.quickink.mobile.features.splash.launch.LaunchScene
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
-import com.airbnb.lottie.compose.LottieAnimation
-import com.airbnb.lottie.compose.LottieCompositionSpec
-import com.airbnb.lottie.compose.animateLottieCompositionAsState
-import com.airbnb.lottie.compose.rememberLottieComposition
-import kotlinx.coroutines.delay
 
-/// Path inside the APK assets folder where the AE → Lottie JSON
-/// export is expected to live. Detected at runtime; absent → fallback.
-private const val LAUNCH_ANIMATION_ASSET = "quickink_launch.json"
+/**
+ * Default Tree-points target shown while the host hasn't yet wired
+ * the live page count — mirrors the prototype's preview value (247).
+ * Replace with the actual lifetime page total when the database
+ * read path is finalized (see the launch animation deferred TODO in
+ * `design/SPLASH_INTEGRATION.md`).
+ */
+internal const val defaultTarget = 247
 
-/// Safety ceiling on the animation hold. Matches the README's stated
-/// 5.0s duration + 500ms slack so a stalled progress callback can't
-/// strand the user on the splash forever.
-private const val SAFETY_TIMEOUT_MS = 5_500L
+/** End of the cinematic timeline (5.0 s) plus 500 ms safety tail. */
+private const val TOTAL_DURATION_S = 5.5
+
+/** Reduced-motion frame to hold (mid-bloom). */
+private const val REDUCED_MOTION_FROZEN_T = 2.5
+
+/** Shortened reduced-motion dismissal — same as the legacy splash. */
+private const val REDUCED_MOTION_HOLD_S = 1.4
 
 @Composable
 fun QuickInkLaunchAnimation(
     onFinished: () -> Unit,
+    target: Int = defaultTarget,
 ) {
     val context = LocalContext.current
-    val hasAsset = remember(context) { context.hasAsset(LAUNCH_ANIMATION_ASSET) }
+    val colors = LocalQuickInkColors.current
+    val palette = LaunchPalettes.Dawn
 
-    // Asset not bundled yet (or removed) — fall through to the
-    // existing minimal-mark splash so the launch path is unchanged
-    // for the user. Once the AE export lands at the documented path
-    // this branch goes silent and the cinematic plays.
-    if (!hasAsset) {
-        QuickInkSplash(onFinished = onFinished)
-        return
-    }
-
-    val composition by rememberLottieComposition(
-        LottieCompositionSpec.Asset(LAUNCH_ANIMATION_ASSET),
-    )
-
-    val progress by animateLottieCompositionAsState(
-        composition = composition,
-        // Animation plays once on app launch; loops only as a
-        // last-resort failure mode (see README §"Interactions &
-        // Behavior" — "Loops silently if launch network/init takes
-        // longer than 5s"). The host already gates dismissal on
-        // `onFinished`, so a single iteration is what we want here.
-        iterations  = 1,
-    )
-
-    // Belt-and-braces dismissal — fire `onFinished` whichever path
-    // completes first:
-    //   1. Composition load fails OR animation stalls → safety
-    //      timeout (5.5s) catches it.
-    //   2. Animation plays cleanly to its end frame → the progress
-    //      effect below catches it the moment progress reaches 1f.
-    LaunchedEffect(Unit) {
-        delay(SAFETY_TIMEOUT_MS)
-        onFinished()
-    }
-    LaunchedEffect(progress, composition) {
-        if (composition != null && progress >= 1f) {
-            onFinished()
+    val reduceMotion = remember {
+        // Android reads "reduced motion" via the transition animation
+        // scale system setting. 0.0 means "off"; treat that as the
+        // reduced-motion preference. Scope: app-wide preference, not
+        // per-component, mirroring the JSX prototype's behavior.
+        try {
+            Settings.Global.getFloat(
+                context.contentResolver,
+                Settings.Global.TRANSITION_ANIMATION_SCALE
+            ) == 0f
+        } catch (_: Throwable) {
+            false
         }
     }
 
-    val colors = LocalQuickInkColors.current
+    var elapsedS by remember { mutableStateOf(0.0) }
+    var didFinish by remember { mutableStateOf(false) }
+
+    // Drive time via `withFrameNanos` so the scene re-renders every
+    // display refresh. Stops once the dismissal target is reached.
+    LaunchedEffect(Unit) {
+        val startNanos = withFrameNanos { it }
+        while (true) {
+            val now = withFrameNanos { it }
+            elapsedS = (now - startNanos) / 1_000_000_000.0
+            val limit = if (reduceMotion) REDUCED_MOTION_HOLD_S else TOTAL_DURATION_S
+            if (!didFinish && elapsedS >= limit) {
+                didFinish = true
+                onFinished()
+                break
+            }
+        }
+    }
+
+    val t = if (reduceMotion) REDUCED_MOTION_FROZEN_T else elapsedS
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            // Cream paint so the first frame load + any aspect-ratio
-            // letterbox edges read as the brand canvas, not black.
-            // Same token the minimal-mark splash uses — see
-            // QuickInkSplash for the rationale.
+            // Cream behind the Canvas — covers any first-frame gap
+            // before the sky gradient ramps in (op = 0 at t=0).
             .background(colors.bg),
-        contentAlignment = Alignment.Center,
     ) {
-        LottieAnimation(
-            composition = composition,
-            progress    = { progress },
-            modifier    = Modifier.fillMaxSize(),
+        LaunchScene(time = t, palette = palette)
+        LaunchPointsCounter(
+            target  = target,
+            time    = t,
+            palette = palette,
+            show    = true,
+        )
+        LaunchLogoLockup(time = t, palette = palette)
+        LaunchHomeFeedTransition(
+            time    = t,
+            palette = palette,
+            target  = target,
         )
     }
-}
-
-/**
- * Cheap presence check for an asset by name. `AssetManager.list("")`
- * reads the root directory listing without opening the file, so this
- * is essentially free at startup. Try/catch covers the "no assets
- * folder at all" case (returns false rather than crashing) — that's
- * the state when this file lands before the assets folder is created.
- */
-private fun Context.hasAsset(name: String): Boolean = try {
-    assets.list("")?.contains(name) == true
-} catch (_: Throwable) {
-    false
 }

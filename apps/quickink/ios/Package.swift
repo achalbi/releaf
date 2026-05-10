@@ -49,18 +49,6 @@ let package = Package(
         // (SwiftPM doesn't re-export). Same version pin as Releaf
         // and ReleafCore — SwiftPM dedupes through resolution.
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
-        // Lottie iOS — plays the cinematic launch animation handed
-        // off by design (`design_handoff_quickink_launch/`). The host
-        // view (`LaunchAnimationView`) loads the AE-exported JSON
-        // from the bundled `Resources/Animations/quickink_launch.json`
-        // and falls through to the minimal-mark `SplashView` when
-        // the asset isn't bundled, so the build is safe before/after
-        // the JSON lands. `lottie-spm` is the binary-distributed
-        // SPM endpoint Airbnb maintains for app-size reasons; the
-        // exposed product is named `Lottie` (same as the source
-        // package). 4.5.0 is the floor we need for the SwiftUI
-        // `LottieView` API used here.
-        .package(url: "https://github.com/airbnb/lottie-spm.git", from: "4.5.0"),
     ],
     targets: [
         .target(
@@ -79,11 +67,6 @@ let package = Package(
                 // GRDB — used by QuickInkDatabase to open the
                 // SQLite file + run migrations.
                 .product(name: "GRDB", package: "GRDB.swift"),
-                // Lottie — SwiftUI `LottieView` lives here. Used
-                // exclusively by `App/LaunchAnimationView.swift` to
-                // play the cinematic launch animation; the rest of
-                // the app has no Lottie dependency.
-                .product(name: "Lottie", package: "lottie-spm"),
             ],
             path: "QuickInk",
             resources: [
@@ -96,21 +79,6 @@ let package = Package(
                 // screen sidesteps this by using the pre-rendered
                 // QuickInkWordmark imageset.
                 .process("DesignSystem/Fonts"),
-                // Launch-animation Lottie JSON. The file itself
-                // (`quickink_launch.json`) is dropped into this
-                // directory by the design team — see
-                // `design_handoff_quickink_launch/README.md` for
-                // the After Effects → Lottie export instructions.
-                // Until the JSON lands, the directory holds only
-                // a `.gitkeep` marker; SwiftPM's `.process(...)`
-                // accepts an empty resource directory and the
-                // runtime view (`LaunchAnimationView`) falls
-                // through to the minimal-mark `SplashView` when
-                // `Bundle.module.url(forResource:withExtension:)`
-                // returns nil. The moment the JSON is added, it
-                // ships in the bundle and the cinematic plays —
-                // no further Package.swift edit needed.
-                .process("Resources/Animations"),
             ]
         ),
         // Phase 4 Slice 4.4 — cross-platform interop tests for the

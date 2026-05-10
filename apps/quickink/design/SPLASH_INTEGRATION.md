@@ -64,28 +64,48 @@ The current setup uses the classic theme + windowBackground approach. If/when yo
 
 Both approaches show the same visual — the modern API just animates the icon scale-in and integrates with the system's launch animation.
 
-## Cinematic launch animation (Lottie)
+## Cinematic launch animation (native port)
 
-The minimal-mark splash above is the brand's static fallback. The cinematic launch animation handed off in `design_handoff_quickink_launch/` (5-second tree-planting / Tree-points reveal) ships on top of it via Lottie. Both platforms route their splash through a `LaunchAnimation*` wrapper that plays the bundled JSON when present and falls through to the minimal-mark splash when it isn't — so the build is safe before the JSON lands and starts playing the cinematic the moment it's dropped in.
+The minimal-mark splash above is the brand's static fallback. The cinematic launch animation handed off in `design_handoff_quickink_launch/` (5-second tree-planting / Tree-points reveal) ships on top of it as a **native port** of the React/SVG prototype — no Lottie, no After Effects. Design did not produce an AE source; the prototype is implemented in React + custom animation primitives, which we ported directly to SwiftUI Canvas (iOS) and Compose Canvas (Android).
+
+### Why a native port
+
+The handoff at `design_handoff_quickink_launch/source/` is a runnable React prototype (`scene.jsx` + `animations.jsx`), not an AE composition. Three options were considered:
+
+1. **Render the React prototype to MP4** — pixel-exact but bakes in `target`, ~1–2 MB asset.
+2. **Recreate in AE then export to Lottie** — faithful but requires building an AE comp from scratch (~2 weeks design effort).
+3. **Native port** ← **chosen**: SwiftUI Canvas + Compose Canvas, structurally 1:1 with the JSX. Dynamic `target`, no asset to ship, no third-party dep.
 
 ### What's wired
 
-- **Android** — `app/src/main/java/app/quickink/mobile/features/splash/QuickInkLaunchAnimation.kt` loads `assets/quickink_launch.json` via `LottieCompositionSpec.Asset(...)`; `MainActivity` now hosts `QuickInkLaunchAnimation` instead of `QuickInkSplash` directly. Gradle dep: `com.airbnb.android:lottie-compose:6.5.2` in `app/build.gradle.kts`.
-- **iOS** — `ios/QuickInk/App/LaunchAnimationView.swift` loads `Resources/Animations/quickink_launch.json` via `LottieAnimation.named(_:bundle:)`; `QuickInkRoot` now gates its routing on a new `showLaunchAnimation` state and renders `LaunchAnimationView` first. SPM dep: `https://github.com/airbnb/lottie-spm.git` from `4.5.0`, product `Lottie`. The resource directory is registered via `.process("Resources/Animations")` and currently holds only a `.gitkeep` marker.
+Both platforms structure the port the same way — a Canvas-rendered SVG scene plus three React-style overlays (Tree-points pill, logo lockup, home-feed transition):
 
-### Activating the cinematic
+- **Android** — `features/splash/QuickInkLaunchAnimation.kt` (host) drives time via `withFrameNanos`. The scene lives in `features/splash/launch/`:
+  - `LaunchEasing.kt` — easings, between, lerp, clamp.
+  - `LaunchPalette.kt` — Dawn / Morning Mist / Golden Hour palettes.
+  - `LaunchScene.kt` — Canvas with sky, sun, clouds, mountains, birds, ground, pollen, stumps, growing tree, water stream.
+  - `LaunchSceneFamily.kt` — the four family members (mother / daughter / son / father with watering can).
+  - `LaunchOverlays.kt` — Tree-points pill, logo lockup, home-feed transition.
 
-Drop the After Effects → Lottie export at:
+- **iOS** — `App/LaunchAnimationView.swift` (host) drives time via `TimelineView(.animation)`. Mirror file structure under `App/LaunchAnimation/`:
+  - `LaunchEasing.swift`, `LaunchPalette.swift`, `LaunchScene.swift`, `LaunchSceneFamily.swift`, `LaunchOverlays.swift`.
 
-- `android/app/src/main/assets/quickink_launch.json`
-- `ios/QuickInk/Resources/Animations/quickink_launch.json`
+Files mirror each other layer-by-layer with the same magic numbers, easings, and parameter names so cross-platform parity audits are trivial — search for a token name, compare iOS vs Android vs the prototype line by line.
 
-No code or Package.swift changes are needed — both runtimes detect the file at startup and switch to the cinematic automatically. See `design_handoff_quickink_launch/README.md` for the AE export instructions, palettes (Dawn / Morning Mist / Golden Hour), and timing.
+### Reduced motion
 
-### Deferred
+Both platforms honor the system reduced-motion preference (iOS `Environment(\.accessibilityReduceMotion)`, Android `Settings.Global.TRANSITION_ANIMATION_SCALE == 0`). When on, time is pinned at t=2.5s (mid-bloom — tree visible, family present, counter mid-tick) and the dismissal is shortened to ~1.4s.
 
-- **Wiring `target`** (the user's lifetime Tree-points balance, ticked up by the in-comp counter). The README documents `target` as one of three input props. Both platforms' wrappers carry a `TODO` next to the load call — Android wires it via `rememberLottieDynamicProperties` keyed on the AE text-layer name; iOS wires it via `LottieView.configure { lav in lav.setValueProvider(...) }`. Held until the AE layer name is fixed and we decide whether to read the page total synchronously at splash-time or async-with-restart.
-- **`prefers-reduced-motion` fallback** — README requires holding the static frame at t=2.5s when reduced motion is on. Both wrappers should branch on `Environment(\.accessibilityReduceMotion)` / `Settings.System.getFloat(... TRANSITION_ANIMATION_SCALE)` once the JSON lands and we can identify the static-frame cue.
+### Wiring `target`
+
+`target` is the user's lifetime Tree-points balance, fed into the counter pill and the home-feed hero. Both hosts default to `247` (the prototype's preview value) until `QuickInkRoot` (iOS) / `MainActivity` (Android) wires the live page count. The host signature already accepts a `target` parameter, so the wiring is a one-line change once we settle on whether to read the page total synchronously at splash-time (opens the database before first frame) or async-with-restart.
+
+### Removed
+
+- Lottie SPM dep (`lottie-spm 4.5.0`) — removed from `ios/Package.swift`.
+- Lottie Compose dep (`com.airbnb.android:lottie-compose:6.5.2`) — removed from `android/app/build.gradle.kts`.
+- `ios/QuickInk/Resources/Animations/` — directory + `.gitkeep` deleted.
+- `Resources/Animations` resource processing entry — removed from `Package.swift`.
 
 ## Master sources
 

@@ -286,20 +286,6 @@ dependencies {
     // reuse that version key).
     implementation("androidx.core:core-splashscreen:1.0.1")
 
-    // Lottie Compose — plays the cinematic launch animation handed
-    // off by design (`design_handoff_quickink_launch/`). The host
-    // composable (`QuickInkLaunchAnimation`) reads the AE-exported
-    // JSON from `assets/quickink_launch.json`; when the asset isn't
-    // bundled it gracefully falls through to the minimal-mark
-    // `QuickInkSplash`, so the build is safe before/after the asset
-    // lands. Pinned at 6.5.x — same major as iOS's `lottie-ios` 4.5
-    // (the two libraries are siblings; their major versions don't
-    // align by design, the renderer compatibility does).
-    //
-    // TODO: hoist the version literal into libs.versions.toml under
-    // `lottie-compose = "6.5.2"` once the catalog is open.
-    implementation("com.airbnb.android:lottie-compose:6.5.2")
-
     // Haze — Compose backdrop-blur. Drives the frosted-glass effect
     // on the home BottomNavBar (`hazeChild` on the bar, `haze` source
     // on the scrolling content behind it). `haze-materials` ships the
