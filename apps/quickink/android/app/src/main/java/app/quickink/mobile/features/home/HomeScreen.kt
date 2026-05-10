@@ -292,6 +292,19 @@ fun HomeScreen(
             )
             Spacer(Modifier.size(QuickInkSpacing.s4))
             SustainabilityHero(totalPages = totalPagesSaved ?: 0)
+            // Mirror the displayed Tree-points value into a shared
+            // SharedPreferences key so the next cold launch's
+            // cinematic counter (`QuickInkLaunchAnimation`) ticks up
+            // to the user's actual current balance instead of the
+            // hardcoded preview default. The splash runs at
+            // MainActivity onCreate, before any DAO flow can resolve,
+            // so a cached pref is the only way to surface a real
+            // number on the launch screen.
+            LaunchedEffect(totalPagesSaved) {
+                val pts = computeTreeImpact(totalPagesSaved ?: 0).totalPoints
+                app.quickink.mobile.features.settings.SettingsPreferences
+                    .writeCachedTreePoints(context, pts)
+            }
             // "N pending" pill — one tap kicks the upload-only sync
             // (REPLACE policy via `requestUserSync`). Visible only
             // when there's actual local work to push, so the home

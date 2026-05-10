@@ -85,12 +85,10 @@ public struct LaunchAnimationView: View {
                 LaunchLogoLockup(time: t, palette: LaunchPalettes.dawn)
                     .position(x: UIScreen.mainSafe.width / 2,
                               y: UIScreen.mainSafe.height * 0.20 + 60)
-                LaunchHomeFeedTransition(
-                    time:    t,
-                    palette: LaunchPalettes.dawn,
-                    target:  target
-                )
-                .ignoresSafeArea()
+                // (No home-feed transition — the cinematic dismisses
+                // straight to the real Home screen, so a baked-in
+                // preview of it inside the splash would just play
+                // immediately on top of itself.)
             }
             .onChange(of: elapsedRaw) { newValue in
                 let limit = reduceMotion ? 1.4 : 5.5

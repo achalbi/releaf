@@ -62,16 +62,27 @@ public struct QuickInkRoot: View {
     public var body: some View {
         Group {
             if showLaunchAnimation {
-                LaunchAnimationView(onFinished: {
-                    // Slight crossfade so the splash → home handoff
-                    // matches the README's "fast-skip" behaviour
-                    // ("crossfade the splash out over ~250ms to
-                    // whatever screen comes next"). The host swap
-                    // is the moment that crossfade fires.
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        showLaunchAnimation = false
+                // Read the user's last-known Tree-points balance
+                // (written by HomeScreen on every total-page-count
+                // observation push) so the cinematic counter pill
+                // ticks up to the user's actual current value rather
+                // than a hardcoded preview default. Defaults to 0 on
+                // a fresh install / first launch — the counter then
+                // doesn't tick, which is the correct empty-state read.
+                LaunchAnimationView(
+                    target: SettingsState.cachedTreePoints,
+                    onFinished: {
+                        // Slight crossfade so the splash → home
+                        // handoff matches the README's "fast-skip"
+                        // behaviour ("crossfade the splash out over
+                        // ~250ms to whatever screen comes next").
+                        // The host swap is the moment that crossfade
+                        // fires.
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showLaunchAnimation = false
+                        }
                     }
-                })
+                )
             } else if !onboardingCompleted {
                 // First-time users — full 3-screen onboarding.
                 OnboardingFlow(

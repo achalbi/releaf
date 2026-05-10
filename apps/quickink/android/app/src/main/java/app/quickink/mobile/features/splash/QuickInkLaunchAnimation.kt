@@ -49,7 +49,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import app.quickink.mobile.features.splash.launch.LaunchHomeFeedTransition
 import app.quickink.mobile.features.splash.launch.LaunchLogoLockup
 import app.quickink.mobile.features.splash.launch.LaunchPalettes
 import app.quickink.mobile.features.splash.launch.LaunchPointsCounter
@@ -134,10 +133,8 @@ fun QuickInkLaunchAnimation(
             show    = true,
         )
         LaunchLogoLockup(time = t, palette = palette)
-        LaunchHomeFeedTransition(
-            time    = t,
-            palette = palette,
-            target  = target,
-        )
+        // (No home-feed transition — the cinematic dismisses straight
+        // to the real Home screen, so a baked-in preview of it inside
+        // the splash would just play immediately on top of itself.)
     }
 }

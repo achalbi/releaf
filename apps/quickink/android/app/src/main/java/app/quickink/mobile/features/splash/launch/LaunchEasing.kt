@@ -94,3 +94,23 @@ internal inline fun ease(fn: (Double) -> Double, t: Double): Double =
 
 /** Tiny convenience — `pow(x, y)` against doubles, matching JSX. */
 internal fun powd(base: Double, exp: Double): Double = base.pow(exp)
+
+/**
+ * Multiplier used to squeeze the family characters' eye height during
+ * a blink. Returns 1.0 outside the ±[halfWindow] s window around [at],
+ * and dips to ~0.08 at the centre of the blink. Different characters
+ * pass different [at] values so the blinks don't all fire on the same
+ * frame — that's what makes the family read as alive rather than as
+ * four mannequins synchronized on one timer.
+ *
+ * Curve: cosine ramp from 1 → 0.08 → 1 across the blink window. Not
+ * linear because the eyelid closes faster than it opens (matches
+ * real-world blink mechanics; a triangular ramp looks robotic).
+ */
+internal fun blinkScale(time: Double, at: Double, halfWindow: Double = 0.12): Double {
+    val dt = kotlin.math.abs(time - at)
+    if (dt > halfWindow) return 1.0
+    val phase = dt / halfWindow
+    val dip = 0.08
+    return dip + (1.0 - dip) * (0.5 - 0.5 * kotlin.math.cos(phase * Math.PI))
+}

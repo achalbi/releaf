@@ -158,13 +158,21 @@ class MainActivity : ComponentActivity() {
             ) {
                 var showSplash by remember { mutableStateOf(true) }
                 if (showSplash) {
-                    // Lottie cinematic when the AE-exported JSON
-                    // is bundled at `assets/quickink_launch.json`;
-                    // gracefully falls through to the existing
-                    // minimal-mark `QuickInkSplash` when the asset
-                    // isn't present, so the launch path is unchanged
-                    // for the user until design ships the JSON.
-                    QuickInkLaunchAnimation(onFinished = { showSplash = false })
+                    // Read the user's last-known Tree-points balance
+                    // (written by HomeScreen on every page-count flow
+                    // push) so the cinematic counter pill ticks up to
+                    // the user's actual current value rather than a
+                    // hardcoded preview default. Defaults to 0 on a
+                    // fresh install — the counter then doesn't tick,
+                    // which is the correct empty-state read.
+                    val cachedTarget = remember(context) {
+                        app.quickink.mobile.features.settings.SettingsPreferences
+                            .readCachedTreePoints(context)
+                    }
+                    QuickInkLaunchAnimation(
+                        onFinished = { showSplash = false },
+                        target     = cachedTarget,
+                    )
                 } else {
                     // QuickInkTheme provides the warm coral/cream palette
                     // and Cormorant Garamond / Caveat typography via

@@ -95,3 +95,22 @@ enum LaunchEasing {
 func ease(_ fn: (Double) -> Double, _ t: Double) -> Double {
     fn(clamp(t, 0, 1))
 }
+
+/// Multiplier used to squeeze the family characters' eye height during
+/// a blink. Returns 1.0 outside the ±120 ms window around `at`, and
+/// dips to ~0.08 at the centre of the blink. Different characters
+/// pass different `at` values so the blinks don't all fire on the
+/// same frame — that's what makes the family read as alive rather
+/// than as four mannequins synchronized on one timer.
+///
+/// Curve: cosine ramp from 1 → 0.08 → 1 across the blink window. Not
+/// linear because the eyelid closes faster than it opens (matches
+/// real-world blink mechanics; a triangular ramp looks robotic).
+@inlinable
+func blinkScale(_ time: Double, at: Double, halfWindow: Double = 0.12) -> Double {
+    let dt = abs(time - at)
+    if dt > halfWindow { return 1.0 }
+    let phase = dt / halfWindow                 // 0 at centre, 1 at edge
+    let dip = 0.08                              // residual eye-slit height
+    return dip + (1.0 - dip) * (0.5 - 0.5 * cos(phase * .pi))
+}

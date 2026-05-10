@@ -206,6 +206,22 @@ struct HomeScreen: View {
                 // `SustainabilityHero(totalPages = totalPagesSaved ?: 0)`
                 // call site in `HomeScreen.kt`.
                 SustainabilityHero(totalPages: capturesVM.totalPageCount)
+                    // Mirror the displayed Tree-points value into a
+                    // shared UserDefaults key so the next cold launch's
+                    // cinematic counter (`LaunchAnimationView`) ticks
+                    // up to the user's actual current balance instead
+                    // of the hardcoded preview default. The splash
+                    // runs before any DAO observation can resolve, so
+                    // a cached pref is the only way to surface a real
+                    // number on the launch screen.
+                    .onChange(of: capturesVM.totalPageCount) { newCount in
+                        SettingsState.cachedTreePoints =
+                            computeTreeImpact(totalPages: newCount).totalPoints
+                    }
+                    .onAppear {
+                        SettingsState.cachedTreePoints =
+                            computeTreeImpact(totalPages: capturesVM.totalPageCount).totalPoints
+                    }
                 // "N pending" pill — renders only while there are
                 // local rows that haven't been pushed to Drive. One
                 // tap kicks the upload-only sync via the shared
