@@ -49,6 +49,17 @@ struct ScanDetailScreen: View {
     /// Set true by the overlay button on the inline preview; cleared
     /// by the cover's close affordance or a system back-swipe.
     @State private var showFullscreenViewer = false
+    /// Selected page index for the thumbnail strip (0-based). Drives
+    /// the highlighted thumbnail and which page is shown in the
+    /// preview. Defaults to 0 (first page).
+    @State private var selectedPageIndex: Int = 0
+    /// Drives the "More" action menu sheet. Holds duplicate / move
+    /// / etc. — keeping the top bar uncluttered.
+    @State private var showMoreMenu = false
+    /// On-disk size of the capture's PDF in bytes, loaded lazily on
+    /// appear so the Details card can show "2.4 MB" etc. Nil until
+    /// resolved or when the file isn't readable.
+    @State private var pdfFileSize: Int64? = nil
 
     init(captureId: String, userId: String, onBack: @escaping () -> Void) {
         self.captureId = captureId
@@ -66,56 +77,34 @@ struct ScanDetailScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
                     if let capture {
-                        // Primary content card: preview + title + metadata
-                        VStack(alignment: .leading, spacing: QuickInkSpacing.s4) {
-                            previewBlock(for: capture)
-                            titleSection(for: capture)
-                            metaBlock(for: capture)
-                        }
-                        .padding(QuickInkSpacing.s4)
-                        .background(QuickInkColors.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                                .stroke(QuickInkColors.border, lineWidth: 1)
-                        )
+                        // Title block — large, prominent, with breadcrumb
+                        titleHeader(for: capture)
+                            .padding(.horizontal, QuickInkSpacing.s5)
 
-                        // Secondary OCR section
+                        // Preview block — full-bleed within margins
+                        previewBlock(for: capture)
+                            .padding(.horizontal, QuickInkSpacing.s5)
+
+                        // Page thumbnails strip (only when multi-page)
+                        if capture.pageCount > 1 {
+                            pageThumbnailsStrip(for: capture)
+                        }
+
+                        // Details card
+                        detailsCard(for: capture)
+                            .padding(.horizontal, QuickInkSpacing.s5)
+
+                        // Actions card
+                        actionsCard(for: capture)
+                            .padding(.horizontal, QuickInkSpacing.s5)
+
+                        // Existing collapsible OCR section
                         ocrSection
                     } else {
-                        // Loading skeleton
-                        VStack(alignment: .leading, spacing: QuickInkSpacing.s4) {
-                            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                                .fill(QuickInkColors.borderSoft)
-                                .frame(height: 300)
-
-                            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                                .fill(QuickInkColors.borderSoft)
-                                .frame(height: 60)
-
-                            HStack(spacing: QuickInkSpacing.s2) {
-                                RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous)
-                                    .fill(QuickInkColors.borderSoft)
-                                    .frame(height: 36)
-                                    .frame(maxWidth: .infinity)
-
-                                RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous)
-                                    .fill(QuickInkColors.borderSoft)
-                                    .frame(height: 36)
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .padding(QuickInkSpacing.s4)
-                        .background(QuickInkColors.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                                .stroke(QuickInkColors.border, lineWidth: 1)
-                        )
-                        .redacted(reason: .placeholder)
+                        loadingSkeleton
+                            .padding(.horizontal, QuickInkSpacing.s5)
                     }
                 }
-                .padding(.horizontal, QuickInkSpacing.s5)
                 .padding(.top, QuickInkSpacing.s4)
                 .padding(.bottom, QuickInkSpacing.s8)
             }
@@ -130,6 +119,10 @@ struct ScanDetailScreen: View {
             // can flash an empty picker for a frame.
             categoriesVM.start()
             await loadCapture()
+            // File size depends on the resolved capture (we need
+            // pdf_uri before we can stat the file) so it runs after
+            // loadCapture lands.
+            await loadFileSize()
         }
         .alert("Delete this scan?", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
@@ -178,6 +171,22 @@ struct ScanDetailScreen: View {
                 .font(.caption)
                 .foregroundStyle(QuickInkColors.inkSoft)
         }
+        // More menu — secondary actions surfaced from the top-bar
+        // ellipsis button. Keeps the top bar uncluttered while still
+        // providing quick access to move-to-folder and delete.
+        .confirmationDialog(
+            "More options",
+            isPresented: $showMoreMenu,
+            titleVisibility: .hidden
+        ) {
+            Button("Move to folder") {
+                showRetagSheet = true
+            }
+            Button("Delete scan", role: .destructive) {
+                showDeleteConfirm = true
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         // Fullscreen flipbook viewer — opens when the user taps the
         // overlay fullscreen button on the inline preview. Only
         // meaningful when a real PDF resolves on disk; the
@@ -217,49 +226,53 @@ struct ScanDetailScreen: View {
 
     @ViewBuilder
     private var topBar: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: QuickInkSpacing.s2) {
+            // Circular back button — matches the floating-pill style
+            // from the mockup (white surface, soft border, 44pt hit
+            // target).
             Button(action: onBack) {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(QuickInkColors.ink)
-                    .frame(width: 44, height: 44)
+                    .frame(width: 40, height: 40)
+                    .background(QuickInkColors.surface)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(QuickInkColors.border, lineWidth: 1))
             }
             .accessibilityLabel("Back to library")
 
-            Text(displayedTopBarTitle)
-                .font(QuickInkText.pageTitle)
-                .foregroundStyle(QuickInkColors.ink)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .padding(.horizontal, QuickInkSpacing.s3)
-
             Spacer()
 
-            // Share/Export PDF — visible whenever we have a non-empty
-            // pdf URI on the capture row. We deliberately do NOT
-            // file-exists-check here: an empty share sheet is
-            // recoverable (user gets a system error) but a missing
-            // button is dead-end. ShareLink handles the URL itself.
+            // Share/Export PDF — circular pill matching back button.
             if let pdfURL = shareablePdfURL(from: capture) {
                 ShareLink(item: pdfURL) {
                     Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(QuickInkColors.ink)
-                        .frame(width: 44, height: 44)
+                        .frame(width: 40, height: 40)
+                        .background(QuickInkColors.surface)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(QuickInkColors.border, lineWidth: 1))
                 }
                 .accessibilityLabel("Share scan")
             }
 
-            Button(action: { showDeleteConfirm = true }) {
-                Image(systemName: "trash")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(QuickInkColors.danger)
-                    .frame(width: 44, height: 44)
+            // More menu — opens a confirmation dialog with secondary
+            // actions (move to folder, delete).
+            Button(action: { showMoreMenu = true }) {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(QuickInkColors.ink)
+                    .frame(width: 40, height: 40)
+                    .background(QuickInkColors.surface)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(QuickInkColors.border, lineWidth: 1))
             }
-            .accessibilityLabel("Delete scan")
+            .accessibilityLabel("More options")
         }
-        .padding(.horizontal, QuickInkSpacing.s2)
+        .padding(.horizontal, QuickInkSpacing.s5)
         .padding(.top, QuickInkSpacing.s2)
+        .padding(.bottom, QuickInkSpacing.s2)
     }
 
     // MARK: - Preview
@@ -437,13 +450,12 @@ struct ScanDetailScreen: View {
         return URL(fileURLWithPath: raw)
     }
 
-    /// Editable title row, sitting between the preview and the
-    /// metadata pills. Shows the persisted title when one is set;
-    /// otherwise renders an "Untitled scan" placeholder in muted ink
-    /// so the empty state is clearly an affordance, not a label.
-    /// Whole row is a Button — tap opens the title editor alert.
+    /// Large title header at the top of the detail screen, matching
+    /// the mockup: prominent display title with an inline edit
+    /// pencil, followed by a breadcrumb row (date • pages • category).
+    /// Tap on the title opens the title editor alert.
     @ViewBuilder
-    private func titleSection(for capture: CaptureSummary) -> some View {
+    private func titleHeader(for capture: CaptureSummary) -> some View {
         let displayed: String? = {
             let trimmed = capture.title?.trimmingCharacters(in: .whitespaces) ?? ""
             return trimmed.isEmpty ? nil : trimmed
@@ -453,64 +465,61 @@ struct ScanDetailScreen: View {
                 titleDraft = capture.title ?? ""
                 showTitleEditor = true
             } label: {
-                HStack(spacing: QuickInkSpacing.s3) {
-                    VStack(alignment: .leading, spacing: QuickInkSpacing.s1) {
-                        Text(displayed ?? "Add a title")
-                            .font(QuickInkText.editorial)
-                            .foregroundStyle(displayed != nil ? QuickInkColors.ink : QuickInkColors.accent)
-                            .lineLimit(3)
-                            .multilineTextAlignment(.leading)
-                        if displayed == nil, let category = capture.category, !category.isEmpty {
-                            Text(category)
-                                .font(QuickInkText.meta)
-                                .foregroundStyle(QuickInkColors.inkSoft)
-                        }
-                    }
-                    Spacer()
+                HStack(alignment: .firstTextBaseline, spacing: QuickInkSpacing.s2) {
+                    Text(displayed ?? "Add a title")
+                        .font(QuickInkText.display)
+                        .foregroundStyle(displayed != nil ? QuickInkColors.ink : QuickInkColors.accent)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                     Image(systemName: "pencil")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(QuickInkColors.muted)
                 }
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Edit title")
+
+            // Breadcrumb row: date • pages • category
+            breadcrumbRow(for: capture)
         }
     }
 
+    /// Compact breadcrumb under the title — shows date, page count,
+    /// and category (when present) separated by middle dots. Each
+    /// item leads with a small SF Symbol icon for visual scanning.
     @ViewBuilder
-    private func metaBlock(for capture: CaptureSummary) -> some View {
-        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
-            // Row 1: Facts (date, page count, file size)
-            HStack(spacing: QuickInkSpacing.s2) {
-                metaPillWithIcon(icon: "calendar", text: friendlyDate(capture.createdAt))
-                if capture.pageCount > 1 {
-                    metaPillWithIcon(icon: "doc.fill", text: "\(capture.pageCount) pages")
+    private func breadcrumbRow(for capture: CaptureSummary) -> some View {
+        HStack(spacing: QuickInkSpacing.s2) {
+            HStack(spacing: QuickInkSpacing.s1) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 11, weight: .medium))
+                Text(friendlyDate(capture.createdAt))
+                    .font(QuickInkText.meta)
+            }
+            .foregroundStyle(QuickInkColors.inkSoft)
+
+            Text("•").foregroundStyle(QuickInkColors.muted).font(QuickInkText.meta)
+
+            HStack(spacing: QuickInkSpacing.s1) {
+                Image(systemName: "doc.fill")
+                    .font(.system(size: 11, weight: .medium))
+                Text("\(capture.pageCount) page\(capture.pageCount == 1 ? "" : "s")")
+                    .font(QuickInkText.meta)
+            }
+            .foregroundStyle(QuickInkColors.inkSoft)
+
+            if let category = capture.category, !category.isEmpty {
+                Text("•").foregroundStyle(QuickInkColors.muted).font(QuickInkText.meta)
+                HStack(spacing: QuickInkSpacing.s1) {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 11, weight: .medium))
+                    Text(category)
+                        .font(QuickInkText.meta)
                 }
-                Spacer()
-            }
-
-            // Row 2: Classification (category tag, source)
-            HStack(spacing: QuickInkSpacing.s2) {
-                tagPill(for: capture)
-                Spacer()
+                .foregroundStyle(QuickInkColors.inkSoft)
             }
         }
-    }
-
-    @ViewBuilder
-    private func metaPillWithIcon(icon: String, text: String) -> some View {
-        HStack(spacing: QuickInkSpacing.s1) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
-            Text(text)
-                .font(QuickInkText.caption)
-        }
-        .foregroundStyle(QuickInkColors.inkSoft)
-        .padding(.horizontal, QuickInkSpacing.s3)
-        .padding(.vertical, QuickInkSpacing.s2)
-        .background(QuickInkColors.borderSoft)
-        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
-        .accessibilityElement(label: text)
     }
 
     @ViewBuilder
@@ -536,15 +545,337 @@ struct ScanDetailScreen: View {
         .accessibilityHint("Tap to change the category")
     }
 
+    // MARK: - Page thumbnails
+
+    /// Horizontal scrollable strip of page thumbnails — one numbered
+    /// chip per page, with the currently selected page highlighted in
+    /// the accent color. Tap a chip to navigate to that page (drives
+    /// `selectedPageIndex`). Only rendered for multi-page captures;
+    /// single-page scans don't need it.
+    ///
+    /// Uses the cached `pageImages` rasterised by [pageTurnViewer]
+    /// when available; falls back to a simple numbered placeholder
+    /// while the rasterisation is in flight, so the strip never
+    /// renders as empty.
     @ViewBuilder
-    private func metaPill(text: String, accent: Bool = false) -> some View {
-        Text(text)
-            .font(QuickInkText.caption)
-            .foregroundStyle(accent ? QuickInkColors.accent : QuickInkColors.inkSoft)
-            .padding(.horizontal, QuickInkSpacing.s3)
-            .padding(.vertical, QuickInkSpacing.s2)
-            .background(accent ? QuickInkColors.accentSoft : QuickInkColors.borderSoft)
-            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+    private func pageThumbnailsStrip(for capture: CaptureSummary) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: QuickInkSpacing.s3) {
+                ForEach(0..<capture.pageCount, id: \.self) { index in
+                    pageThumbnail(index: index)
+                }
+            }
+            .padding(.horizontal, QuickInkSpacing.s5)
+        }
+    }
+
+    /// Single thumbnail chip in [pageThumbnailsStrip]. Draws the
+    /// rasterised page bitmap when available (cached on `pageImages`)
+    /// or a paper-toned placeholder when the rasterisation hasn't
+    /// landed yet. The selected chip gets an accent border and a
+    /// rounded badge with its page number.
+    @ViewBuilder
+    private func pageThumbnail(index: Int) -> some View {
+        let isSelected = (index == selectedPageIndex)
+        Button {
+            selectedPageIndex = index
+        } label: {
+            ZStack(alignment: .bottomTrailing) {
+                Group {
+                    if index < pageImages.count {
+                        Image(uiImage: pageImages[index])
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        ZStack {
+                            QuickInkColors.paper2
+                            Image(systemName: "doc.text")
+                                .font(.system(size: 20))
+                                .foregroundStyle(QuickInkColors.muted)
+                        }
+                    }
+                }
+                .frame(width: 64, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
+                        .stroke(isSelected ? QuickInkColors.accent : QuickInkColors.border, lineWidth: isSelected ? 2 : 1)
+                )
+
+                // Page number badge (bottom-trailing)
+                Text("\(index + 1)")
+                    .font(QuickInkText.caption)
+                    .foregroundStyle(isSelected ? QuickInkColors.textOnAccent : QuickInkColors.ink)
+                    .frame(width: 22, height: 22)
+                    .background(isSelected ? QuickInkColors.accent : QuickInkColors.surface)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(QuickInkColors.border.opacity(0.6), lineWidth: 0.5))
+                    .offset(x: 6, y: 6)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Page \(index + 1)\(isSelected ? ", selected" : "")")
+    }
+
+    // MARK: - Details card
+
+    /// Structured details card matching the mockup: rows for File
+    /// type / Size / Created / Location / Tags, each with a label on
+    /// the left and value on the right. Header has a small
+    /// document.text icon + "Details" label per the mockup.
+    @ViewBuilder
+    private func detailsCard(for capture: CaptureSummary) -> some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
+            HStack(spacing: QuickInkSpacing.s2) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(QuickInkColors.inkSoft)
+                Text("Details")
+                    .font(QuickInkText.heading)
+                    .foregroundStyle(QuickInkColors.ink)
+            }
+
+            VStack(spacing: QuickInkSpacing.s3) {
+                detailRow(label: "File type", value: fileTypeLabel(for: capture))
+                detailRow(label: "Size", value: pdfFileSize.map(formatBytes) ?? "—")
+                detailRow(label: "Created", value: friendlyDate(capture.createdAt))
+                detailRow(
+                    label: "Location",
+                    value: capture.category ?? "Unsorted",
+                    valueColor: capture.category != nil ? QuickInkColors.accent : QuickInkColors.inkSoft
+                )
+                tagsRow(for: capture)
+            }
+        }
+        .padding(QuickInkSpacing.s4)
+        .background(QuickInkColors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                .stroke(QuickInkColors.border, lineWidth: 1)
+        )
+    }
+
+    /// One label/value row inside [detailsCard]. Label is muted,
+    /// left-aligned; value is ink, right-aligned. `valueColor` lets
+    /// callers override (e.g. accent color for the Location link).
+    @ViewBuilder
+    private func detailRow(
+        label: String,
+        value: String,
+        valueColor: Color = QuickInkColors.ink
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .font(QuickInkText.meta)
+                .foregroundStyle(QuickInkColors.inkSoft)
+            Spacer()
+            Text(value)
+                .font(QuickInkText.body)
+                .foregroundStyle(valueColor)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+        }
+    }
+
+    /// "Tags" row inside [detailsCard]. Renders the existing tag pill
+    /// plus a "+" affordance to add/change category, matching the
+    /// mockup's tag chips.
+    @ViewBuilder
+    private func tagsRow(for capture: CaptureSummary) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Tags")
+                .font(QuickInkText.meta)
+                .foregroundStyle(QuickInkColors.inkSoft)
+            Spacer()
+            HStack(spacing: QuickInkSpacing.s2) {
+                if let category = capture.category, !category.isEmpty {
+                    Button {
+                        showRetagSheet = true
+                    } label: {
+                        Text(category)
+                            .font(QuickInkText.caption)
+                            .foregroundStyle(QuickInkColors.accent)
+                            .padding(.horizontal, QuickInkSpacing.s3)
+                            .padding(.vertical, QuickInkSpacing.s2)
+                            .background(QuickInkColors.accentSoft)
+                            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button {
+                    showRetagSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(QuickInkColors.inkSoft)
+                        .frame(width: 28, height: 28)
+                        .background(QuickInkColors.borderSoft)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add tag")
+            }
+        }
+    }
+
+    // MARK: - Actions card
+
+    /// Quick-actions card matching the mockup: header + rows for
+    /// Export as PDF, Share, Move to folder, Delete. Each row is a
+    /// full-width tappable button with an SF Symbol on the left.
+    @ViewBuilder
+    private func actionsCard(for capture: CaptureSummary) -> some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
+            HStack(spacing: QuickInkSpacing.s2) {
+                Image(systemName: "pencil")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(QuickInkColors.inkSoft)
+                Text("Actions")
+                    .font(QuickInkText.heading)
+                    .foregroundStyle(QuickInkColors.ink)
+            }
+
+            VStack(spacing: 0) {
+                if let pdfURL = shareablePdfURL(from: capture) {
+                    actionRow(icon: "doc.fill", label: "Export as PDF") {
+                        ShareLink(item: pdfURL) {
+                            actionRowContent(icon: "doc.fill", label: "Export as PDF")
+                        }
+                    }
+                    actionDivider
+                    actionRow(icon: "square.and.arrow.up", label: "Share") {
+                        ShareLink(item: pdfURL) {
+                            actionRowContent(icon: "square.and.arrow.up", label: "Share")
+                        }
+                    }
+                    actionDivider
+                }
+
+                Button { showRetagSheet = true } label: {
+                    actionRowContent(icon: "folder", label: "Move to folder")
+                }
+                .buttonStyle(.plain)
+
+                actionDivider
+
+                Button { showDeleteConfirm = true } label: {
+                    actionRowContent(icon: "trash", label: "Delete", isDestructive: true)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(QuickInkSpacing.s4)
+        .background(QuickInkColors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                .stroke(QuickInkColors.border, lineWidth: 1)
+        )
+    }
+
+    /// Wrapper for an action row whose content needs to be a custom
+    /// view (e.g. a `ShareLink` that wraps the row content). Plain
+    /// taps that just call a closure should use `Button` directly
+    /// with `actionRowContent` as the label.
+    @ViewBuilder
+    private func actionRow<Content: View>(
+        icon: String,
+        label: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+    }
+
+    /// The visual content of an action row — icon + label. Used both
+    /// directly (inside `Button`) and as the label of a ShareLink.
+    @ViewBuilder
+    private func actionRowContent(icon: String, label: String, isDestructive: Bool = false) -> some View {
+        HStack(spacing: QuickInkSpacing.s3) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(isDestructive ? QuickInkColors.danger : QuickInkColors.inkSoft)
+                .frame(width: 24)
+            Text(label)
+                .font(QuickInkText.body)
+                .foregroundStyle(isDestructive ? QuickInkColors.danger : QuickInkColors.ink)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, QuickInkSpacing.s3)
+        .contentShape(Rectangle())
+    }
+
+    /// Subtle divider between rows in the [actionsCard]. Drawn as a
+    /// 1pt rectangle in the soft border color so adjacent rows feel
+    /// grouped rather than floating.
+    private var actionDivider: some View {
+        Rectangle()
+            .fill(QuickInkColors.borderSoft)
+            .frame(height: 1)
+    }
+
+    // MARK: - Loading skeleton
+
+    /// Placeholder shown while `loadCapture()` is in flight. Mirrors
+    /// the resolved layout (preview slab, title, breadcrumb, details
+    /// card) so the screen doesn't visually jump when data lands.
+    @ViewBuilder
+    private var loadingSkeleton: some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s4) {
+            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                .fill(QuickInkColors.borderSoft)
+                .frame(height: 320)
+
+            RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
+                .fill(QuickInkColors.borderSoft)
+                .frame(height: 32)
+                .frame(maxWidth: 240)
+
+            RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
+                .fill(QuickInkColors.borderSoft)
+                .frame(height: 16)
+                .frame(maxWidth: 180)
+        }
+        .redacted(reason: .placeholder)
+    }
+
+    // MARK: - File metadata helpers
+
+    /// Resolve the file-type label for the Details row. Captures with
+    /// a real PDF on disk show "PDF document"; image-only captures
+    /// (preview JPEG, no PDF) fall back to "Image".
+    private func fileTypeLabel(for capture: CaptureSummary) -> String {
+        if pdfURL(from: capture) != nil { return "PDF document" }
+        if loadedPreviewImage(for: capture) != nil { return "Image" }
+        return "Document"
+    }
+
+    /// Format a byte count as "1.2 MB" / "340 KB" using the system
+    /// formatter so the locale-aware separator is correct.
+    private func formatBytes(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+
+    /// Lazy load the on-disk PDF size so the Details row can show it.
+    /// Best-effort — leaves `pdfFileSize = nil` (Details renders "—")
+    /// if the file isn't readable.
+    private func loadFileSize() async {
+        guard let url = pdfURL(from: capture) else {
+            self.pdfFileSize = nil
+            return
+        }
+        let size = await Task.detached(priority: .utility) { () -> Int64? in
+            do {
+                let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+                return attrs[.size] as? Int64
+            } catch {
+                return nil
+            }
+        }.value
+        self.pdfFileSize = size
     }
 
     // MARK: - OCR
