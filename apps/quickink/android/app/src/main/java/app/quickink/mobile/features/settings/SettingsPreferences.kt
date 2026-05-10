@@ -198,5 +198,38 @@ class SettingsPreferences(context: Context) {
         private const val RECENT_SEARCH_DELIMITER = '\u0001'
         private const val KEY_PRIMARY_COLOR       = "primary_color"
         private const val KEY_THEME_MODE          = "theme_mode"
+        private const val KEY_CACHED_TREE_POINTS  = "cached_tree_points"
+
+        /**
+         * Last-known lifetime Tree-points balance. Written by
+         * HomeScreen whenever the SustainabilityHero recomputes (i.e.
+         * when the `observeTotalPageCount` flow pushes a new total),
+         * read by [QuickInkLaunchAnimation] at splash time so the
+         * cinematic counter pill ticks up to the user's actual current
+         * value rather than a hardcoded preview number. Defaults to 0
+         * for first-launch / fresh-install where there's nothing to
+         * display yet.
+         *
+         * Lives as a `static`-style helper on the companion (rather
+         * than an instance property) because the splash composable
+         * runs at MainActivity onCreate, which is before the
+         * `SettingsPreferences(context)` instance the rest of the
+         * app uses is constructed in QuickInkRoot — the read path
+         * needs to work without a live instance.
+         *
+         * Counterpart: iOS `SettingsState.cachedTreePoints`.
+         */
+        fun readCachedTreePoints(context: Context): Int =
+            context.applicationContext
+                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getInt(KEY_CACHED_TREE_POINTS, 0)
+
+        fun writeCachedTreePoints(context: Context, points: Int) {
+            context.applicationContext
+                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putInt(KEY_CACHED_TREE_POINTS, points)
+                .apply()
+        }
     }
 }

@@ -162,6 +162,25 @@ public final class SettingsState: ObservableObject {
         UserDefaults.standard.set(driveBackupEnabled, forKey: Keys.driveBackup)
     }
 
+    /// Last-known lifetime Tree-points balance. Written by HomeScreen
+    /// whenever the SustainabilityHero recomputes (i.e. when the
+    /// captured-page count observation pushes a new total), read by
+    /// `LaunchAnimationView` at splash time so the cinematic counter
+    /// pill ticks up to the user's actual current value rather than
+    /// a hardcoded preview number. Defaults to 0 for first-launch /
+    /// fresh-install where there's nothing to display yet.
+    ///
+    /// Lives as a `static` getter/setter (not an @Published instance
+    /// var) because the splash runs *before* QuickInkRoot's body
+    /// instantiates the SettingsState ObservableObject — the read
+    /// path needs to work without a live instance.
+    ///
+    /// Counterpart: Android `SettingsPreferences.cachedTreePoints`.
+    public static var cachedTreePoints: Int {
+        get { UserDefaults.standard.integer(forKey: Keys.cachedTreePoints) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.cachedTreePoints) }
+    }
+
     /// Drop every identity-leaking pref on sign-out so the next
     /// account on the same device doesn't inherit the previous
     /// user's custom display name / phone / photo / punchline /
@@ -198,5 +217,6 @@ public final class SettingsState: ObservableObject {
         static let recentSearches       = "quickink.settings.recent_searches"
         static let primaryColor         = "quickink.settings.primary_color"
         static let themeMode            = "quickink.settings.theme_mode"
+        static let cachedTreePoints     = "quickink.settings.cached_tree_points"
     }
 }
