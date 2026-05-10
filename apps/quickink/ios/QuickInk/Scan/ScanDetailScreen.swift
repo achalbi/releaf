@@ -66,14 +66,53 @@ struct ScanDetailScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
                     if let capture {
-                        previewBlock(for: capture)
-                        titleSection(for: capture)
-                        metaBlock(for: capture)
+                        // Primary content card: preview + title + metadata
+                        VStack(alignment: .leading, spacing: QuickInkSpacing.s4) {
+                            previewBlock(for: capture)
+                            titleSection(for: capture)
+                            metaBlock(for: capture)
+                        }
+                        .padding(QuickInkSpacing.s4)
+                        .background(QuickInkColors.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                                .stroke(QuickInkColors.border, lineWidth: 1)
+                        )
+
+                        // Secondary OCR section
                         ocrSection
                     } else {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, QuickInkSpacing.s8)
+                        // Loading skeleton
+                        VStack(alignment: .leading, spacing: QuickInkSpacing.s4) {
+                            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                                .fill(QuickInkColors.borderSoft)
+                                .frame(height: 300)
+
+                            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                                .fill(QuickInkColors.borderSoft)
+                                .frame(height: 60)
+
+                            HStack(spacing: QuickInkSpacing.s2) {
+                                RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous)
+                                    .fill(QuickInkColors.borderSoft)
+                                    .frame(height: 36)
+                                    .frame(maxWidth: .infinity)
+
+                                RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous)
+                                    .fill(QuickInkColors.borderSoft)
+                                    .frame(height: 36)
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .padding(QuickInkSpacing.s4)
+                        .background(QuickInkColors.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                                .stroke(QuickInkColors.border, lineWidth: 1)
+                        )
+                        .redacted(reason: .placeholder)
                     }
                 }
                 .padding(.horizontal, QuickInkSpacing.s5)
@@ -134,6 +173,10 @@ struct ScanDetailScreen: View {
             Button("Save") {
                 Task { await applyTitle(titleDraft) }
             }
+        } message: {
+            Text("\(titleDraft.count) characters")
+                .font(.caption)
+                .foregroundStyle(QuickInkColors.inkSoft)
         }
         // Fullscreen flipbook viewer — opens when the user taps the
         // overlay fullscreen button on the inline preview. Only
@@ -177,17 +220,18 @@ struct ScanDetailScreen: View {
         HStack(spacing: 0) {
             Button(action: onBack) {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 18))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(QuickInkColors.ink)
-                    .padding(QuickInkSpacing.s3)
+                    .frame(width: 44, height: 44)
             }
-            .accessibilityLabel("Back")
+            .accessibilityLabel("Back to library")
 
             Text(displayedTopBarTitle)
                 .font(QuickInkText.pageTitle)
                 .foregroundStyle(QuickInkColors.ink)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .padding(.horizontal, QuickInkSpacing.s3)
 
             Spacer()
 
@@ -199,18 +243,18 @@ struct ScanDetailScreen: View {
             if let pdfURL = shareablePdfURL(from: capture) {
                 ShareLink(item: pdfURL) {
                     Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 18))
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(QuickInkColors.ink)
-                        .padding(QuickInkSpacing.s3)
+                        .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("Share scan")
             }
 
             Button(action: { showDeleteConfirm = true }) {
                 Image(systemName: "trash")
-                    .font(.system(size: 18))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(QuickInkColors.danger)
-                    .padding(QuickInkSpacing.s3)
+                    .frame(width: 44, height: 44)
             }
             .accessibilityLabel("Delete scan")
         }
@@ -235,15 +279,11 @@ struct ScanDetailScreen: View {
                 pageTurnViewer(for: pdfURL, capture: capture)
                     .overlay(alignment: .topTrailing) { fullscreenChip }
             } else {
-                PDFKitView(url: pdfURL, backgroundColor: QuickInkColors.surface)
+                PDFKitView(url: pdfURL, backgroundColor: QuickInkColors.bg)
                     .frame(maxWidth: .infinity)
                     .frame(height: pdfPreviewHeight(for: capture))
-                    .background(QuickInkColors.surface)
+                    .background(QuickInkColors.bg)
                     .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                            .stroke(QuickInkColors.border, lineWidth: 1)
-                    )
                     .overlay(alignment: .topTrailing) { fullscreenChip }
             }
         } else if let image = loadedPreviewImage(for: capture) {
@@ -268,12 +308,8 @@ struct ScanDetailScreen: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .background(QuickInkColors.surface)
+                .background(QuickInkColors.bg)
                 .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                        .stroke(QuickInkColors.border, lineWidth: 1)
-                )
         } else {
             ZStack {
                 QuickInkColors.paper2
@@ -299,13 +335,14 @@ struct ScanDetailScreen: View {
             Image(systemName: "arrow.up.left.and.arrow.down.right")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(QuickInkColors.textOnAccent)
-                .frame(width: 40, height: 40)
+                .frame(width: 44, height: 44)
                 .background(QuickInkColors.ink.opacity(0.55))
                 .clipShape(Circle())
         }
         .buttonStyle(.plain)
         .padding(QuickInkSpacing.s3)
         .accessibilityLabel("View fullscreen")
+        .accessibilityHint("Expands the scan to fill the screen")
     }
 
     /// Heuristic height for the embedded PDFView. Single-page scans
@@ -411,49 +448,69 @@ struct ScanDetailScreen: View {
             let trimmed = capture.title?.trimmingCharacters(in: .whitespaces) ?? ""
             return trimmed.isEmpty ? nil : trimmed
         }()
-        Button {
-            titleDraft = capture.title ?? ""
-            showTitleEditor = true
-        } label: {
-            HStack(spacing: QuickInkSpacing.s3) {
-                Text(displayed ?? "Untitled scan")
-                    .font(QuickInkText.heading)
-                    .foregroundStyle(displayed != nil ? QuickInkColors.ink : QuickInkColors.muted)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "pencil")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(QuickInkColors.muted)
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+            Button {
+                titleDraft = capture.title ?? ""
+                showTitleEditor = true
+            } label: {
+                HStack(spacing: QuickInkSpacing.s3) {
+                    VStack(alignment: .leading, spacing: QuickInkSpacing.s1) {
+                        Text(displayed ?? "Add a title")
+                            .font(QuickInkText.editorial)
+                            .foregroundStyle(displayed != nil ? QuickInkColors.ink : QuickInkColors.accent)
+                            .lineLimit(3)
+                            .multilineTextAlignment(.leading)
+                        if displayed == nil, let category = capture.category, !category.isEmpty {
+                            Text(category)
+                                .font(QuickInkText.meta)
+                                .foregroundStyle(QuickInkColors.inkSoft)
+                        }
+                    }
+                    Spacer()
+                    Image(systemName: "pencil")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(QuickInkColors.muted)
+                }
             }
-            .padding(QuickInkSpacing.s4)
-            .background(QuickInkColors.surface)
-            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                    .stroke(QuickInkColors.border, lineWidth: 1)
-            )
+            .buttonStyle(.plain)
+            .accessibilityLabel("Edit title")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Edit title")
     }
 
     @ViewBuilder
     private func metaBlock(for capture: CaptureSummary) -> some View {
-        HStack(spacing: QuickInkSpacing.s2) {
-            metaPill(text: friendlyDate(capture.createdAt))
-            if capture.pageCount > 1 {
-                metaPill(text: "\(capture.pageCount) pages")
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+            // Row 1: Facts (date, page count, file size)
+            HStack(spacing: QuickInkSpacing.s2) {
+                metaPillWithIcon(icon: "calendar", text: friendlyDate(capture.createdAt))
+                if capture.pageCount > 1 {
+                    metaPillWithIcon(icon: "doc.fill", text: "\(capture.pageCount) pages")
+                }
+                Spacer()
             }
-            // Category affordance — a tappable pill the user can
-            // hit to retag the saved scan. When the capture already
-            // has a tag, the pill renders the tag with the accent
-            // treatment; when it doesn't, we fall back to a muted
-            // "+ Tag scan" affordance so retagging is still
-            // discoverable. Both routes open the same retag sheet.
-            tagPill(for: capture)
-            Spacer()
+
+            // Row 2: Classification (category tag, source)
+            HStack(spacing: QuickInkSpacing.s2) {
+                tagPill(for: capture)
+                Spacer()
+            }
         }
+    }
+
+    @ViewBuilder
+    private func metaPillWithIcon(icon: String, text: String) -> some View {
+        HStack(spacing: QuickInkSpacing.s1) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+            Text(text)
+                .font(QuickInkText.caption)
+        }
+        .foregroundStyle(QuickInkColors.inkSoft)
+        .padding(.horizontal, QuickInkSpacing.s3)
+        .padding(.vertical, QuickInkSpacing.s2)
+        .background(QuickInkColors.borderSoft)
+        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+        .accessibilityElement(label: text)
     }
 
     @ViewBuilder
@@ -475,7 +532,8 @@ struct ScanDetailScreen: View {
             .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(hasTag ? "Edit tag" : "Add tag")
+        .accessibilityLabel(hasTag ? "Category: \(capture.category ?? "")" : "Add category")
+        .accessibilityHint("Tap to change the category")
     }
 
     @ViewBuilder
@@ -494,45 +552,75 @@ struct ScanDetailScreen: View {
     @ViewBuilder
     private var ocrSection: some View {
         VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
-            Button(action: toggleOcr) {
+            // Eyebrow label
+            Text("EXTRACTED TEXT")
+                .font(QuickInkText.eyebrow)
+                .tracking(QuickInkLetterSpacing.eyebrow)
+                .foregroundStyle(QuickInkColors.muted)
+                .padding(.horizontal, QuickInkSpacing.s5)
+
+            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { toggleOcr() } }) {
                 HStack {
                     Image(systemName: showOcr ? "chevron.down" : "chevron.right")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(QuickInkColors.muted)
+                        .rotationEffect(.degrees(showOcr ? 0 : 0))
                     Text(showOcr ? "Hide extracted text" : "Show extracted text")
                         .font(QuickInkText.body)
                         .foregroundStyle(QuickInkColors.ink)
                     Spacer()
+                    if !ocrPages.isEmpty {
+                        Text("\(ocrPages.count) pages")
+                            .font(QuickInkText.caption)
+                            .foregroundStyle(QuickInkColors.accent)
+                            .padding(.horizontal, QuickInkSpacing.s3)
+                            .padding(.vertical, QuickInkSpacing.s2)
+                            .background(QuickInkColors.accentSoft)
+                            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+                    }
                     if isLoadingOcr {
                         ProgressView()
                             .scaleEffect(0.7)
                     }
                 }
                 .padding(QuickInkSpacing.s4)
-                .background(QuickInkColors.surface)
+                .background(QuickInkColors.accentSoft)
                 .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                        .stroke(QuickInkColors.border, lineWidth: 1)
+                        .stroke(QuickInkColors.borderSoft, lineWidth: 1)
                 )
             }
             .buttonStyle(.plain)
+            .padding(.horizontal, QuickInkSpacing.s5)
 
             if showOcr {
                 if ocrPages.isEmpty {
-                    Text("No text recognised on this scan.")
-                        .font(QuickInkText.meta)
-                        .foregroundStyle(QuickInkColors.inkSoft)
-                        .padding(QuickInkSpacing.s4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(QuickInkColors.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+                    VStack(spacing: QuickInkSpacing.s3) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 40))
+                            .foregroundStyle(QuickInkColors.muted)
+                        Text("No text found")
+                            .font(QuickInkText.heading)
+                            .foregroundStyle(QuickInkColors.ink)
+                        Text("This scan doesn't contain any recognizable text.")
+                            .font(QuickInkText.meta)
+                            .foregroundStyle(QuickInkColors.inkSoft)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(QuickInkSpacing.s4)
+                    .background(QuickInkColors.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+                    .padding(.horizontal, QuickInkSpacing.s5)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 } else {
                     VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
                         ForEach(ocrPages) { page in
                             ocrPageCard(for: page)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
+                    .padding(.horizontal, QuickInkSpacing.s5)
                 }
             }
         }
@@ -549,14 +637,23 @@ struct ScanDetailScreen: View {
     @ViewBuilder
     private func ocrPageCard(for page: OcrPagePreview) -> some View {
         let isEditing = (editingPageId == page.id)
-        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
             HStack(spacing: QuickInkSpacing.s2) {
-                Text("Page \(page.pageIndex + 1)")
-                    .font(QuickInkText.eyebrow)
-                    .tracking(QuickInkLetterSpacing.eyebrow)
-                    .foregroundStyle(QuickInkColors.muted)
+                HStack(spacing: QuickInkSpacing.s2) {
+                    Text("Page \(page.pageIndex + 1)")
+                        .font(QuickInkText.eyebrow)
+                        .tracking(QuickInkLetterSpacing.eyebrow)
+                        .foregroundStyle(QuickInkColors.muted)
+                        .padding(.horizontal, QuickInkSpacing.s3)
+                        .padding(.vertical, QuickInkSpacing.s2)
+                        .background(QuickInkColors.borderSoft)
+                        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+                }
                 Spacer()
                 if isEditing {
+                    Text("\(ocrDraft.count) characters")
+                        .font(QuickInkText.meta)
+                        .foregroundStyle(QuickInkColors.inkSoft)
                     Button {
                         editingPageId = nil
                         ocrDraft = ""
@@ -564,6 +661,7 @@ struct ScanDetailScreen: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(QuickInkColors.muted)
+                            .padding(QuickInkSpacing.s2)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Cancel edit")
@@ -574,6 +672,7 @@ struct ScanDetailScreen: View {
                         Image(systemName: "checkmark")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(QuickInkColors.accent)
+                            .padding(QuickInkSpacing.s2)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Save text")
@@ -585,6 +684,7 @@ struct ScanDetailScreen: View {
                         Image(systemName: "pencil")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(QuickInkColors.muted)
+                            .padding(QuickInkSpacing.s2)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Edit text")
@@ -604,9 +704,9 @@ struct ScanDetailScreen: View {
                     )
                     .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous))
             } else {
-                Text(page.text)
+                Text(page.text.isEmpty ? "No text on this page." : page.text)
                     .font(QuickInkText.body)
-                    .foregroundStyle(QuickInkColors.ink)
+                    .foregroundStyle(page.text.isEmpty ? QuickInkColors.inkSoft : QuickInkColors.ink)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
             }
