@@ -625,10 +625,12 @@ internal fun nozzleAt(t: Double): Offset {
 }
 
 private fun DrawScope.drawWaterStream(p: LaunchPalette, t: Double) {
-    if (t <= 1.85 || t >= 4.0) return
-    val intro = ease(LaunchEasing::easeOutCubic, between(t, 1.85, 2.1))
-    val outro = ease(LaunchEasing::easeInCubic,  between(t, 3.7,  4.0))
-    val op = intro * (1 - outro)
+    // Water keeps flowing from the spout once the can has tilted
+    // (1.85 s) and continues for the rest of the splash — there's
+    // no outro fade. The host dismisses the whole splash at 7.5 s
+    // so the stream just disappears with everything else.
+    if (t <= 1.85) return
+    val op = ease(LaunchEasing::easeOutCubic, between(t, 1.85, 2.1))
     if (op <= 0.01) return
 
     val nozzle = nozzleAt(t)
@@ -689,9 +691,10 @@ private fun DrawScope.drawWaterStream(p: LaunchPalette, t: Double) {
         )
     }
 
-    // Splash + wet patch.
-    val splashOp = ease(LaunchEasing::easeOutCubic, between(t, 2.2, 2.6)) *
-                   (1 - ease(LaunchEasing::easeInCubic, between(t, 3.4, 3.85)))
+    // Splash + wet patch. Like the stream itself, this stays full
+    // strength once it ramps up at 2.2–2.6 s; no fade-out — the
+    // puddle's still being filled while the can is still pouring.
+    val splashOp = ease(LaunchEasing::easeOutCubic, between(t, 2.2, 2.6))
     if (splashOp > 0) {
         val splashPhase = ((t - 2.2) * 5) % 1.0
         drawOval(

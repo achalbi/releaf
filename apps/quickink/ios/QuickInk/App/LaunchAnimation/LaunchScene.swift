@@ -758,10 +758,12 @@ private func nozzleAt(t: Double) -> CGPoint {
 
 @MainActor
 private func drawWaterStream(ctx: inout GraphicsContext, p: LaunchPalette, t: Double) {
-    guard t > 1.85, t < 4.0 else { return }
-    let intro  = ease(LaunchEasing.easeOutCubic, between(t, 1.85, 2.1))
-    let outro  = ease(LaunchEasing.easeInCubic,  between(t, 3.7,  4.0))
-    let op = intro * (1 - outro)
+    // Water keeps flowing from the spout once the can has tilted
+    // (1.85 s) and continues for the rest of the splash — there's
+    // no outro fade. The host dismisses the whole splash at 7.5 s
+    // so the stream just disappears with everything else.
+    guard t > 1.85 else { return }
+    let op = ease(LaunchEasing.easeOutCubic, between(t, 1.85, 2.1))
     if op <= 0.01 { return }
 
     let nozzle = nozzleAt(t: t)
@@ -823,9 +825,10 @@ private func drawWaterStream(ctx: inout GraphicsContext, p: LaunchPalette, t: Do
         )
     }
 
-    // Splash + wet patch at the soil.
+    // Splash + wet patch at the soil. Like the stream itself, this
+    // stays full strength once it ramps up at 2.2–2.6 s; no fade-out
+    // — the puddle's still being filled while the can is still pouring.
     let splashOp = ease(LaunchEasing.easeOutCubic, between(t, 2.2, 2.6))
-                 * (1 - ease(LaunchEasing.easeInCubic, between(t, 3.4, 3.85)))
     if splashOp > 0 {
         let splashPhase = ((t - 2.2) * 5).truncatingRemainder(dividingBy: 1.0)
         var sp = c

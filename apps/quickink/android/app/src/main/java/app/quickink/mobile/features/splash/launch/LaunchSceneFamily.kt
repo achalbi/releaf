@@ -351,44 +351,12 @@ private fun DrawScope.drawMother(
                 close()
             }
             drawPath(hair, p.hairBrown, alpha = parentAlpha)
-            // Hair flow strands — thin lighter-tone strokes giving the
-            // shoulder-length hair flow texture. Constrained to the
-            // shoulder regions (x outside ±8, y from -8 down to 5) so
-            // the strokes never bulge across the face cutout — the
-            // previous version had the curves dipping through the
-            // face circle which read as "hair painted on her cheek".
-            val hi = p.hairLight
-            for (x in listOf(-14f, -12f, -10f)) {
-                drawLine(
-                    color = hi,
-                    start = Offset(x, -8f),
-                    end   = Offset(x - 0.5f, 5f),
-                    strokeWidth = 0.6f,
-                    cap = StrokeCap.Round,
-                    alpha = parentAlpha,
-                )
-            }
-            for (x in listOf(10f, 12f, 14f)) {
-                drawLine(
-                    color = hi,
-                    start = Offset(x, -8f),
-                    end   = Offset(x + 0.5f, 5f),
-                    strokeWidth = 0.6f,
-                    cap = StrokeCap.Round,
-                    alpha = parentAlpha,
-                )
-            }
-            // Centre parting — sits ABOVE the face circle, not on
-            // the forehead. Stops at y=-28 so it doesn't bleed onto
-            // the cheeks.
-            drawLine(
-                color = hi,
-                start = Offset(0f, -31f),
-                end   = Offset(0f, -28f),
-                strokeWidth = 0.5f,
-                cap = StrokeCap.Round,
-                alpha = parentAlpha,
-            )
+            // No highlight strands on mother's hair — kept reading as
+            // "hair on the face" even with the strokes constrained to
+            // the shoulder zone (proximity to the chin cutout edge
+            // made them look like sideburns crossing the cheek). The
+            // flat hairBrown shape with the chin cutout is enough
+            // framing on its own.
             drawFaceFeatures(
                 p, radius = 13.5f, eyeY = -15f, smileY = -10f,
                 blush = true, bindi = true,
