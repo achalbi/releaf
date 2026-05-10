@@ -412,10 +412,10 @@ private fun HomeHeader(
     // same coral gradient brush, same canvas-coloured outer ring,
     // same ambient/contact drop shadow stack. Differs in two
     // intentional ways: no upward `lift` (the avatar isn't floating
-    // above a bar surface), and the inner glyph is dialled down
-    // from the FAB's 30dp Bolt to a 32dp Outlined.Face — the
-    // FAB is the primary action; the avatar is a secondary
-    // identity tap and reads quieter.
+    // above a bar surface), and the inner content swaps the FAB's
+    // Bolt glyph for the user's first initial (or a 32dp Outlined.Face
+    // when the display name is blank) — the FAB is the primary action;
+    // the avatar is a secondary identity tap and reads quieter.
     val avatarInner     = 56.dp
     val avatarImageSize = 32.dp
     val avatarRing      = 4.dp
@@ -508,36 +508,43 @@ private fun HomeHeader(
                         .background(coralGradient),
                     contentAlignment = Alignment.Center,
                 ) {
-                    // Default fallback: a white face glyph on
-                    // the coral disc. Used directly when there's no
-                    // profile photo AND as the loading/error slot
-                    // for SubcomposeAsyncImage below — a stale URI
-                    // pointing at a deleted file would otherwise
-                    // leave the disc blank.
-                    //
-                    // Earlier passes rendered the user's first
-                    // initial here (Canvas + TextMeasurer to dodge
-                    // metric-vs-optical centering quirks), but the
-                    // person glyph reads more universally and avoids
-                    // the whole "what if the user's name starts
-                    // with a descender / non-Latin / emoji" question.
+                    // Default fallback: the user's first initial in
+                    // canvas-tone serif on the coral disc — same posture
+                    // as the side-nav drawer's banner avatar so the two
+                    // surfaces read as the same identity. Falls back to
+                    // the Outlined.Face glyph only when the display name
+                    // is blank (e.g. signed-out / fresh-install state).
+                    // Used directly when there's no profile photo AND
+                    // as the loading/error slot for SubcomposeAsyncImage
+                    // below — a stale URI pointing at a deleted file
+                    // would otherwise leave the disc blank.
+                    val initial = (displayName?.trim().orEmpty())
+                        .firstOrNull()
+                        ?.uppercase()
                     val fallback: @Composable () -> Unit = {
-                        Box(
-                            modifier = Modifier.size(avatarImageSize),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector        = Icons.Outlined.Face,
-                                contentDescription = "Open profile menu",
-                                // Tinted to the canvas tone (`colors.bg`)
-                                // so the glyph echoes the outer ring and
-                                // reads as cream-on-coral rather than
-                                // pure white-on-coral — softer, warmer,
-                                // and ties the avatar's two cream-toned
-                                // surfaces (ring + glyph) together.
-                                tint               = colors.bg,
-                                modifier           = Modifier.fillMaxSize(),
+                        if (initial != null) {
+                            Text(
+                                text     = initial,
+                                style    = type.display.copy(fontSize = 28.sp),
+                                color    = colors.bg,
                             )
+                        } else {
+                            Box(
+                                modifier = Modifier.size(avatarImageSize),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector        = Icons.Outlined.Face,
+                                    contentDescription = "Open profile menu",
+                                    // Tinted to the canvas tone
+                                    // (`colors.bg`) so the glyph echoes
+                                    // the outer ring and reads as
+                                    // cream-on-coral rather than pure
+                                    // white-on-coral.
+                                    tint               = colors.bg,
+                                    modifier           = Modifier.fillMaxSize(),
+                                )
+                            }
                         }
                     }
 
