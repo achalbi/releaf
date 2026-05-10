@@ -301,9 +301,9 @@ struct ScanDetailScreen: View {
     private var fullscreenChip: some View {
         Button(action: { showFullscreenViewer = true }) {
             Image(systemName: "arrow.up.left.and.arrow.down.right")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(QuickInkColors.textOnAccent)
-                .frame(width: 44, height: 44)
+                .frame(width: 48, height: 48)
                 .background(QuickInkColors.ink.opacity(0.55))
                 .clipShape(Circle())
         }
@@ -431,7 +431,7 @@ struct ScanDetailScreen: View {
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                     Image(systemName: "pencil")
-                        .font(.system(size: 16, weight: .medium))
+                        .font(.system(size: 20, weight: .medium))
                         .foregroundStyle(QuickInkColors.muted)
                 }
             }
@@ -451,7 +451,7 @@ struct ScanDetailScreen: View {
         HStack(spacing: QuickInkSpacing.s2) {
             HStack(spacing: QuickInkSpacing.s1) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                 Text(friendlyDate(capture.createdAt))
                     .font(QuickInkText.meta)
             }
@@ -461,7 +461,7 @@ struct ScanDetailScreen: View {
 
             HStack(spacing: QuickInkSpacing.s1) {
                 Image(systemName: "doc")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                 Text("\(capture.pageCount) page\(capture.pageCount == 1 ? "" : "s")")
                     .font(QuickInkText.meta)
             }
@@ -471,7 +471,7 @@ struct ScanDetailScreen: View {
                 Text("•").foregroundStyle(QuickInkColors.muted).font(QuickInkText.meta)
                 HStack(spacing: QuickInkSpacing.s1) {
                     Image(systemName: "folder")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 14, weight: .medium))
                     Text(category)
                         .font(QuickInkText.meta)
                 }
@@ -586,7 +586,7 @@ struct ScanDetailScreen: View {
         VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
             HStack(spacing: QuickInkSpacing.s2) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(QuickInkColors.inkSoft)
                 Text("Details")
                     .font(QuickInkText.cardTitle)
@@ -664,9 +664,9 @@ struct ScanDetailScreen: View {
                     showRetagSheet = true
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(QuickInkColors.inkSoft)
-                        .frame(width: 22, height: 22)
+                        .frame(width: 26, height: 26)
                         .background(QuickInkColors.borderSoft)
                         .clipShape(Circle())
                 }
@@ -686,7 +686,7 @@ struct ScanDetailScreen: View {
         VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
             HStack(spacing: QuickInkSpacing.s2) {
                 Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(QuickInkColors.inkSoft)
                 Text("Actions")
                     .font(QuickInkText.cardTitle)
@@ -744,9 +744,9 @@ struct ScanDetailScreen: View {
     private func actionRowContent(icon: String, label: String, isDestructive: Bool = false) -> some View {
         HStack(spacing: QuickInkSpacing.s2) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(isDestructive ? QuickInkColors.danger : QuickInkColors.inkSoft)
-                .frame(width: 16)
+                .frame(width: 22)
             Text(label)
                 .font(QuickInkText.caption)
                 .foregroundStyle(isDestructive ? QuickInkColors.danger : QuickInkColors.ink)

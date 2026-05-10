@@ -764,7 +764,7 @@ private fun TitleHeader(
                 imageVector        = Icons.Outlined.Edit,
                 contentDescription = "Edit title",
                 tint               = colors.muted,
-                modifier           = Modifier.size(18.dp),
+                modifier           = Modifier.size(22.dp),
             )
         }
         BreadcrumbRow(capture = capture)
@@ -818,7 +818,7 @@ private fun BreadcrumbItem(
             imageVector        = icon,
             contentDescription = null,
             tint               = colors.inkSoft,
-            modifier           = Modifier.size(11.dp),
+            modifier           = Modifier.size(14.dp),
         )
         Text(text = text, style = type.meta, color = colors.inkSoft)
     }
@@ -966,7 +966,7 @@ private fun DetailsCard(
                 imageVector        = Icons.Outlined.Description,
                 contentDescription = null,
                 tint               = colors.inkSoft,
-                modifier           = Modifier.size(12.dp),
+                modifier           = Modifier.size(16.dp),
             )
             Text(text = "Details", style = type.cardTitle, color = colors.ink)
         }
@@ -1041,7 +1041,7 @@ private fun TagsRow(category: String?, onAddTag: () -> Unit) {
             }
             Box(
                 modifier = Modifier
-                    .size(22.dp)
+                    .size(26.dp)
                     .clip(CircleShape)
                     .background(colors.borderSoft)
                     .clickable(onClick = onAddTag),
@@ -1051,7 +1051,7 @@ private fun TagsRow(category: String?, onAddTag: () -> Unit) {
                     imageVector        = Icons.Outlined.Add,
                     contentDescription = "Add tag",
                     tint               = colors.inkSoft,
-                    modifier           = Modifier.size(11.dp),
+                    modifier           = Modifier.size(14.dp),
                 )
             }
         }
@@ -1091,7 +1091,7 @@ private fun ActionsCard(
                 imageVector        = Icons.Outlined.GridView,
                 contentDescription = null,
                 tint               = colors.inkSoft,
-                modifier           = Modifier.size(12.dp),
+                modifier           = Modifier.size(16.dp),
             )
             Text(text = "Actions", style = type.cardTitle, color = colors.ink)
         }
@@ -1138,12 +1138,12 @@ private fun ActionRow(
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
     ) {
-        Box(modifier = Modifier.width(16.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.width(22.dp), contentAlignment = Alignment.Center) {
             Icon(
                 imageVector        = icon,
                 contentDescription = null,
                 tint               = tint,
-                modifier           = Modifier.size(11.dp),
+                modifier           = Modifier.size(16.dp),
             )
         }
         Text(

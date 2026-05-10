@@ -44,7 +44,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -160,17 +160,17 @@ fun PdfPagesView(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(QuickInkSpacing.s3)
-                    .size(40.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(colors.ink.copy(alpha = 0.55f))
                     .clickable(onClick = onFullscreenClick),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector        = Icons.Filled.Fullscreen,
+                    imageVector        = Icons.Outlined.Fullscreen,
                     contentDescription = "View fullscreen",
                     tint               = colors.textOnAccent,
-                    modifier           = Modifier.size(22.dp),
+                    modifier           = Modifier.size(28.dp),
                 )
             }
         }
