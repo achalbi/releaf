@@ -54,7 +54,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import app.quickink.mobile.features.scan.PendingShare
 import app.quickink.mobile.features.settings.SettingsPreferences
-import app.quickink.mobile.features.splash.QuickInkSplash
+import app.quickink.mobile.features.splash.QuickInkLaunchAnimation
 import app.quickink.mobile.ui.theme.QuickInkTheme
 
 class MainActivity : ComponentActivity() {
@@ -158,7 +158,13 @@ class MainActivity : ComponentActivity() {
             ) {
                 var showSplash by remember { mutableStateOf(true) }
                 if (showSplash) {
-                    QuickInkSplash(onFinished = { showSplash = false })
+                    // Lottie cinematic when the AE-exported JSON
+                    // is bundled at `assets/quickink_launch.json`;
+                    // gracefully falls through to the existing
+                    // minimal-mark `QuickInkSplash` when the asset
+                    // isn't present, so the launch path is unchanged
+                    // for the user until design ships the JSON.
+                    QuickInkLaunchAnimation(onFinished = { showSplash = false })
                 } else {
                     // QuickInkTheme provides the warm coral/cream palette
                     // and Cormorant Garamond / Caveat typography via

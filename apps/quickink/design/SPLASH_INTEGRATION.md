@@ -64,6 +64,29 @@ The current setup uses the classic theme + windowBackground approach. If/when yo
 
 Both approaches show the same visual — the modern API just animates the icon scale-in and integrates with the system's launch animation.
 
+## Cinematic launch animation (Lottie)
+
+The minimal-mark splash above is the brand's static fallback. The cinematic launch animation handed off in `design_handoff_quickink_launch/` (5-second tree-planting / Tree-points reveal) ships on top of it via Lottie. Both platforms route their splash through a `LaunchAnimation*` wrapper that plays the bundled JSON when present and falls through to the minimal-mark splash when it isn't — so the build is safe before the JSON lands and starts playing the cinematic the moment it's dropped in.
+
+### What's wired
+
+- **Android** — `app/src/main/java/app/quickink/mobile/features/splash/QuickInkLaunchAnimation.kt` loads `assets/quickink_launch.json` via `LottieCompositionSpec.Asset(...)`; `MainActivity` now hosts `QuickInkLaunchAnimation` instead of `QuickInkSplash` directly. Gradle dep: `com.airbnb.android:lottie-compose:6.5.2` in `app/build.gradle.kts`.
+- **iOS** — `ios/QuickInk/App/LaunchAnimationView.swift` loads `Resources/Animations/quickink_launch.json` via `LottieAnimation.named(_:bundle:)`; `QuickInkRoot` now gates its routing on a new `showLaunchAnimation` state and renders `LaunchAnimationView` first. SPM dep: `https://github.com/airbnb/lottie-spm.git` from `4.5.0`, product `Lottie`. The resource directory is registered via `.process("Resources/Animations")` and currently holds only a `.gitkeep` marker.
+
+### Activating the cinematic
+
+Drop the After Effects → Lottie export at:
+
+- `android/app/src/main/assets/quickink_launch.json`
+- `ios/QuickInk/Resources/Animations/quickink_launch.json`
+
+No code or Package.swift changes are needed — both runtimes detect the file at startup and switch to the cinematic automatically. See `design_handoff_quickink_launch/README.md` for the AE export instructions, palettes (Dawn / Morning Mist / Golden Hour), and timing.
+
+### Deferred
+
+- **Wiring `target`** (the user's lifetime Tree-points balance, ticked up by the in-comp counter). The README documents `target` as one of three input props. Both platforms' wrappers carry a `TODO` next to the load call — Android wires it via `rememberLottieDynamicProperties` keyed on the AE text-layer name; iOS wires it via `LottieView.configure { lav in lav.setValueProvider(...) }`. Held until the AE layer name is fixed and we decide whether to read the page total synchronously at splash-time or async-with-restart.
+- **`prefers-reduced-motion` fallback** — README requires holding the static frame at t=2.5s when reduced motion is on. Both wrappers should branch on `Environment(\.accessibilityReduceMotion)` / `Settings.System.getFloat(... TRANSITION_ANIMATION_SCALE)` once the JSON lands and we can identify the static-frame cue.
+
 ## Master sources
 
 - `design/source/quickink-icon-1024.png` — original 1254×1254 PNG you provided.

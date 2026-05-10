@@ -24,6 +24,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -283,9 +284,16 @@ private fun BannerHeader(
                     if (initial != null) {
                         // Strip the platform's default font padding and
                         // centre the line-height box around the glyph,
-                        // otherwise the visible "A" floats up-and-left
-                        // off the disc's optical centre (font cap-height
-                        // sits in the upper third of the line box).
+                        // then nudge down by ~8dp to land the cap-height
+                        // on the disc's optical centre. Even with
+                        // Trim.Both, the line box runs from descender
+                        // line to ascender line — for a capital "A"
+                        // (no descender, sits below the ascender slot
+                        // where diacritics like "Á" would land), the
+                        // visible glyph centroid sits above the box
+                        // centre. Offsetting down by ~15% of fontSize
+                        // (54sp × ~0.15 ≈ 8dp) brings the cap-height
+                        // midline onto the disc's geometric centre.
                         Text(
                             text     = initial,
                             color    = colors.accent,
@@ -299,6 +307,7 @@ private fun BannerHeader(
                                 ),
                             ),
                             lineHeight = 54.sp,
+                            modifier = Modifier.offset(y = 8.dp),
                         )
                     } else {
                         Icon(

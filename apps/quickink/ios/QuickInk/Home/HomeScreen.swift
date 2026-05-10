@@ -196,6 +196,16 @@ struct HomeScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
                 headerBlock
+                // Sustainability hero — frames QuickInk as a paper-
+                // saving tool. Total pages is sourced from the
+                // `CaptureListViewModel`'s lifetime SUM observation
+                // (the same VM already powering the recents rail),
+                // so a fresh scan re-renders the score without an
+                // extra subscription. Tap opens the Tree-points
+                // breakdown sheet. Mirror of Android's
+                // `SustainabilityHero(totalPages = totalPagesSaved ?: 0)`
+                // call site in `HomeScreen.kt`.
+                SustainabilityHero(totalPages: capturesVM.totalPageCount)
                 // "N pending" pill — renders only while there are
                 // local rows that haven't been pushed to Drive. One
                 // tap kicks the upload-only sync via the shared

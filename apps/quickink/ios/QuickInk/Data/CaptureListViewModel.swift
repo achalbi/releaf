@@ -86,10 +86,18 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
 public final class CaptureListViewModel: ObservableObject {
 
     @Published public private(set) var captures: [CaptureSummary] = []
+    /// Lifetime sum of `page_count` across all of the user's
+    /// non-deleted captures. Backs the sustainability hero on the
+    /// home screen — kept here (alongside `captures`) because both
+    /// reads watch the same `captures` table, so a single screen
+    /// holds both observations rather than spawning a sibling VM.
+    /// Mirror of Android's `captureDao.observeTotalPageCount(userId)`.
+    @Published public private(set) var totalPageCount: Int = 0
 
     private let dbQueue: DatabaseQueue
     private let userId: String
     private var cancellable: AnyCancellable?
+    private var totalCancellable: AnyCancellable?
 
     public init(database: QuickInkDatabase = .shared, userId: String) {
         self.dbQueue = database.dbQueue
@@ -111,6 +119,24 @@ public final class CaptureListViewModel: ObservableObject {
         .sink(
             receiveCompletion: { _ in },
             receiveValue: { [weak self] in self?.captures = $0 }
+        )
+
+        // Lifetime page total — drives the home sustainability hero.
+        // `COALESCE(SUM(...), 0)` keeps the empty-library case as `0`
+        // rather than NULL, so the hero's empty-state branch reads a
+        // real Int without a separate Optional unwrap.
+        totalCancellable = ValueObservation.tracking { [userId] db in
+            try Int.fetchOne(db, sql: """
+                SELECT COALESCE(SUM(page_count), 0)
+                FROM captures
+                WHERE user_id = ? AND deleted_at IS NULL
+                """, arguments: [userId]) ?? 0
+        }
+        .publisher(in: dbQueue)
+        .receive(on: DispatchQueue.main)
+        .sink(
+            receiveCompletion: { _ in },
+            receiveValue: { [weak self] in self?.totalPageCount = $0 }
         )
     }
 }

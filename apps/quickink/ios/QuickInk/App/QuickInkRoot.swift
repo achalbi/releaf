@@ -47,11 +47,32 @@ public struct QuickInkRoot: View {
     /// battery / cellular when the user isn't looking at the app.
     @Environment(\.scenePhase) private var scenePhase
 
+    /// Splash gate — when `true`, the launch animation owns the
+    /// screen and the routing below is paused. Flipped to `false`
+    /// once `LaunchAnimationView` reports the cinematic finished
+    /// (or its safety timeout fires). Mirror of Android's
+    /// `showSplash` `mutableStateOf` in `MainActivity.kt`. Defaults
+    /// to `true` so the splash always shows on cold launch; the
+    /// animation view itself decides whether to play the bundled
+    /// Lottie cinematic or fall through to the minimal-mark splash.
+    @State private var showLaunchAnimation: Bool = true
+
     public init() {}
 
     public var body: some View {
         Group {
-            if !onboardingCompleted {
+            if showLaunchAnimation {
+                LaunchAnimationView(onFinished: {
+                    // Slight crossfade so the splash → home handoff
+                    // matches the README's "fast-skip" behaviour
+                    // ("crossfade the splash out over ~250ms to
+                    // whatever screen comes next"). The host swap
+                    // is the moment that crossfade fires.
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        showLaunchAnimation = false
+                    }
+                })
+            } else if !onboardingCompleted {
                 // First-time users — full 3-screen onboarding.
                 OnboardingFlow(
                     authStore:  authStore,

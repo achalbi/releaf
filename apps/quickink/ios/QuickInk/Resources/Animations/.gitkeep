@@ -1,0 +1,16 @@
+# Resources/Animations
+#
+# Drop the After Effects → Lottie export at:
+#
+#   quickink_launch.json
+#
+# in this directory. SwiftPM picks it up via the `.process(...)`
+# entry in `ios/Package.swift` and bundles it under
+# `Bundle.module`. The runtime view (`App/LaunchAnimationView.swift`)
+# loads it via `Bundle.module.url(forResource: "quickink_launch",
+# withExtension: "json")` and gracefully falls back to the minimal-
+# mark `SplashView` when the file isn't present, so the build is
+# safe before/after the asset lands.
+#
+# See `design_handoff_quickink_launch/README.md` for export
+# instructions and the design tokens to recreate in After Effects.
