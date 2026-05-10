@@ -38,18 +38,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.LocalOffer
@@ -59,7 +55,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -83,8 +78,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureEntity
-import app.quickink.mobile.data.ocr.OcrResultDao
-import app.quickink.mobile.data.ocr.OcrResultEntity
 import app.quickink.mobile.data.sync.QuickInkBinarySync
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
@@ -130,11 +123,9 @@ fun ScanDetailScreen(
     val scope = rememberCoroutineScope()
 
     val captureDao = remember(app) { app.database.captureDao() }
-    val ocrDao = remember(app) { app.database.ocrResultDao() }
     val categoryDao = remember(app) { app.database.categoryDao() }
 
     var capture by remember(captureId) { mutableStateOf<CaptureEntity?>(null) }
-    var showOcr by remember(captureId) { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     // Drives the retag bottom sheet. Tapping the category pill (or
     // the "Tag scan" affordance for an untagged capture) sets this
@@ -221,17 +212,6 @@ fun ScanDetailScreen(
         capture = captureDao.findById(captureId)
     }
 
-    // OCR is loaded only when the user first expands the section.
-    // The Flow re-collection cost is tiny (one query against a
-    // capture-id-scoped index) so we just keep it live for the
-    // remainder of the screen's lifetime instead of trying to
-    // detach it after the first emission.
-    val ocrPages by remember(captureId, showOcr) {
-        if (showOcr) ocrDao.observeForCapture(captureId)
-        else kotlinx.coroutines.flow.flowOf(emptyList())
-    }.collectAsState(initial = emptyList())
-    val ocrLoaded = showOcr && ocrPages.isNotEmpty()
-
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val hasBottomNav = onHome != null && onLibrary != null && onScan != null &&
         onSearch != null && onSettings != null
@@ -296,18 +276,6 @@ fun ScanDetailScreen(
                     modifier = Modifier.padding(horizontal = QuickInkSpacing.s5),
                 )
             } else {
-                // OCR pill at the top — moved up from the bottom of
-                // the page so the user can reach extracted text
-                // without scrolling past preview/details/actions.
-                OcrSection(
-                    showOcr   = showOcr,
-                    isLoading = showOcr && !ocrLoaded,
-                    ocrPages  = ocrPages,
-                    ocrDao    = ocrDao,
-                    onToggle  = { showOcr = !showOcr },
-                    modifier  = Modifier.padding(horizontal = QuickInkSpacing.s5),
-                )
-
                 // Title header — large display title + breadcrumb
                 TitleHeader(
                     capture = current,
@@ -1306,186 +1274,6 @@ private fun RetagRow(label: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-@Composable
-private fun OcrSection(
-    showOcr: Boolean,
-    isLoading: Boolean,
-    ocrPages: List<OcrResultEntity>,
-    ocrDao: OcrResultDao,
-    onToggle: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalQuickInkColors.current
-    val type = LocalQuickInkTypography.current
-
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(QuickInkRadius.md))
-                .background(colors.surface)
-                .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
-                .clickable(onClick = onToggle)
-                .padding(QuickInkSpacing.s4),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector       = if (showOcr) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                contentDescription = null,
-                tint              = colors.muted,
-                modifier          = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.size(QuickInkSpacing.s2))
-            Text(
-                text     = if (showOcr) "Hide extracted text" else "Show extracted text",
-                style    = type.body,
-                color    = colors.ink,
-                modifier = Modifier.weight(1f),
-            )
-            if (isLoading) {
-                CircularProgressIndicator(
-                    color    = colors.muted,
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                )
-            }
-        }
-
-        if (showOcr) {
-            if (ocrPages.isEmpty() && !isLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(QuickInkRadius.md))
-                        .background(colors.surface)
-                        .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
-                        .padding(QuickInkSpacing.s4),
-                ) {
-                    Text(
-                        text  = "No text recognised on this scan.",
-                        style = type.meta,
-                        color = colors.inkSoft,
-                    )
-                }
-            } else {
-                ocrPages.sortedBy { it.pageIndex }.forEach { page ->
-                    OcrPageCard(page = page, ocrDao = ocrDao)
-                }
-            }
-        }
-    }
-}
-
-/**
- * One page card inside [OcrSection]. Read mode renders the OCR text
- * inside a [SelectionContainer] so the user can copy it; tapping the
- * pencil flips into edit mode where the text becomes an
- * [OutlinedTextField]. Save persists via [OcrResultDao.setText]
- * (dirty + ts bump → next sync mirrors); Cancel discards the draft
- * and returns to read mode.
- *
- * Local edit state is keyed on [page.id] so navigating between pages
- * doesn't bleed drafts. While editing, an external `page.text` change
- * (e.g., sync arrived) is ignored — last-write-wins on Save.
- */
-@Composable
-private fun OcrPageCard(
-    page: OcrResultEntity,
-    ocrDao: OcrResultDao,
-) {
-    val colors = LocalQuickInkColors.current
-    val type = LocalQuickInkTypography.current
-    val scope = rememberCoroutineScope()
-
-    var editing by remember(page.id) { mutableStateOf(false) }
-    var draft by remember(page.id) { mutableStateOf(page.text) }
-
-    // Keep the draft synced with the persisted text whenever we're not
-    // actively editing. Without this, a sync that lands a fresh OCR
-    // value while the card sits in read mode would leave the draft
-    // pointing at stale content the next time the user taps Edit.
-    LaunchedEffect(page.text, editing) {
-        if (!editing) draft = page.text
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(QuickInkRadius.md))
-            .background(colors.surface)
-            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
-            .padding(QuickInkSpacing.s4),
-        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text     = "PAGE ${page.pageIndex + 1}",
-                style    = type.eyebrow,
-                color    = colors.muted,
-                modifier = Modifier.weight(1f),
-            )
-            if (editing) {
-                IconButton(onClick = {
-                    draft = page.text
-                    editing = false
-                }) {
-                    Icon(
-                        imageVector        = Icons.Filled.Close,
-                        contentDescription = "Cancel edit",
-                        tint               = colors.muted,
-                        modifier           = Modifier.size(18.dp),
-                    )
-                }
-                IconButton(onClick = {
-                    val snapshot = draft
-                    scope.launch {
-                        try {
-                            ocrDao.setText(page.id, snapshot, IsoClock.nowIso())
-                            editing = false
-                        } catch (_: Exception) { /* best-effort */ }
-                    }
-                }) {
-                    Icon(
-                        imageVector        = Icons.Filled.Check,
-                        contentDescription = "Save text",
-                        tint               = colors.accent,
-                        modifier           = Modifier.size(18.dp),
-                    )
-                }
-            } else {
-                IconButton(onClick = { editing = true }) {
-                    Icon(
-                        imageVector        = Icons.Filled.Edit,
-                        contentDescription = "Edit text",
-                        tint               = colors.muted,
-                        modifier           = Modifier.size(18.dp),
-                    )
-                }
-            }
-        }
-
-        if (editing) {
-            OutlinedTextField(
-                value         = draft,
-                onValueChange = { draft = it },
-                modifier      = Modifier.fillMaxWidth(),
-                minLines      = 3,
-                textStyle     = type.body,
-            )
-        } else {
-            SelectionContainer {
-                Text(
-                    text  = page.text,
-                    style = type.body,
-                    color = colors.ink,
-                )
-            }
-        }
-    }
-}
 
 private fun friendlyDate(iso: String): String =
     try {

@@ -32,9 +32,6 @@ struct ScanDetailScreen: View {
     @StateObject private var categoriesVM: CategoryListViewModel
 
     @State private var capture: CaptureSummary?
-    @State private var ocrPages: [OcrPagePreview] = []
-    @State private var isLoadingOcr = false
-    @State private var showOcr = false
     @State private var showDeleteConfirm = false
     /// Drives the retag action sheet. Tapping the category pill (or
     /// the "Tag scan" affordance for an untagged capture) sets this
@@ -50,11 +47,6 @@ struct ScanDetailScreen: View {
     /// [CaptureRepository.setTitle]; Cancel discards it.
     @State private var showTitleEditor = false
     @State private var titleDraft = ""
-    /// Per-page OCR edit state. `editingPageId` is the row currently
-    /// in edit mode (only one at a time); `ocrDraft` is the in-flight
-    /// text. Both reset when Save commits or Cancel discards.
-    @State private var editingPageId: String? = nil
-    @State private var ocrDraft = ""
     /// Drives the fullscreen flipbook viewer (`FullscreenPdfViewer`).
     /// Set true by the overlay button on the inline preview; cleared
     /// by the cover's close affordance or a system back-swipe.
@@ -96,12 +88,6 @@ struct ScanDetailScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
                     if let capture {
-                        // OCR pill at the top — moved up from the
-                        // bottom of the page so the user can reach
-                        // extracted text without scrolling past
-                        // preview / details / actions first.
-                        ocrSection
-
                         // Title block — large, prominent, with breadcrumb
                         titleHeader(for: capture)
                             .padding(.horizontal, QuickInkSpacing.s5)
@@ -842,190 +828,6 @@ struct ScanDetailScreen: View {
         self.pdfFileSize = size
     }
 
-    // MARK: - OCR
-
-    @ViewBuilder
-    private var ocrSection: some View {
-        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
-            // Eyebrow label
-            Text("EXTRACTED TEXT")
-                .font(QuickInkText.eyebrow)
-                .tracking(QuickInkLetterSpacing.eyebrow)
-                .foregroundStyle(QuickInkColors.muted)
-                .padding(.horizontal, QuickInkSpacing.s5)
-
-            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { toggleOcr() } }) {
-                HStack {
-                    Image(systemName: showOcr ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(QuickInkColors.muted)
-                        .rotationEffect(.degrees(showOcr ? 0 : 0))
-                    Text(showOcr ? "Hide extracted text" : "Show extracted text")
-                        .font(QuickInkText.body)
-                        .foregroundStyle(QuickInkColors.ink)
-                    Spacer()
-                    if !ocrPages.isEmpty {
-                        Text("\(ocrPages.count) pages")
-                            .font(QuickInkText.caption)
-                            .foregroundStyle(QuickInkColors.accent)
-                            .padding(.horizontal, QuickInkSpacing.s3)
-                            .padding(.vertical, QuickInkSpacing.s2)
-                            .background(QuickInkColors.accentSoft)
-                            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
-                    }
-                    if isLoadingOcr {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                    }
-                }
-                .padding(QuickInkSpacing.s4)
-                .background(QuickInkColors.accentSoft)
-                .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                        .stroke(QuickInkColors.borderSoft, lineWidth: 1)
-                )
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, QuickInkSpacing.s5)
-
-            if showOcr {
-                if ocrPages.isEmpty {
-                    VStack(spacing: QuickInkSpacing.s3) {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 40))
-                            .foregroundStyle(QuickInkColors.muted)
-                        Text("No text found")
-                            .font(QuickInkText.heading)
-                            .foregroundStyle(QuickInkColors.ink)
-                        Text("This scan doesn't contain any recognizable text.")
-                            .font(QuickInkText.meta)
-                            .foregroundStyle(QuickInkColors.inkSoft)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(QuickInkSpacing.s4)
-                    .background(QuickInkColors.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
-                    .padding(.horizontal, QuickInkSpacing.s5)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                } else {
-                    VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
-                        ForEach(ocrPages) { page in
-                            ocrPageCard(for: page)
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
-                    }
-                    .padding(.horizontal, QuickInkSpacing.s5)
-                }
-            }
-        }
-    }
-
-    /// One page card inside [ocrSection]. Read mode renders the OCR
-    /// text with `.textSelection(.enabled)` so the user can copy it;
-    /// tapping the pencil flips into edit mode where the text becomes
-    /// a `TextEditor`. Save persists via
-    /// [CaptureRepository.setOcrText]; Cancel discards the draft and
-    /// returns to read mode. Local edit state lives at the screen
-    /// level (only one row editable at a time) so navigating between
-    /// pages doesn't bleed drafts.
-    @ViewBuilder
-    private func ocrPageCard(for page: OcrPagePreview) -> some View {
-        let isEditing = (editingPageId == page.id)
-        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
-            HStack(spacing: QuickInkSpacing.s2) {
-                HStack(spacing: QuickInkSpacing.s2) {
-                    Text("Page \(page.pageIndex + 1)")
-                        .font(QuickInkText.eyebrow)
-                        .tracking(QuickInkLetterSpacing.eyebrow)
-                        .foregroundStyle(QuickInkColors.muted)
-                        .padding(.horizontal, QuickInkSpacing.s3)
-                        .padding(.vertical, QuickInkSpacing.s2)
-                        .background(QuickInkColors.borderSoft)
-                        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
-                }
-                Spacer()
-                if isEditing {
-                    Text("\(ocrDraft.count) characters")
-                        .font(QuickInkText.meta)
-                        .foregroundStyle(QuickInkColors.inkSoft)
-                    Button {
-                        editingPageId = nil
-                        ocrDraft = ""
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(QuickInkColors.muted)
-                            .padding(QuickInkSpacing.s2)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Cancel edit")
-                    Button {
-                        let snapshot = ocrDraft
-                        Task { await applyOcrEdit(pageId: page.id, text: snapshot) }
-                    } label: {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(QuickInkColors.accent)
-                            .padding(QuickInkSpacing.s2)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Save text")
-                } else {
-                    Button {
-                        ocrDraft = page.text
-                        editingPageId = page.id
-                    } label: {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(QuickInkColors.muted)
-                            .padding(QuickInkSpacing.s2)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Edit text")
-                }
-            }
-
-            if isEditing {
-                TextEditor(text: $ocrDraft)
-                    .font(QuickInkText.body)
-                    .foregroundStyle(QuickInkColors.ink)
-                    .frame(minHeight: 120)
-                    .scrollContentBackground(.hidden)
-                    .background(QuickInkColors.bg)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
-                            .stroke(QuickInkColors.borderSoft, lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous))
-            } else {
-                Text(page.text.isEmpty ? "No text on this page." : page.text)
-                    .font(QuickInkText.body)
-                    .foregroundStyle(page.text.isEmpty ? QuickInkColors.inkSoft : QuickInkColors.ink)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-            }
-        }
-        .padding(QuickInkSpacing.s4)
-        .background(QuickInkColors.surface)
-        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                .stroke(QuickInkColors.border, lineWidth: 1)
-        )
-    }
-
-    private func toggleOcr() {
-        if showOcr {
-            showOcr = false
-        } else {
-            showOcr = true
-            if ocrPages.isEmpty {
-                Task { await loadOcr() }
-            }
-        }
-    }
-
     // MARK: - Load
 
     /// Soft-delete the in-view capture and dismiss back to Home.
@@ -1078,24 +880,6 @@ struct ScanDetailScreen: View {
         }
     }
 
-    /// Persist an OCR text edit for a single page row. Refreshes
-    /// `ocrPages` after the write so the page card flips back to
-    /// read mode with the new content. Best-effort — a transient
-    /// failure leaves the draft visible so the user can retry.
-    private func applyOcrEdit(pageId: String, text: String) async {
-        do {
-            try await CaptureRepository().setOcrText(
-                ocrResultId: pageId,
-                text:        text
-            )
-            editingPageId = nil
-            ocrDraft = ""
-            await loadOcr()
-        } catch {
-            print("ScanDetailScreen.applyOcrEdit failed: \(error)")
-        }
-    }
-
     private func loadCapture() async {
         let dbQueue = QuickInkDatabase.shared.dbQueue
         do {
@@ -1110,26 +894,6 @@ struct ScanDetailScreen: View {
             self.capture = result
         } catch {
             print("ScanDetailScreen.loadCapture failed: \(error)")
-        }
-    }
-
-    private func loadOcr() async {
-        isLoadingOcr = true
-        defer { isLoadingOcr = false }
-
-        let dbQueue = QuickInkDatabase.shared.dbQueue
-        do {
-            let pages = try await dbQueue.read { db -> [OcrPagePreview] in
-                try OcrPagePreview.fetchAll(db, sql: """
-                    SELECT id, page_index, text
-                    FROM ocr_results
-                    WHERE capture_id = ? AND deleted_at IS NULL
-                    ORDER BY page_index ASC
-                    """, arguments: [captureId])
-            }
-            self.ocrPages = pages
-        } catch {
-            print("ScanDetailScreen.loadOcr failed: \(error)")
         }
     }
 
@@ -1156,18 +920,3 @@ struct ScanDetailScreen: View {
     }
 }
 
-/// Lightweight projection of `ocr_results` rows used by the
-/// detail viewer's OCR section. Carries `id` so per-page edits
-/// can persist back via `CaptureRepository.setOcrText(...)`. The
-/// full row's `blocks_json` and engine metadata aren't surfaced.
-private struct OcrPagePreview: Codable, FetchableRecord, Identifiable, Sendable {
-    let id: String
-    let pageIndex: Int
-    let text: String
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case pageIndex = "page_index"
-        case text
-    }
-}
