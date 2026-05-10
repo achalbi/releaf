@@ -48,9 +48,10 @@ struct LaunchPointsCounter: View {
     /// gradient. Designed to read at a glance from across the room.
     @ViewBuilder
     private var content: some View {
-        let slideIn  = ease(LaunchEasing.easeOutBack, between(time, 0.5, 1.4))
-        let slideOut = 1 - ease(LaunchEasing.easeInCubic, between(time, 4.45, 5.0))
-        let op = max(0, min(1, slideIn * slideOut))
+        let slideIn = ease(LaunchEasing.easeOutBack, between(time, 0.5, 1.4))
+        // Counter holds at full opacity through the 2 s tail — the
+        // host dismisses the splash before any fade-out is needed.
+        let op = max(0, min(1, slideIn))
         let ty = (1 - slideIn) * -30                       // drop in from above
         let cT = ease(LaunchEasing.easeOutCubic, between(time, 1.85, 4.1))
         let value = Int((Double(target) * cT).rounded())
@@ -136,9 +137,12 @@ struct LaunchLogoLockup: View {
     let palette: LaunchPalette
 
     var body: some View {
-        let inOp  = ease(LaunchEasing.easeOutCubic, between(time, 2.0, 2.6))
-        let outOp = 1 - ease(LaunchEasing.easeInCubic, between(time, 4.5, 4.85))
-        let op = inOp * outOp
+        // Logo holds at full opacity through the 2 s tail — pairs
+        // with the centred Tree-points counter so the final frame
+        // of the splash is "QuickInk + your impact", visible long
+        // enough for the user to take it in.
+        let inOp = ease(LaunchEasing.easeOutCubic, between(time, 2.0, 2.6))
+        let op = inOp
         let ty = (1 - inOp) * 14
         let logoScale = 0.9 + 0.1 * inOp
 

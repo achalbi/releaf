@@ -91,7 +91,12 @@ public struct LaunchAnimationView: View {
                 // immediately on top of itself.)
             }
             .onChange(of: elapsedRaw) { newValue in
-                let limit = reduceMotion ? 1.4 : 5.5
+                // 7.5 s total: 5.0 s for the prototype's reveal + 2 s
+                // hold on the final state (family, tree, logo and the
+                // big top-centred Tree-points counter) so the user
+                // has a beat to read the number before the splash
+                // dismisses to the real Home screen.
+                let limit = reduceMotion ? 1.4 : 7.5
                 if !didFinish, newValue >= limit {
                     didFinish = true
                     onFinished()

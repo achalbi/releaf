@@ -79,9 +79,10 @@ internal fun LaunchPointsCounter(
 ) {
     if (!show) return
 
-    val slideIn  = ease(LaunchEasing::easeOutBack, between(time, 0.5, 1.4))
-    val slideOut = 1 - ease(LaunchEasing::easeInCubic, between(time, 4.45, 5.0))
-    val op = (slideIn * slideOut).coerceIn(0.0, 1.0).toFloat()
+    val slideIn = ease(LaunchEasing::easeOutBack, between(time, 0.5, 1.4))
+    // Counter holds at full opacity through the 2 s tail — the host
+    // dismisses the splash before any fade-out is needed.
+    val op = slideIn.coerceIn(0.0, 1.0).toFloat()
     val ty = ((1 - slideIn) * -30).toFloat()                  // drop in from above
     val cT = ease(LaunchEasing::easeOutCubic, between(time, 1.85, 4.1))
     val value = (target * cT).toInt()
@@ -133,9 +134,12 @@ internal fun LaunchPointsCounter(
 
 @Composable
 internal fun LaunchLogoLockup(time: Double, palette: LaunchPalette) {
-    val inOp  = ease(LaunchEasing::easeOutCubic, between(time, 2.0, 2.6))
-    val outOp = 1 - ease(LaunchEasing::easeInCubic, between(time, 4.5, 4.85))
-    val op = (inOp * outOp).toFloat()
+    // Logo holds at full opacity through the 2 s tail — pairs with
+    // the centred Tree-points counter so the final frame of the
+    // splash is "QuickInk + your impact", visible long enough for
+    // the user to take it in.
+    val inOp = ease(LaunchEasing::easeOutCubic, between(time, 2.0, 2.6))
+    val op = inOp.toFloat()
     val ty = ((1 - inOp) * 14).toFloat()
     val logoScale = (0.9 + 0.1 * inOp).toFloat()
 

@@ -64,8 +64,14 @@ import app.quickink.mobile.ui.theme.LocalQuickInkColors
  */
 internal const val defaultTarget = 247
 
-/** End of the cinematic timeline (5.0 s) plus 500 ms safety tail. */
-private const val TOTAL_DURATION_S = 5.5
+/**
+ * Total splash duration: 5.0 s for the prototype's reveal + 2 s hold
+ * on the final state (family, tree, logo and the big top-centred
+ * Tree-points counter) so the user has a beat to read the number
+ * before the splash dismisses to the real Home screen + ~500 ms
+ * safety tail rolled into the same number.
+ */
+private const val TOTAL_DURATION_S = 7.5
 
 /** Reduced-motion frame to hold (mid-bloom). */
 private const val REDUCED_MOTION_FROZEN_T = 2.5
