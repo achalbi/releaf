@@ -62,6 +62,42 @@ public struct LaunchAnimationView: View {
     }
 
     public var body: some View {
+        // Force-portrait wrapper — the SwiftUI library can't reach
+        // `UISupportedInterfaceOrientations` (no app target yet) and
+        // `UIWindowScene.requestGeometryUpdate` is iOS 16+ + scene-
+        // delegate plumbing. Cheapest reliable lock: detect landscape
+        // from the GeometryReader's reported size, render the scene
+        // into a portrait-shaped frame (h × w when in landscape), then
+        // counter-rotate by ±90° so the user sees the cinematic the
+        // right way up regardless of how they're holding the phone.
+        // The two `.position(...)` blocks centre the rotated content
+        // on the actual screen rect.
+        GeometryReader { proxy in
+            let w = proxy.size.width
+            let h = proxy.size.height
+            let isLandscape = w > h
+            let sceneW = isLandscape ? h : w
+            let sceneH = isLandscape ? w : h
+            ZStack {
+                animationContent
+                    .frame(width: sceneW, height: sceneH)
+                    .rotationEffect(isLandscape ? .degrees(90) : .degrees(0))
+                    .position(x: w / 2, y: h / 2)
+            }
+            .frame(width: w, height: h)
+            .background(QuickInkColors.bg.ignoresSafeArea())
+        }
+        .ignoresSafeArea()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("QuickInk launch animation")
+        .onAppear { startDate = Date() }
+    }
+
+    /// The actual splash composition — sky / scene / overlays. Pulled
+    /// out of `body` so the force-portrait wrapper can put it inside
+    /// a fixed-size frame without touching the per-layer logic.
+    @ViewBuilder
+    private var animationContent: some View {
         TimelineView(.animation) { context in
             let elapsedRaw = context.date.timeIntervalSince(startDate)
             // Reduced motion: pin to a single representative frame
@@ -69,22 +105,25 @@ public struct LaunchAnimationView: View {
             let t = reduceMotion ? 2.5 : elapsedRaw
 
             ZStack {
-                // Cream behind the Canvas — covers any first-frame
-                // gap before the sky gradient ramps in (op = 0 at t=0).
-                QuickInkColors.bg.ignoresSafeArea()
-
                 LaunchScene(time: t, palette: LaunchPalettes.dawn)
-                    .ignoresSafeArea()
-
                 LaunchPointsCounter(
                     target:  target,
                     time:    t,
                     palette: LaunchPalettes.dawn,
                     show:    true
                 )
-                LaunchLogoLockup(time: t, palette: LaunchPalettes.dawn)
-                    .position(x: UIScreen.mainSafe.width / 2,
-                              y: UIScreen.mainSafe.height * 0.20 + 60)
+                // Logo positioned relative to the inner scene frame
+                // (which is locked to portrait by the outer wrapper),
+                // not to UIScreen.main — so the logo lands in the same
+                // place visually whether the device is held portrait
+                // or landscape.
+                GeometryReader { sceneProxy in
+                    LaunchLogoLockup(time: t, palette: LaunchPalettes.dawn)
+                        .position(
+                            x: sceneProxy.size.width / 2,
+                            y: sceneProxy.size.height * 0.20 + 60
+                        )
+                }
                 // (No home-feed transition — the cinematic dismisses
                 // straight to the real Home screen, so a baked-in
                 // preview of it inside the splash would just play
@@ -103,33 +142,9 @@ public struct LaunchAnimationView: View {
                 }
             }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("QuickInk launch animation")
-        .onAppear { startDate = Date() }
     }
 }
 
-// MARK: - Screen-bounds helper
-
-#if canImport(UIKit)
-import UIKit
-
-extension UIScreen {
-    /// Best-effort active screen size — `UIScreen.main` is deprecated
-    /// in iOS 16+ but the replacement (`windowScene.screen`) requires
-    /// crawling the active scene set. We do that here so the rest of
-    /// the file reads naturally; falls back to `UIScreen.main` if no
-    /// connected scene is available (e.g. previews, unit tests).
-    static var mainSafe: CGSize {
-        if let scene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first {
-            return scene.screen.bounds.size
-        }
-        return UIScreen.main.bounds.size
-    }
-}
-#endif
 
 #if DEBUG
 struct LaunchAnimationView_Previews: PreviewProvider {
