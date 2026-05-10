@@ -521,9 +521,14 @@ private struct MainShell: View {
 
         case .scanDetail(let captureId):
             ScanDetailScreen(
-                captureId: captureId,
-                userId:    userId,
-                onBack:    { path.removeLast() }
+                captureId:  captureId,
+                userId:     userId,
+                onBack:     { path.removeLast() },
+                onHome:     { path.removeAll() },
+                onLibrary:  { navToTab(.notesList) },
+                onScan:     { showQuickCapture = true },
+                onSearch:   { navToTab(.search) },
+                onSettings: { navToTab(.settings) }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)

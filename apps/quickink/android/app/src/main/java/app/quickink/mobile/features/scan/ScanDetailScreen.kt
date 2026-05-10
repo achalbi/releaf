@@ -42,6 +42,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -88,6 +89,9 @@ import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.ocr.OcrResultDao
 import app.quickink.mobile.data.ocr.OcrResultEntity
 import app.quickink.mobile.data.sync.QuickInkBinarySync
+import app.quickink.mobile.features.nav.NavTab
+import app.quickink.mobile.features.nav.QuickInkBottomNavBar
+import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
@@ -112,6 +116,15 @@ fun ScanDetailScreen(
     captureId: String,
     userId: String,
     onBack: () -> Unit,
+    // Bottom-nav callbacks. Optional so we keep the legacy "navigate
+    // to detail and only allow back" path working from places that
+    // don't host a tab bar. When all five are supplied, the floating
+    // QuickInkBottomNavBar renders below the content.
+    onHome: (() -> Unit)? = null,
+    onLibrary: (() -> Unit)? = null,
+    onScan: (() -> Unit)? = null,
+    onSearch: (() -> Unit)? = null,
+    onSettings: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as QuickInkApp
@@ -227,11 +240,17 @@ fun ScanDetailScreen(
     val ocrLoaded = showOcr && ocrPages.isNotEmpty()
 
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val hasBottomNav = onHome != null && onLibrary != null && onScan != null &&
+        onSearch != null && onSettings != null
 
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .quickInkDotGridBackground(),
+    ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .quickInkDotGridBackground()
             .padding(top = statusBarTop + QuickInkSpacing.s4),
     ) {
         // Top bar — circular floating buttons (back, share, more)
@@ -344,7 +363,10 @@ fun ScanDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(top = QuickInkSpacing.s4, bottom = QuickInkSpacing.s8),
+                .padding(
+                    top    = QuickInkSpacing.s4,
+                    bottom = if (hasBottomNav) QuickInkBottomNavReservedHeight else QuickInkSpacing.s8,
+                ),
             verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s5),
         ) {
             val current = capture
@@ -353,6 +375,18 @@ fun ScanDetailScreen(
                     modifier = Modifier.padding(horizontal = QuickInkSpacing.s5),
                 )
             } else {
+                // OCR pill at the top — moved up from the bottom of
+                // the page so the user can reach extracted text
+                // without scrolling past preview/details/actions.
+                OcrSection(
+                    showOcr   = showOcr,
+                    isLoading = showOcr && !ocrLoaded,
+                    ocrPages  = ocrPages,
+                    ocrDao    = ocrDao,
+                    onToggle  = { showOcr = !showOcr },
+                    modifier  = Modifier.padding(horizontal = QuickInkSpacing.s5),
+                )
+
                 // Title header — large display title + breadcrumb
                 TitleHeader(
                     capture = current,
@@ -405,19 +439,28 @@ fun ScanDetailScreen(
                         modifier       = Modifier.weight(1f),
                     )
                 }
-
-                // Existing collapsible OCR section
-                OcrSection(
-                    showOcr   = showOcr,
-                    isLoading = showOcr && !ocrLoaded,
-                    ocrPages  = ocrPages,
-                    ocrDao    = ocrDao,
-                    onToggle  = { showOcr = !showOcr },
-                    modifier  = Modifier.padding(horizontal = QuickInkSpacing.s5),
-                )
             }
         }
+    } // end inner Column
+
+    // Floating bottom nav, anchored to the bottom of the surrounding
+    // Box. Mirrors the iOS `safeAreaInset(.bottom)` layer — the
+    // ScrollView above reserves QuickInkBottomNavReservedHeight at
+    // the bottom of its content padding so the last card isn't hidden
+    // behind the bar.
+    if (onHome != null && onLibrary != null && onScan != null &&
+        onSearch != null && onSettings != null) {
+        QuickInkBottomNavBar(
+            activeTab  = NavTab.Library,
+            onHome     = onHome,
+            onLibrary  = onLibrary,
+            onScan     = onScan,
+            onSearch   = onSearch,
+            onSettings = onSettings,
+            modifier   = Modifier.align(Alignment.BottomCenter),
+        )
     }
+    } // end outer Box
 
     // Retag bottom sheet — tapping the category pill (or the
     // untagged "Tag scan" affordance) opens this. One row per
@@ -1009,7 +1052,6 @@ private fun DetailsCard(
             label = "Size",
             value = pdfFileSize?.let { android.text.format.Formatter.formatFileSize(context, it) } ?: "—",
         )
-        DetailRow(label = "Created", value = friendlyDate(capture.createdAt))
         DetailRow(
             label      = "Location",
             value      = capture.category ?: "Unsorted",
@@ -1122,9 +1164,9 @@ private fun ActionsCard(
             horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
         ) {
             Icon(
-                imageVector        = Icons.Filled.Edit,
+                imageVector        = Icons.Filled.Bolt,
                 contentDescription = null,
-                tint               = colors.inkSoft,
+                tint               = colors.accent,
                 modifier           = Modifier.size(12.dp),
             )
             Text(text = "Actions", style = type.cardTitle, color = colors.ink)

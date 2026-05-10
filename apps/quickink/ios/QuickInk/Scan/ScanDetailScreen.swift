@@ -18,6 +18,16 @@ struct ScanDetailScreen: View {
     let captureId: String
     let userId: String
     let onBack: () -> Void
+    /// Bottom-nav callbacks. Optional so we keep the current
+    /// "navigate to detail and only allow back" path working from
+    /// places that don't host a tab bar (e.g. share-extension entry
+    /// points). When all five are supplied, the floating bottom nav
+    /// renders below the content; otherwise it stays hidden.
+    let onHome: (() -> Void)?
+    let onLibrary: (() -> Void)?
+    let onScan: (() -> Void)?
+    let onSearch: (() -> Void)?
+    let onSettings: (() -> Void)?
 
     @StateObject private var categoriesVM: CategoryListViewModel
 
@@ -61,10 +71,24 @@ struct ScanDetailScreen: View {
     /// resolved or when the file isn't readable.
     @State private var pdfFileSize: Int64? = nil
 
-    init(captureId: String, userId: String, onBack: @escaping () -> Void) {
+    init(
+        captureId: String,
+        userId: String,
+        onBack: @escaping () -> Void,
+        onHome: (() -> Void)? = nil,
+        onLibrary: (() -> Void)? = nil,
+        onScan: (() -> Void)? = nil,
+        onSearch: (() -> Void)? = nil,
+        onSettings: (() -> Void)? = nil
+    ) {
         self.captureId = captureId
         self.userId = userId
         self.onBack = onBack
+        self.onHome = onHome
+        self.onLibrary = onLibrary
+        self.onScan = onScan
+        self.onSearch = onSearch
+        self.onSettings = onSettings
         _categoriesVM = StateObject(
             wrappedValue: CategoryListViewModel(userId: userId)
         )
@@ -77,6 +101,12 @@ struct ScanDetailScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
                     if let capture {
+                        // OCR pill at the top — moved up from the
+                        // bottom of the page so the user can reach
+                        // extracted text without scrolling past
+                        // preview / details / actions first.
+                        ocrSection
+
                         // Title block — large, prominent, with breadcrumb
                         titleHeader(for: capture)
                             .padding(.horizontal, QuickInkSpacing.s5)
@@ -102,20 +132,30 @@ struct ScanDetailScreen: View {
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
                         }
                         .padding(.horizontal, QuickInkSpacing.s5)
-
-                        // Existing collapsible OCR section
-                        ocrSection
                     } else {
                         loadingSkeleton
                             .padding(.horizontal, QuickInkSpacing.s5)
                     }
                 }
                 .padding(.top, QuickInkSpacing.s4)
-                .padding(.bottom, QuickInkSpacing.s8)
+                .padding(.bottom, hasBottomNav ? QuickInkBottomNavReservedHeight : QuickInkSpacing.s8)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(QuickInkColors.bg.ignoresSafeArea())
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if hasBottomNav,
+               let onHome, let onLibrary, let onScan, let onSearch, let onSettings {
+                QuickInkBottomNavBar(
+                    activeTab:  .library,
+                    onHome:     onHome,
+                    onLibrary:  onLibrary,
+                    onScan:     onScan,
+                    onSearch:   onSearch,
+                    onSettings: onSettings
+                )
+            }
+        }
         .task {
             // Start the categories observation first (synchronous,
             // returns immediately) so it's already emitting by the
@@ -214,6 +254,15 @@ struct ScanDetailScreen: View {
                     .onAppear { showFullscreenViewer = false }
             }
         }
+    }
+
+    /// True when all five bottom-nav callbacks are wired, so the
+    /// floating QuickInkBottomNavBar should render. Lets the screen
+    /// support both nav-aware (open from Library/Home) and minimal
+    /// (open from a share extension) hosts without a separate flag.
+    private var hasBottomNav: Bool {
+        onHome != nil && onLibrary != nil && onScan != nil &&
+        onSearch != nil && onSettings != nil
     }
 
     /// Computed top-bar title — prefers the user-set `title`, falls
@@ -643,7 +692,6 @@ struct ScanDetailScreen: View {
             VStack(spacing: QuickInkSpacing.s2) {
                 detailRow(label: "File type", value: fileTypeLabel(for: capture))
                 detailRow(label: "Size", value: pdfFileSize.map(formatBytes) ?? "—")
-                detailRow(label: "Created", value: friendlyDate(capture.createdAt))
                 detailRow(
                     label: "Location",
                     value: capture.category ?? "Unsorted",
@@ -733,9 +781,9 @@ struct ScanDetailScreen: View {
     private func actionsCard(for capture: CaptureSummary) -> some View {
         VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
             HStack(spacing: QuickInkSpacing.s2) {
-                Image(systemName: "pencil")
+                Image(systemName: "bolt.fill")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(QuickInkColors.inkSoft)
+                    .foregroundStyle(QuickInkColors.accent)
                 Text("Actions")
                     .font(QuickInkText.cardTitle)
                     .foregroundStyle(QuickInkColors.ink)

@@ -479,9 +479,14 @@ private fun MainShell(
         ) { backStackEntry ->
             val captureId = backStackEntry.arguments?.getString("captureId").orEmpty()
             ScanDetailScreen(
-                captureId = captureId,
-                userId    = userId,
-                onBack    = { navController.popBackStack() },
+                captureId  = captureId,
+                userId     = userId,
+                onBack     = { navController.popBackStack() },
+                onHome     = { navToTab(Routes.HOME) },
+                onLibrary  = { navToTab(Routes.NOTES_LIST) },
+                onScan     = { showQuickCapture = true },
+                onSearch   = { navToTab(Routes.SEARCH) },
+                onSettings = { navToTab(Routes.SETTINGS) },
             )
         }
         composable(
