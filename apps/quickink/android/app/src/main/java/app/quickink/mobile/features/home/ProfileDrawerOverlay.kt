@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.paddingFromBaseline
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -282,31 +283,42 @@ private fun BannerHeader(
                 val fallback: @Composable () -> Unit = {
                     val initial = displayName.trim().firstOrNull()?.uppercase()
                     if (initial != null) {
-                        // Strip the platform's default font padding and
-                        // trim the line-height box to the actual glyph
-                        // bounds (cap-height to baseline). With both
-                        // `includeFontPadding = false` AND
-                        // `LineHeightStyle.Trim.Both` the trimmed
-                        // bounding box runs from cap-height to baseline,
-                        // and `Alignment.Center` plus the parent Box's
-                        // `contentAlignment = Center` plant that box
-                        // centre on the disc's geometric centre. No
-                        // manual offset — the previous +8dp y-offset
-                        // was over-correcting and pushed the "A" below
-                        // optical centre.
+                        // Explicit baseline-based positioning. The
+                        // line-height + Alignment.Center approach was
+                        // unreliable — Compose's "trimmed line box"
+                        // still includes descender space below the
+                        // baseline (where 'g' / 'p' tails would go),
+                        // so a single capital "A" (no descender) gets
+                        // centred too high inside that box, leaving
+                        // the visible glyph below the disc's optical
+                        // centre. paddingFromBaseline pins the
+                        // baseline at a known y so the cap-height
+                        // midline (the visible glyph centroid for
+                        // capital letters) lands exactly on the disc
+                        // geometric centre.
+                        //
+                        // Math (132dp disc, 54sp font, Roboto-ish
+                        // cap-height ≈ 0.71 × fontSize ≈ 38dp):
+                        //   - disc centre y = 66dp
+                        //   - A's visual centre = baseline − 19dp
+                        //   - baseline = 66 + 19 = 85dp from disc top
+                        //   - bottom = 132 − 85 = 47dp
+                        // Both top and bottom are specified so the
+                        // modifier height = 132dp = disc, which means
+                        // contentAlignment.Center can't shift the
+                        // baseline off the computed position.
                         Text(
                             text     = initial,
                             color    = colors.accent,
                             fontSize = 54.sp,
                             textAlign = TextAlign.Center,
                             style    = TextStyle(
-                                platformStyle  = PlatformTextStyle(includeFontPadding = false),
-                                lineHeightStyle = LineHeightStyle(
-                                    alignment = LineHeightStyle.Alignment.Center,
-                                    trim      = LineHeightStyle.Trim.Both,
-                                ),
+                                platformStyle = PlatformTextStyle(includeFontPadding = false),
                             ),
-                            lineHeight = 54.sp,
+                            modifier = Modifier.paddingFromBaseline(
+                                top    = 85.dp,
+                                bottom = 47.dp,
+                            ),
                         )
                     } else {
                         Icon(
