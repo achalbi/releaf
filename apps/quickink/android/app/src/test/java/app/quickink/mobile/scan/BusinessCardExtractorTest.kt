@@ -270,6 +270,33 @@ class BusinessCardExtractorTest {
         }
     }
 
+    @Test fun nameDirectlyAboveDesignation_winsOverIsolatedBigFontElsewhere() {
+        // Two equally-plausible name candidates:
+        //   - Block 0: a big-font line up top with no designation
+        //              directly below it (no adjacency bonus).
+        //   - Block 2: a smaller line followed by a designation
+        //              directly underneath (adjacency bonus +4 for
+        //              name AND for designation).
+        // Without the adjacency bonus block 0 wins by virtue of
+        // being bigger and at the top. With the bonus block 2 wins
+        // because the (name, designation) pair is the dominant
+        // pattern on real cards.
+        val blocks = listOf(
+            // Big-font line at the top — no designation under it.
+            block(0, "ACME RESEARCH LABS",        y = 0.05, h = 0.10),
+            // Some random spacer block.
+            block(1, "estd. 1998",                y = 0.18, h = 0.04),
+            // The actual name + designation pair, smaller font.
+            block(2, "Aarav Sharma",              y = 0.35, h = 0.05),
+            // Designation immediately below — adjacency gap < 0.10.
+            block(3, "Senior Software Engineer",  y = 0.42, h = 0.04),
+            block(4, "+91 9876543210",            y = 0.55, h = 0.04),
+        )
+        val out = BusinessCardExtractor.extract(blocks)
+        assertEquals("Aarav Sharma", out.name)
+        assertEquals("Senior Software Engineer", out.designation)
+    }
+
     @Test fun fallsBackToWhateverEngineEmitsWhenNoLineBlocks() {
         // Defensive: an engine that emits only paragraph-grained
         // (or word-grained) blocks shouldn't return empty — fall

@@ -72,8 +72,15 @@ public struct ExtractionPipeline: Sendable {
             !Self.categoryStopWords.contains(Self.normaliseForStopCheck(candidate.text))
         }
 
+        // Cross-kind layout bonus — name-above-designation pattern.
+        // Mirror of the Android pipeline.
+        let boostedCandidates = applyNameDesignationAdjacencyBonus(
+            filteredCandidates,
+            layout: layout
+        )
+
         let t3 = DispatchTime.now().uptimeNanoseconds
-        let resolved = resolve(filteredCandidates)
+        let resolved = resolve(boostedCandidates)
         timings["resolve"] = DispatchTime.now().uptimeNanoseconds - t3
 
         let trace = keepTrace
@@ -181,6 +188,57 @@ public struct ExtractionPipeline: Sendable {
             if seen.insert(key).inserted { out.append(c.text) }
         }
         return out
+    }
+
+    /// Boost NAME / DESIGNATION pairs where the name's bbox sits
+    /// directly above the designation's bbox. The pattern is the
+    /// single most reliable layout cue on business cards. Adds
+    /// `nameDesignationAdjacencyBonus` to BOTH candidates' scores
+    /// when matched. Mirror of `applyNameDesignationAdjacencyBonus`
+    /// in the Android pipeline.
+    private func applyNameDesignationAdjacencyBonus(
+        _ candidates: [FieldCandidate],
+        layout: LayoutContext
+    ) -> [FieldCandidate] {
+        let names  = candidates.filter { $0.kind == .name }
+        let desigs = candidates.filter { $0.kind == .designation }
+        if names.isEmpty || desigs.isEmpty { return candidates }
+
+        var nameBoosts:  Set<Int> = []
+        var desigBoosts: Set<Int> = []
+        for n in names {
+            let nBox = layout.blocks[n.sourceBlockIndex].bbox
+            let nBottom = nBox.y + nBox.height
+            for d in desigs {
+                let dBox = layout.blocks[d.sourceBlockIndex].bbox
+                let gap = dBox.y - nBottom
+                if gap >= 0, gap <= weights.adjacencyYDistance {
+                    nameBoosts.insert(n.sourceBlockIndex)
+                    desigBoosts.insert(d.sourceBlockIndex)
+                }
+            }
+        }
+
+        if nameBoosts.isEmpty { return candidates }
+        return candidates.map { c in
+            if c.kind == .name && nameBoosts.contains(c.sourceBlockIndex) {
+                return FieldCandidate(
+                    sourceBlockIndex: c.sourceBlockIndex,
+                    text:             c.text,
+                    kind:             c.kind,
+                    score:            c.score + weights.nameDesignationAdjacencyBonus
+                )
+            }
+            if c.kind == .designation && desigBoosts.contains(c.sourceBlockIndex) {
+                return FieldCandidate(
+                    sourceBlockIndex: c.sourceBlockIndex,
+                    text:             c.text,
+                    kind:             c.kind,
+                    score:            c.score + weights.nameDesignationAdjacencyBonus
+                )
+            }
+            return c
+        }
     }
 
     /// Strings that should never surface as an extracted field on a

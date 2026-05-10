@@ -110,9 +110,18 @@ class ExtractionPipeline(
         // as-field anti-pattern.
         val filtered = all.filterNot { it.text.normalisedForStopCheck() in CATEGORY_STOP_WORDS }
 
+        // Cross-kind layout bonus: name-immediately-above-designation
+        // is the dominant pattern on real business cards. Each NAME
+        // candidate that has a DESIGNATION candidate directly below
+        // it (within `adjacencyYDistance` on the y-axis) gets the
+        // adjacency bonus added; the matching designation candidate
+        // gets the same bonus. Lets a "John Smith / Director" pair
+        // beat an isolated big-font line elsewhere on the card.
+        val boosted = applyNameDesignationAdjacencyBonus(filtered, layout)
+
         // Resolve each field.
         val tResolve = System.nanoTime()
-        val resolved = resolve(filtered, layout)
+        val resolved = resolve(boosted, layout)
         timings["resolve"] = System.nanoTime() - tResolve
 
         return resolved.copy(
@@ -221,6 +230,58 @@ class ExtractionPipeline(
     ): FieldCandidate? = candidates
         .filter { it.score >= min && it.sourceBlockIndex !in avoidBlocks }
         .maxByOrNull { it.score }
+
+    /**
+     * Boost NAME / DESIGNATION pairs where the name's bbox sits
+     * directly above the designation's bbox. The pattern is the
+     * single most reliable layout cue on business cards — "John
+     * Smith" stacked above "Senior Engineer" — so when both
+     * classifiers fire on adjacent blocks we want the resolver to
+     * prefer that pair over isolated big-font lines elsewhere on
+     * the card.
+     *
+     * Each match adds `nameDesignationAdjacencyBonus` to BOTH
+     * candidates' scores. Returns a new list — original candidates
+     * are immutable.
+     */
+    private fun applyNameDesignationAdjacencyBonus(
+        candidates: List<FieldCandidate>,
+        layout: LayoutContext,
+    ): List<FieldCandidate> {
+        val nameCands = candidates.filter { it.kind == FieldKind.NAME }
+        val desigCands = candidates.filter { it.kind == FieldKind.DESIGNATION }
+        if (nameCands.isEmpty() || desigCands.isEmpty()) return candidates
+
+        // Block indices that should receive the bonus, by kind.
+        val nameBoosts  = mutableSetOf<Int>()
+        val desigBoosts = mutableSetOf<Int>()
+        for (n in nameCands) {
+            val nBox = layout.blocks[n.sourceBlockIndex].bbox
+            val nBottom = nBox.y + nBox.height
+            for (d in desigCands) {
+                val dBox = layout.blocks[d.sourceBlockIndex].bbox
+                // Designation must sit BELOW the name (dBox.y > nBox.y)
+                // and within the adjacency distance from the name's
+                // bottom edge.
+                val gap = dBox.y - nBottom
+                if (gap in 0.0..weights.adjacencyYDistance) {
+                    nameBoosts  += n.sourceBlockIndex
+                    desigBoosts += d.sourceBlockIndex
+                }
+            }
+        }
+
+        if (nameBoosts.isEmpty()) return candidates
+        return candidates.map { c ->
+            when {
+                c.kind == FieldKind.NAME && c.sourceBlockIndex in nameBoosts ->
+                    c.copy(score = c.score + weights.nameDesignationAdjacencyBonus)
+                c.kind == FieldKind.DESIGNATION && c.sourceBlockIndex in desigBoosts ->
+                    c.copy(score = c.score + weights.nameDesignationAdjacencyBonus)
+                else -> c
+            }
+        }
+    }
 
     companion object {
         /**
