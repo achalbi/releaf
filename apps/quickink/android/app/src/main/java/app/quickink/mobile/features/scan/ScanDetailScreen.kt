@@ -458,14 +458,14 @@ private fun PreviewImage(
     val previewPresent = !previewUri.isNullOrBlank() && localFileExists(previewUri)
 
     when {
-        pdfPresent && pdfUri != null -> {
+        pdfPresent -> {
             // Multi-page captures get the swipe + page-turn viewer;
             // single-page captures keep the scrollable PdfPagesView
             // since it already handles pinch-to-zoom and there's
             // nothing to swipe to anyway.
             if (capture.pageCount > 1) {
                 PageTurnPdfView(
-                    pdfUri            = pdfUri,
+                    pdfUri            = pdfUri!!,
                     onFullscreenClick = onFullscreenClick,
                     modifier = Modifier
                         .fillMaxWidth()

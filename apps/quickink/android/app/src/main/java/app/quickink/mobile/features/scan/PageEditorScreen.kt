@@ -38,7 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.RotateRight
+import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -198,7 +198,7 @@ fun PageEditorScreen(
             )
             ToolPill(
                 kind     = EditorTool.Rotate,
-                icon     = Icons.Filled.RotateRight,
+                icon     = Icons.AutoMirrored.Filled.RotateRight,
                 label    = "Rotate",
                 active   = activeTool == EditorTool.Rotate,
                 onClick  = {

@@ -40,7 +40,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.Subject
+import androidx.compose.material.icons.automirrored.filled.Subject
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -81,7 +81,7 @@ enum class ExportFormat(
     Plain(
         label    = "Plain text",
         subtitle = "Just the OCR text — quick paste",
-        icon     = Icons.Filled.Subject,
+        icon     = Icons.AutoMirrored.Filled.Subject,
     );
 }
 
