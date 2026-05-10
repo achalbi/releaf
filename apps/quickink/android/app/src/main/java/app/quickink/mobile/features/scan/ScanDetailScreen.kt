@@ -18,6 +18,7 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,13 +33,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -46,11 +50,16 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.LocalOffer
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -72,6 +81,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureEntity
@@ -129,6 +139,17 @@ fun ScanDetailScreen(
     // the inline preview; cleared by the dialog's close affordance or
     // the back press.
     var showFullscreenViewer by remember(captureId) { mutableStateOf(false) }
+    // More-menu dropdown anchor state. Driven by the ellipsis button
+    // in the top bar; opens a small menu with secondary actions
+    // (move to folder, delete) so the bar itself stays uncluttered.
+    var showMoreMenu by remember { mutableStateOf(false) }
+    // Selected page index for the thumbnails strip (0-based). Visual-
+    // only highlight today; tap-to-jump is a follow-up that requires
+    // surfacing a `currentPage` state through PageTurnPdfView.
+    var selectedPageIndex by remember(captureId) { mutableStateOf(0) }
+    // On-disk size of the capture's PDF in bytes, loaded lazily so
+    // the Details row can render "2.4 MB" etc. Null until resolved.
+    var pdfFileSize by remember(captureId) { mutableStateOf<Long?>(null) }
 
     // Live category list — populated from the same DAO the home
     // grid + review screen read, scoped to the current user. The
@@ -139,6 +160,15 @@ fun ScanDetailScreen(
 
     LaunchedEffect(captureId) {
         capture = captureDao.findById(captureId)
+    }
+
+    // Resolve the on-disk PDF size after the capture row lands.
+    // Best-effort — leaves `pdfFileSize = null` if the file isn't
+    // readable, in which case the Details row falls back to "—".
+    LaunchedEffect(capture?.pdfUri) {
+        pdfFileSize = withContext(Dispatchers.IO) {
+            resolvePdfFileSize(capture?.pdfUri)
+        }
     }
 
     // Self-heal: if the capture row references a local file that
@@ -204,53 +234,76 @@ fun ScanDetailScreen(
             .quickInkDotGridBackground()
             .padding(top = statusBarTop + QuickInkSpacing.s4),
     ) {
-        // Top bar
+        // Top bar — circular floating buttons (back, share, more)
+        // matching the mockup's pill style. Title moves into the
+        // body's title header, freeing the top bar for action chips.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = QuickInkSpacing.s2, vertical = QuickInkSpacing.s2),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(horizontal = QuickInkSpacing.s5, vertical = QuickInkSpacing.s2),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
         ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector       = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint              = colors.ink,
-                )
-            }
-            Text(
-                text  = capture?.title?.takeIf { it.isNotBlank() }
-                    ?: capture?.category
-                    ?: "Scan",
-                style = type.pageTitle,
-                color = colors.ink,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            CircularTopBarButton(
+                icon            = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDesc     = "Back to library",
+                onClick         = onBack,
             )
 
-            // Share button — always visible when there's a capture
-            // loaded. `sharePdf` falls back to the preview JPEG if
-            // the PDF URI is missing/invalid and surfaces a Toast on
-            // failure, so the tap is never a silent no-op.
+            Spacer(modifier = Modifier.weight(1f))
+
             if (capture != null) {
-                IconButton(onClick = {
-                    sharePdf(context, capture?.pdfUri, capture?.previewUri)
-                }) {
-                    Icon(
-                        imageVector       = Icons.Filled.Share,
-                        contentDescription = "Share scan",
-                        tint              = colors.ink,
-                    )
-                }
+                CircularTopBarButton(
+                    icon        = Icons.Filled.Share,
+                    contentDesc = "Share scan",
+                    onClick     = {
+                        sharePdf(context, capture?.pdfUri, capture?.previewUri)
+                    },
+                )
             }
 
-            IconButton(onClick = { showDeleteConfirm = true }) {
-                Icon(
-                    imageVector       = Icons.Filled.Delete,
-                    contentDescription = "Delete scan",
-                    tint              = colors.danger,
+            // More menu — anchored to the ellipsis button. Opens a
+            // small dropdown with secondary actions (move to folder,
+            // delete) so the bar stays uncluttered.
+            Box {
+                CircularTopBarButton(
+                    icon        = Icons.Filled.MoreHoriz,
+                    contentDesc = "More options",
+                    onClick     = { showMoreMenu = true },
                 )
+                DropdownMenu(
+                    expanded         = showMoreMenu,
+                    onDismissRequest = { showMoreMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text    = { Text("Move to folder", style = type.body, color = colors.ink) },
+                        onClick = {
+                            showMoreMenu = false
+                            showRetagSheet = true
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector        = Icons.Filled.Folder,
+                                contentDescription = null,
+                                tint               = colors.inkSoft,
+                            )
+                        },
+                    )
+                    DropdownMenuItem(
+                        text    = { Text("Delete scan", style = type.body, color = colors.danger) },
+                        onClick = {
+                            showMoreMenu = false
+                            showDeleteConfirm = true
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector        = Icons.Filled.Delete,
+                                contentDescription = null,
+                                tint               = colors.danger,
+                            )
+                        },
+                    )
+                }
             }
         }
 
@@ -291,37 +344,68 @@ fun ScanDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = QuickInkSpacing.s5, vertical = QuickInkSpacing.s4),
+                .padding(top = QuickInkSpacing.s4, bottom = QuickInkSpacing.s8),
             verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s5),
         ) {
             val current = capture
             if (current == null) {
-                CircularProgressIndicator(
-                    color    = colors.accent,
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                LoadingSkeleton(
+                    modifier = Modifier.padding(horizontal = QuickInkSpacing.s5),
                 )
             } else {
-                PreviewImage(
-                    capture           = current,
-                    onFullscreenClick = { showFullscreenViewer = true },
-                )
-                TitleSection(
-                    title    = current.title,
-                    onEdit   = {
+                // Title header — large display title + breadcrumb
+                TitleHeader(
+                    capture = current,
+                    onEdit  = {
                         titleDraft     = current.title.orEmpty()
                         showTitleEditor = true
                     },
+                    modifier = Modifier.padding(horizontal = QuickInkSpacing.s5),
                 )
-                MetaBlock(
-                    capture  = current,
-                    onTagTap = { showRetagSheet = true },
+
+                // Preview block — full-bleed within margins
+                PreviewImage(
+                    capture           = current,
+                    onFullscreenClick = { showFullscreenViewer = true },
+                    modifier          = Modifier.padding(horizontal = QuickInkSpacing.s5),
                 )
+
+                // Page thumbnails strip (multi-page only)
+                if (current.pageCount > 1) {
+                    PageThumbnailsStrip(
+                        pageCount         = current.pageCount,
+                        selectedPageIndex = selectedPageIndex,
+                        onSelectPage      = { selectedPageIndex = it },
+                    )
+                }
+
+                // Details card — File type, Size, Created, Location, Tags
+                DetailsCard(
+                    capture     = current,
+                    pdfFileSize = pdfFileSize,
+                    onAddTag    = { showRetagSheet = true },
+                    modifier    = Modifier.padding(horizontal = QuickInkSpacing.s5),
+                )
+
+                // Actions card — Export PDF, Share, Move to folder, Delete
+                ActionsCard(
+                    capture        = current,
+                    onShare        = {
+                        sharePdf(context, current.pdfUri, current.previewUri)
+                    },
+                    onMoveToFolder = { showRetagSheet = true },
+                    onDelete       = { showDeleteConfirm = true },
+                    modifier       = Modifier.padding(horizontal = QuickInkSpacing.s5),
+                )
+
+                // Existing collapsible OCR section
                 OcrSection(
                     showOcr   = showOcr,
                     isLoading = showOcr && !ocrLoaded,
                     ocrPages  = ocrPages,
                     ocrDao    = ocrDao,
                     onToggle  = { showOcr = !showOcr },
+                    modifier  = Modifier.padding(horizontal = QuickInkSpacing.s5),
                 )
             }
         }
@@ -440,6 +524,7 @@ fun ScanDetailScreen(
 private fun PreviewImage(
     capture: CaptureEntity,
     onFullscreenClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
@@ -467,7 +552,7 @@ private fun PreviewImage(
                 PageTurnPdfView(
                     pdfUri            = pdfUri!!,
                     onFullscreenClick = onFullscreenClick,
-                    modifier = Modifier
+                    modifier = modifier
                         .fillMaxWidth()
                         .aspectRatio(0.707f) // A4-ish portrait until pages render
                         .clip(RoundedCornerShape(QuickInkRadius.md))
@@ -478,7 +563,7 @@ private fun PreviewImage(
                 PdfPagesView(
                     pdfUri            = pdfUri,
                     onFullscreenClick = onFullscreenClick,
-                    modifier = Modifier
+                    modifier = modifier
                         .fillMaxWidth()
                         .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md)),
                 )
@@ -492,7 +577,7 @@ private fun PreviewImage(
                     .build(),
                 contentDescription = capture.category ?: "Scan preview",
                 contentScale       = ContentScale.Fit,
-                modifier = Modifier
+                modifier = modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(QuickInkRadius.md))
                     .background(colors.surface)
@@ -511,7 +596,7 @@ private fun PreviewImage(
             val isRestoringFromDrive =
                 capture.pdfDriveFileId != null || capture.previewDriveFileId != null
             Box(
-                modifier = Modifier
+                modifier = modifier
                     .fillMaxWidth()
                     .height(320.dp)
                     .clip(RoundedCornerShape(QuickInkRadius.md))
@@ -666,108 +751,513 @@ private fun localFileExists(uri: String?): Boolean {
  * clearly an affordance, not a label. Whole row is clickable — tap
  * opens the title editor modal owned by [ScanDetailScreen].
  */
+/**
+ * Circular top-bar action button. Matches iOS's floating-pill style —
+ * white surface with a soft border, 40dp hit target. Used for back,
+ * share, and the more-menu trigger so the bar reads as a floating
+ * action layer rather than a flat row.
+ */
 @Composable
-private fun TitleSection(
-    title: String?,
-    onEdit: () -> Unit,
+private fun CircularTopBarButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDesc: String,
+    onClick: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
-    val type = LocalQuickInkTypography.current
-    val displayed = title?.takeIf { it.isNotBlank() }
-    Row(
-        modifier              = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(QuickInkRadius.md))
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
             .background(colors.surface)
-            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
-            .clickable(onClick = onEdit)
-            .padding(QuickInkSpacing.s4),
-        verticalAlignment     = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+            .border(1.dp, colors.border, CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text     = displayed ?: "Untitled scan",
-            style    = type.heading,
-            color    = if (displayed != null) colors.ink else colors.muted,
-            modifier = Modifier.weight(1f),
-            maxLines = 2,
-        )
         Icon(
-            imageVector        = Icons.Filled.Edit,
-            contentDescription = "Edit title",
-            tint               = colors.muted,
+            imageVector        = icon,
+            contentDescription = contentDesc,
+            tint               = colors.ink,
             modifier           = Modifier.size(18.dp),
         )
     }
 }
 
+/**
+ * Large display title at the top of the detail screen, matching the
+ * mockup: prominent display title with an inline edit pencil,
+ * followed by the breadcrumb row (date • pages • category).
+ */
 @Composable
-private fun MetaBlock(
+private fun TitleHeader(
     capture: CaptureEntity,
-    onTagTap: () -> Unit,
+    onEdit: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier              = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
-        verticalAlignment     = Alignment.CenterVertically,
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val displayed = capture.title?.takeIf { it.isNotBlank() }
+    Column(
+        modifier            = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
     ) {
-        MetaPill(text = friendlyDate(capture.createdAt))
-        if (capture.pageCount > 1) {
-            MetaPill(text = "${capture.pageCount} pages")
+        Row(
+            modifier              = Modifier.clickable(onClick = onEdit),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+            Text(
+                text     = displayed ?: "Add a title",
+                style    = type.display,
+                color    = if (displayed != null) colors.ink else colors.accent,
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Icon(
+                imageVector        = Icons.Filled.Edit,
+                contentDescription = "Edit title",
+                tint               = colors.muted,
+                modifier           = Modifier.size(18.dp),
+            )
         }
-        // Category affordance — a tappable pill that opens the
-        // retag sheet. When the capture already has a tag, the pill
-        // renders the tag with the accent treatment; when it
-        // doesn't, we fall back to a muted "Tag scan" affordance so
-        // retagging is still discoverable.
-        TagPill(category = capture.category, onClick = onTagTap)
+        BreadcrumbRow(capture = capture)
+    }
+}
+
+/**
+ * Compact breadcrumb under the title — date, page count, and
+ * category (when present) separated by middle dots, each prefixed
+ * with a small icon for visual scanning.
+ */
+@Composable
+private fun BreadcrumbRow(capture: CaptureEntity) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Row(
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+    ) {
+        BreadcrumbItem(
+            icon = Icons.Filled.CalendarToday,
+            text = friendlyDate(capture.createdAt),
+        )
+        BreadcrumbDot()
+        BreadcrumbItem(
+            icon = Icons.Filled.Description,
+            text = "${capture.pageCount} page${if (capture.pageCount == 1) "" else "s"}",
+        )
+        if (!capture.category.isNullOrEmpty()) {
+            BreadcrumbDot()
+            BreadcrumbItem(
+                icon = Icons.Filled.Folder,
+                text = capture.category!!,
+            )
+        }
     }
 }
 
 @Composable
-private fun TagPill(category: String?, onClick: () -> Unit) {
+private fun BreadcrumbItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
-    val hasTag = !category.isNullOrEmpty()
-    val bg = if (hasTag) colors.accentSoft else colors.borderSoft
-    val fg = if (hasTag) colors.accent     else colors.inkSoft
     Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(QuickInkRadius.pill))
-            .background(bg)
-            .clickable(onClick = onClick)
-            .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1),
     ) {
         Icon(
-            imageVector       = if (hasTag) Icons.Filled.LocalOffer else Icons.Filled.Add,
+            imageVector        = icon,
             contentDescription = null,
-            tint              = fg,
-            modifier          = Modifier.size(12.dp),
+            tint               = colors.inkSoft,
+            modifier           = Modifier.size(11.dp),
         )
+        Text(text = text, style = type.meta, color = colors.inkSoft)
+    }
+}
+
+@Composable
+private fun BreadcrumbDot() {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Text(text = "•", style = type.meta, color = colors.muted)
+}
+
+/**
+ * Horizontal scrollable strip of page thumbnails — one numbered chip
+ * per page, with the currently selected page highlighted in the
+ * accent color. Tap a chip to set [selectedPageIndex]. Only rendered
+ * for multi-page captures.
+ *
+ * Today the chips are paper-toned placeholders with page numbers.
+ * Rendering actual page bitmaps is a follow-up that needs the PDF
+ * rasteriser surfaced from PdfPagesView.
+ */
+@Composable
+private fun PageThumbnailsStrip(
+    pageCount: Int,
+    selectedPageIndex: Int,
+    onSelectPage: (Int) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = QuickInkSpacing.s5),
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        repeat(pageCount) { index ->
+            val selected = (index == selectedPageIndex)
+            Box(
+                modifier = Modifier
+                    .width(64.dp)
+                    .height(80.dp)
+                    .clip(RoundedCornerShape(QuickInkRadius.sm))
+                    .background(colors.paper2)
+                    .border(
+                        width = if (selected) 2.dp else 1.dp,
+                        color = if (selected) colors.accent else colors.border,
+                        shape = RoundedCornerShape(QuickInkRadius.sm),
+                    )
+                    .clickable { onSelectPage(index) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.Filled.Description,
+                    contentDescription = null,
+                    tint               = colors.muted,
+                    modifier           = Modifier.size(20.dp),
+                )
+                // Page-number badge bottom-right
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = (-6).dp, bottom = (-6).dp)
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(if (selected) colors.accent else colors.surface)
+                        .border(
+                            width = 0.5.dp,
+                            color = colors.border,
+                            shape = CircleShape,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text  = "${index + 1}",
+                        style = type.caption,
+                        color = if (selected) colors.textOnAccent else colors.ink,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Structured details card matching the mockup — header + rows for
+ * File type / Size / Created / Location / Tags. Each row is a
+ * label-left / value-right pair; the Tags row swaps the value for an
+ * inline category chip plus a "+" affordance.
+ */
+@Composable
+private fun DetailsCard(
+    capture: CaptureEntity,
+    pdfFileSize: Long?,
+    onAddTag: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val context = LocalContext.current
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
+            .padding(QuickInkSpacing.s4),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        Row(
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.Description,
+                contentDescription = null,
+                tint               = colors.inkSoft,
+                modifier           = Modifier.size(14.dp),
+            )
+            Text(text = "Details", style = type.heading, color = colors.ink)
+        }
+
+        DetailRow(label = "File type", value = fileTypeLabel(capture))
+        DetailRow(
+            label = "Size",
+            value = pdfFileSize?.let { android.text.format.Formatter.formatFileSize(context, it) } ?: "—",
+        )
+        DetailRow(label = "Created", value = friendlyDate(capture.createdAt))
+        DetailRow(
+            label      = "Location",
+            value      = capture.category ?: "Unsorted",
+            valueColor = if (capture.category != null) colors.accent else colors.inkSoft,
+        )
+        TagsRow(category = capture.category, onAddTag = onAddTag)
+    }
+}
+
+@Composable
+private fun DetailRow(
+    label: String,
+    value: String,
+    valueColor: androidx.compose.ui.graphics.Color = LocalQuickInkColors.current.ink,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Row(
+        modifier          = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+    ) {
         Text(
-            text  = if (hasTag) category!! else "Tag scan",
-            style = type.caption,
-            color = fg,
+            text  = label,
+            style = type.meta,
+            color = colors.inkSoft,
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        Text(
+            text     = value,
+            style    = type.body,
+            color    = valueColor,
+            maxLines = 2,
+            textAlign = TextAlign.End,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
 @Composable
-private fun MetaPill(text: String, accent: Boolean = false) {
+private fun TagsRow(category: String?, onAddTag: () -> Unit) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
-    val bg = if (accent) colors.accentSoft else colors.borderSoft
-    val fg = if (accent) colors.accent     else colors.inkSoft
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(QuickInkRadius.pill))
-            .background(bg)
-            .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
+    Row(
+        modifier          = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = text, style = type.caption, color = fg)
+        Text(text = "Tags", style = type.meta, color = colors.inkSoft)
+        Spacer(modifier = Modifier.weight(1f))
+        Row(
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+            if (!category.isNullOrEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(QuickInkRadius.pill))
+                        .background(colors.accentSoft)
+                        .clickable(onClick = onAddTag)
+                        .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
+                ) {
+                    Text(text = category, style = type.caption, color = colors.accent)
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(colors.borderSoft)
+                    .clickable(onClick = onAddTag),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.Filled.Add,
+                    contentDescription = "Add tag",
+                    tint               = colors.inkSoft,
+                    modifier           = Modifier.size(14.dp),
+                )
+            }
+        }
     }
+}
+
+/**
+ * Quick-actions card matching the mockup: header + rows for Export
+ * as PDF, Share, Move to folder, Delete. Each row is a full-width
+ * tappable surface with an icon on the left.
+ */
+@Composable
+private fun ActionsCard(
+    capture: CaptureEntity,
+    onShare: () -> Unit,
+    onMoveToFolder: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
+            .padding(QuickInkSpacing.s4),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        Row(
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.Edit,
+                contentDescription = null,
+                tint               = colors.inkSoft,
+                modifier           = Modifier.size(14.dp),
+            )
+            Text(text = "Actions", style = type.heading, color = colors.ink)
+        }
+
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Export as PDF (uses the same share intent — Android
+            // doesn't have a separate "export" affordance the way
+            // iOS's ShareLink does; sharing a PDF *is* the export
+            // path on this platform).
+            ActionRow(
+                icon         = Icons.Filled.Description,
+                label        = "Export as PDF",
+                onClick      = onShare,
+            )
+            ActionDivider()
+            ActionRow(
+                icon         = Icons.Filled.Share,
+                label        = "Share",
+                onClick      = onShare,
+            )
+            ActionDivider()
+            ActionRow(
+                icon         = Icons.Filled.Folder,
+                label        = "Move to folder",
+                onClick      = onMoveToFolder,
+            )
+            ActionDivider()
+            ActionRow(
+                icon          = Icons.Filled.Delete,
+                label         = "Delete",
+                onClick       = onDelete,
+                isDestructive = true,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    isDestructive: Boolean = false,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val tint = if (isDestructive) colors.danger else colors.inkSoft
+    val labelColor = if (isDestructive) colors.danger else colors.ink
+    Row(
+        modifier              = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = QuickInkSpacing.s3),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        Box(modifier = Modifier.width(24.dp), contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector        = icon,
+                contentDescription = null,
+                tint               = tint,
+                modifier           = Modifier.size(18.dp),
+            )
+        }
+        Text(text = label, style = type.body, color = labelColor)
+    }
+}
+
+@Composable
+private fun ActionDivider() {
+    val colors = LocalQuickInkColors.current
+    HorizontalDivider(
+        thickness = 1.dp,
+        color     = colors.borderSoft,
+    )
+}
+
+/**
+ * Placeholder column shown while the capture row is loading. Mirrors
+ * the resolved layout (preview slab + title row + breadcrumb) so the
+ * screen doesn't visually jump when data lands.
+ */
+@Composable
+private fun LoadingSkeleton(modifier: Modifier = Modifier) {
+    val colors = LocalQuickInkColors.current
+    Column(
+        modifier            = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s4),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(320.dp)
+                .clip(RoundedCornerShape(QuickInkRadius.md))
+                .background(colors.borderSoft),
+        )
+        Box(
+            modifier = Modifier
+                .width(240.dp)
+                .height(32.dp)
+                .clip(RoundedCornerShape(QuickInkRadius.sm))
+                .background(colors.borderSoft),
+        )
+        Box(
+            modifier = Modifier
+                .width(180.dp)
+                .height(16.dp)
+                .clip(RoundedCornerShape(QuickInkRadius.sm))
+                .background(colors.borderSoft),
+        )
+    }
+}
+
+/**
+ * File-type label for the [DetailsCard] row. PDF on disk reads as
+ * "PDF document"; preview-only captures read as "Image"; the missing-
+ * file fallback reads as "Document".
+ */
+private fun fileTypeLabel(capture: CaptureEntity): String =
+    when {
+        capture.pdfUri.isNotBlank() && localFileExists(capture.pdfUri)            -> "PDF document"
+        !capture.previewUri.isNullOrBlank() && localFileExists(capture.previewUri) -> "Image"
+        else                                                                       -> "Document"
+    }
+
+/**
+ * Resolve the PDF's on-disk size for the [DetailsCard] Size row.
+ * Best-effort — returns null when the URI is missing/unparseable or
+ * the file isn't readable. Run on Dispatchers.IO; safe to call from a
+ * suspend block.
+ */
+private fun resolvePdfFileSize(rawUri: String?): Long? {
+    if (rawUri.isNullOrBlank()) return null
+    val parsed = runCatching { Uri.parse(rawUri) }.getOrNull() ?: return null
+    val file = when (parsed.scheme) {
+        "file" -> parsed.path?.let(::File)
+        null   -> File(rawUri)
+        else   -> null
+    } ?: return null
+    return runCatching { file.length().takeIf { it > 0 } }.getOrNull()
 }
 
 /**
@@ -884,11 +1374,15 @@ private fun OcrSection(
     ocrPages: List<OcrResultEntity>,
     ocrDao: OcrResultDao,
     onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
 
-    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
