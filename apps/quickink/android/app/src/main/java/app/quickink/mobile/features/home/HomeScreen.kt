@@ -413,7 +413,7 @@ private fun HomeHeader(
     // same ambient/contact drop shadow stack. Differs in two
     // intentional ways: no upward `lift` (the avatar isn't floating
     // above a bar surface), and the inner glyph is dialled down
-    // from the FAB's 30dp Bolt to a 16dp Outlined.Face — the
+    // from the FAB's 30dp Bolt to a 22dp Outlined.Face — the
     // FAB is the primary action; the avatar is a secondary
     // identity tap and reads quieter.
     val avatarInner  = 56.dp
@@ -534,7 +534,7 @@ private fun HomeHeader(
                             // Symbols. Still bright enough to read
                             // on the coral disc.
                             tint               = colors.textOnAccent.copy(alpha = 0.75f),
-                            modifier           = Modifier.size(16.dp),
+                            modifier           = Modifier.size(22.dp),
                         )
                     }
 
