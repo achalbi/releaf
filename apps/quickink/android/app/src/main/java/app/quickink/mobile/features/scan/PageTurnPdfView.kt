@@ -176,19 +176,28 @@ private fun PageTurnPager(
 
     // External → internal: when the controlled `currentPage` changes
     // (e.g. user tapped a thumbnail), animate the pager to that page.
-    // Skipped when the pager is already there to avoid an animation
-    // back to the same page when the parent echoes our own emission.
+    // Skipped when the pager is already there or already heading
+    // there (targetPage == currentPage prop) so we don't restart an
+    // in-flight animation when the back-sync echoes a transient
+    // mid-animation page through the parent.
     LaunchedEffect(currentPage) {
         if (currentPage in pages.indices &&
-            currentPage != pagerState.currentPage) {
+            currentPage != pagerState.currentPage &&
+            currentPage != pagerState.targetPage) {
             pagerState.animateScrollToPage(currentPage)
         }
     }
 
-    // Internal → external: when the user swipes, mirror the new page
-    // to the parent so the thumbnails strip's selected chip follows.
-    LaunchedEffect(pagerState.currentPage) {
-        onCurrentPageChange(pagerState.currentPage)
+    // Internal → external: mirror the SETTLED page (post-animation,
+    // post-swipe) up to the parent. Using `settledPage` rather than
+    // `currentPage` is critical — `currentPage` updates as pages
+    // cross the centre during a programmatic animateScrollToPage,
+    // and echoing those transients back through the parent would
+    // cancel the in-flight animation (the `LaunchedEffect(currentPage)`
+    // above is re-keyed every time the prop changes). `settledPage`
+    // only fires when the pager comes to rest.
+    LaunchedEffect(pagerState.settledPage) {
+        onCurrentPageChange(pagerState.settledPage)
     }
 
     // Pinch-to-zoom + pan state for the ACTIVE page only. Reset to
