@@ -289,8 +289,8 @@ struct HomeScreen: View {
     }
 
     /// Top-right profile pill — coral disc with the user's profile
-    /// photo (when picked), the user's initial (when we have a
-    /// name), or the SF Symbol person glyph. Tap slides the
+    /// photo, initial, or SF Symbol person glyph capped at 22pt.
+    /// Tapping slides the
     /// profile drawer in from the leading edge — same pattern as
     /// Releaf's avatar → home drawer. The drawer surfaces Profile
     /// (the new editor), Settings, and Sign out as account actions.
@@ -309,15 +309,15 @@ struct HomeScreen: View {
                     Image(uiImage: avatar)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 44, height: 44)
+                        .frame(width: 22, height: 22)
                         .clipShape(Circle())
                 } else if let initial = displayNameInitial {
                     Text(initial)
-                        .font(QuickInkText.heading)
+                        .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(QuickInkColors.accent)
                 } else {
                     Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 28))
+                        .font(.system(size: 22))
                         .foregroundStyle(QuickInkColors.accent)
                 }
             }

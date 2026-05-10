@@ -413,12 +413,13 @@ private fun HomeHeader(
     // same ambient/contact drop shadow stack. Differs in two
     // intentional ways: no upward `lift` (the avatar isn't floating
     // above a bar surface), and the inner glyph is dialled down
-    // from the FAB's 30dp Bolt to a 22dp Outlined.Face — the
+    // from the FAB's 30dp Bolt to a 32dp Outlined.Face — the
     // FAB is the primary action; the avatar is a secondary
     // identity tap and reads quieter.
-    val avatarInner  = 56.dp
-    val avatarRing   = 4.dp
-    val avatarOuter  = avatarInner + avatarRing * 2
+    val avatarInner     = 56.dp
+    val avatarImageSize = 32.dp
+    val avatarRing      = 4.dp
+    val avatarOuter     = avatarInner + avatarRing * 2
     val coralGradient = Brush.verticalGradient(
         colors = listOf(colors.accent, colors.accentDeep),
     )
@@ -427,8 +428,8 @@ private fun HomeHeader(
         // Top-left profile pill — a button, not a label. Mirrors
         // the centre Zap FAB's chrome so the two read as siblings:
         // user's space on the left, action space on the right.
-        // Profile photo (when picked) is the primary visual; the
-        // Face glyph is the default fallback. Tap slides the
+        // Profile photo (when picked) and the fallback Face glyph
+        // are capped at 22dp inside the coral disc. Tap slides the
         // profile drawer in from the leading edge — same pattern
         // as Releaf's home avatar → home drawer.
         // No ripple — the coral disc + canvas ring + drop shadow
@@ -522,7 +523,7 @@ private fun HomeHeader(
                     // with a descender / non-Latin / emoji" question.
                     val fallback: @Composable () -> Unit = {
                         Box(
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier.size(avatarImageSize),
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
@@ -558,15 +559,17 @@ private fun HomeHeader(
                                 // photo is overwritten in-place at the
                                 // same path — without this, a fresh
                                 // pick would keep serving the stale
-                                // bitmap. The avatar is small (56dp),
-                                // so the perf cost is nil.
+                                // bitmap. The rendered photo is small
+                                // (32dp), so the perf cost is nil.
                                 .memoryCachePolicy(CachePolicy.DISABLED)
                                 .diskCachePolicy(CachePolicy.DISABLED)
                                 .crossfade(true)
                                 .build(),
                             contentDescription = "Open profile menu",
                             contentScale       = ContentScale.Crop,
-                            modifier           = Modifier.fillMaxSize().clip(CircleShape),
+                            modifier           = Modifier
+                                .size(avatarImageSize)
+                                .clip(CircleShape),
                             loading = { fallback() },
                             error   = { fallback() },
                         )
