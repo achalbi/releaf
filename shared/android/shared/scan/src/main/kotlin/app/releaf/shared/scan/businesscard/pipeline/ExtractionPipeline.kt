@@ -59,8 +59,25 @@ class ExtractionPipeline(
         if (blocks.isEmpty()) return ExtractedContact.empty
         val timings = mutableMapOf<String, Long>()
 
+        // ML Kit emits both Paragraph- and Line-grained blocks for
+        // the same text. The Paragraph block concatenates every line
+        // it covers with `\n`s — which means it contains every
+        // keyword on the card *and* spans a giant bbox, so every
+        // classifier scores it sky-high (companySuffix hit ✓, name
+        // top-position ✓, address postcode ✓ — all on the same
+        // paragraph block). Filter to Line granularity when any
+        // Line block is present; otherwise fall back to whatever the
+        // engine gave us. iOS Vision only emits Line, so this is a
+        // no-op there.
+        val preferred = if (blocks.any { it.kind == OcrBlock.Kind.Line }) {
+            blocks.filter { it.kind == OcrBlock.Kind.Line }
+        } else {
+            blocks
+        }
+        if (preferred.isEmpty()) return ExtractedContact.empty
+
         val tLayout = System.nanoTime()
-        val layout = layoutOf(blocks)
+        val layout = layoutOf(preferred)
         timings["layout"] = System.nanoTime() - tLayout
 
         // Run base classifiers.

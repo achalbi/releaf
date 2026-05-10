@@ -183,6 +183,62 @@ class BusinessCardExtractorTest {
         assertTrue(out.websites.isEmpty())
     }
 
+    @Test fun mlKitDualEmission_paragraphBlockDoesNotPoisonClassifiers() {
+        // ML Kit Latin v2 emits BOTH paragraph- and line-grained
+        // blocks for every text region. The paragraph block is a
+        // multi-line concatenation that covers a giant bbox and
+        // contains every keyword on the card — without filtering to
+        // Line, every classifier scores it sky-high (largeText
+        // bonus + companySuffix hit + topPosition + …) and the
+        // user gets the full card text as the company / name /
+        // address. Filter must keep the result identical to the
+        // line-only baseline.
+        val lineBlocks = listOf(
+            block(0, "Aarav Sharma",                y = 0.05, h = 0.10),
+            block(1, "Senior Software Engineer",    y = 0.18, h = 0.06),
+            block(2, "Acme Technologies Pvt Ltd",   y = 0.30, h = 0.07),
+            block(3, "+91 98765 43210",             y = 0.45, h = 0.04),
+            block(4, "aarav@acme.tech",             y = 0.52, h = 0.04),
+            block(5, "12, MG Road,",                y = 0.78, h = 0.04),
+            block(6, "Bangalore 560001",            y = 0.85, h = 0.04),
+        )
+        // Synthetic paragraph block — same content concatenated,
+        // larger bbox spanning the whole text region.
+        val paragraphBlock = OcrBlock(
+            text       = lineBlocks.joinToString("\n") { it.text },
+            bbox       = OcrBbox(x = 0.05, y = 0.05, width = 0.6, height = 0.85),
+            confidence = null,
+            language   = "en",
+            kind       = OcrBlock.Kind.Paragraph,
+        )
+        val withParagraph = listOf(paragraphBlock) + lineBlocks
+        val out = BusinessCardExtractor.extract(withParagraph)
+
+        // Same output as the line-only baseline — paragraph filtered out.
+        assertEquals("Aarav Sharma", out.name)
+        assertEquals("Senior Software Engineer", out.designation)
+        assertEquals("Acme Technologies Pvt Ltd", out.company)
+        assertEquals(listOf("+919876543210"), out.phones)
+        assertEquals(listOf("aarav@acme.tech"), out.emails)
+    }
+
+    @Test fun fallsBackToWhateverEngineEmitsWhenNoLineBlocks() {
+        // Defensive: an engine that emits only paragraph-grained
+        // (or word-grained) blocks shouldn't return empty — fall
+        // back to whatever's there.
+        val blocks = listOf(
+            OcrBlock(
+                text       = "Aarav Sharma",
+                bbox       = OcrBbox(x = 0.05, y = 0.05, width = 0.6, height = 0.10),
+                confidence = null,
+                language   = "en",
+                kind       = OcrBlock.Kind.Paragraph,
+            ),
+        )
+        val out = BusinessCardExtractor.extract(blocks)
+        assertEquals("Aarav Sharma", out.name)
+    }
+
     // -------- helpers --------
 
     /** Synthetic block at the supplied y / height. Width fixed at 0.6. */

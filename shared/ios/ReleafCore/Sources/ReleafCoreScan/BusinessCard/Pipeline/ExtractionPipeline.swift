@@ -29,8 +29,21 @@ public struct ExtractionPipeline: Sendable {
         guard !blocks.isEmpty else { return .empty }
         var timings: [String: UInt64] = [:]
 
+        // ML Kit emits both Paragraph- and Line-grained blocks; the
+        // Paragraph block concatenates every line on the card and
+        // poisons the classifier scores. Filter to Line when present.
+        // Vision only emits Line, so this is a no-op there. Mirror
+        // of the Android pipeline.
+        let preferred: [OcrBlock] = {
+            if blocks.contains(where: { $0.kind == .line }) {
+                return blocks.filter { $0.kind == .line }
+            }
+            return blocks
+        }()
+        guard !preferred.isEmpty else { return .empty }
+
         let t0 = DispatchTime.now().uptimeNanoseconds
-        let layout = layoutOf(blocks)
+        let layout = layoutOf(preferred)
         timings["layout"] = DispatchTime.now().uptimeNanoseconds - t0
 
         let t1 = DispatchTime.now().uptimeNanoseconds
