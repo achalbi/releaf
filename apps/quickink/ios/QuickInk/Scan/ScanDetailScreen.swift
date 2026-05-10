@@ -128,7 +128,7 @@ struct ScanDetailScreen: View {
             if hasBottomNav,
                let onHome, let onLibrary, let onScan, let onSearch, let onSettings {
                 QuickInkBottomNavBar(
-                    activeTab:  .library,
+                    activeTab:  .none,
                     onHome:     onHome,
                     onLibrary:  onLibrary,
                     onScan:     onScan,

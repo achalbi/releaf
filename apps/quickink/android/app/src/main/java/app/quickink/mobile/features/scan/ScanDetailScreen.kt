@@ -374,7 +374,7 @@ fun ScanDetailScreen(
     if (onHome != null && onLibrary != null && onScan != null &&
         onSearch != null && onSettings != null) {
         QuickInkBottomNavBar(
-            activeTab  = NavTab.Library,
+            activeTab  = NavTab.None,
             onHome     = onHome,
             onLibrary  = onLibrary,
             onScan     = onScan,

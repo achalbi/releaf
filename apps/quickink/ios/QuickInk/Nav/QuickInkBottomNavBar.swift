@@ -38,8 +38,11 @@ import SwiftUI
 
 /// Top-level destinations that own a tab in the bottom nav. Used by
 /// `QuickInkBottomNavBar` to paint the active cell. Scan is *not* a
-/// tab — it's a transient action launched from the FAB.
-public enum NavTab { case home, library, search, settings }
+/// tab — it's a transient action launched from the FAB. `none` is a
+/// sentinel for sub-screens (e.g. ScanDetail) that host the bar but
+/// aren't themselves a destination — passing `.none` paints no
+/// active cell.
+public enum NavTab { case home, library, search, settings, none }
 
 /// The reserved space the bottom nav occupies on screens that own a
 /// scroll surface. Padding callers should add at the bottom of their

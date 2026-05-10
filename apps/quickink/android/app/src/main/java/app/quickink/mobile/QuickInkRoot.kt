@@ -379,6 +379,20 @@ private fun MainShell(
         }
     }
 
+    /// Variant of [navToTab] used by ScanDetailScreen's bottom nav.
+    /// Skips `restoreState` so tapping Library / Search from the
+    /// detail screen lands on a fresh tab view (top of list, no
+    /// retained search query) rather than the saved state. Matches
+    /// iOS where the same callback path resets the navigation stack.
+    val navToTabFresh: (String) -> Unit = { route ->
+        navController.navigate(route) {
+            popUpTo(Routes.HOME) {
+                inclusive = false
+            }
+            launchSingleTop = true
+        }
+    }
+
     NavHost(navController = navController, startDestination = Routes.HOME) {
         composable(Routes.HOME) {
             HomeScreen(
@@ -482,11 +496,15 @@ private fun MainShell(
                 captureId  = captureId,
                 userId     = userId,
                 onBack     = { navController.popBackStack() },
-                onHome     = { navToTab(Routes.HOME) },
-                onLibrary  = { navToTab(Routes.NOTES_LIST) },
+                // Use the fresh-state variant — tapping Library or
+                // Search from a scan detail should land on the
+                // tab's default view, not the saved state from
+                // before the user opened the detail.
+                onHome     = { navToTabFresh(Routes.HOME) },
+                onLibrary  = { navToTabFresh(Routes.NOTES_LIST) },
                 onScan     = { showQuickCapture = true },
-                onSearch   = { navToTab(Routes.SEARCH) },
-                onSettings = { navToTab(Routes.SETTINGS) },
+                onSearch   = { navToTabFresh(Routes.SEARCH) },
+                onSettings = { navToTabFresh(Routes.SETTINGS) },
             )
         }
         composable(

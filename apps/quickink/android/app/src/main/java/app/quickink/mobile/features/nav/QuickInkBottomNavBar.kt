@@ -84,7 +84,12 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
  * [QuickInkBottomNavBar] to paint the active cell. Scan is *not* a
  * tab — it's a transient action launched from the FAB.
  */
-enum class NavTab { Home, Library, Search, Settings }
+/**
+ * Top-level tab destinations + a `None` sentinel for sub-screens
+ * (e.g. ScanDetail) that host the bar but aren't themselves a
+ * destination — passing [NavTab.None] paints no active cell.
+ */
+enum class NavTab { Home, Library, Search, Settings, None }
 
 /**
  * The reserved space the bottom nav occupies on screens that own a
