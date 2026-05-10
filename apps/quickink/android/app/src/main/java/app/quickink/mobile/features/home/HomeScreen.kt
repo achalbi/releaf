@@ -603,12 +603,12 @@ private fun HomeHeader(
 /**
  * Hero card under the greeting that frames QuickInk as a paper-saving
  * tool. Shows the user's lifetime digitised page count and translates
- * it into a composite "ReLeaf points" impact score plus water spared.
+ * it into a composite "Tree points" impact score plus water spared.
  * Static leaf-green palette (independent of the user's accent picker)
  * so the eco message reads the same regardless of whether they've
  * picked Coral or Leaf Yellow for everything else.
  *
- * ReLeaf-points model — we deliberately do *not* show a flat
+ * Tree-points model — we deliberately do *not* show a flat
  * `pages / 8333` tree count any more. A single divisor flatters
  * casual users (every scan rounds to "0.00 trees") and undersells
  * power users (one tree feels small even though the lifecycle impact
@@ -633,78 +633,10 @@ private fun HomeHeader(
  * up at a constant per-page rate. Numbers are deliberately
  * conservative; the goal is a directional impact score, not a
  * precise lifecycle assessment.
- */
-/**
- * Snapshot of one user's lifetime impact, expressed both as raw LCA
- * outputs (sheets / trees-equivalent / water / CO₂ / energy) and as
- * the per-component point contributions that sum to [totalPoints].
  *
- * The hero card and the breakdown bottom sheet both read from this
- * struct so the displayed score and the per-row math can never drift
- * out of sync.
+ * Tapping the card opens [SustainabilityBreakdownSheet], which
+ * surfaces the per-component math behind the displayed score.
  */
-private data class ReleafImpact(
-    val pages: Int,
-    val pulpYield: Double,
-    val treeFraction: Double,
-    val waterLiters: Int,
-    val co2Grams: Double,
-    val energyWh: Double,
-    val pSheets: Double,
-    val pTrees: Double,
-    val pWater: Double,
-    val pCarbon: Double,
-    val pEnergy: Double,
-    val pStreak: Double,
-    val totalPoints: Int,
-)
-
-/**
- * Build a [ReleafImpact] for the given lifetime page count. See the
- * [SustainabilityHero] KDoc for the rationale behind each factor and
- * weight.
- */
-private fun computeReleafImpact(totalPages: Int): ReleafImpact {
-    val sheets       = totalPages.toDouble()
-    val pulpYield    = 0.17                          // tree biomass → paper
-    val treeFraction = (sheets / 8333.0) * pulpYield
-    val waterLiters  = totalPages * 10               // kept as Int for the L label
-    val co2Grams     = sheets * 4.6
-    val energyWh     = sheets * 50.0
-
-    // Component weights are calibrated so a single tree-milestone
-    // (~8,333 pages) lands in the low six figures, while a single
-    // captured page still scores in the low hundreds — enough to feel
-    // rewarding without making the empty-state-to-first-scan jump
-    // feel cheap.
-    val pSheets = sheets       * 7.5
-    val pTrees  = treeFraction * 12_000.0
-    val pWater  = waterLiters  * 0.6
-    val pCarbon = co2Grams     * 1.2
-    val pEnergy = energyWh     * 0.4
-    val pStreak = if (sheets > 0) ln(sheets + 1.0) * 180.0 else 0.0
-
-    val total = (pSheets + pTrees + pWater + pCarbon + pEnergy + pStreak)
-        .roundToInt()
-        .coerceAtLeast(0)
-
-    return ReleafImpact(
-        pages        = totalPages,
-        pulpYield    = pulpYield,
-        treeFraction = treeFraction,
-        waterLiters  = waterLiters,
-        co2Grams     = co2Grams,
-        energyWh     = energyWh,
-        pSheets      = pSheets,
-        pTrees       = pTrees,
-        pWater       = pWater,
-        pCarbon      = pCarbon,
-        pEnergy      = pEnergy,
-        pStreak      = pStreak,
-        totalPoints  = total,
-    )
-}
-
 @Composable
 private fun SustainabilityHero(totalPages: Int) {
     val colors = LocalQuickInkColors.current
@@ -714,7 +646,7 @@ private fun SustainabilityHero(totalPages: Int) {
     val ecoBg   = QuickInkColors.LeafGreenBase.copy(alpha = 0.18f)
     val ecoBorder = QuickInkColors.LeafGreenBase.copy(alpha = 0.40f)
 
-    val impact = remember(totalPages) { computeReleafImpact(totalPages) }
+    val impact = remember(totalPages) { computeTreeImpact(totalPages) }
     var showBreakdown by remember { mutableStateOf(false) }
 
     // Refined-warm pass: points + water are their own right-aligned
@@ -723,7 +655,7 @@ private fun SustainabilityHero(totalPages: Int) {
     // no more "first tree on the way" prose case, the integer score
     // does the same job at a glance and reads as a real metric.
     val ecoPointsLabel =
-        String.format(java.util.Locale.ROOT, "%,d ReLeaf pts", impact.totalPoints)
+        String.format(java.util.Locale.ROOT, "%,d Tree pts", impact.totalPoints)
     val title    = "By going digital"
     val headline = when {
         totalPages == 0 -> "Start saving paper"
@@ -785,9 +717,338 @@ private fun SustainabilityHero(totalPages: Int) {
             Spacer(Modifier.size(QuickInkSpacing.s2))
             Column(horizontalAlignment = Alignment.End) {
                 Text(text = ecoPointsLabel, style = type.meta, color = ecoDeep)
-                Text(text = "$waterLiters L water", style = type.meta, color = ecoDeep)
+                Text(text = "${impact.waterLiters} L water", style = type.meta, color = ecoDeep)
             }
         }
+    }
+
+    if (showBreakdown) {
+        SustainabilityBreakdownSheet(
+            impact    = impact,
+            onDismiss = { showBreakdown = false },
+        )
+    }
+}
+
+// MARK: - Sustainability impact model
+
+/**
+ * Snapshot of one user's lifetime impact, expressed both as raw LCA
+ * outputs (sheets / trees-equivalent / water / CO₂ / energy) and as
+ * the per-component point contributions that sum to [totalPoints].
+ *
+ * The hero card and the breakdown bottom sheet both read from this
+ * struct so the displayed score and the per-row math can never drift
+ * out of sync.
+ */
+private data class TreeImpact(
+    val pages: Int,
+    val pulpYield: Double,
+    val treeFraction: Double,
+    val waterLiters: Int,
+    val co2Grams: Double,
+    val energyWh: Double,
+    val pSheets: Double,
+    val pTrees: Double,
+    val pWater: Double,
+    val pCarbon: Double,
+    val pEnergy: Double,
+    val pStreak: Double,
+    val totalPoints: Int,
+)
+
+/**
+ * Build a [TreeImpact] for the given lifetime page count. See the
+ * [SustainabilityHero] KDoc for the rationale behind each factor and
+ * weight.
+ */
+private fun computeTreeImpact(totalPages: Int): TreeImpact {
+    val sheets       = totalPages.toDouble()
+    val pulpYield    = 0.17                          // tree biomass → paper
+    val treeFraction = (sheets / 8333.0) * pulpYield
+    val waterLiters  = totalPages * 10               // kept as Int for the L label
+    val co2Grams     = sheets * 4.6
+    val energyWh     = sheets * 50.0
+
+    // Component weights are calibrated so a single tree-milestone
+    // (~8,333 pages) lands in the low six figures, while a single
+    // captured page still scores in the low hundreds — enough to feel
+    // rewarding without making the empty-state-to-first-scan jump
+    // feel cheap.
+    val pSheets = sheets       * 7.5
+    val pTrees  = treeFraction * 12_000.0
+    val pWater  = waterLiters  * 0.6
+    val pCarbon = co2Grams     * 1.2
+    val pEnergy = energyWh     * 0.4
+    val pStreak = if (sheets > 0) ln(sheets + 1.0) * 180.0 else 0.0
+
+    val total = (pSheets + pTrees + pWater + pCarbon + pEnergy + pStreak)
+        .roundToInt()
+        .coerceAtLeast(0)
+
+    return TreeImpact(
+        pages        = totalPages,
+        pulpYield    = pulpYield,
+        treeFraction = treeFraction,
+        waterLiters  = waterLiters,
+        co2Grams     = co2Grams,
+        energyWh     = energyWh,
+        pSheets      = pSheets,
+        pTrees       = pTrees,
+        pWater       = pWater,
+        pCarbon      = pCarbon,
+        pEnergy      = pEnergy,
+        pStreak      = pStreak,
+        totalPoints  = total,
+    )
+}
+
+// MARK: - Sustainability breakdown sheet
+
+/**
+ * Bottom sheet that opens when the user taps [SustainabilityHero].
+ * Lays out the Tree-points calculation in two stacked sections:
+ *
+ *   1. **What we measured** — the raw lifecycle outputs (sheets,
+ *      tree-equivalent, water, CO₂, energy) with the per-sheet
+ *      conversion factor as a caption underneath each row.
+ *   2. **How that scores** — the per-component point contributions
+ *      with their weight rates as a caption, totalled at the bottom.
+ *
+ * The total at the top of the sheet is the same integer the hero card
+ * shows; both reads come from the same [TreeImpact] snapshot so the
+ * displayed score and the breakdown can never disagree.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SustainabilityBreakdownSheet(
+    impact: TreeImpact,
+    onDismiss: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    val ecoDeep = QuickInkColors.LeafGreenDeep
+    val ecoBg   = QuickInkColors.LeafGreenBase.copy(alpha = 0.18f)
+
+    val locale = java.util.Locale.ROOT
+    val totalLabel = String.format(locale, "%,d Tree pts", impact.totalPoints)
+    val pagesLabel = when (impact.pages) {
+        0    -> "No pages saved yet"
+        1    -> "From 1 page saved"
+        else -> String.format(locale, "From %,d pages saved", impact.pages)
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = colors.bg,
+        dragHandle = {
+            Box(modifier = Modifier.padding(top = QuickInkSpacing.s2, bottom = QuickInkSpacing.s3)) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 40.dp, height = 4.dp)
+                        .clip(RoundedCornerShape(QuickInkRadius.pill))
+                        .background(colors.border),
+                )
+            }
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(
+                    start  = QuickInkSpacing.s5,
+                    end    = QuickInkSpacing.s5,
+                    bottom = QuickInkSpacing.s5,
+                ),
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+        ) {
+            // Header row — title + close affordance.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text  = "How your Tree score works",
+                        style = type.heading,
+                        color = colors.ink,
+                    )
+                    Text(
+                        text  = "Five LCA factors plus an engagement boost.",
+                        style = type.meta,
+                        color = colors.inkSoft,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(colors.borderSoft)
+                        .clickable(onClick = onDismiss),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector        = Icons.Filled.Close,
+                        contentDescription = "Close",
+                        tint               = colors.inkSoft,
+                        modifier           = Modifier.size(14.dp),
+                    )
+                }
+            }
+
+            // Hero total — mirrors the card so the user sees the same
+            // number they tapped through.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(QuickInkRadius.lg))
+                    .background(ecoBg)
+                    .padding(QuickInkSpacing.s4),
+            ) {
+                Text(text = pagesLabel, style = type.meta, color = ecoDeep)
+                Text(text = totalLabel, style = type.editorial, color = colors.ink)
+            }
+
+            // Section 1 — raw lifecycle outputs.
+            BreakdownSectionHeader(label = "What we measured")
+            BreakdownRow(
+                label   = "Sheets engaged",
+                value   = String.format(locale, "%,d pages", impact.pages),
+                caption = "Lifetime captures across all notebooks",
+            )
+            BreakdownRow(
+                label   = "Tree-equivalent",
+                value   = String.format(locale, "%.4f trees", impact.treeFraction),
+                caption = String.format(
+                    locale,
+                    "pages ÷ 8,333 × %.0f%% pulp yield",
+                    impact.pulpYield * 100.0,
+                ),
+            )
+            BreakdownRow(
+                label   = "Water spared",
+                value   = String.format(locale, "%,d L", impact.waterLiters),
+                caption = "≈ 10 L of process water per A4 sheet",
+            )
+            BreakdownRow(
+                label   = "CO₂ avoided",
+                value   = formatGramsOrKg(impact.co2Grams),
+                caption = "≈ 4.6 g CO₂e per sheet, cradle-to-grave",
+            )
+            BreakdownRow(
+                label   = "Energy spared",
+                value   = formatWhOrKWh(impact.energyWh),
+                caption = "≈ 50 Wh per sheet (mill + transport)",
+            )
+
+            HorizontalDivider(color = colors.border, thickness = 1.dp)
+
+            // Section 2 — point contributions.
+            BreakdownSectionHeader(label = "How that scores")
+            BreakdownRow(
+                label   = "Sheet engagement",
+                value   = pointsLabel(locale, impact.pSheets),
+                caption = "+7.5 pts per page captured",
+            )
+            BreakdownRow(
+                label   = "Tree milestone",
+                value   = pointsLabel(locale, impact.pTrees),
+                caption = "+12,000 pts per tree-equivalent saved",
+            )
+            BreakdownRow(
+                label   = "Water",
+                value   = pointsLabel(locale, impact.pWater),
+                caption = "+0.6 pts per litre",
+            )
+            BreakdownRow(
+                label   = "CO₂",
+                value   = pointsLabel(locale, impact.pCarbon),
+                caption = "+1.2 pts per gram avoided",
+            )
+            BreakdownRow(
+                label   = "Energy",
+                value   = pointsLabel(locale, impact.pEnergy),
+                caption = "+0.4 pts per watt-hour",
+            )
+            BreakdownRow(
+                label   = "Engagement boost",
+                value   = pointsLabel(locale, impact.pStreak),
+                caption = "ln(pages + 1) × 180 — rewards sustained use",
+            )
+
+            HorizontalDivider(color = colors.border, thickness = 1.dp)
+
+            // Total row — matches the card.
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(text = "Total", style = type.label, color = colors.ink)
+                Text(text = totalLabel, style = type.heading, color = ecoDeep)
+            }
+
+            Text(
+                text  = "Numbers are deliberately conservative — directional " +
+                        "impact, not a precise lifecycle assessment.",
+                style = type.caption,
+                color = colors.muted,
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s2))
+        }
+    }
+}
+
+@Composable
+private fun BreakdownSectionHeader(label: String) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Text(
+        text  = label.uppercase(java.util.Locale.ROOT),
+        style = type.caption,
+        color = colors.muted,
+    )
+}
+
+@Composable
+private fun BreakdownRow(label: String, value: String, caption: String) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Row(
+        modifier              = Modifier.fillMaxWidth(),
+        verticalAlignment     = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = label,   style = type.label,   color = colors.ink)
+            Text(text = caption, style = type.caption, color = colors.muted)
+        }
+        Text(text = value, style = type.label, color = colors.ink)
+    }
+}
+
+/** "+1,234 pts" — used for the per-component point contributions. */
+private fun pointsLabel(locale: java.util.Locale, raw: Double): String =
+    String.format(locale, "+%,d pts", raw.roundToInt().coerceAtLeast(0))
+
+/** "812 g" under a kilo, "1.23 kg" once we cross the threshold. */
+private fun formatGramsOrKg(grams: Double): String {
+    val locale = java.util.Locale.ROOT
+    return if (grams < 1_000.0) {
+        String.format(locale, "%,d g", grams.roundToInt())
+    } else {
+        String.format(locale, "%.2f kg", grams / 1_000.0)
+    }
+}
+
+/** "812 Wh" under a kilowatt-hour, "1.23 kWh" once we cross over. */
+private fun formatWhOrKWh(wh: Double): String {
+    val locale = java.util.Locale.ROOT
+    return if (wh < 1_000.0) {
+        String.format(locale, "%,d Wh", wh.roundToInt())
+    } else {
+        String.format(locale, "%.2f kWh", wh / 1_000.0)
     }
 }
 

@@ -61,6 +61,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.quickink.mobile.R
@@ -277,7 +281,25 @@ private fun BannerHeader(
                 val fallback: @Composable () -> Unit = {
                     val initial = displayName.trim().firstOrNull()?.uppercase()
                     if (initial != null) {
-                        Text(text = initial, color = colors.accent, fontSize = 54.sp)
+                        // Strip the platform's default font padding and
+                        // centre the line-height box around the glyph,
+                        // otherwise the visible "A" floats up-and-left
+                        // off the disc's optical centre (font cap-height
+                        // sits in the upper third of the line box).
+                        Text(
+                            text     = initial,
+                            color    = colors.accent,
+                            fontSize = 54.sp,
+                            textAlign = TextAlign.Center,
+                            style    = TextStyle(
+                                platformStyle  = PlatformTextStyle(includeFontPadding = false),
+                                lineHeightStyle = LineHeightStyle(
+                                    alignment = LineHeightStyle.Alignment.Center,
+                                    trim      = LineHeightStyle.Trim.Both,
+                                ),
+                            ),
+                            lineHeight = 54.sp,
+                        )
                     } else {
                         Icon(
                             imageVector       = Icons.Filled.AccountCircle,
