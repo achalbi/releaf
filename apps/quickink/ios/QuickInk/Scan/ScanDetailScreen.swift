@@ -676,7 +676,7 @@ struct ScanDetailScreen: View {
                 .foregroundStyle(QuickInkColors.inkSoft)
             Spacer()
             Text(value)
-                .font(QuickInkText.meta)
+                .font(QuickInkText.caption)
                 .foregroundStyle(valueColor)
                 .multilineTextAlignment(.trailing)
                 .lineLimit(2)
@@ -743,12 +743,6 @@ struct ScanDetailScreen: View {
 
             VStack(spacing: 0) {
                 if let pdfURL = shareablePdfURL(from: capture) {
-                    actionRow(icon: "doc.fill", label: "Export as PDF") {
-                        ShareLink(item: pdfURL) {
-                            actionRowContent(icon: "doc.fill", label: "Export as PDF")
-                        }
-                    }
-                    actionDivider
                     actionRow(icon: "square.and.arrow.up", label: "Share") {
                         ShareLink(item: pdfURL) {
                             actionRowContent(icon: "square.and.arrow.up", label: "Share")
@@ -798,11 +792,11 @@ struct ScanDetailScreen: View {
     private func actionRowContent(icon: String, label: String, isDestructive: Bool = false) -> some View {
         HStack(spacing: QuickInkSpacing.s2) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(isDestructive ? QuickInkColors.danger : QuickInkColors.inkSoft)
-                .frame(width: 18)
+                .frame(width: 16)
             Text(label)
-                .font(QuickInkText.label)
+                .font(QuickInkText.caption)
                 .foregroundStyle(isDestructive ? QuickInkColors.danger : QuickInkColors.ink)
                 .lineLimit(1)
                 .truncationMode(.tail)

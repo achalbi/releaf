@@ -1039,7 +1039,7 @@ private fun DetailRow(
         Spacer(modifier = Modifier.weight(1f))
         Text(
             text     = value,
-            style    = type.meta,
+            style    = type.caption,
             color    = valueColor,
             maxLines = 2,
             textAlign = TextAlign.End,
@@ -1131,16 +1131,6 @@ private fun ActionsCard(
         }
 
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Export as PDF (uses the same share intent — Android
-            // doesn't have a separate "export" affordance the way
-            // iOS's ShareLink does; sharing a PDF *is* the export
-            // path on this platform).
-            ActionRow(
-                icon         = Icons.Filled.Description,
-                label        = "Export as PDF",
-                onClick      = onShare,
-            )
-            ActionDivider()
             ActionRow(
                 icon         = Icons.Filled.Share,
                 label        = "Share",
@@ -1182,17 +1172,17 @@ private fun ActionRow(
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
     ) {
-        Box(modifier = Modifier.width(18.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.width(16.dp), contentAlignment = Alignment.Center) {
             Icon(
                 imageVector        = icon,
                 contentDescription = null,
                 tint               = tint,
-                modifier           = Modifier.size(14.dp),
+                modifier           = Modifier.size(11.dp),
             )
         }
         Text(
             text     = label,
-            style    = type.label,
+            style    = type.caption,
             color    = labelColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
