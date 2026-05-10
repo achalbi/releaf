@@ -48,15 +48,17 @@ class PhoneClassifier : Classifier {
         private val PHONE_REGEX = Regex("""\+?\d[\d\s\-.()]{8,18}\d""")
 
         /**
-         * 10 → as-is. 11 with leading 0 → drop the 0. 12 with leading 91
-         * → "+<digits>". Anything else → null. Mirror of iOS / older
-         * `BusinessCardParser.normalisePhone`.
+         * 10 → as-is. 11 with leading 0 → kept as-is (the 0 is a
+         * trunk prefix some Indian cards still print; preserving it
+         * keeps the form intact for the user's contact). 12 with
+         * leading 91 → "+<digits>". Anything else → null. Mirror of
+         * iOS / older `BusinessCardParser.normalisePhone`.
          */
         fun normalisePhone(raw: String): String? {
             val digits = raw.filter { it.isDigit() }
             return when {
                 digits.length == 10                            -> digits
-                digits.length == 11 && digits.startsWith("0")  -> digits.drop(1)
+                digits.length == 11 && digits.startsWith("0")  -> digits
                 digits.length == 12 && digits.startsWith("91") -> "+$digits"
                 else                                           -> null
             }

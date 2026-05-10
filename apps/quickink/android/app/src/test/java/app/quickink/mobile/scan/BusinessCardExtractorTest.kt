@@ -71,7 +71,10 @@ class BusinessCardExtractorTest {
             "98765 43210"         to "9876543210",
             "98765-43210"         to "9876543210",
             "(987) 654-3210"      to "9876543210",
-            "09876543210"         to "9876543210",
+            // Leading 0 (trunk prefix) is preserved verbatim — the
+            // user wants the on-card form intact in the saved
+            // contact, not silently rewritten.
+            "09876543210"         to "09876543210",
             "+91 9876543210"      to "+919876543210",
             "+91-98765-43210"     to "+919876543210",
             "919876543210"        to "+919876543210",

@@ -31,18 +31,19 @@ public struct PhoneClassifier: Classifier {
         return out
     }
 
-    /// 10 → as-is. 11 with leading 0 → drop. 12 with leading 91 →
-    /// `+<digits>`. Anything else → nil.
+    /// 10 → as-is. 11 with leading 0 → kept as-is (preserves the
+    /// trunk prefix some Indian cards still print). 12 with leading
+    /// 91 → `+<digits>`. Anything else → nil.
     public static func normalisePhone(_ raw: String) -> String? {
         let digits = raw.unicodeScalars
             .filter { CharacterSet.decimalDigits.contains($0) }
             .map { String($0) }
             .joined()
         switch digits.count {
-        case 10:                                        return digits
-        case 11 where digits.hasPrefix("0"):            return String(digits.dropFirst())
-        case 12 where digits.hasPrefix("91"):           return "+" + digits
-        default:                                        return nil
+        case 10:                                return digits
+        case 11 where digits.hasPrefix("0"):    return digits
+        case 12 where digits.hasPrefix("91"):   return "+" + digits
+        default:                                return nil
         }
     }
 
