@@ -90,13 +90,18 @@ struct ScanDetailScreen: View {
                             pageThumbnailsStrip(for: capture)
                         }
 
-                        // Details card
-                        detailsCard(for: capture)
-                            .padding(.horizontal, QuickInkSpacing.s5)
-
-                        // Actions card
-                        actionsCard(for: capture)
-                            .padding(.horizontal, QuickInkSpacing.s5)
+                        // Details + Actions cards — side by side, matching
+                        // the Drive-style mockup. Both cards stretch to
+                        // equal width; on very narrow screens (iPhone SE
+                        // 1st gen) the row still fits because the rows
+                        // inside each card wrap on long values.
+                        HStack(alignment: .top, spacing: QuickInkSpacing.s3) {
+                            detailsCard(for: capture)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                            actionsCard(for: capture)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
+                        .padding(.horizontal, QuickInkSpacing.s5)
 
                         // Existing collapsible OCR section
                         ocrSection

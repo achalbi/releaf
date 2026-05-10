@@ -379,24 +379,32 @@ fun ScanDetailScreen(
                     )
                 }
 
-                // Details card — File type, Size, Created, Location, Tags
-                DetailsCard(
-                    capture     = current,
-                    pdfFileSize = pdfFileSize,
-                    onAddTag    = { showRetagSheet = true },
-                    modifier    = Modifier.padding(horizontal = QuickInkSpacing.s5),
-                )
-
-                // Actions card — Export PDF, Share, Move to folder, Delete
-                ActionsCard(
-                    capture        = current,
-                    onShare        = {
-                        sharePdf(context, current.pdfUri, current.previewUri)
-                    },
-                    onMoveToFolder = { showRetagSheet = true },
-                    onDelete       = { showDeleteConfirm = true },
-                    modifier       = Modifier.padding(horizontal = QuickInkSpacing.s5),
-                )
+                // Details + Actions cards — side by side, matching the
+                // Drive-style mockup. Both cards stretch to equal width
+                // via Modifier.weight(1f); on narrow screens the rows
+                // inside each card wrap rather than overflow.
+                Row(
+                    modifier              = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = QuickInkSpacing.s5),
+                    horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+                ) {
+                    DetailsCard(
+                        capture     = current,
+                        pdfFileSize = pdfFileSize,
+                        onAddTag    = { showRetagSheet = true },
+                        modifier    = Modifier.weight(1f),
+                    )
+                    ActionsCard(
+                        capture        = current,
+                        onShare        = {
+                            sharePdf(context, current.pdfUri, current.previewUri)
+                        },
+                        onMoveToFolder = { showRetagSheet = true },
+                        onDelete       = { showDeleteConfirm = true },
+                        modifier       = Modifier.weight(1f),
+                    )
+                }
 
                 // Existing collapsible OCR section
                 OcrSection(
