@@ -63,9 +63,6 @@ struct ScanDetailScreen: View {
     /// the highlighted thumbnail and which page is shown in the
     /// preview. Defaults to 0 (first page).
     @State private var selectedPageIndex: Int = 0
-    /// Drives the "More" action menu sheet. Holds duplicate / move
-    /// / etc. — keeping the top bar uncluttered.
-    @State private var showMoreMenu = false
     /// On-disk size of the capture's PDF in bytes, loaded lazily on
     /// appear so the Details card can show "2.4 MB" etc. Nil until
     /// resolved or when the file isn't readable.
@@ -96,8 +93,6 @@ struct ScanDetailScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            topBar
-
             ScrollView {
                 VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
                     if let capture {
@@ -216,22 +211,6 @@ struct ScanDetailScreen: View {
                 .font(.caption)
                 .foregroundStyle(QuickInkColors.inkSoft)
         }
-        // More menu — secondary actions surfaced from the top-bar
-        // ellipsis button. Keeps the top bar uncluttered while still
-        // providing quick access to move-to-folder and delete.
-        .confirmationDialog(
-            "More options",
-            isPresented: $showMoreMenu,
-            titleVisibility: .hidden
-        ) {
-            Button("Move to folder") {
-                showRetagSheet = true
-            }
-            Button("Delete scan", role: .destructive) {
-                showDeleteConfirm = true
-            }
-            Button("Cancel", role: .cancel) {}
-        }
         // Fullscreen flipbook viewer — opens when the user taps the
         // overlay fullscreen button on the inline preview. Only
         // meaningful when a real PDF resolves on disk; the
@@ -263,70 +242,6 @@ struct ScanDetailScreen: View {
     private var hasBottomNav: Bool {
         onHome != nil && onLibrary != nil && onScan != nil &&
         onSearch != nil && onSettings != nil
-    }
-
-    /// Computed top-bar title — prefers the user-set `title`, falls
-    /// back to the category, then to the generic "Scan" label so the
-    /// header is never empty.
-    private var displayedTopBarTitle: String {
-        if let t = capture?.title?.trimmingCharacters(in: .whitespaces),
-           !t.isEmpty {
-            return t
-        }
-        return capture?.category ?? "Scan"
-    }
-
-    // MARK: - Top bar
-
-    @ViewBuilder
-    private var topBar: some View {
-        HStack(spacing: QuickInkSpacing.s2) {
-            // Circular back button — matches the floating-pill style
-            // from the mockup (white surface, soft border, 44pt hit
-            // target).
-            Button(action: onBack) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(QuickInkColors.ink)
-                    .frame(width: 40, height: 40)
-                    .background(QuickInkColors.surface)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(QuickInkColors.border, lineWidth: 1))
-            }
-            .accessibilityLabel("Back to library")
-
-            Spacer()
-
-            // Share/Export PDF — circular pill matching back button.
-            if let pdfURL = shareablePdfURL(from: capture) {
-                ShareLink(item: pdfURL) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(QuickInkColors.ink)
-                        .frame(width: 40, height: 40)
-                        .background(QuickInkColors.surface)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(QuickInkColors.border, lineWidth: 1))
-                }
-                .accessibilityLabel("Share scan")
-            }
-
-            // More menu — opens a confirmation dialog with secondary
-            // actions (move to folder, delete).
-            Button(action: { showMoreMenu = true }) {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(QuickInkColors.ink)
-                    .frame(width: 40, height: 40)
-                    .background(QuickInkColors.surface)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(QuickInkColors.border, lineWidth: 1))
-            }
-            .accessibilityLabel("More options")
-        }
-        .padding(.horizontal, QuickInkSpacing.s5)
-        .padding(.top, QuickInkSpacing.s2)
-        .padding(.bottom, QuickInkSpacing.s2)
     }
 
     // MARK: - Preview
@@ -781,9 +696,9 @@ struct ScanDetailScreen: View {
     private func actionsCard(for capture: CaptureSummary) -> some View {
         VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
             HStack(spacing: QuickInkSpacing.s2) {
-                Image(systemName: "bolt.fill")
+                Image(systemName: "square.grid.2x2.fill")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(QuickInkColors.accent)
+                    .foregroundStyle(QuickInkColors.inkSoft)
                 Text("Actions")
                     .font(QuickInkText.cardTitle)
                     .foregroundStyle(QuickInkColors.ink)

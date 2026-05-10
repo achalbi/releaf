@@ -40,9 +40,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -52,13 +50,11 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.LocalOffer
-import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -152,10 +148,6 @@ fun ScanDetailScreen(
     // the inline preview; cleared by the dialog's close affordance or
     // the back press.
     var showFullscreenViewer by remember(captureId) { mutableStateOf(false) }
-    // More-menu dropdown anchor state. Driven by the ellipsis button
-    // in the top bar; opens a small menu with secondary actions
-    // (move to folder, delete) so the bar itself stays uncluttered.
-    var showMoreMenu by remember { mutableStateOf(false) }
     // Selected page index for the thumbnails strip (0-based). Visual-
     // only highlight today; tap-to-jump is a follow-up that requires
     // surfacing a `currentPage` state through PageTurnPdfView.
@@ -253,78 +245,6 @@ fun ScanDetailScreen(
             .fillMaxSize()
             .padding(top = statusBarTop + QuickInkSpacing.s4),
     ) {
-        // Top bar — circular floating buttons (back, share, more)
-        // matching the mockup's pill style. Title moves into the
-        // body's title header, freeing the top bar for action chips.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = QuickInkSpacing.s5, vertical = QuickInkSpacing.s2),
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
-        ) {
-            CircularTopBarButton(
-                icon            = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDesc     = "Back to library",
-                onClick         = onBack,
-            )
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            if (capture != null) {
-                CircularTopBarButton(
-                    icon        = Icons.Filled.Share,
-                    contentDesc = "Share scan",
-                    onClick     = {
-                        sharePdf(context, capture?.pdfUri, capture?.previewUri)
-                    },
-                )
-            }
-
-            // More menu — anchored to the ellipsis button. Opens a
-            // small dropdown with secondary actions (move to folder,
-            // delete) so the bar stays uncluttered.
-            Box {
-                CircularTopBarButton(
-                    icon        = Icons.Filled.MoreHoriz,
-                    contentDesc = "More options",
-                    onClick     = { showMoreMenu = true },
-                )
-                DropdownMenu(
-                    expanded         = showMoreMenu,
-                    onDismissRequest = { showMoreMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text    = { Text("Move to folder", style = type.body, color = colors.ink) },
-                        onClick = {
-                            showMoreMenu = false
-                            showRetagSheet = true
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector        = Icons.Filled.Folder,
-                                contentDescription = null,
-                                tint               = colors.inkSoft,
-                            )
-                        },
-                    )
-                    DropdownMenuItem(
-                        text    = { Text("Delete scan", style = type.body, color = colors.danger) },
-                        onClick = {
-                            showMoreMenu = false
-                            showDeleteConfirm = true
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector        = Icons.Filled.Delete,
-                                contentDescription = null,
-                                tint               = colors.danger,
-                            )
-                        },
-                    )
-                }
-            }
-        }
 
         if (showDeleteConfirm) {
             AlertDialog(
@@ -803,37 +723,6 @@ private fun localFileExists(uri: String?): Boolean {
  * opens the title editor modal owned by [ScanDetailScreen].
  */
 /**
- * Circular top-bar action button. Matches iOS's floating-pill style —
- * white surface with a soft border, 40dp hit target. Used for back,
- * share, and the more-menu trigger so the bar reads as a floating
- * action layer rather than a flat row.
- */
-@Composable
-private fun CircularTopBarButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDesc: String,
-    onClick: () -> Unit,
-) {
-    val colors = LocalQuickInkColors.current
-    Box(
-        modifier = Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(colors.surface)
-            .border(1.dp, colors.border, CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector        = icon,
-            contentDescription = contentDesc,
-            tint               = colors.ink,
-            modifier           = Modifier.size(18.dp),
-        )
-    }
-}
-
-/**
  * Large display title at the top of the detail screen, matching the
  * mockup: prominent display title with an inline edit pencil,
  * followed by the breadcrumb row (date • pages • category).
@@ -1164,9 +1053,9 @@ private fun ActionsCard(
             horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
         ) {
             Icon(
-                imageVector        = Icons.Filled.Bolt,
+                imageVector        = Icons.Filled.GridView,
                 contentDescription = null,
-                tint               = colors.accent,
+                tint               = colors.inkSoft,
                 modifier           = Modifier.size(12.dp),
             )
             Text(text = "Actions", style = type.cardTitle, color = colors.ink)
