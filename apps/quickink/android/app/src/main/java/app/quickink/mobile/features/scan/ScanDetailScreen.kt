@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -871,11 +872,14 @@ private fun PageThumbnailsStrip(
                     tint               = colors.muted,
                     modifier           = Modifier.size(20.dp),
                 )
-                // Page-number badge bottom-right
+                // Page-number badge bottom-right. Use `offset` rather
+                // than negative padding (which crashes Compose at
+                // runtime — Modifier.padding rejects negative dp).
+                // Mirror of iOS `.offset(x: 6, y: 6)` on the same chip.
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(end = (-6).dp, bottom = (-6).dp)
+                        .offset(x = 6.dp, y = 6.dp)
                         .size(22.dp)
                         .clip(CircleShape)
                         .background(if (selected) colors.accent else colors.surface)
