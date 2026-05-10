@@ -517,62 +517,40 @@ private func drawMother(
         },
         with: .color(p.hairBrown)
     )
-    // Hair flow strands — thin lighter-tone strokes inside the hair
-    // mass to give it texture rather than reading as a flat brown
-    // helmet. Three strokes on each side following the silhouette
-    // edges, plus a centre parting stroke that catches the light
-    // along the part-line.
+    // Hair flow strands — thin lighter-tone strokes giving the
+    // shoulder-length hair flow texture. Constrained to the
+    // shoulder regions (x outside ±8, y from -8 down to 5) so the
+    // strokes never bulge across the face cutout — the previous
+    // version had the curves dipping through the face circle which
+    // read as "hair painted on her cheek".
     let hairHi = p.hairLight
+    for x in [-14.0, -12.0, -10.0] {
+        head.stroke(
+            Path { pth in
+                pth.move(to: CGPoint(x: x, y: -8))
+                pth.addLine(to: CGPoint(x: x - 0.5, y: 5))
+            },
+            with: .color(hairHi),
+            style: StrokeStyle(lineWidth: 0.6, lineCap: .round)
+        )
+    }
+    for x in [10.0, 12.0, 14.0] {
+        head.stroke(
+            Path { pth in
+                pth.move(to: CGPoint(x: x, y: -8))
+                pth.addLine(to: CGPoint(x: x + 0.5, y: 5))
+            },
+            with: .color(hairHi),
+            style: StrokeStyle(lineWidth: 0.6, lineCap: .round)
+        )
+    }
+    // Centre parting — sits ABOVE the face circle (face top ≈ y=-28.5),
+    // not on the forehead. Stops short at y=-26 so it doesn't bleed
+    // onto the cheeks.
     head.stroke(
         Path { pth in
-            pth.move(to: CGPoint(x: -10, y: -25))
-            pth.addQuadCurve(
-                to:      CGPoint(x: -13, y: 0),
-                control: CGPoint(x: -14, y: -10)
-            )
-        },
-        with: .color(hairHi),
-        style: StrokeStyle(lineWidth: 0.7, lineCap: .round)
-    )
-    head.stroke(
-        Path { pth in
-            pth.move(to: CGPoint(x: -6, y: -28))
-            pth.addQuadCurve(
-                to:      CGPoint(x: -10, y: 4),
-                control: CGPoint(x: -10, y: -10)
-            )
-        },
-        with: .color(hairHi),
-        style: StrokeStyle(lineWidth: 0.6, lineCap: .round)
-    )
-    head.stroke(
-        Path { pth in
-            pth.move(to: CGPoint(x: 10, y: -25))
-            pth.addQuadCurve(
-                to:      CGPoint(x: 13, y: 0),
-                control: CGPoint(x: 14, y: -10)
-            )
-        },
-        with: .color(hairHi),
-        style: StrokeStyle(lineWidth: 0.7, lineCap: .round)
-    )
-    head.stroke(
-        Path { pth in
-            pth.move(to: CGPoint(x: 6, y: -28))
-            pth.addQuadCurve(
-                to:      CGPoint(x: 10, y: 4),
-                control: CGPoint(x: 10, y: -10)
-            )
-        },
-        with: .color(hairHi),
-        style: StrokeStyle(lineWidth: 0.6, lineCap: .round)
-    )
-    // Centre parting — short stroke along the top of the head where
-    // the hair separates left/right.
-    head.stroke(
-        Path { pth in
-            pth.move(to: CGPoint(x: 0, y: -29))
-            pth.addLine(to: CGPoint(x: 0, y: -22))
+            pth.move(to: CGPoint(x: 0, y: -31))
+            pth.addLine(to: CGPoint(x: 0, y: -28))
         },
         with: .color(hairHi),
         style: StrokeStyle(lineWidth: 0.5, lineCap: .round)

@@ -42,114 +42,88 @@ struct LaunchPointsCounter: View {
         else { content }
     }
 
-    /// Slide-in (eased back overshoot) → hold → slide-out (eased
-    /// in cubic). Multiplied opacity collapses the timeline to a
-    /// single composite alpha + tx.
+    /// Slide-in (eased back overshoot from above) → hold → fade out.
+    /// Centered horizontally at the top of the screen, with no
+    /// background pill — the number sits directly on the sky
+    /// gradient. Designed to read at a glance from across the room.
     @ViewBuilder
     private var content: some View {
         let slideIn  = ease(LaunchEasing.easeOutBack, between(time, 0.5, 1.4))
         let slideOut = 1 - ease(LaunchEasing.easeInCubic, between(time, 4.45, 5.0))
         let op = max(0, min(1, slideIn * slideOut))
-        let tx = (1 - slideIn) * -120
+        let ty = (1 - slideIn) * -30                       // drop in from above
         let cT = ease(LaunchEasing.easeOutCubic, between(time, 1.85, 4.1))
         let value = Int((Double(target) * cT).rounded())
         let ticking = cT > 0 && cT < 0.99
-        let pulse = ticking ? 1 + 0.025 * abs(sin(time * 13.5)) : 1.0
+        let pulse = ticking ? 1 + 0.02 * abs(sin(time * 13.5)) : 1.0
         let celebrate = ease(LaunchEasing.easeOutBack, between(time, 4.0, 4.3))
         let celeFade  = ease(LaunchEasing.easeInCubic, between(time, 4.2, 4.45))
-        let celeScale = 1 + celebrate * 0.08 * (1 - celeFade)
+        let celeScale = 1 + celebrate * 0.10 * (1 - celeFade)
 
-        HStack(spacing: 9) {
-            // Leaf glyph — same path commands as the JSX
-            // `<svg viewBox="0 0 18 18">` source.
-            Canvas { ctx, _ in
-                let path = Path { p in
-                    p.move(to: CGPoint(x: 9, y: 1.5))
-                    p.addCurve(
-                        to:       CGPoint(x: 2.5, y: 12),
-                        control1: CGPoint(x: 4,   y: 3),
-                        control2: CGPoint(x: 1.5, y: 7)
-                    )
-                    p.addCurve(
-                        to:       CGPoint(x: 6.8, y: 11.2),
-                        control1: CGPoint(x: 4,   y: 12.3),
-                        control2: CGPoint(x: 5.5, y: 12)
-                    )
-                    p.addLine(to: CGPoint(x: 6.8, y: 8))
-                    p.addLine(to: CGPoint(x: 7.6, y: 8))
-                    p.addLine(to: CGPoint(x: 7.6, y: 10.7))
-                    p.addCurve(
-                        to:       CGPoint(x: 10.5, y: 7.2),
-                        control1: CGPoint(x: 8.7,  y: 9.9),
-                        control2: CGPoint(x: 9.7,  y: 8.7)
-                    )
-                    p.addLine(to: CGPoint(x: 9, y: 7))
-                    p.addLine(to: CGPoint(x: 10.8, y: 6.5))
-                    p.addCurve(
-                        to:       CGPoint(x: 12, y: 3.4),
-                        control1: CGPoint(x: 11.3, y: 5.5),
-                        control2: CGPoint(x: 11.7, y: 4.5)
-                    )
-                    p.addCurve(
-                        to:       CGPoint(x: 9, y: 1.5),
-                        control1: CGPoint(x: 11,  y: 2.4),
-                        control2: CGPoint(x: 10,  y: 1.8)
-                    )
-                    p.closeSubpath()
+        // Use the deep-green feed accent for ink-on-cream contrast —
+        // the badgeAccent (light green) doesn't read on the cream sky.
+        let inkColor = palette.feedAccent
+
+        VStack(spacing: 4) {
+            HStack(alignment: .center, spacing: 10) {
+                // Leaf glyph at hero size.
+                Canvas { ctx, _ in
+                    let path = Path { p in
+                        p.move(to: CGPoint(x: 9, y: 1.5))
+                        p.addCurve(
+                            to:       CGPoint(x: 2.5, y: 12),
+                            control1: CGPoint(x: 4,   y: 3),
+                            control2: CGPoint(x: 1.5, y: 7)
+                        )
+                        p.addCurve(
+                            to:       CGPoint(x: 6.8, y: 11.2),
+                            control1: CGPoint(x: 4,   y: 12.3),
+                            control2: CGPoint(x: 5.5, y: 12)
+                        )
+                        p.addLine(to: CGPoint(x: 6.8, y: 8))
+                        p.addLine(to: CGPoint(x: 7.6, y: 8))
+                        p.addLine(to: CGPoint(x: 7.6, y: 10.7))
+                        p.addCurve(
+                            to:       CGPoint(x: 10.5, y: 7.2),
+                            control1: CGPoint(x: 8.7,  y: 9.9),
+                            control2: CGPoint(x: 9.7,  y: 8.7)
+                        )
+                        p.addLine(to: CGPoint(x: 9, y: 7))
+                        p.addLine(to: CGPoint(x: 10.8, y: 6.5))
+                        p.addCurve(
+                            to:       CGPoint(x: 12, y: 3.4),
+                            control1: CGPoint(x: 11.3, y: 5.5),
+                            control2: CGPoint(x: 11.7, y: 4.5)
+                        )
+                        p.addCurve(
+                            to:       CGPoint(x: 9, y: 1.5),
+                            control1: CGPoint(x: 11,  y: 2.4),
+                            control2: CGPoint(x: 10,  y: 1.8)
+                        )
+                        p.closeSubpath()
+                    }
+                    // Scale the 18×18 viewBox up to 36×36.
+                    var c = ctx
+                    c.scaleBy(x: 36.0/18.0, y: 36.0/18.0)
+                    c.fill(path, with: .color(inkColor))
                 }
-                ctx.fill(path, with: .color(palette.badgeAccent))
-            }
-            .frame(width: 18, height: 18)
+                .frame(width: 36, height: 36)
 
-            VStack(alignment: .leading, spacing: 3) {
                 Text("\(value)")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(palette.badgeText)
+                    .font(.system(size: 56, weight: .bold))
+                    .foregroundStyle(inkColor)
                     .monospacedDigit()
-                Text("Tree Points")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(palette.badgeAccent)
-                    .tracking(1.1) // matches JSX 0.12em letterSpacing
-                    .textCase(.uppercase)
             }
+            Text("TREE POINTS")
+                .font(.system(size: 12, weight: .semibold))
+                .tracking(3.5)
+                .foregroundStyle(inkColor.opacity(0.7))
         }
-        .padding(.leading, 11)
-        .padding(.trailing, 14)
-        .padding(.vertical, 9)
-        .background(
-            ZStack {
-                // Glass-blur on a tinted plate. iOS's `.regularMaterial`
-                // gives us the same backdrop-filter feel the JSX uses
-                // via `backdropFilter: 'blur(20px)'`.
-                if #available(iOS 15.0, *) {
-                    Color.clear.background(.regularMaterial)
-                }
-                palette.badgeBg
-            }
-            .clipShape(Capsule())
-        )
-        .overlay(
-            Capsule()
-                .strokeBorder(palette.badgeAccent.opacity(0.2), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.22), radius: 11, x: 0, y: 8)
         .scaleEffect(pulse * celeScale)
-        .offset(x: tx, y: 0)
+        .offset(y: ty)
         .opacity(op)
-        // The +1 floater visible while the counter is still climbing.
-        .overlay(alignment: .topTrailing) {
-            if ticking {
-                Text("+1")
-                    .font(.system(size: 10, weight: .bold))
-                    .monospacedDigit()
-                    .foregroundStyle(palette.badgeAccent)
-                    .opacity(0.5 + 0.5 * abs(sin(time * 13)))
-                    .offset(y: -10 - abs(sin(time * 13)) * 4)
-                    .padding(.trailing, 6)
-                    .opacity(op)
-            }
-        }
-        .position(x: 18 + 60, y: 64 + 28) // anchor approx top-left
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, 60)
         .allowsHitTesting(false)
     }
 }

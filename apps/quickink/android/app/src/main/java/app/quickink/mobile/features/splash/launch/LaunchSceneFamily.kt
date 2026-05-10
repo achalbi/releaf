@@ -351,34 +351,40 @@ private fun DrawScope.drawMother(
                 close()
             }
             drawPath(hair, p.hairBrown, alpha = parentAlpha)
-            // Hair flow strands — thin lighter-tone strokes give the
-            // hair texture rather than reading as a flat brown helmet.
+            // Hair flow strands — thin lighter-tone strokes giving the
+            // shoulder-length hair flow texture. Constrained to the
+            // shoulder regions (x outside ±8, y from -8 down to 5) so
+            // the strokes never bulge across the face cutout — the
+            // previous version had the curves dipping through the
+            // face circle which read as "hair painted on her cheek".
             val hi = p.hairLight
-            val flow1 = Path().apply {
-                moveTo(-10f, -25f); quadraticTo(-14f, -10f, -13f, 0f)
+            for (x in listOf(-14f, -12f, -10f)) {
+                drawLine(
+                    color = hi,
+                    start = Offset(x, -8f),
+                    end   = Offset(x - 0.5f, 5f),
+                    strokeWidth = 0.6f,
+                    cap = StrokeCap.Round,
+                    alpha = parentAlpha,
+                )
             }
-            drawPath(flow1, hi, alpha = parentAlpha,
-                     style = Stroke(width = 0.7f, cap = StrokeCap.Round))
-            val flow2 = Path().apply {
-                moveTo(-6f, -28f); quadraticTo(-10f, -10f, -10f, 4f)
+            for (x in listOf(10f, 12f, 14f)) {
+                drawLine(
+                    color = hi,
+                    start = Offset(x, -8f),
+                    end   = Offset(x + 0.5f, 5f),
+                    strokeWidth = 0.6f,
+                    cap = StrokeCap.Round,
+                    alpha = parentAlpha,
+                )
             }
-            drawPath(flow2, hi, alpha = parentAlpha,
-                     style = Stroke(width = 0.6f, cap = StrokeCap.Round))
-            val flow3 = Path().apply {
-                moveTo(10f, -25f); quadraticTo(14f, -10f, 13f, 0f)
-            }
-            drawPath(flow3, hi, alpha = parentAlpha,
-                     style = Stroke(width = 0.7f, cap = StrokeCap.Round))
-            val flow4 = Path().apply {
-                moveTo(6f, -28f); quadraticTo(10f, -10f, 10f, 4f)
-            }
-            drawPath(flow4, hi, alpha = parentAlpha,
-                     style = Stroke(width = 0.6f, cap = StrokeCap.Round))
-            // Centre parting.
+            // Centre parting — sits ABOVE the face circle, not on
+            // the forehead. Stops at y=-28 so it doesn't bleed onto
+            // the cheeks.
             drawLine(
                 color = hi,
-                start = Offset(0f, -29f),
-                end   = Offset(0f, -22f),
+                start = Offset(0f, -31f),
+                end   = Offset(0f, -28f),
                 strokeWidth = 0.5f,
                 cap = StrokeCap.Round,
                 alpha = parentAlpha,

@@ -82,73 +82,50 @@ internal fun LaunchPointsCounter(
     val slideIn  = ease(LaunchEasing::easeOutBack, between(time, 0.5, 1.4))
     val slideOut = 1 - ease(LaunchEasing::easeInCubic, between(time, 4.45, 5.0))
     val op = (slideIn * slideOut).coerceIn(0.0, 1.0).toFloat()
-    val tx = ((1 - slideIn) * -120).toFloat()
+    val ty = ((1 - slideIn) * -30).toFloat()                  // drop in from above
     val cT = ease(LaunchEasing::easeOutCubic, between(time, 1.85, 4.1))
     val value = (target * cT).toInt()
     val ticking = cT > 0 && cT < 0.99
-    val pulse = (if (ticking) 1 + 0.025 * abs(sin(time * 13.5)) else 1.0).toFloat()
+    val pulse = (if (ticking) 1 + 0.02 * abs(sin(time * 13.5)) else 1.0).toFloat()
     val celebrate = ease(LaunchEasing::easeOutBack, between(time, 4.0, 4.3))
     val celeFade  = ease(LaunchEasing::easeInCubic, between(time, 4.2, 4.45))
-    val celeScale = (1 + celebrate * 0.08 * (1 - celeFade)).toFloat()
+    val celeScale = (1 + celebrate * 0.10 * (1 - celeFade)).toFloat()
 
-    Box(
+    // Use the deep-green feed accent for ink-on-cream contrast — the
+    // badgeAccent (light green) doesn't read on the cream sky.
+    val ink = palette.feedAccent
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier
             .fillMaxSize()
-            .padding(start = 18.dp, top = 64.dp),
+            .alpha(op)
+            .scale(pulse * celeScale)
+            .offset(y = ty.dp)
+            .padding(top = 60.dp),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
-            modifier = Modifier
-                .alpha(op)
-                .scale(pulse * celeScale)
-                .offset(x = tx.dp)
-                .shadow(elevation = 8.dp, shape = RoundedCornerShape(50))
-                .clip(RoundedCornerShape(50))
-                .background(palette.badgeBg)
-                .border(
-                    width = 1.dp,
-                    color = palette.badgeAccent.copy(alpha = 0.2f),
-                    shape = RoundedCornerShape(50)
-                )
-                .padding(start = 11.dp, end = 14.dp, top = 9.dp, bottom = 9.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Canvas(modifier = Modifier.size(18.dp)) {
-                drawLeafGlyph(palette.badgeAccent)
+            Canvas(modifier = Modifier.size(36.dp)) {
+                drawLeafGlyph(ink)
             }
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(
-                    text = "$value",
-                    color = palette.badgeText,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = "TREE POINTS",
-                    color = palette.badgeAccent,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 1.1.sp,
-                )
-            }
-        }
-        if (ticking) {
             Text(
-                text  = "+1",
-                color = palette.badgeAccent.copy(
-                    alpha = (0.5f + 0.5f * abs(sin(time * 13)).toFloat())
-                ),
-                fontSize = 10.sp,
+                text = "$value",
+                color = ink,
+                fontSize = 56.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .offset(
-                        x = (110 + tx).dp,
-                        y = (-10 - abs(sin(time * 13)) * 4).toFloat().dp
-                    )
-                    .alpha(op)
             )
         }
+        Text(
+            text = "TREE POINTS",
+            color = ink.copy(alpha = 0.7f),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 3.5.sp,
+        )
     }
 }
 
