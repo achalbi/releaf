@@ -30,9 +30,41 @@ struct AddContactSheet: UIViewControllerRepresentable {
     /// Normalised mobile numbers — first one is tagged as Mobile,
     /// any extras land as additional Mobile entries in the form.
     let phones: [String]
+    /// Optional company / organisation name.
+    let company: String?
+    /// Optional job title / designation.
+    let designation: String?
+    /// Optional email addresses, first tagged as Work, extras as
+    /// additional entries.
+    let emails: [String]
+    /// Optional website URLs.
+    let urls: [String]
+    /// Optional multi-line address string. Joined with newlines —
+    /// the system sheet renders it in a single Work address field.
+    let address: String?
     /// Fired when the user dismisses the sheet via Done or Cancel.
     /// Lets the parent flip its presentation flag.
     let onDismiss: () -> Void
+
+    init(
+        name: String?,
+        phones: [String],
+        company: String? = nil,
+        designation: String? = nil,
+        emails: [String] = [],
+        urls: [String] = [],
+        address: String? = nil,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.name        = name
+        self.phones      = phones
+        self.company     = company
+        self.designation = designation
+        self.emails      = emails
+        self.urls        = urls
+        self.address     = address
+        self.onDismiss   = onDismiss
+    }
 
     func makeUIViewController(context: Context) -> UIViewController {
         let contact = CNMutableContact()
@@ -47,11 +79,30 @@ struct AddContactSheet: UIViewControllerRepresentable {
                 contact.familyName = parts.dropFirst().joined(separator: " ")
             }
         }
+        if let company, !company.isEmpty {
+            contact.organizationName = company
+        }
+        if let designation, !designation.isEmpty {
+            contact.jobTitle = designation
+        }
         contact.phoneNumbers = phones.map { phone in
             CNLabeledValue(
                 label: CNLabelPhoneNumberMobile,
                 value: CNPhoneNumber(stringValue: phone)
             )
+        }
+        contact.emailAddresses = emails.map { email in
+            CNLabeledValue(label: CNLabelWork, value: email as NSString)
+        }
+        contact.urlAddresses = urls.map { url in
+            CNLabeledValue(label: CNLabelWork, value: url as NSString)
+        }
+        if let address, !address.isEmpty {
+            let postal = CNMutablePostalAddress()
+            postal.street = address    // Multi-line goes into the street field; Apple's API splits when the user edits.
+            contact.postalAddresses = [
+                CNLabeledValue(label: CNLabelWork, value: postal as CNPostalAddress),
+            ]
         }
         let vc = CNContactViewController(forNewContact: contact)
         vc.delegate = context.coordinator

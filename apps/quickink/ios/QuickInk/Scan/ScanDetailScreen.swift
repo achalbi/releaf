@@ -12,6 +12,7 @@
 import SwiftUI
 import GRDB
 import PDFKit
+import ReleafCoreScan
 
 struct ScanDetailScreen: View {
 
@@ -59,17 +60,15 @@ struct ScanDetailScreen: View {
     /// appear so the Details card can show "2.4 MB" etc. Nil until
     /// resolved or when the file isn't readable.
     @State private var pdfFileSize: Int64? = nil
-    /// Drives the "Add to contact" sheet presented from the Actions
-    /// card on Business Card captures. Set true on tap; the sheet
-    /// flips it back when the system contact form dismisses.
-    @State private var showAddContactSheet = false
-    /// Parsed name + phones extracted from the capture's OCR. Loaded
-    /// on tap of the Add-to-contact row so we don't pay the SQLite
-    /// read on every scan-detail open. Empty (`nil` name + `[]`
-    /// phones) means parsing yielded nothing — the system contact
-    /// form opens with empty fields and the user fills them in.
-    @State private var addContactPayload: BusinessCardParser.Parsed =
-        BusinessCardParser.Parsed(name: nil, phones: [])
+    /// Extracted contact for the in-flight Business Card review
+    /// sheet. Set on tap of "Add to contact"; nil means the sheet
+    /// is dismissed. Wrapped in `IdentifiedExtraction` so it works
+    /// with `.sheet(item:)`.
+    @State private var businessCardExtraction: IdentifiedExtraction? = nil
+    /// User-edited form data, set when the user taps Save in the
+    /// review sheet. Triggers presentation of the system
+    /// CNContactViewController.
+    @State private var pendingContactForm: IdentifiedForm? = nil
 
     init(
         captureId: String,
@@ -208,14 +207,43 @@ struct ScanDetailScreen: View {
                 .font(.caption)
                 .foregroundStyle(QuickInkColors.inkSoft)
         }
-        // Add-to-contact sheet — system contact-creation form
-        // pre-filled with the parser's name + phone-number guesses.
-        // Presented from the Actions card on Business Card captures.
-        .sheet(isPresented: $showAddContactSheet) {
+        // Business Card review sheet — opens when extraction lands
+        // (businessCardExtraction != nil). Shows every extracted
+        // field as an editable form so the user can fix any
+        // mis-classifications before the system contact form takes
+        // over. On Save we stash the edited form and the next sheet
+        // (`pendingContactForm` != nil) presents CNContactViewController.
+        .sheet(item: $businessCardExtraction) { wrapper in
+            AddContactReviewSheet(
+                extracted: wrapper.extracted,
+                onCancel:  { businessCardExtraction = nil },
+                onConfirm: { edited in
+                    businessCardExtraction = nil
+                    // Tiny delay so the review sheet finishes
+                    // dismissing before the contact form rises —
+                    // SwiftUI doesn't gracefully chain two .sheet
+                    // presentations on the same view.
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 350_000_000)
+                        pendingContactForm = IdentifiedForm(form: edited)
+                    }
+                }
+            )
+        }
+        // System contact-creation form — opens once the user has
+        // saved the review sheet. Splits the comma-joined phones /
+        // emails / urls back out before passing them in.
+        .sheet(item: $pendingContactForm) { wrapper in
+            let form = wrapper.form
             AddContactSheet(
-                name:      addContactPayload.name,
-                phones:    addContactPayload.phones,
-                onDismiss: { showAddContactSheet = false }
+                name:        form.name.isEmpty ? nil : form.name,
+                phones:      splitCsv(form.phones),
+                company:     form.company.isEmpty ? nil : form.company,
+                designation: form.designation.isEmpty ? nil : form.designation,
+                emails:      splitCsv(form.emails),
+                urls:        splitCsv(form.websites),
+                address:     form.address.isEmpty ? nil : form.address,
+                onDismiss:   { pendingContactForm = nil }
             )
             .ignoresSafeArea()
         }
@@ -855,33 +883,41 @@ struct ScanDetailScreen: View {
         (capture.category ?? "").lowercased() == "business card"
     }
 
-    /// Load the capture's OCR text, run the business-card parser,
-    /// stash the result, and open the system contact-creation sheet.
-    /// Runs even when the OCR pass produced nothing — the sheet just
-    /// opens with empty fields the user can fill in by hand.
+    /// Run the bbox-aware [BusinessCardExtractor] over the capture's
+    /// stored OCR blocks and open the editable review sheet. Empty
+    /// or missing OCR → opens the sheet with empty fields and the
+    /// user fills them in by hand.
     private func openAddContactSheet() async {
-        let ocr = await loadOcrText()
-        addContactPayload = BusinessCardParser.parse(ocr)
-        showAddContactSheet = true
+        let extracted: ExtractedContact = await loadAndExtract()
+        await MainActor.run {
+            businessCardExtraction = IdentifiedExtraction(extracted: extracted)
+        }
     }
 
-    /// One-shot read of the capture's OCR pages, joined into a
-    /// single text blob in page order. Empty string when there's no
-    /// OCR row (the parser handles that case fine — yields nothing
-    /// and the contact sheet opens empty).
-    private func loadOcrText() async -> String {
+    /// Read every OCR row's `blocks_json` for the capture, decode the
+    /// `OcrBlock` lists, and run the extractor. Decoder is permissive
+    /// — a single malformed row doesn't fail the rest of the pages.
+    private func loadAndExtract() async -> ExtractedContact {
         let dbQueue = QuickInkDatabase.shared.dbQueue
         do {
-            let texts = try await dbQueue.read { db -> [String] in
+            let payloads: [String] = try await dbQueue.read { db -> [String] in
                 try String.fetchAll(db, sql: """
-                    SELECT text FROM ocr_results
+                    SELECT blocks_json FROM ocr_results
                     WHERE capture_id = ? AND deleted_at IS NULL
                     ORDER BY page_index ASC
                     """, arguments: [captureId])
             }
-            return texts.joined(separator: "\n\n")
+            let decoder = JSONDecoder()
+            var allBlocks: [OcrBlock] = []
+            for raw in payloads {
+                guard let data = raw.data(using: .utf8) else { continue }
+                if let blocks = try? decoder.decode([OcrBlock].self, from: data) {
+                    allBlocks.append(contentsOf: blocks)
+                }
+            }
+            return BusinessCardExtractor.extract(allBlocks)
         } catch {
-            return ""
+            return ExtractedContact.empty
         }
     }
 
@@ -994,5 +1030,32 @@ struct ScanDetailScreen: View {
         }
         return iso
     }
+}
+
+// MARK: - Sheet identity wrappers
+
+/// SwiftUI's `.sheet(item:)` requires `Identifiable`. The shared
+/// `ExtractedContact` is `Equatable` only — wrapping here keeps the
+/// shared module unchanged.
+private struct IdentifiedExtraction: Identifiable {
+    let id = UUID()
+    let extracted: ExtractedContact
+}
+
+/// Same wrapper as [IdentifiedExtraction] for the user-edited form
+/// before it lands in the system contact-creation sheet.
+private struct IdentifiedForm: Identifiable {
+    let id = UUID()
+    let form: EditableContact
+}
+
+/// Split a comma- (or newline-) separated string into trimmed,
+/// non-empty entries. Used by the contact-form sheet to expand the
+/// review form's flat-string fields back into the structured arrays
+/// `AddContactSheet` expects.
+private func splitCsv(_ s: String) -> [String] {
+    s.split(whereSeparator: { $0 == "," || $0 == "\n" })
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
 }
 

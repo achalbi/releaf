@@ -53,6 +53,10 @@ import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.LocalOffer
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.Share
+import app.quickink.mobile.features.scan.businesscard.AddContactReviewSheet
+import app.quickink.mobile.features.scan.businesscard.launchAddContactIntent
+import app.quickink.mobile.features.scan.businesscard.runBusinessCardExtraction
+import app.releaf.shared.scan.businesscard.ExtractedContact
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -157,6 +161,10 @@ fun ScanDetailScreen(
     // On-disk size of the capture's PDF in bytes, loaded lazily so
     // the Details row can render "2.4 MB" etc. Null until resolved.
     var pdfFileSize by remember(captureId) { mutableStateOf<Long?>(null) }
+    // Extracted contact for the in-flight Business Card review
+    // sheet. Set on tap of "Add to contact"; the sheet observes it
+    // through the non-null check, and clearing it dismisses.
+    var businessCardExtraction by remember(captureId) { mutableStateOf<ExtractedContact?>(null) }
 
     // Live category list — populated from the same DAO the home
     // grid + review screen read, scoped to the current user. The
@@ -365,24 +373,18 @@ fun ScanDetailScreen(
                         onMoveToFolder = { showRetagSheet = true },
                         onDelete       = { showDeleteConfirm = true },
                         // Business-card-only Add-to-contact row.
-                        // Loads the capture's OCR, parses it for
-                        // name + phone numbers, and launches the
-                        // system contact-create intent pre-filled
-                        // with whatever the parser found. Empty
-                        // parse → form opens empty for manual
-                        // entry.
+                        // Runs the full bbox-aware extraction
+                        // pipeline over the capture's stored OCR
+                        // blocks, then opens an editable review
+                        // sheet so the user can fix any
+                        // mis-classifications before the final
+                        // contact intent fires.
                         onAddToContact = if (isBusinessCard) {
                             {
                                 scope.launch {
-                                    val ocrText = runCatching {
-                                        ocrDao.findFirstTextForCapture(captureId)
-                                    }.getOrNull().orEmpty()
-                                    val parsed = BusinessCardParser.parse(ocrText)
-                                    launchAddContactIntent(
-                                        context = context,
-                                        name    = parsed.name,
-                                        phones  = parsed.phones,
-                                    )
+                                    businessCardExtraction = runCatching {
+                                        runBusinessCardExtraction(captureId, ocrDao)
+                                    }.getOrDefault(ExtractedContact.empty)
                                 }
                             }
                         } else null,
@@ -505,6 +507,22 @@ fun ScanDetailScreen(
                 showFullscreenViewer = false
             }
         }
+    }
+
+    // Business Card review sheet — opens once `runBusinessCard-
+    // Extraction` lands (set businessCardExtraction != null). On
+    // confirm we hand the (possibly-edited) form to
+    // `launchAddContactIntent`. On dismiss we just clear the state.
+    val pendingExtraction = businessCardExtraction
+    if (pendingExtraction != null) {
+        AddContactReviewSheet(
+            extracted = pendingExtraction,
+            onDismiss = { businessCardExtraction = null },
+            onConfirm = { edited ->
+                businessCardExtraction = null
+                launchAddContactIntent(context, edited)
+            },
+        )
     }
 }
 
@@ -725,70 +743,6 @@ private fun shareableUri(context: android.content.Context, raw: String): Uri? {
                 .getOrNull()
         }
         else -> null
-    }
-}
-
-/**
- * Launch the system "Add to contact" UI pre-filled with the parsed
- * business-card data. Uses [ContactsContract.Intents.Insert.ACTION]
- * so the OS handles the confirmation flow itself — no
- * READ/WRITE_CONTACTS permission needed by this app.
- *
- * Mirror of iOS's `AddContactSheet` (CNContactViewController). Only
- * the first phone number lands in the inline `PHONE` extra; we
- * additionally pack any extras into a `ContactsContract.Data`
- * ArrayList so multi-number cards still surface every match. If the
- * parser found nothing, the intent still opens — the user gets the
- * standard Contacts app with empty fields.
- */
-private fun launchAddContactIntent(
-    context: android.content.Context,
-    name: String?,
-    phones: List<String>,
-) {
-    val intent = Intent(ContactsContract.Intents.Insert.ACTION).apply {
-        type = ContactsContract.RawContacts.CONTENT_TYPE
-        if (!name.isNullOrEmpty()) {
-            putExtra(ContactsContract.Intents.Insert.NAME, name)
-        }
-        if (phones.isNotEmpty()) {
-            putExtra(ContactsContract.Intents.Insert.PHONE, phones.first())
-            putExtra(
-                ContactsContract.Intents.Insert.PHONE_TYPE,
-                ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE,
-            )
-            // Pack any additional numbers into the data extras so
-            // the contact form shows multiple phone fields.
-            if (phones.size > 1) {
-                val extras = ArrayList<android.content.ContentValues>(phones.size - 1)
-                for (extra in phones.drop(1)) {
-                    extras += android.content.ContentValues().apply {
-                        put(
-                            ContactsContract.Data.MIMETYPE,
-                            ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE,
-                        )
-                        put(ContactsContract.CommonDataKinds.Phone.NUMBER, extra)
-                        put(
-                            ContactsContract.CommonDataKinds.Phone.TYPE,
-                            ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE,
-                        )
-                    }
-                }
-                putParcelableArrayListExtra(
-                    ContactsContract.Intents.Insert.DATA,
-                    extras,
-                )
-            }
-        }
-    }
-    try {
-        context.startActivity(intent)
-    } catch (_: Exception) {
-        android.widget.Toast.makeText(
-            context,
-            "Couldn't open the contact form",
-            android.widget.Toast.LENGTH_SHORT,
-        ).show()
     }
 }
 

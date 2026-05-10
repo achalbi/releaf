@@ -1,0 +1,201 @@
+/*
+ * BusinessCardExtractorTest.kt
+ *
+ * Golden-card unit tests for the shared
+ * `app.releaf.shared.scan.businesscard.BusinessCardExtractor`. The
+ * extractor itself lives in `:shared:scan`; the tests live here
+ * because that's where the existing JUnit + serialization test
+ * harness already exists.
+ *
+ * Each test constructs a synthetic `OcrBlock` list with realistic
+ * bbox positions for a typical business-card layout and asserts the
+ * extractor produces the expected fields. No network, no DB, no
+ * mocks — pure unit tests of the heuristic pipeline.
+ */
+
+package app.quickink.mobile.scan
+
+import app.releaf.shared.scan.OcrBbox
+import app.releaf.shared.scan.OcrBlock
+import app.releaf.shared.scan.businesscard.BusinessCardExtractor
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class BusinessCardExtractorTest {
+
+    @Test fun emptyInput_yieldsEmptyContact() {
+        val out = BusinessCardExtractor.extract(emptyList())
+        assertNull(out.name)
+        assertNull(out.company)
+        assertEquals(0.0, out.confidence, 0.0001)
+    }
+
+    @Test fun typicalIndianCard_extractsAllFields() {
+        // Layout (top → bottom):
+        //   Name  (large, top)
+        //   Designation (smaller, just below name — vocab hit)
+        //   Company (medium, mid-top — suffix vocab hit)
+        //   Phone (small, mid)
+        //   Email (small, mid)
+        //   Address line 1 (small, bottom, comma)
+        //   Address line 2 (small, bottom, postcode)
+        val blocks = listOf(
+            block(0, "Aarav Sharma",          y = 0.05, h = 0.10),
+            block(1, "Senior Software Engineer", y = 0.18, h = 0.06),
+            block(2, "Acme Technologies Pvt Ltd", y = 0.30, h = 0.07),
+            block(3, "+91 98765 43210",       y = 0.45, h = 0.04),
+            block(4, "aarav@acme.tech",       y = 0.52, h = 0.04),
+            block(5, "12, MG Road,",          y = 0.78, h = 0.04),
+            block(6, "Bangalore 560001",      y = 0.85, h = 0.04),
+        )
+
+        val out = BusinessCardExtractor.extract(blocks)
+
+        assertEquals("Aarav Sharma", out.name)
+        assertEquals("Senior Software Engineer", out.designation)
+        assertEquals("Acme Technologies Pvt Ltd", out.company)
+        assertEquals(listOf("+919876543210"), out.phones)
+        assertEquals(listOf("aarav@acme.tech"), out.emails)
+        assertNotNull(out.address)
+        assertTrue(out.address!!.contains("MG Road"))
+        assertTrue(out.address!!.contains("560001"))
+        assertTrue(out.confidence > 0.0)
+    }
+
+    @Test fun phoneNormalisation_handlesAllAcceptedFormats() {
+        val cases = listOf(
+            "9876543210"          to "9876543210",
+            "98765 43210"         to "9876543210",
+            "98765-43210"         to "9876543210",
+            "(987) 654-3210"      to "9876543210",
+            "09876543210"         to "9876543210",
+            "+91 9876543210"      to "+919876543210",
+            "+91-98765-43210"     to "+919876543210",
+            "919876543210"        to "+919876543210",
+        )
+        for ((input, expected) in cases) {
+            val blocks = listOf(block(0, input, y = 0.5, h = 0.05))
+            val out = BusinessCardExtractor.extract(blocks)
+            assertEquals(
+                "expected '$expected' for input '$input', got ${out.phones}",
+                listOf(expected),
+                out.phones,
+            )
+        }
+    }
+
+    @Test fun phoneNormalisation_rejectsInvalidLengths() {
+        val invalid = listOf(
+            "12345",            // too short
+            "123456789",        // 9 digits
+            "98765 43210 12",   // 12 digits w/o 91 prefix
+            "1234567890123456", // way too long
+        )
+        for (input in invalid) {
+            val blocks = listOf(block(0, "Phone: $input", y = 0.5, h = 0.05))
+            val out = BusinessCardExtractor.extract(blocks)
+            assertTrue("Did not expect to parse '$input' but got ${out.phones}", out.phones.isEmpty())
+        }
+    }
+
+    @Test fun multiplePhones_areExtractedAndDeduped() {
+        val blocks = listOf(
+            block(0, "Cell: 9876543210 / Office: 9988776655", y = 0.5, h = 0.04),
+            block(1, "Mobile: +91 9876543210", y = 0.55, h = 0.04),  // dup
+        )
+        val out = BusinessCardExtractor.extract(blocks)
+        assertTrue(out.phones.contains("9876543210") || out.phones.contains("+919876543210"))
+        assertTrue(out.phones.contains("9988776655"))
+    }
+
+    @Test fun email_isLowerCasedAndDeduped() {
+        val blocks = listOf(
+            block(0, "AARAV@ACME.TECH",          y = 0.4, h = 0.04),
+            block(1, "Email: aarav@acme.tech",   y = 0.45, h = 0.04),
+        )
+        val out = BusinessCardExtractor.extract(blocks)
+        assertEquals(1, out.emails.size)
+        assertEquals("aarav@acme.tech", out.emails.first())
+    }
+
+    @Test fun designationVocab_picksTitleEvenWhenLayoutIsAmbiguous() {
+        val blocks = listOf(
+            block(0, "Some Generic Heading", y = 0.05, h = 0.10),
+            block(1, "Vice President of Engineering", y = 0.20, h = 0.04),
+            block(2, "+91 9876543210", y = 0.50, h = 0.04),
+        )
+        val out = BusinessCardExtractor.extract(blocks)
+        assertEquals("Vice President of Engineering", out.designation)
+    }
+
+    @Test fun company_suffixHitWinsOverNamePosition() {
+        // Block at top is large but contains suffix → company candidate
+        // beats name candidate for that block.
+        val blocks = listOf(
+            block(0, "ACME TECHNOLOGIES PVT LTD", y = 0.05, h = 0.12),
+            block(1, "Aarav Sharma",              y = 0.20, h = 0.06),
+            block(2, "Director",                  y = 0.27, h = 0.04),
+        )
+        val out = BusinessCardExtractor.extract(blocks)
+        assertEquals("ACME TECHNOLOGIES PVT LTD", out.company)
+        assertEquals("Aarav Sharma", out.name)
+        assertEquals("Director", out.designation)
+    }
+
+    @Test fun website_recognised_inAllForms() {
+        val blocks = listOf(
+            block(0, "https://acme.tech", y = 0.5, h = 0.04),
+            block(1, "www.acme.in", y = 0.55, h = 0.04),
+            block(2, "acme.com", y = 0.60, h = 0.04),
+        )
+        val out = BusinessCardExtractor.extract(blocks)
+        // All three should appear (deduped if identical, but they're not).
+        assertTrue(out.websites.any { it.contains("acme.tech") })
+        assertTrue(out.websites.any { it.contains("acme.in") })
+        assertTrue(out.websites.any { it.contains("acme.com") })
+    }
+
+    @Test fun address_clustersAdjacentBottomLines() {
+        val blocks = listOf(
+            block(0, "Aarav Sharma",                y = 0.05, h = 0.10),
+            block(1, "Director",                    y = 0.18, h = 0.05),
+            block(2, "12, MG Road, Indiranagar,",   y = 0.75, h = 0.04),
+            block(3, "Bangalore, KA 560038",        y = 0.81, h = 0.04),
+        )
+        val out = BusinessCardExtractor.extract(blocks)
+        assertNotNull(out.address)
+        // Multi-line — both lines joined with newline.
+        assertTrue(out.address!!.contains("\n"))
+        assertTrue(out.address!!.contains("MG Road"))
+        assertTrue(out.address!!.contains("560038"))
+    }
+
+    @Test fun emailHostNotMisidentifiedAsBareDomainWebsite() {
+        val blocks = listOf(
+            block(0, "aarav@acme.com", y = 0.5, h = 0.04),
+        )
+        val out = BusinessCardExtractor.extract(blocks)
+        assertEquals(listOf("aarav@acme.com"), out.emails)
+        // The "acme.com" inside the email shouldn't surface as a website.
+        assertTrue(out.websites.isEmpty())
+    }
+
+    // -------- helpers --------
+
+    /** Synthetic block at the supplied y / height. Width fixed at 0.6. */
+    private fun block(
+        index: Int,
+        text: String,
+        y: Double,
+        h: Double,
+    ): OcrBlock = OcrBlock(
+        text       = text,
+        bbox       = OcrBbox(x = 0.05, y = y, width = 0.6, height = h),
+        confidence = null,                      // ML Kit Play-Services 19.0.1
+        language   = "en",
+        kind       = OcrBlock.Kind.Line,
+    )
+}
