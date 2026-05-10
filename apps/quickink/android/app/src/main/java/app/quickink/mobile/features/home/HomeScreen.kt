@@ -55,6 +55,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.outlined.Face
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CheckCircle
@@ -66,7 +67,6 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -1470,14 +1470,14 @@ private fun friendlyMonthDay(iso: String): String =
  */
 private fun iconForCategory(name: String): ImageVector =
     when (name.lowercase()) {
-        "ideas"      -> Icons.Filled.Lightbulb
-        "projects"   -> Icons.Filled.Folder
-        "meetings"   -> Icons.Filled.Group
-        "todo"       -> Icons.Filled.CheckCircle
-        "study"      -> Icons.Filled.School
-        "journal"    -> Icons.Filled.Book
-        "brainstorm" -> Icons.Filled.Star
-        else         -> Icons.AutoMirrored.Filled.Label
+        "ideas"         -> Icons.Filled.Lightbulb
+        "projects"      -> Icons.Filled.Folder
+        "meetings"      -> Icons.Filled.Group
+        "todo"          -> Icons.Filled.CheckCircle
+        "business card" -> Icons.Filled.Badge
+        "journal"       -> Icons.Filled.Book
+        "brainstorm"    -> Icons.Filled.Star
+        else            -> Icons.AutoMirrored.Filled.Label
     }
 
 @Composable

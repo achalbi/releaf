@@ -28,7 +28,7 @@ public final class CategoryRepository: @unchecked Sendable {
     /// treated as system-managed: the Settings → Categories screen
     /// hides delete + rename affordances for them.
     public static let defaultSeed: [String] = [
-        "Ideas", "Projects", "Meetings", "Todo", "Study", "Journal",
+        "Ideas", "Projects", "Meetings", "Todo", "Business Card", "Journal",
     ]
 
     /// True for the 6 seed names users get on first launch — system

@@ -640,14 +640,14 @@ struct HomeScreen: View {
     /// `iconForCategory` switch.
     private func iconFor(_ name: String) -> String {
         switch name.lowercased() {
-        case "ideas":      return "lightbulb"
-        case "projects":   return "folder"
-        case "meetings":   return "person.3"
-        case "todo":       return "checkmark.circle"
-        case "study":      return "graduationcap"
-        case "journal":    return "book.closed"
-        case "brainstorm": return "sparkles"
-        default:           return "tag"
+        case "ideas":         return "lightbulb"
+        case "projects":      return "folder"
+        case "meetings":      return "person.3"
+        case "todo":          return "checkmark.circle"
+        case "business card": return "person.crop.rectangle"
+        case "journal":       return "book.closed"
+        case "brainstorm":    return "sparkles"
+        default:              return "tag"
         }
     }
 

@@ -110,7 +110,7 @@ class CategoryRepository(
          * them.
          */
         val DEFAULT_SEED: List<String> = listOf(
-            "Ideas", "Projects", "Meetings", "Todo", "Study", "Journal",
+            "Ideas", "Projects", "Meetings", "Todo", "Business Card", "Journal",
         )
 
         /** True for the 6 seed names users get on first launch. */
