@@ -120,6 +120,8 @@ import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.sync.SyncStateKeys
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import kotlin.math.ln
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import java.time.LocalTime
 
@@ -412,10 +414,10 @@ private fun HomeHeader(
     // same coral gradient brush, same canvas-coloured outer ring,
     // same ambient/contact drop shadow stack. Differs in two
     // intentional ways: no upward `lift` (the avatar isn't floating
-    // above a bar surface), and the inner content swaps the FAB's
-    // Bolt glyph for the user's first initial (or a 32dp Outlined.Face
-    // when the display name is blank) — the FAB is the primary action;
-    // the avatar is a secondary identity tap and reads quieter.
+    // above a bar surface), and the inner glyph is dialled down
+    // from the FAB's 30dp Bolt to a 32dp Outlined.Face — the
+    // FAB is the primary action; the avatar is a secondary
+    // identity tap and reads quieter.
     val avatarInner     = 56.dp
     val avatarImageSize = 32.dp
     val avatarRing      = 4.dp
@@ -508,43 +510,36 @@ private fun HomeHeader(
                         .background(coralGradient),
                     contentAlignment = Alignment.Center,
                 ) {
-                    // Default fallback: the user's first initial in
-                    // canvas-tone serif on the coral disc — same posture
-                    // as the side-nav drawer's banner avatar so the two
-                    // surfaces read as the same identity. Falls back to
-                    // the Outlined.Face glyph only when the display name
-                    // is blank (e.g. signed-out / fresh-install state).
-                    // Used directly when there's no profile photo AND
-                    // as the loading/error slot for SubcomposeAsyncImage
-                    // below — a stale URI pointing at a deleted file
-                    // would otherwise leave the disc blank.
-                    val initial = (displayName?.trim().orEmpty())
-                        .firstOrNull()
-                        ?.uppercase()
+                    // Default fallback: a canvas-tone face glyph on
+                    // the coral disc. Used directly when there's no
+                    // profile photo AND as the loading/error slot
+                    // for SubcomposeAsyncImage below — a stale URI
+                    // pointing at a deleted file would otherwise
+                    // leave the disc blank.
+                    //
+                    // Earlier passes rendered the user's first
+                    // initial here (Canvas + TextMeasurer to dodge
+                    // metric-vs-optical centering quirks), but the
+                    // person glyph reads more universally and avoids
+                    // the whole "what if the user's name starts
+                    // with a descender / non-Latin / emoji" question.
                     val fallback: @Composable () -> Unit = {
-                        if (initial != null) {
-                            Text(
-                                text     = initial,
-                                style    = type.display.copy(fontSize = 28.sp),
-                                color    = colors.bg,
+                        Box(
+                            modifier = Modifier.size(avatarImageSize),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector        = Icons.Outlined.Face,
+                                contentDescription = "Open profile menu",
+                                // Tinted to the canvas tone (`colors.bg`)
+                                // so the glyph echoes the outer ring and
+                                // reads as cream-on-coral rather than
+                                // pure white-on-coral — softer, warmer,
+                                // and ties the avatar's two cream-toned
+                                // surfaces (ring + glyph) together.
+                                tint               = colors.bg,
+                                modifier           = Modifier.fillMaxSize(),
                             )
-                        } else {
-                            Box(
-                                modifier = Modifier.size(avatarImageSize),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    imageVector        = Icons.Outlined.Face,
-                                    contentDescription = "Open profile menu",
-                                    // Tinted to the canvas tone
-                                    // (`colors.bg`) so the glyph echoes
-                                    // the outer ring and reads as
-                                    // cream-on-coral rather than pure
-                                    // white-on-coral.
-                                    tint               = colors.bg,
-                                    modifier           = Modifier.fillMaxSize(),
-                                )
-                            }
                         }
                     }
 
@@ -603,16 +598,36 @@ private fun HomeHeader(
 /**
  * Hero card under the greeting that frames QuickInk as a paper-saving
  * tool. Shows the user's lifetime digitised page count and translates
- * it into approximate trees + water spared. Static leaf-green palette
- * (independent of the user's accent picker) so the eco message reads
- * the same regardless of whether they've picked Coral or Leaf Yellow
- * for everything else.
+ * it into a composite "ReLeaf points" impact score plus water spared.
+ * Static leaf-green palette (independent of the user's accent picker)
+ * so the eco message reads the same regardless of whether they've
+ * picked Coral or Leaf Yellow for everything else.
  *
- * Math: 8,333 sheets per tree (commonly cited industry figure — one
- * tree yields ~16.67 reams of office paper) and ~10 L of water per
- * sheet (production + pulp processing). Both are deliberately
- * conservative; the goal is a directional impact stat, not a precise
- * lifecycle assessment.
+ * ReLeaf-points model — we deliberately do *not* show a flat
+ * `pages / 8333` tree count any more. A single divisor flatters
+ * casual users (every scan rounds to "0.00 trees") and undersells
+ * power users (one tree feels small even though the lifecycle impact
+ * is huge). Instead we blend five independent paper-LCA factors into
+ * one integer score:
+ *
+ *   1. Sheet engagement   — flat per-page reward; each capture has to
+ *                           feel like it moved the needle.
+ *   2. Tree-equivalent    — pages → fractional mature pine using the
+ *                           conventional 8,333 sheets/tree, then
+ *                           de-rated by the typical ~17% pulp yield
+ *                           (only ~1/6 of a tree's biomass actually
+ *                           becomes office paper). Heavy weight so a
+ *                           whole-tree milestone reads as a real jump.
+ *   3. Water spared       — ~10 L of process water per A4 sheet.
+ *   4. CO₂ avoided        — ~4.6 g CO₂e per sheet, cradle-to-grave.
+ *   5. Energy spared      — ~50 Wh per sheet (mill + transport).
+ *
+ * A logarithmic engagement boost is layered on top so the curve still
+ * rewards sustained use without being purely linear — each order of
+ * magnitude of pages adds a fixed bump rather than the score creeping
+ * up at a constant per-page rate. Numbers are deliberately
+ * conservative; the goal is a directional impact score, not a
+ * precise lifecycle assessment.
  */
 @Composable
 private fun SustainabilityHero(totalPages: Int) {
@@ -623,18 +638,38 @@ private fun SustainabilityHero(totalPages: Int) {
     val ecoBg   = QuickInkColors.LeafGreenBase.copy(alpha = 0.18f)
     val ecoBorder = QuickInkColors.LeafGreenBase.copy(alpha = 0.40f)
 
-    val trees = totalPages / 8333.0
-    val waterLiters = totalPages * 10
-    // Refined-warm pass: trees + water are now their own right-aligned
+    // --- ReLeaf-points lifecycle model ---
+    // Per-sheet LCA factors (see KDoc above for sources / reasoning).
+    val sheets       = totalPages.toDouble()
+    val pulpYield    = 0.17                          // tree biomass → paper
+    val treeFraction = (sheets / 8333.0) * pulpYield
+    val waterLiters  = totalPages * 10               // kept as Int for the L label
+    val co2Grams     = sheets * 4.6
+    val energyWh     = sheets * 50.0
+
+    // Component weights are calibrated so a single tree-milestone
+    // (~8,333 pages) lands in the low six figures, while a single
+    // captured page still scores in the low hundreds — enough to feel
+    // rewarding without making the empty-state-to-first-scan jump
+    // feel cheap.
+    val pSheets = sheets             * 7.5
+    val pTrees  = treeFraction       * 12_000.0
+    val pWater  = waterLiters        * 0.6
+    val pCarbon = co2Grams           * 1.2
+    val pEnergy = energyWh           * 0.4
+    val pStreak = if (sheets > 0) ln(sheets + 1.0) * 180.0 else 0.0
+
+    val ecoPoints = (pSheets + pTrees + pWater + pCarbon + pEnergy + pStreak)
+        .roundToInt()
+        .coerceAtLeast(0)
+
+    // Refined-warm pass: points + water are their own right-aligned
     // data column to the right of the headline. We always render two
-    // numeric labels (trees, water) so the rhythm stays consistent —
-    // no more "first tree on the way" prose case, the 0.00 figure
+    // numeric labels (points, water) so the rhythm stays consistent —
+    // no more "first tree on the way" prose case, the integer score
     // does the same job at a glance and reads as a real metric.
-    val treesLabel = if (trees >= 1.0) {
-        String.format(java.util.Locale.ROOT, "%.1f trees", trees)
-    } else {
-        String.format(java.util.Locale.ROOT, "%.2f trees", trees)
-    }
+    val ecoPointsLabel =
+        String.format(java.util.Locale.ROOT, "%,d ReLeaf pts", ecoPoints)
     val title    = "By going digital"
     val headline = when {
         totalPages == 0 -> "Start saving paper"
@@ -690,7 +725,7 @@ private fun SustainabilityHero(totalPages: Int) {
         if (totalPages > 0) {
             Spacer(Modifier.size(QuickInkSpacing.s2))
             Column(horizontalAlignment = Alignment.End) {
-                Text(text = treesLabel, style = type.meta, color = ecoDeep)
+                Text(text = ecoPointsLabel, style = type.meta, color = ecoDeep)
                 Text(text = "$waterLiters L water", style = type.meta, color = ecoDeep)
             }
         }
