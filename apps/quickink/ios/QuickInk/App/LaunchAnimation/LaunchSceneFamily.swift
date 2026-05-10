@@ -225,11 +225,13 @@ private func drawFaceFeatures(
         )
     }
 
-    // Bindi (mother only).
+    // Bindi (mother only). Positioned at the top of the face oval —
+    // y = eyeY - radius * 0.5 puts it on the upper forehead, between
+    // the brows (eyeY - radius * 0.4) and the hairline.
     if bindi {
         ctx.fill(
             Path(ellipseIn: CGRect(
-                x: -1.4, y: eyeY - radius * 0.7 - 1.4,
+                x: -1.4, y: eyeY - radius * 0.5 - 1.4,
                 width: 2.8, height: 2.8
             )),
             with: .color(Color(launchHex: 0xc4283a))
@@ -517,12 +519,44 @@ private func drawMother(
         },
         with: .color(p.hairBrown)
     )
-    // No highlight strands on mother's hair — kept reading as "hair
-    // on the face" even with the strokes constrained to the shoulder
-    // zone (the proximity to the chin cutout edge made them look
-    // like sideburns crossing the cheek, regardless of actual
-    // pixel containment). The flat hairBrown shape with the chin
-    // cutout is enough framing on its own.
+    // Face oval cutout — re-paints skin OVER the hair to define the
+    // actual visible face shape, which is narrower than the face
+    // circle (so the hair frames it as long flowing hair down the
+    // sides). Without this layer the hair's chin cutout x=±8 leaves
+    // the eyes / brows / bindi / smile sitting in a tiny window with
+    // hair encroaching on the cheeks. Lifted from the JSX prototype's
+    // second skin path which I missed on the original port.
+    head.fill(
+        Path { pth in
+            pth.move(to: CGPoint(x: -12, y: -16))
+            pth.addQuadCurve(
+                to:      CGPoint(x: -8, y: -22),
+                control: CGPoint(x: -13, y: -22)
+            )
+            pth.addQuadCurve(
+                to:      CGPoint(x: 8, y: -22),
+                control: CGPoint(x: 0, y: -23)
+            )
+            pth.addQuadCurve(
+                to:      CGPoint(x: 12, y: -16),
+                control: CGPoint(x: 13, y: -22)
+            )
+            pth.addQuadCurve(
+                to:      CGPoint(x: 8, y: -4),
+                control: CGPoint(x: 12, y: -8)
+            )
+            pth.addQuadCurve(
+                to:      CGPoint(x: -8, y: -4),
+                control: CGPoint(x: 0, y: -2)
+            )
+            pth.addQuadCurve(
+                to:      CGPoint(x: -12, y: -16),
+                control: CGPoint(x: -12, y: -8)
+            )
+            pth.closeSubpath()
+        },
+        with: .color(p.skin)
+    )
     drawFaceFeatures(
         ctx: &head, p: p,
         radius: 13.5,

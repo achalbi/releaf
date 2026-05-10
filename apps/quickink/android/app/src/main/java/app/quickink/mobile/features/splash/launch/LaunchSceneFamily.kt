@@ -194,11 +194,14 @@ private fun DrawScope.drawFaceFeatures(
                  style = Stroke(width = 0.7f, cap = StrokeCap.Round))
     }
 
+    // Bindi (mother only). Positioned at the top of the face oval —
+    // y = eyeY - radius * 0.5 puts it on the upper forehead, between
+    // the brows (eyeY - radius * 0.4) and the hairline.
     if (bindi) {
         drawCircle(
             color = Color(0xFFC4283A),
             radius = 1.4f,
-            center = Offset(0f, eyeY - radius * 0.7f),
+            center = Offset(0f, eyeY - radius * 0.5f),
             alpha = parentAlpha,
         )
     }
@@ -351,12 +354,26 @@ private fun DrawScope.drawMother(
                 close()
             }
             drawPath(hair, p.hairBrown, alpha = parentAlpha)
-            // No highlight strands on mother's hair — kept reading as
-            // "hair on the face" even with the strokes constrained to
-            // the shoulder zone (proximity to the chin cutout edge
-            // made them look like sideburns crossing the cheek). The
-            // flat hairBrown shape with the chin cutout is enough
-            // framing on its own.
+            // Face oval cutout — re-paints skin OVER the hair to
+            // define the actual visible face shape, which is
+            // narrower than the face circle (so the hair frames it
+            // as long flowing hair down the sides). Without this
+            // layer the hair's chin cutout x=±8 leaves the eyes /
+            // brows / bindi / smile sitting in a tiny window with
+            // hair encroaching on the cheeks. Lifted from the JSX
+            // prototype's second skin path which the original port
+            // missed.
+            val faceOval = Path().apply {
+                moveTo(-12f, -16f)
+                quadraticTo(-13f, -22f, -8f, -22f)
+                quadraticTo(0f, -23f, 8f, -22f)
+                quadraticTo(13f, -22f, 12f, -16f)
+                quadraticTo(12f, -8f, 8f, -4f)
+                quadraticTo(0f, -2f, -8f, -4f)
+                quadraticTo(-12f, -8f, -12f, -16f)
+                close()
+            }
+            drawPath(faceOval, p.skin, alpha = parentAlpha)
             drawFaceFeatures(
                 p, radius = 13.5f, eyeY = -15f, smileY = -10f,
                 blush = true, bindi = true,
