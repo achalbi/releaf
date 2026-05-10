@@ -59,6 +59,17 @@ struct ScanDetailScreen: View {
     /// appear so the Details card can show "2.4 MB" etc. Nil until
     /// resolved or when the file isn't readable.
     @State private var pdfFileSize: Int64? = nil
+    /// Drives the "Add to contact" sheet presented from the Actions
+    /// card on Business Card captures. Set true on tap; the sheet
+    /// flips it back when the system contact form dismisses.
+    @State private var showAddContactSheet = false
+    /// Parsed name + phones extracted from the capture's OCR. Loaded
+    /// on tap of the Add-to-contact row so we don't pay the SQLite
+    /// read on every scan-detail open. Empty (`nil` name + `[]`
+    /// phones) means parsing yielded nothing — the system contact
+    /// form opens with empty fields and the user fills them in.
+    @State private var addContactPayload: BusinessCardParser.Parsed =
+        BusinessCardParser.Parsed(name: nil, phones: [])
 
     init(
         captureId: String,
@@ -196,6 +207,17 @@ struct ScanDetailScreen: View {
             Text("\(titleDraft.count) characters")
                 .font(.caption)
                 .foregroundStyle(QuickInkColors.inkSoft)
+        }
+        // Add-to-contact sheet — system contact-creation form
+        // pre-filled with the parser's name + phone-number guesses.
+        // Presented from the Actions card on Business Card captures.
+        .sheet(isPresented: $showAddContactSheet) {
+            AddContactSheet(
+                name:      addContactPayload.name,
+                phones:    addContactPayload.phones,
+                onDismiss: { showAddContactSheet = false }
+            )
+            .ignoresSafeArea()
         }
         // Fullscreen flipbook viewer — opens when the user taps the
         // overlay fullscreen button on the inline preview. Only
@@ -694,6 +716,19 @@ struct ScanDetailScreen: View {
             }
 
             VStack(spacing: 0) {
+                // Business-card-only "Add to contact" row. Sits at
+                // the top of the Actions list because it's the most
+                // common action a user takes on a scanned card.
+                if isBusinessCard(capture) {
+                    Button {
+                        Task { await openAddContactSheet() }
+                    } label: {
+                        actionRowContent(icon: "person.crop.circle.badge.plus", label: "Add to contact")
+                    }
+                    .buttonStyle(.plain)
+                    actionDivider
+                }
+
                 if let pdfURL = shareablePdfURL(from: capture) {
                     actionRow(icon: "square.and.arrow.up", label: "Share") {
                         ShareLink(item: pdfURL) {
@@ -810,6 +845,44 @@ struct ScanDetailScreen: View {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         return formatter.string(fromByteCount: bytes)
+    }
+
+    /// True for scans tagged with the Business Card category. Drives
+    /// the conditional "Add to contact" action row. Case-insensitive
+    /// so "business card" / "Business Card" / "BUSINESS CARD" all
+    /// trip the gate.
+    private func isBusinessCard(_ capture: CaptureSummary) -> Bool {
+        (capture.category ?? "").lowercased() == "business card"
+    }
+
+    /// Load the capture's OCR text, run the business-card parser,
+    /// stash the result, and open the system contact-creation sheet.
+    /// Runs even when the OCR pass produced nothing — the sheet just
+    /// opens with empty fields the user can fill in by hand.
+    private func openAddContactSheet() async {
+        let ocr = await loadOcrText()
+        addContactPayload = BusinessCardParser.parse(ocr)
+        showAddContactSheet = true
+    }
+
+    /// One-shot read of the capture's OCR pages, joined into a
+    /// single text blob in page order. Empty string when there's no
+    /// OCR row (the parser handles that case fine — yields nothing
+    /// and the contact sheet opens empty).
+    private func loadOcrText() async -> String {
+        let dbQueue = QuickInkDatabase.shared.dbQueue
+        do {
+            let texts = try await dbQueue.read { db -> [String] in
+                try String.fetchAll(db, sql: """
+                    SELECT text FROM ocr_results
+                    WHERE capture_id = ? AND deleted_at IS NULL
+                    ORDER BY page_index ASC
+                    """, arguments: [captureId])
+            }
+            return texts.joined(separator: "\n\n")
+        } catch {
+            return ""
+        }
     }
 
     /// Lazy load the on-disk PDF size so the Details row can show it.

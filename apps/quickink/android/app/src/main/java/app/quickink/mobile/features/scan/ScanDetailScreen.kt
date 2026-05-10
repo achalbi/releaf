@@ -16,6 +16,7 @@ package app.quickink.mobile.features.scan
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.provider.ContactsContract
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,6 +51,7 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.LocalOffer
+import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -125,6 +127,7 @@ fun ScanDetailScreen(
     val scope = rememberCoroutineScope()
 
     val captureDao = remember(app) { app.database.captureDao() }
+    val ocrDao = remember(app) { app.database.ocrResultDao() }
     val categoryDao = remember(app) { app.database.categoryDao() }
 
     var capture by remember(captureId) { mutableStateOf<CaptureEntity?>(null) }
@@ -352,6 +355,8 @@ fun ScanDetailScreen(
                         onAddTag    = { showRetagSheet = true },
                         modifier    = Modifier.weight(1f),
                     )
+                    val isBusinessCard = current.category
+                        ?.equals("Business Card", ignoreCase = true) == true
                     ActionsCard(
                         capture        = current,
                         onShare        = {
@@ -359,6 +364,28 @@ fun ScanDetailScreen(
                         },
                         onMoveToFolder = { showRetagSheet = true },
                         onDelete       = { showDeleteConfirm = true },
+                        // Business-card-only Add-to-contact row.
+                        // Loads the capture's OCR, parses it for
+                        // name + phone numbers, and launches the
+                        // system contact-create intent pre-filled
+                        // with whatever the parser found. Empty
+                        // parse → form opens empty for manual
+                        // entry.
+                        onAddToContact = if (isBusinessCard) {
+                            {
+                                scope.launch {
+                                    val ocrText = runCatching {
+                                        ocrDao.findFirstTextForCapture(captureId)
+                                    }.getOrNull().orEmpty()
+                                    val parsed = BusinessCardParser.parse(ocrText)
+                                    launchAddContactIntent(
+                                        context = context,
+                                        name    = parsed.name,
+                                        phones  = parsed.phones,
+                                    )
+                                }
+                            }
+                        } else null,
                         modifier       = Modifier.weight(1f),
                     )
                 }
@@ -698,6 +725,70 @@ private fun shareableUri(context: android.content.Context, raw: String): Uri? {
                 .getOrNull()
         }
         else -> null
+    }
+}
+
+/**
+ * Launch the system "Add to contact" UI pre-filled with the parsed
+ * business-card data. Uses [ContactsContract.Intents.Insert.ACTION]
+ * so the OS handles the confirmation flow itself — no
+ * READ/WRITE_CONTACTS permission needed by this app.
+ *
+ * Mirror of iOS's `AddContactSheet` (CNContactViewController). Only
+ * the first phone number lands in the inline `PHONE` extra; we
+ * additionally pack any extras into a `ContactsContract.Data`
+ * ArrayList so multi-number cards still surface every match. If the
+ * parser found nothing, the intent still opens — the user gets the
+ * standard Contacts app with empty fields.
+ */
+private fun launchAddContactIntent(
+    context: android.content.Context,
+    name: String?,
+    phones: List<String>,
+) {
+    val intent = Intent(ContactsContract.Intents.Insert.ACTION).apply {
+        type = ContactsContract.RawContacts.CONTENT_TYPE
+        if (!name.isNullOrEmpty()) {
+            putExtra(ContactsContract.Intents.Insert.NAME, name)
+        }
+        if (phones.isNotEmpty()) {
+            putExtra(ContactsContract.Intents.Insert.PHONE, phones.first())
+            putExtra(
+                ContactsContract.Intents.Insert.PHONE_TYPE,
+                ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE,
+            )
+            // Pack any additional numbers into the data extras so
+            // the contact form shows multiple phone fields.
+            if (phones.size > 1) {
+                val extras = ArrayList<android.content.ContentValues>(phones.size - 1)
+                for (extra in phones.drop(1)) {
+                    extras += android.content.ContentValues().apply {
+                        put(
+                            ContactsContract.Data.MIMETYPE,
+                            ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE,
+                        )
+                        put(ContactsContract.CommonDataKinds.Phone.NUMBER, extra)
+                        put(
+                            ContactsContract.CommonDataKinds.Phone.TYPE,
+                            ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE,
+                        )
+                    }
+                }
+                putParcelableArrayListExtra(
+                    ContactsContract.Intents.Insert.DATA,
+                    extras,
+                )
+            }
+        }
+    }
+    try {
+        context.startActivity(intent)
+    } catch (_: Exception) {
+        android.widget.Toast.makeText(
+            context,
+            "Couldn't open the contact form",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
     }
 }
 
@@ -1069,6 +1160,13 @@ private fun ActionsCard(
     onShare: () -> Unit,
     onMoveToFolder: () -> Unit,
     onDelete: () -> Unit,
+    /**
+     * Optional Add-to-contact action. Non-null only for Business
+     * Card captures — the parent gates this so other categories
+     * don't see the row. When set, renders as the first action row
+     * (most-likely action for a card capture).
+     */
+    onAddToContact: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalQuickInkColors.current
@@ -1097,6 +1195,14 @@ private fun ActionsCard(
         }
 
         Column(modifier = Modifier.fillMaxWidth()) {
+            if (onAddToContact != null) {
+                ActionRow(
+                    icon    = Icons.Outlined.PersonAdd,
+                    label   = "Add to contact",
+                    onClick = onAddToContact,
+                )
+                ActionDivider()
+            }
             ActionRow(
                 icon         = Icons.Outlined.Share,
                 label        = "Share",
