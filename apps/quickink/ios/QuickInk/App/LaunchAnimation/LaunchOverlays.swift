@@ -65,56 +65,14 @@ struct LaunchPointsCounter: View {
         // the badgeAccent (light green) doesn't read on the cream sky.
         let inkColor = palette.feedAccent
 
+        // Number + caption only — no leaf glyph. The VStack defaults
+        // to centre alignment on the cross axis, so both texts sit
+        // dead-centre under the maxWidth-infinity frame.
         VStack(spacing: 4) {
-            HStack(alignment: .center, spacing: 10) {
-                // Leaf glyph at hero size.
-                Canvas { ctx, _ in
-                    let path = Path { p in
-                        p.move(to: CGPoint(x: 9, y: 1.5))
-                        p.addCurve(
-                            to:       CGPoint(x: 2.5, y: 12),
-                            control1: CGPoint(x: 4,   y: 3),
-                            control2: CGPoint(x: 1.5, y: 7)
-                        )
-                        p.addCurve(
-                            to:       CGPoint(x: 6.8, y: 11.2),
-                            control1: CGPoint(x: 4,   y: 12.3),
-                            control2: CGPoint(x: 5.5, y: 12)
-                        )
-                        p.addLine(to: CGPoint(x: 6.8, y: 8))
-                        p.addLine(to: CGPoint(x: 7.6, y: 8))
-                        p.addLine(to: CGPoint(x: 7.6, y: 10.7))
-                        p.addCurve(
-                            to:       CGPoint(x: 10.5, y: 7.2),
-                            control1: CGPoint(x: 8.7,  y: 9.9),
-                            control2: CGPoint(x: 9.7,  y: 8.7)
-                        )
-                        p.addLine(to: CGPoint(x: 9, y: 7))
-                        p.addLine(to: CGPoint(x: 10.8, y: 6.5))
-                        p.addCurve(
-                            to:       CGPoint(x: 12, y: 3.4),
-                            control1: CGPoint(x: 11.3, y: 5.5),
-                            control2: CGPoint(x: 11.7, y: 4.5)
-                        )
-                        p.addCurve(
-                            to:       CGPoint(x: 9, y: 1.5),
-                            control1: CGPoint(x: 11,  y: 2.4),
-                            control2: CGPoint(x: 10,  y: 1.8)
-                        )
-                        p.closeSubpath()
-                    }
-                    // Scale the 18×18 viewBox up to 36×36.
-                    var c = ctx
-                    c.scaleBy(x: 36.0/18.0, y: 36.0/18.0)
-                    c.fill(path, with: .color(inkColor))
-                }
-                .frame(width: 36, height: 36)
-
-                Text("\(value)")
-                    .font(.system(size: 56, weight: .bold))
-                    .foregroundStyle(inkColor)
-                    .monospacedDigit()
-            }
+            Text("\(value)")
+                .font(.system(size: 56, weight: .bold))
+                .foregroundStyle(inkColor)
+                .monospacedDigit()
             Text("TREE POINTS")
                 .font(.system(size: 12, weight: .semibold))
                 .tracking(3.5)

@@ -96,6 +96,8 @@ internal fun LaunchPointsCounter(
     // badgeAccent (light green) doesn't read on the cream sky.
     val ink = palette.feedAccent
 
+    // Number + caption only — no leaf glyph. The Column's
+    // CenterHorizontally alignment plants both texts dead-centre.
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -106,20 +108,12 @@ internal fun LaunchPointsCounter(
             .offset(y = ty.dp)
             .padding(top = 60.dp),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Canvas(modifier = Modifier.size(36.dp)) {
-                drawLeafGlyph(ink)
-            }
-            Text(
-                text = "$value",
-                color = ink,
-                fontSize = 56.sp,
-                fontWeight = FontWeight.Bold,
-            )
-        }
+        Text(
+            text = "$value",
+            color = ink,
+            fontSize = 56.sp,
+            fontWeight = FontWeight.Bold,
+        )
         Text(
             text = "TREE POINTS",
             color = ink.copy(alpha = 0.7f),
