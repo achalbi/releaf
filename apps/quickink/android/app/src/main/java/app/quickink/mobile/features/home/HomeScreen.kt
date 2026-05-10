@@ -521,21 +521,26 @@ private fun HomeHeader(
                     // the whole "what if the user's name starts
                     // with a descender / non-Latin / emoji" question.
                     val fallback: @Composable () -> Unit = {
-                        Icon(
-                            imageVector        = Icons.Outlined.Face,
-                            contentDescription = "Open profile menu",
-                            // Drop the tint to 75% white. The
-                            // Outlined.Face stroke is already the
-                            // thinnest fixed-stroke variant in
-                            // material-icons-extended (no weight
-                            // axis), so the alpha drop is the
-                            // closest equivalent to a "lighter"
-                            // glyph without pulling in Material
-                            // Symbols. Still bright enough to read
-                            // on the coral disc.
-                            tint               = colors.textOnAccent.copy(alpha = 0.75f),
-                            modifier           = Modifier.size(22.dp),
-                        )
+                        Box(
+                            modifier = Modifier.size(22.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector        = Icons.Outlined.Face,
+                                contentDescription = "Open profile menu",
+                                // Drop the tint to 75% white. The
+                                // Outlined.Face stroke is already the
+                                // thinnest fixed-stroke variant in
+                                // material-icons-extended (no weight
+                                // axis), so the alpha drop is the
+                                // closest equivalent to a "lighter"
+                                // glyph without pulling in Material
+                                // Symbols. Still bright enough to read
+                                // on the coral disc.
+                                tint               = colors.textOnAccent.copy(alpha = 0.75f),
+                                modifier           = Modifier.fillMaxSize(),
+                            )
+                        }
                     }
 
                     if (profilePhotoUri.isNotEmpty()) {
