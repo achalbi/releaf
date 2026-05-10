@@ -503,13 +503,51 @@ public final class ScanFlowController: ObservableObject {
             for window in stride(from: tokens.count, through: 1, by: -1) {
                 let needle = Self.depluralizePhrase(tokens.prefix(window).joined(separator: " "))
                 guard !needle.isEmpty else { continue }
+                // Pass 1: canonical (depluralized) name match.
                 if let row = rows.first(where: { row in
                     Self.depluralizePhrase(row["name"] as String) == needle
                 }) {
                     return row["name"] as String?
                 }
+                // Pass 2: alias match — categories with known
+                // synonyms / OCR-error variants that don't reduce
+                // to the canonical via depluralization alone (e.g.
+                // "card" / "businesscard" / "8usiness" all map to
+                // "Business Card").
+                if let row = rows.first(where: { row in
+                    let canonical = row["name"] as String
+                    return Self.aliasesFor(canonical).contains { alias in
+                        Self.depluralizePhrase(alias) == needle
+                    }
+                }) {
+                    return row["name"] as String?
+                }
             }
             return nil
+        }
+    }
+
+    /// Synonyms / OCR-error variants for a category name that the
+    /// canonical depluralization pass wouldn't catch. The keys are
+    /// matched case-insensitively against the active category list;
+    /// returning a non-empty list adds an extra pass to
+    /// [matchCategoryName] that compares the OCR needle against each
+    /// alias (after depluralization). Empty for unknown categories,
+    /// which fall through to the canonical-only match.
+    nonisolated static func aliasesFor(_ canonicalName: String) -> [String] {
+        switch canonicalName.lowercased() {
+        case "business card":
+            // "card" alone, the no-space mash-up, and the common
+            // OCR misread where ML Kit decodes "B" as "8".
+            return [
+                "card",
+                "businesscard",
+                "8usiness",
+                "8usinesscard",
+                "8usiness card",
+            ]
+        default:
+            return []
         }
     }
 

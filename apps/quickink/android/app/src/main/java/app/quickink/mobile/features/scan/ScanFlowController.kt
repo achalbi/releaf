@@ -530,14 +530,50 @@ class ScanFlowController(
             for (window in tokens.size downTo 1) {
                 val needle = depluralizePhrase(tokens.take(window).joinToString(" "))
                 if (needle.isEmpty()) continue
-                val match = cats.firstOrNull { depluralizePhrase(it.name) == needle }
-                if (match != null) return match.name
+                // Pass 1: canonical (depluralized) name match.
+                val canonical = cats.firstOrNull { depluralizePhrase(it.name) == needle }
+                if (canonical != null) return canonical.name
+                // Pass 2: alias match — categories with known
+                // synonyms / OCR-error variants that don't reduce
+                // to the canonical via depluralization alone (e.g.
+                // "card" / "businesscard" / "8usiness" all map to
+                // "Business Card").
+                val aliasMatch = cats.firstOrNull { cat ->
+                    aliasesFor(cat.name).any { alias ->
+                        depluralizePhrase(alias) == needle
+                    }
+                }
+                if (aliasMatch != null) return aliasMatch.name
             }
             null
         } catch (_: Exception) {
             null
         }
     }
+
+    /**
+     * Synonyms / OCR-error variants for a category name that the
+     * canonical depluralization pass wouldn't catch. Matched
+     * case-insensitively against the active category list; returning
+     * a non-empty list adds an extra pass to [matchCategoryName] that
+     * compares the OCR needle against each alias (after
+     * depluralization). Empty for unknown categories, which fall
+     * through to the canonical-only match. Mirror of iOS
+     * `ScanFlowController.aliasesFor(_:)`.
+     */
+    private fun aliasesFor(canonicalName: String): List<String> =
+        when (canonicalName.lowercase()) {
+            "business card" -> listOf(
+                // "card" alone, the no-space mash-up, and the common
+                // OCR misread where ML Kit decodes "B" as "8".
+                "card",
+                "businesscard",
+                "8usiness",
+                "8usinesscard",
+                "8usiness card",
+            )
+            else -> emptyList()
+        }
 
     /**
      * Whitespace-split tokenizer + per-token depluralizer. Lets
