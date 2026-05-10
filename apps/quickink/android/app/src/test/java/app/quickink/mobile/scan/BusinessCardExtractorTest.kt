@@ -297,6 +297,60 @@ class BusinessCardExtractorTest {
         assertEquals("Senior Software Engineer", out.designation)
     }
 
+    @Test fun salutation_anchorsNameSelectionEvenWhenLayoutFavoursAnotherBlock() {
+        // Block 0 is the bigger / topmost line — without the
+        // salutation bonus it would win NAME on layout alone.
+        // Block 2 has "Mr." — should win regardless because that's
+        // a near-positive identification of a name line.
+        val blocks = listOf(
+            block(0, "Acme Studios",       y = 0.05, h = 0.10),  // big, top — wordmark
+            block(1, "Founder",            y = 0.18, h = 0.05),
+            block(2, "Mr. Aarav Sharma",   y = 0.28, h = 0.06),  // smaller — but salutation
+        )
+        val out = BusinessCardExtractor.extract(blocks)
+        // Salutation pulls block 2 to the top of the NAME pool.
+        assertEquals("Mr. Aarav Sharma", out.name)
+    }
+
+    @Test fun salutation_recognisedAcrossCommonForms() {
+        val variants = listOf(
+            "Mr Aarav Sharma",
+            "Mr. Aarav Sharma",
+            "Mrs. Priya Patel",
+            "Ms Riya Mehta",
+            "Dr. Kavya Iyer",
+            "Sri Vikram Singh",
+            "Smt. Lata Verma",
+            "Prof. R.K. Narayan",
+        )
+        for (text in variants) {
+            val blocks = listOf(
+                block(0, "Acme Pvt Ltd",  y = 0.05, h = 0.12),
+                block(1, text,            y = 0.30, h = 0.05),
+                block(2, "Director",      y = 0.38, h = 0.04),
+            )
+            val out = BusinessCardExtractor.extract(blocks)
+            assertEquals("expected name from '$text'", text, out.name)
+        }
+    }
+
+    @Test fun biggestFontFavoursCompanyOverName() {
+        // No suffix vocab match on either block — both COMPANY
+        // candidates rely on layout alone. The biggest-text penalty
+        // for NAME nudges the largest block to COMPANY.
+        val blocks = listOf(
+            // Big-font wordmark at the top — no "Pvt Ltd" suffix.
+            block(0, "QuickInk",         y = 0.05, h = 0.12),
+            // Smaller name + designation pair below.
+            block(1, "Aarav Sharma",     y = 0.28, h = 0.06),
+            block(2, "Engineer",         y = 0.36, h = 0.05),
+        )
+        val out = BusinessCardExtractor.extract(blocks)
+        assertEquals("QuickInk", out.company)
+        assertEquals("Aarav Sharma", out.name)
+        assertEquals("Engineer", out.designation)
+    }
+
     @Test fun fallsBackToWhateverEngineEmitsWhenNoLineBlocks() {
         // Defensive: an engine that emits only paragraph-grained
         // (or word-grained) blocks shouldn't return empty — fall

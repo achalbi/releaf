@@ -32,6 +32,13 @@ public struct ScoringWeights: Sendable {
     public let nameTokenCountPenalty: Double
     public let companyPunctuationPenalty: Double
     public let duplicateOverlapPenalty: Double
+    /// Penalty applied to NAME candidates whose block height is at
+    /// or near `layout.maxHeight`. Mirror of the Android weight.
+    public let largestTextPenaltyForName: Double
+    /// Bonus when the block's first token is a known honorific
+    /// ("Mr", "Mrs", "Dr", "Sri", "Smt", …). Mirror of the Android
+    /// weight.
+    public let nameSalutationBonus: Double
 
     public let minNameScore: Double
     public let minCompanyScore: Double
@@ -61,6 +68,8 @@ public struct ScoringWeights: Sendable {
         nameTokenCountPenalty: Double          = 5.0,
         companyPunctuationPenalty: Double      = 3.0,
         duplicateOverlapPenalty: Double        = 2.0,
+        largestTextPenaltyForName: Double      = 4.0,
+        nameSalutationBonus: Double            = 6.0,
         minNameScore: Double                   = 5.0,
         minCompanyScore: Double                = 5.0,
         minDesignationScore: Double            = 5.0,
@@ -88,6 +97,8 @@ public struct ScoringWeights: Sendable {
         self.nameTokenCountPenalty             = nameTokenCountPenalty
         self.companyPunctuationPenalty         = companyPunctuationPenalty
         self.duplicateOverlapPenalty           = duplicateOverlapPenalty
+        self.largestTextPenaltyForName         = largestTextPenaltyForName
+        self.nameSalutationBonus               = nameSalutationBonus
         self.minNameScore                      = minNameScore
         self.minCompanyScore                   = minCompanyScore
         self.minDesignationScore               = minDesignationScore

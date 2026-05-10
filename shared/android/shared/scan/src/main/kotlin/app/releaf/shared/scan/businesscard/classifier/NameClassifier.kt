@@ -9,10 +9,20 @@
  *   + engine confidence (× weight)
  *   + 2.0 if every alphabetic token starts with an uppercase letter
  *     ("Title Case Hint")
+ *   + nameSalutationBonus        — first token is a known honorific
+ *                                  (Mr / Mrs / Dr / Sri / Smt / …);
+ *                                  near-positive identification
  *   - nameDigitsPenalty          — any digit in the block
  *   - nameTokenCountPenalty      — token count outside [1, 4]
  *   - 6.0                        — block contains email / URL / phone
  *                                  signals (definitely not the name)
+ *   - largestTextPenaltyForName  — block height is at / near
+ *                                  layout.maxHeight (only on multi-
+ *                                  block layouts). Biggest text on a
+ *                                  card is almost always the company
+ *                                  wordmark; this nudges that block
+ *                                  toward COMPANY without forbidding
+ *                                  it as NAME outright.
  *
  * The pipeline picks the single highest-scoring NAME candidate;
  * minNameScore prunes obvious no-signal cards (returns null name).
@@ -61,9 +71,29 @@ class NameClassifier : Classifier {
             // Title-case hint — every alphabetic token starts upper.
             if (tokens.isNotEmpty() && tokens.all { isTitleCased(it) }) score += 2.0
 
+            // Salutation hint — first token is a known honorific
+            // ("Mr.", "Mrs", "Dr", "Sri"). Near-positive identification
+            // since these never appear on company / address / phone
+            // lines.
+            if (tokens.isNotEmpty() && SALUTATIONS.contains(stripPunct(tokens.first().lowercase()))) {
+                score += weights.nameSalutationBonus
+            }
+
             // All-caps acronym blocks ("XYZ TECHNOLOGIES") tend to
             // be company / department, not name. Soft penalty.
             if (text == text.uppercase() && text.length > 4) score -= 2.0
+
+            // Largest-text penalty — when a card has multiple blocks
+            // and this one is at / near the tallest, it's far more
+            // likely the company wordmark than the person's name.
+            // 95% of max-height triggers — leaves the bonus space for
+            // ties (multiple blocks at the same large size, e.g.
+            // company line + a tagline).
+            if (layout.blocks.size > 1 &&
+                layout.maxHeight > 0.0 &&
+                block.bbox.height >= 0.95 * layout.maxHeight) {
+                score -= weights.largestTextPenaltyForName
+            }
 
             out += FieldCandidate(
                 sourceBlockIndex = idx,
@@ -80,6 +110,25 @@ class NameClassifier : Classifier {
         private val CONTAINS_URL   = Regex("""(?:https?://|www\.)""", RegexOption.IGNORE_CASE)
         private val CONTAINS_PHONE = Regex("""\+?\d[\d\s\-.()]{7,}\d""")
 
+        /**
+         * Lowercased, punctuation-stripped salutation set. Compared
+         * against the first token of the block. Common English titles
+         * + Indian honorifics; extend with caution — false positives
+         * are essentially impossible since none of these read as
+         * company / address / phone tokens.
+         */
+        private val SALUTATIONS: Set<String> = setOf(
+            "mr", "mrs", "ms", "mx",
+            "dr", "doctor",
+            "prof", "professor",
+            "sri", "shri", "smt", "shrimati",
+            "kumari", "miss",
+            "rev", "reverend",
+            "hon", "honorable",
+            "sir", "madam",
+            "col", "lt", "capt", "maj",
+        )
+
         /** True for "John", "John-Paul", "O'Connor", "Mc'Donald". */
         private fun isTitleCased(token: String): Boolean {
             // Strip trailing punctuation first.
@@ -88,5 +137,9 @@ class NameClassifier : Classifier {
             val first = clean.first()
             return first.isLetter() && first.isUpperCase()
         }
+
+        /** Strip non-alphanumeric chars so "Mr." / "Mr" / "Mr," all match. */
+        private fun stripPunct(token: String): String =
+            token.filter { it.isLetterOrDigit() }
     }
 }

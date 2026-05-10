@@ -57,6 +57,25 @@ data class ScoringWeights(
     ,
     val companyPunctuationPenalty: Double = 3.0,
     val duplicateOverlapPenalty: Double   = 2.0,
+    /**
+     * Penalty applied to NAME candidates whose block height is at
+     * or near `layout.maxHeight`. The biggest text on a real card is
+     * almost always the company wordmark — this nudges the largest
+     * block toward COMPANY over NAME without forbidding it outright.
+     * Only applies when the layout has > 1 block; a single-block
+     * layout has no "biggest" to compare to.
+     */
+    val largestTextPenaltyForName: Double = 4.0,
+
+    // Bonuses — content-driven layout cues.
+    /**
+     * Strong NAME signal when the block's first token is a known
+     * honorific ("Mr", "Mrs", "Dr", "Sri", "Smt", …). These almost
+     * never appear on company / address / phone lines, so a hit is
+     * close to a positive identification. See [NameClassifier] for
+     * the salutation set.
+     */
+    val nameSalutationBonus: Double       = 6.0,
 
     // Selection thresholds. Candidates below the per-kind minimum
     // are dropped; pipeline emits null for the field (or skips the
