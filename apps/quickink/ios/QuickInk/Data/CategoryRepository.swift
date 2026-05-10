@@ -181,4 +181,59 @@ public final class CategoryRepository: @unchecked Sendable {
             _ = try await insert(userId: userId, name: name, position: index)
         }
     }
+
+    /// One-shot migration for users who were on a previous default
+    /// seed that included "Study" (which has since been replaced by
+    /// "Business Card"). Renames Study → Business Card in the
+    /// categories table and retags any captures that referenced
+    /// "Study" so the user's existing scans still group correctly.
+    ///
+    /// Guarded by a UserDefaults flag so it only runs once per
+    /// install. The body itself is also idempotent — if Business
+    /// Card already exists we soft-delete Study instead of trying to
+    /// rename (the (user_id, name) UNIQUE constraint would refuse
+    /// the rename otherwise).
+    public func migrateLegacyStudyToBusinessCardIfNeeded(userId: String) async throws {
+        let flagKey = "quickink.migrations.study-to-business-card-v1"
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: flagKey) else { return }
+
+        let now = IsoClock.nowIso()
+        try await dbQueue.write { db in
+            let studyExists = (try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM categories
+                WHERE user_id = ? AND name = 'Study' AND deleted_at IS NULL
+                """, arguments: [userId]) ?? 0) > 0
+            let businessCardExists = (try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM categories
+                WHERE user_id = ? AND name = 'Business Card' AND deleted_at IS NULL
+                """, arguments: [userId]) ?? 0) > 0
+
+            if studyExists && !businessCardExists {
+                try db.execute(sql: """
+                    UPDATE categories
+                    SET name = 'Business Card', updated_at = ?, dirty = 1
+                    WHERE user_id = ? AND name = 'Study' AND deleted_at IS NULL
+                    """, arguments: [now, userId])
+            } else if studyExists && businessCardExists {
+                try db.execute(sql: """
+                    UPDATE categories
+                    SET deleted_at = ?, updated_at = ?, dirty = 1
+                    WHERE user_id = ? AND name = 'Study' AND deleted_at IS NULL
+                    """, arguments: [now, now, userId])
+            }
+
+            // Retag any captures still pointing at "Study" so they
+            // continue to group with the renamed category. Runs even
+            // when no category row was touched (covers the case
+            // where the user deleted "Study" earlier but still has
+            // older captures with that string in their `category`).
+            try db.execute(sql: """
+                UPDATE captures
+                SET category = 'Business Card', updated_at = ?, dirty = 1
+                WHERE user_id = ? AND category = 'Study' AND deleted_at IS NULL
+                """, arguments: [now, userId])
+        }
+        defaults.set(true, forKey: flagKey)
+    }
 }

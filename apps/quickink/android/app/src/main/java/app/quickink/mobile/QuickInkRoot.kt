@@ -296,8 +296,15 @@ private fun MainShell(
     // user; the repository skips work when rows already exist.
     LaunchedEffect(userId) {
         try {
-            CategoryRepository(app.database.categoryDao())
-                .seedDefaultsIfEmpty(userId)
+            val repo = CategoryRepository(
+                categoryDao = app.database.categoryDao(),
+                captureDao  = app.database.captureDao(),
+            )
+            repo.seedDefaultsIfEmpty(userId)
+            // One-shot migration for users on the previous seed
+            // that included "Study". Idempotent + flag-guarded;
+            // safe to call on every launch.
+            repo.migrateLegacyStudyToBusinessCardIfNeeded(context, userId)
         } catch (_: Exception) { /* best-effort */ }
     }
 

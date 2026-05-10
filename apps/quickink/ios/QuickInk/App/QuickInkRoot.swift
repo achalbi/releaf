@@ -379,7 +379,12 @@ private struct MainShell: View {
             // ScanReviewScreen + the Settings → Categories list
             // both observe the same table — a freshly-seeded user
             // sees the chips on the very next scan.
-            try? await CategoryRepository().seedDefaultsIfEmpty(userId: userId)
+            let categoryRepo = CategoryRepository()
+            try? await categoryRepo.seedDefaultsIfEmpty(userId: userId)
+            // One-shot migration for users on the previous seed
+            // that included "Study". Idempotent + flag-guarded;
+            // safe to call on every launch.
+            try? await categoryRepo.migrateLegacyStudyToBusinessCardIfNeeded(userId: userId)
         }
         // Quick-capture modal lifted from HomeScreen so the ⚡ FAB
         // on Library / Search / Settings can present it too. Same

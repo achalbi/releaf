@@ -8,6 +8,7 @@
 
 package app.quickink.mobile.data.category
 
+import android.content.Context
 import app.quickink.mobile.data.capture.CaptureDao
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
@@ -99,6 +100,47 @@ class CategoryRepository(
         DEFAULT_SEED.forEachIndexed { index, name ->
             insert(userId = userId, name = name, position = index)
         }
+    }
+
+    /**
+     * One-shot migration for users who were on a previous default
+     * seed that included "Study" (which has since been replaced by
+     * "Business Card"). Renames Study → Business Card and retags
+     * any captures still referencing the old name.
+     *
+     * Guarded by a SharedPreferences flag so it only runs once per
+     * install. The body itself is also defensive — if Business Card
+     * already exists we soft-delete Study instead of trying to
+     * rename (the (user_id, name) UNIQUE constraint would refuse
+     * the rename otherwise). Mirror of iOS
+     * `migrateLegacyStudyToBusinessCardIfNeeded`.
+     */
+    suspend fun migrateLegacyStudyToBusinessCardIfNeeded(
+        context: Context,
+        userId: String,
+    ) {
+        val prefs = context.applicationContext
+            .getSharedPreferences("quickink_migrations", Context.MODE_PRIVATE)
+        val flagKey = "study-to-business-card-v1"
+        if (prefs.getBoolean(flagKey, false)) return
+
+        val active       = categoryDao.listActive(userId)
+        val study        = active.firstOrNull { it.name == "Study" }
+        val businessCard = active.firstOrNull { it.name == "Business Card" }
+        val now          = IsoClock.nowIso()
+
+        if (study != null && businessCard == null) {
+            categoryDao.rename(study.id, "Business Card", now)
+        } else if (study != null && businessCard != null) {
+            categoryDao.softDelete(study.id, now)
+        }
+
+        // Retag captures even when no category row was touched —
+        // covers the case where the user deleted "Study" earlier
+        // but older captures still hold the literal string.
+        captureDao?.renameCategory(userId, "Study", "Business Card", now)
+
+        prefs.edit().putBoolean(flagKey, true).apply()
     }
 
     companion object {
