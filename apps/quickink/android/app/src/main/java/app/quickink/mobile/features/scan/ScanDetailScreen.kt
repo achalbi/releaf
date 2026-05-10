@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -315,11 +314,16 @@ fun ScanDetailScreen(
                     modifier = Modifier.padding(horizontal = QuickInkSpacing.s5),
                 )
 
-                // Preview block — full-bleed within margins
+                // Preview block — full-bleed within margins. The
+                // selectedPageIndex two-way bind keeps the thumbnails
+                // strip and the swipeable pager in sync (tap a chip to
+                // jump; swipe the pager to advance the chip).
                 PreviewImage(
-                    capture           = current,
-                    onFullscreenClick = { showFullscreenViewer = true },
-                    modifier          = Modifier.padding(horizontal = QuickInkSpacing.s5),
+                    capture             = current,
+                    onFullscreenClick   = { showFullscreenViewer = true },
+                    currentPage         = selectedPageIndex,
+                    onCurrentPageChange = { selectedPageIndex = it },
+                    modifier            = Modifier.padding(horizontal = QuickInkSpacing.s5),
                 )
 
                 // Page thumbnails strip (multi-page only)
@@ -495,6 +499,8 @@ private fun PreviewImage(
     capture: CaptureEntity,
     onFullscreenClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    currentPage: Int = 0,
+    onCurrentPageChange: (Int) -> Unit = {},
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
@@ -520,8 +526,10 @@ private fun PreviewImage(
             // nothing to swipe to anyway.
             if (capture.pageCount > 1) {
                 PageTurnPdfView(
-                    pdfUri            = pdfUri!!,
-                    onFullscreenClick = onFullscreenClick,
+                    pdfUri              = pdfUri!!,
+                    onFullscreenClick   = onFullscreenClick,
+                    currentPage         = currentPage,
+                    onCurrentPageChange = onCurrentPageChange,
                     modifier = modifier
                         .fillMaxWidth()
                         .aspectRatio(0.707f) // A4-ish portrait until pages render
@@ -854,44 +862,56 @@ private fun PageThumbnailsStrip(
         repeat(pageCount) { index ->
             val selected = (index == selectedPageIndex)
             val bitmap   = pageBitmaps.getOrNull(index)
+            // Outer Box is NOT clipped — lets the page-number badge
+            // sit fully visible in the bottom-right corner without
+            // being eaten by the rounded-corner clip on the inner
+            // image surface.
             Box(
                 modifier = Modifier
                     .width(64.dp)
                     .height(80.dp)
-                    .clip(RoundedCornerShape(QuickInkRadius.sm))
-                    .background(colors.paper2)
-                    .border(
-                        width = if (selected) 2.dp else 1.dp,
-                        color = if (selected) colors.accent else colors.border,
-                        shape = RoundedCornerShape(QuickInkRadius.sm),
-                    )
                     .clickable { onSelectPage(index) },
-                contentAlignment = Alignment.Center,
             ) {
-                if (bitmap != null) {
-                    Image(
-                        bitmap             = bitmap.asImageBitmap(),
-                        contentDescription = "Page ${index + 1}",
-                        contentScale       = ContentScale.Crop,
-                        modifier           = Modifier.fillMaxSize(),
-                    )
-                } else {
-                    Icon(
-                        imageVector        = Icons.Filled.Description,
-                        contentDescription = null,
-                        tint               = colors.muted,
-                        modifier           = Modifier.size(20.dp),
-                    )
+                // Inner clipped surface — image / fallback icon.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(QuickInkRadius.sm))
+                        .background(colors.paper2)
+                        .border(
+                            width = if (selected) 2.dp else 1.dp,
+                            color = if (selected) colors.accent else colors.border,
+                            shape = RoundedCornerShape(QuickInkRadius.sm),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (bitmap != null) {
+                        Image(
+                            bitmap             = bitmap.asImageBitmap(),
+                            contentDescription = "Page ${index + 1}",
+                            contentScale       = ContentScale.Crop,
+                            modifier           = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Icon(
+                            imageVector        = Icons.Filled.Description,
+                            contentDescription = null,
+                            tint               = colors.muted,
+                            modifier           = Modifier.size(20.dp),
+                        )
+                    }
                 }
-                // Page-number badge bottom-right. Use `offset` rather
-                // than negative padding (which crashes Compose at
-                // runtime — Modifier.padding rejects negative dp).
-                // Mirror of iOS `.offset(x: 6, y: 6)` on the same chip.
+                // Page-number badge bottom-right, sitting inside the
+                // outer (un-clipped) Box so the rounded-corner clip
+                // on the inner surface doesn't hide the corner where
+                // the badge sits. Inset slightly with positive padding
+                // so it reads as overlaid on the corner, not floating
+                // off the chip.
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .offset(x = 6.dp, y = 6.dp)
-                        .size(22.dp)
+                        .padding(end = 4.dp, bottom = 4.dp)
+                        .size(20.dp)
                         .clip(CircleShape)
                         .background(if (selected) colors.accent else colors.surface)
                         .border(

@@ -357,7 +357,10 @@ struct ScanDetailScreen: View {
                     self.pageImages = images
                 }
             } else {
-                PageTurnPdfView(pageImages: pageImages)
+                PageTurnPdfView(
+                    pageImages:  pageImages,
+                    currentPage: $selectedPageIndex
+                )
                     .frame(maxWidth: .infinity)
                     .aspectRatio(pageAspectRatio, contentMode: .fit)
                     .background(QuickInkColors.surface)

@@ -44,6 +44,11 @@ struct FullscreenPdfViewer: View {
     /// Pinch-zoom scale for the single-page path. PageTurnPdfView
     /// owns its own scale state for the multi-page path.
     @State private var singlePageZoom: CGFloat = 1.0
+    /// Local current-page state for the multi-page path. PageTurnPdfView
+    /// requires a binding now (so callers can drive it externally);
+    /// the fullscreen viewer doesn't surface page state to its parent
+    /// so this is just a private holder for the swipe to mutate.
+    @State private var fullscreenCurrentPage: Int = 0
 
     var body: some View {
         ZStack {
@@ -107,7 +112,10 @@ struct FullscreenPdfViewer: View {
             // first page so portrait scans don't get letterboxed
             // unnecessarily; SwiftUI fits within the viewport so the
             // page never exceeds screen bounds in either axis.
-            PageTurnPdfView(pageImages: pageImages)
+            PageTurnPdfView(
+                pageImages:  pageImages,
+                currentPage: $fullscreenCurrentPage
+            )
                 .aspectRatio(pageAspectRatio, contentMode: .fit)
                 .padding(.horizontal, QuickInkSpacing.s2)
         } else if let only = pageImages.first {

@@ -108,6 +108,14 @@ fun PageTurnPdfView(
     pdfUri: Uri,
     modifier: Modifier = Modifier,
     onFullscreenClick: (() -> Unit)? = null,
+    /// Externally-controlled current page (0-based). Lets the caller
+    /// drive the pager from a sibling UI like the thumbnails strip.
+    /// Defaults to 0 — first page on initial render.
+    currentPage: Int = 0,
+    /// Fired whenever the pager's active page changes (swipe or
+    /// programmatic scroll). Lets the caller mirror state — e.g. so
+    /// the thumbnails strip's selected chip follows the swipe.
+    onCurrentPageChange: (Int) -> Unit = {},
 ) {
     val context = LocalContext.current
     val colors = LocalQuickInkColors.current
@@ -140,8 +148,10 @@ fun PageTurnPdfView(
             }
             else -> {
                 PageTurnPager(
-                    pages             = pages!!,
-                    onFullscreenClick = onFullscreenClick,
+                    pages               = pages!!,
+                    onFullscreenClick   = onFullscreenClick,
+                    currentPage         = currentPage,
+                    onCurrentPageChange = onCurrentPageChange,
                 )
             }
         }
@@ -152,12 +162,34 @@ fun PageTurnPdfView(
 private fun PageTurnPager(
     pages: List<Bitmap>,
     onFullscreenClick: (() -> Unit)? = null,
+    currentPage: Int = 0,
+    onCurrentPageChange: (Int) -> Unit = {},
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     val density = LocalDensity.current
 
-    val pagerState = rememberPagerState(pageCount = { pages.size })
+    val pagerState = rememberPagerState(
+        initialPage = currentPage.coerceIn(0, (pages.size - 1).coerceAtLeast(0)),
+        pageCount   = { pages.size },
+    )
+
+    // External → internal: when the controlled `currentPage` changes
+    // (e.g. user tapped a thumbnail), animate the pager to that page.
+    // Skipped when the pager is already there to avoid an animation
+    // back to the same page when the parent echoes our own emission.
+    LaunchedEffect(currentPage) {
+        if (currentPage in pages.indices &&
+            currentPage != pagerState.currentPage) {
+            pagerState.animateScrollToPage(currentPage)
+        }
+    }
+
+    // Internal → external: when the user swipes, mirror the new page
+    // to the parent so the thumbnails strip's selected chip follows.
+    LaunchedEffect(pagerState.currentPage) {
+        onCurrentPageChange(pagerState.currentPage)
+    }
 
     // Pinch-to-zoom + pan state for the ACTIVE page only. Reset to
     // defaults whenever the active page changes so each page starts

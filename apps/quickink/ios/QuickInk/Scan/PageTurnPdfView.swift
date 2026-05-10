@@ -28,8 +28,14 @@ import PDFKit
 struct PageTurnPdfView: View {
 
     let pageImages: [UIImage]
+    /// Two-way bound active page index (0-based). Lets the parent
+    /// drive the pager from a sibling UI like the thumbnails strip
+    /// AND get notified when the user swipes. Callers that don't
+    /// need to control the page from outside can pass a binding to a
+    /// local `@State Int` — the view writes back through it on
+    /// swipe so internal state stays consistent.
+    @Binding var currentPage: Int
 
-    @State private var currentPage = 0
     @State private var dragOffset: CGFloat = 0
     /// Pinch-to-zoom scale for the ACTIVE page. Reset to 1 whenever
     /// the user flips to a new page so each page starts unzoomed.
