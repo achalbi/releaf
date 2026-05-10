@@ -281,7 +281,7 @@ struct ScanDetailScreen: View {
         } else {
             ZStack {
                 QuickInkColors.paper2
-                Image(systemName: "doc.text.fill")
+                Image(systemName: "doc.text")
                     .font(.system(size: 64))
                     .foregroundStyle(QuickInkColors.muted)
             }
@@ -460,7 +460,7 @@ struct ScanDetailScreen: View {
             Text("•").foregroundStyle(QuickInkColors.muted).font(QuickInkText.meta)
 
             HStack(spacing: QuickInkSpacing.s1) {
-                Image(systemName: "doc.fill")
+                Image(systemName: "doc")
                     .font(.system(size: 11, weight: .medium))
                 Text("\(capture.pageCount) page\(capture.pageCount == 1 ? "" : "s")")
                     .font(QuickInkText.meta)
@@ -470,7 +470,7 @@ struct ScanDetailScreen: View {
             if let category = capture.category, !category.isEmpty {
                 Text("•").foregroundStyle(QuickInkColors.muted).font(QuickInkText.meta)
                 HStack(spacing: QuickInkSpacing.s1) {
-                    Image(systemName: "folder.fill")
+                    Image(systemName: "folder")
                         .font(.system(size: 11, weight: .medium))
                     Text(category)
                         .font(QuickInkText.meta)
@@ -487,7 +487,7 @@ struct ScanDetailScreen: View {
             showRetagSheet = true
         } label: {
             HStack(spacing: QuickInkSpacing.s1) {
-                Image(systemName: hasTag ? "tag.fill" : "tag")
+                Image(systemName: "tag")
                     .font(.system(size: 11, weight: .medium))
                 Text(hasTag ? (capture.category ?? "") : "Tag scan")
                     .font(QuickInkText.caption)
@@ -685,7 +685,7 @@ struct ScanDetailScreen: View {
     private func actionsCard(for capture: CaptureSummary) -> some View {
         VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
             HStack(spacing: QuickInkSpacing.s2) {
-                Image(systemName: "square.grid.2x2.fill")
+                Image(systemName: "square.grid.2x2")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(QuickInkColors.inkSoft)
                 Text("Actions")

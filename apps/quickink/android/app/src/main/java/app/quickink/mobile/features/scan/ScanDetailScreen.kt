@@ -41,16 +41,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CalendarToday
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.LocalOffer
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.LocalOffer
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -598,7 +598,7 @@ private fun PreviewImage(
                         )
                     } else {
                         Icon(
-                            imageVector       = Icons.Filled.Description,
+                            imageVector       = Icons.Outlined.Description,
                             contentDescription = null,
                             tint              = colors.muted,
                             modifier          = Modifier.size(64.dp),
@@ -761,7 +761,7 @@ private fun TitleHeader(
                 overflow = TextOverflow.Ellipsis,
             )
             Icon(
-                imageVector        = Icons.Filled.Edit,
+                imageVector        = Icons.Outlined.Edit,
                 contentDescription = "Edit title",
                 tint               = colors.muted,
                 modifier           = Modifier.size(18.dp),
@@ -785,18 +785,18 @@ private fun BreadcrumbRow(capture: CaptureEntity) {
         horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
     ) {
         BreadcrumbItem(
-            icon = Icons.Filled.CalendarToday,
+            icon = Icons.Outlined.CalendarToday,
             text = friendlyDate(capture.createdAt),
         )
         BreadcrumbDot()
         BreadcrumbItem(
-            icon = Icons.Filled.Description,
+            icon = Icons.Outlined.Description,
             text = "${capture.pageCount} page${if (capture.pageCount == 1) "" else "s"}",
         )
         if (!capture.category.isNullOrEmpty()) {
             BreadcrumbDot()
             BreadcrumbItem(
-                icon = Icons.Filled.Folder,
+                icon = Icons.Outlined.Folder,
                 text = capture.category!!,
             )
         }
@@ -894,7 +894,7 @@ private fun PageThumbnailsStrip(
                         )
                     } else {
                         Icon(
-                            imageVector        = Icons.Filled.Description,
+                            imageVector        = Icons.Outlined.Description,
                             contentDescription = null,
                             tint               = colors.muted,
                             modifier           = Modifier.size(20.dp),
@@ -963,7 +963,7 @@ private fun DetailsCard(
             horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
         ) {
             Icon(
-                imageVector        = Icons.Filled.Description,
+                imageVector        = Icons.Outlined.Description,
                 contentDescription = null,
                 tint               = colors.inkSoft,
                 modifier           = Modifier.size(12.dp),
@@ -1048,7 +1048,7 @@ private fun TagsRow(category: String?, onAddTag: () -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector        = Icons.Filled.Add,
+                    imageVector        = Icons.Outlined.Add,
                     contentDescription = "Add tag",
                     tint               = colors.inkSoft,
                     modifier           = Modifier.size(11.dp),
@@ -1088,7 +1088,7 @@ private fun ActionsCard(
             horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
         ) {
             Icon(
-                imageVector        = Icons.Filled.GridView,
+                imageVector        = Icons.Outlined.GridView,
                 contentDescription = null,
                 tint               = colors.inkSoft,
                 modifier           = Modifier.size(12.dp),
@@ -1098,19 +1098,19 @@ private fun ActionsCard(
 
         Column(modifier = Modifier.fillMaxWidth()) {
             ActionRow(
-                icon         = Icons.Filled.Share,
+                icon         = Icons.Outlined.Share,
                 label        = "Share",
                 onClick      = onShare,
             )
             ActionDivider()
             ActionRow(
-                icon         = Icons.Filled.Folder,
+                icon         = Icons.Outlined.Folder,
                 label        = "Move to folder",
                 onClick      = onMoveToFolder,
             )
             ActionDivider()
             ActionRow(
-                icon          = Icons.Filled.Delete,
+                icon          = Icons.Outlined.Delete,
                 label         = "Delete",
                 onClick       = onDelete,
                 isDestructive = true,
@@ -1323,7 +1323,7 @@ private fun RetagRow(label: String, selected: Boolean, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
     ) {
         Icon(
-            imageVector       = if (selected) Icons.Filled.Check else Icons.Filled.LocalOffer,
+            imageVector       = if (selected) Icons.Outlined.Check else Icons.Outlined.LocalOffer,
             contentDescription = null,
             tint              = if (selected) colors.accent else colors.inkSoft,
             modifier          = Modifier.size(18.dp),

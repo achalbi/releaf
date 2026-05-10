@@ -55,9 +55,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -152,7 +152,7 @@ fun QuickInkBottomNavBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             RegularTab(
-                icon       = Icons.Filled.Home,
+                icon       = Icons.Outlined.Home,
                 label      = "Home",
                 isSelected = activeTab == NavTab.Home,
                 modifier   = Modifier.weight(1f),
@@ -177,7 +177,7 @@ fun QuickInkBottomNavBar(
                 onClick    = onSearch,
             )
             RegularTab(
-                icon       = Icons.Filled.Settings,
+                icon       = Icons.Outlined.Settings,
                 label      = "Settings",
                 isSelected = activeTab == NavTab.Settings,
                 modifier   = Modifier.weight(1f),
@@ -380,7 +380,7 @@ private fun BrandTab(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector        = Icons.Filled.Bolt,
+                    imageVector        = Icons.Outlined.Bolt,
                     contentDescription = "Scan",
                     tint               = colors.textOnAccent,
                     modifier           = Modifier.size(30.dp),

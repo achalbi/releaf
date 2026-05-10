@@ -106,7 +106,7 @@ public struct QuickInkBottomNavBar: View {
         //                divergence.
         ZStack(alignment: .top) {
             HStack(spacing: 0) {
-                navIcon(systemName: "house.fill", label: "Home", active: activeTab == .home, action: onHome)
+                navIcon(systemName: "house", label: "Home", active: activeTab == .home, action: onHome)
                     .frame(maxWidth: .infinity)
                 navIconAsset(assetName: "IconNote", label: "Library", active: activeTab == .library, action: onLibrary)
                     .frame(maxWidth: .infinity)
@@ -233,7 +233,7 @@ public struct QuickInkBottomNavBar: View {
                     .fill(gradient)
                     .frame(width: 56, height: 56)
                     .shadow(color: QuickInkColors.accent.opacity(0.38), radius: 16, x: 0, y: 8)
-                Image(systemName: "bolt.fill")
+                Image(systemName: "bolt")
                     .font(.system(size: 32, weight: .semibold))
                     .foregroundStyle(QuickInkColors.textOnAccent)
             }
