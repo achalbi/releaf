@@ -57,6 +57,7 @@ import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Eco
 import androidx.compose.material.icons.filled.Folder
@@ -69,8 +70,12 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -629,17 +634,37 @@ private fun HomeHeader(
  * conservative; the goal is a directional impact score, not a
  * precise lifecycle assessment.
  */
-@Composable
-private fun SustainabilityHero(totalPages: Int) {
-    val colors = LocalQuickInkColors.current
-    val type = LocalQuickInkTypography.current
+/**
+ * Snapshot of one user's lifetime impact, expressed both as raw LCA
+ * outputs (sheets / trees-equivalent / water / CO₂ / energy) and as
+ * the per-component point contributions that sum to [totalPoints].
+ *
+ * The hero card and the breakdown bottom sheet both read from this
+ * struct so the displayed score and the per-row math can never drift
+ * out of sync.
+ */
+private data class ReleafImpact(
+    val pages: Int,
+    val pulpYield: Double,
+    val treeFraction: Double,
+    val waterLiters: Int,
+    val co2Grams: Double,
+    val energyWh: Double,
+    val pSheets: Double,
+    val pTrees: Double,
+    val pWater: Double,
+    val pCarbon: Double,
+    val pEnergy: Double,
+    val pStreak: Double,
+    val totalPoints: Int,
+)
 
-    val ecoDeep = QuickInkColors.LeafGreenDeep
-    val ecoBg   = QuickInkColors.LeafGreenBase.copy(alpha = 0.18f)
-    val ecoBorder = QuickInkColors.LeafGreenBase.copy(alpha = 0.40f)
-
-    // --- ReLeaf-points lifecycle model ---
-    // Per-sheet LCA factors (see KDoc above for sources / reasoning).
+/**
+ * Build a [ReleafImpact] for the given lifetime page count. See the
+ * [SustainabilityHero] KDoc for the rationale behind each factor and
+ * weight.
+ */
+private fun computeReleafImpact(totalPages: Int): ReleafImpact {
     val sheets       = totalPages.toDouble()
     val pulpYield    = 0.17                          // tree biomass → paper
     val treeFraction = (sheets / 8333.0) * pulpYield
@@ -652,16 +677,45 @@ private fun SustainabilityHero(totalPages: Int) {
     // captured page still scores in the low hundreds — enough to feel
     // rewarding without making the empty-state-to-first-scan jump
     // feel cheap.
-    val pSheets = sheets             * 7.5
-    val pTrees  = treeFraction       * 12_000.0
-    val pWater  = waterLiters        * 0.6
-    val pCarbon = co2Grams           * 1.2
-    val pEnergy = energyWh           * 0.4
+    val pSheets = sheets       * 7.5
+    val pTrees  = treeFraction * 12_000.0
+    val pWater  = waterLiters  * 0.6
+    val pCarbon = co2Grams     * 1.2
+    val pEnergy = energyWh     * 0.4
     val pStreak = if (sheets > 0) ln(sheets + 1.0) * 180.0 else 0.0
 
-    val ecoPoints = (pSheets + pTrees + pWater + pCarbon + pEnergy + pStreak)
+    val total = (pSheets + pTrees + pWater + pCarbon + pEnergy + pStreak)
         .roundToInt()
         .coerceAtLeast(0)
+
+    return ReleafImpact(
+        pages        = totalPages,
+        pulpYield    = pulpYield,
+        treeFraction = treeFraction,
+        waterLiters  = waterLiters,
+        co2Grams     = co2Grams,
+        energyWh     = energyWh,
+        pSheets      = pSheets,
+        pTrees       = pTrees,
+        pWater       = pWater,
+        pCarbon      = pCarbon,
+        pEnergy      = pEnergy,
+        pStreak      = pStreak,
+        totalPoints  = total,
+    )
+}
+
+@Composable
+private fun SustainabilityHero(totalPages: Int) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+
+    val ecoDeep = QuickInkColors.LeafGreenDeep
+    val ecoBg   = QuickInkColors.LeafGreenBase.copy(alpha = 0.18f)
+    val ecoBorder = QuickInkColors.LeafGreenBase.copy(alpha = 0.40f)
+
+    val impact = remember(totalPages) { computeReleafImpact(totalPages) }
+    var showBreakdown by remember { mutableStateOf(false) }
 
     // Refined-warm pass: points + water are their own right-aligned
     // data column to the right of the headline. We always render two
@@ -669,7 +723,7 @@ private fun SustainabilityHero(totalPages: Int) {
     // no more "first tree on the way" prose case, the integer score
     // does the same job at a glance and reads as a real metric.
     val ecoPointsLabel =
-        String.format(java.util.Locale.ROOT, "%,d ReLeaf pts", ecoPoints)
+        String.format(java.util.Locale.ROOT, "%,d ReLeaf pts", impact.totalPoints)
     val title    = "By going digital"
     val headline = when {
         totalPages == 0 -> "Start saving paper"
@@ -683,6 +737,11 @@ private fun SustainabilityHero(totalPages: Int) {
             .clip(RoundedCornerShape(QuickInkRadius.lg))
             .background(ecoBg)
             .border(1.dp, ecoBorder, RoundedCornerShape(QuickInkRadius.lg))
+            // Tap to open the score-breakdown sheet. Always tappable
+            // — the breakdown also serves as the explainer for the
+            // empty-state ("here's how the score will work once you
+            // start scanning").
+            .clickable { showBreakdown = true }
             .padding(QuickInkSpacing.s4),
         verticalAlignment = Alignment.CenterVertically,
     ) {

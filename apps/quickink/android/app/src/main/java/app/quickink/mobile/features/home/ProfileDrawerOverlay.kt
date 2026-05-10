@@ -67,7 +67,7 @@ import app.quickink.mobile.R
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkSpacing
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 
@@ -267,8 +267,28 @@ private fun BannerHeader(
                     .border(1.dp, Color.White.copy(alpha = 0.6f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
+                // First-initial / AccountCircle fallback. Used directly
+                // when there's no profile photo AND as the loading /
+                // error slot for SubcomposeAsyncImage below — a stale
+                // URI pointing at a deleted file (profilePhotoUri
+                // persists in SharedPreferences across reinstalls)
+                // would otherwise leave the cream disc empty, which
+                // is exactly the bug this fallback fixes.
+                val fallback: @Composable () -> Unit = {
+                    val initial = displayName.trim().firstOrNull()?.uppercase()
+                    if (initial != null) {
+                        Text(text = initial, color = colors.accent, fontSize = 54.sp)
+                    } else {
+                        Icon(
+                            imageVector       = Icons.Filled.AccountCircle,
+                            contentDescription = null,
+                            tint              = colors.accent,
+                            modifier          = Modifier.size(84.dp),
+                        )
+                    }
+                }
                 if (profilePhotoUri.isNotEmpty()) {
-                    AsyncImage(
+                    SubcomposeAsyncImage(
                         model = ImageRequest.Builder(context)
                             .data(Uri.parse(profilePhotoUri))
                             // Same cache-disabled posture as the home
@@ -282,19 +302,11 @@ private fun BannerHeader(
                         contentDescription = null,
                         contentScale       = ContentScale.Crop,
                         modifier           = Modifier.fillMaxSize().clip(CircleShape),
+                        loading = { fallback() },
+                        error   = { fallback() },
                     )
                 } else {
-                    val initial = displayName.trim().firstOrNull()?.uppercase()
-                    if (initial != null) {
-                        Text(text = initial, color = colors.accent, fontSize = 54.sp)
-                    } else {
-                        Icon(
-                            imageVector       = Icons.Filled.AccountCircle,
-                            contentDescription = null,
-                            tint              = colors.accent,
-                            modifier          = Modifier.size(84.dp),
-                        )
-                    }
+                    fallback()
                 }
             }
             Column(
