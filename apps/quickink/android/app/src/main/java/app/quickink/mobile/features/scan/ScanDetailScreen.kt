@@ -14,7 +14,9 @@
 package app.quickink.mobile.features.scan
 
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -71,6 +73,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -144,6 +147,11 @@ fun ScanDetailScreen(
     // only highlight today; tap-to-jump is a follow-up that requires
     // surfacing a `currentPage` state through PageTurnPdfView.
     var selectedPageIndex by remember(captureId) { mutableStateOf(0) }
+    // Rendered page bitmaps for the thumbnails strip. Loaded once,
+    // off the main thread, so the chips show actual page content
+    // instead of placeholder document icons. Empty until the
+    // background render lands. Mirror of iOS `pageImages` state.
+    var pageBitmaps by remember(captureId) { mutableStateOf<List<Bitmap>>(emptyList()) }
     // On-disk size of the capture's PDF in bytes, loaded lazily so
     // the Details row can render "2.4 MB" etc. Null until resolved.
     var pdfFileSize by remember(captureId) { mutableStateOf<Long?>(null) }
@@ -166,6 +174,27 @@ fun ScanDetailScreen(
         pdfFileSize = withContext(Dispatchers.IO) {
             resolvePdfFileSize(capture?.pdfUri)
         }
+    }
+
+    // Rasterise PDF pages for the thumbnails strip once the capture
+    // resolves. Off the main thread (PdfRenderer can be slow on
+    // large files); skipped for single-page captures since the strip
+    // doesn't render in that case. Empty list = "show placeholder
+    // icons" until the bitmaps land.
+    LaunchedEffect(capture?.pdfUri, capture?.pageCount) {
+        val pdfUriString = capture?.pdfUri
+        val pageCount    = capture?.pageCount ?: 0
+        if (pdfUriString.isNullOrBlank() || pageCount <= 1 ||
+            !localFileExists(pdfUriString)) {
+            pageBitmaps = emptyList()
+            return@LaunchedEffect
+        }
+        val rendered = withContext(Dispatchers.IO) {
+            runCatching {
+                renderPdfPages(context, Uri.parse(pdfUriString))
+            }.getOrDefault(emptyList())
+        }
+        pageBitmaps = rendered
     }
 
     // Self-heal: if the capture row references a local file that
@@ -297,6 +326,7 @@ fun ScanDetailScreen(
                 if (current.pageCount > 1) {
                     PageThumbnailsStrip(
                         pageCount         = current.pageCount,
+                        pageBitmaps       = pageBitmaps,
                         selectedPageIndex = selectedPageIndex,
                         onSelectPage      = { selectedPageIndex = it },
                     )
@@ -794,18 +824,21 @@ private fun BreadcrumbDot() {
 }
 
 /**
- * Horizontal scrollable strip of page thumbnails — one numbered chip
- * per page, with the currently selected page highlighted in the
- * accent color. Tap a chip to set [selectedPageIndex]. Only rendered
- * for multi-page captures.
+ * Horizontal scrollable strip of page thumbnails — one chip per page,
+ * with the currently selected page highlighted in the accent color.
+ * Tap a chip to set [selectedPageIndex]. Only rendered for multi-page
+ * captures.
  *
- * Today the chips are paper-toned placeholders with page numbers.
- * Rendering actual page bitmaps is a follow-up that needs the PDF
- * rasteriser surfaced from PdfPagesView.
+ * Renders the actual rasterised page bitmap when available
+ * ([pageBitmaps] is populated by ScanDetailScreen's LaunchedEffect)
+ * and falls through to a paper-toned placeholder + document icon
+ * while the background render is in flight. Mirrors iOS
+ * `pageThumbnail`.
  */
 @Composable
 private fun PageThumbnailsStrip(
     pageCount: Int,
+    pageBitmaps: List<Bitmap>,
     selectedPageIndex: Int,
     onSelectPage: (Int) -> Unit,
 ) {
@@ -820,6 +853,7 @@ private fun PageThumbnailsStrip(
     ) {
         repeat(pageCount) { index ->
             val selected = (index == selectedPageIndex)
+            val bitmap   = pageBitmaps.getOrNull(index)
             Box(
                 modifier = Modifier
                     .width(64.dp)
@@ -834,12 +868,21 @@ private fun PageThumbnailsStrip(
                     .clickable { onSelectPage(index) },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    imageVector        = Icons.Filled.Description,
-                    contentDescription = null,
-                    tint               = colors.muted,
-                    modifier           = Modifier.size(20.dp),
-                )
+                if (bitmap != null) {
+                    Image(
+                        bitmap             = bitmap.asImageBitmap(),
+                        contentDescription = "Page ${index + 1}",
+                        contentScale       = ContentScale.Crop,
+                        modifier           = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Icon(
+                        imageVector        = Icons.Filled.Description,
+                        contentDescription = null,
+                        tint               = colors.muted,
+                        modifier           = Modifier.size(20.dp),
+                    )
+                }
                 // Page-number badge bottom-right. Use `offset` rather
                 // than negative padding (which crashes Compose at
                 // runtime — Modifier.padding rejects negative dp).
