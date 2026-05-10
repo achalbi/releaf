@@ -630,17 +630,17 @@ struct ScanDetailScreen: View {
     /// document.text icon + "Details" label per the mockup.
     @ViewBuilder
     private func detailsCard(for capture: CaptureSummary) -> some View {
-        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
             HStack(spacing: QuickInkSpacing.s2) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(QuickInkColors.inkSoft)
                 Text("Details")
-                    .font(QuickInkText.heading)
+                    .font(QuickInkText.cardTitle)
                     .foregroundStyle(QuickInkColors.ink)
             }
 
-            VStack(spacing: QuickInkSpacing.s3) {
+            VStack(spacing: QuickInkSpacing.s2) {
                 detailRow(label: "File type", value: fileTypeLabel(for: capture))
                 detailRow(label: "Size", value: pdfFileSize.map(formatBytes) ?? "—")
                 detailRow(label: "Created", value: friendlyDate(capture.createdAt))
@@ -652,7 +652,7 @@ struct ScanDetailScreen: View {
                 tagsRow(for: capture)
             }
         }
-        .padding(QuickInkSpacing.s4)
+        .padding(QuickInkSpacing.s3)
         .background(QuickInkColors.surface)
         .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
         .overlay(
@@ -672,11 +672,11 @@ struct ScanDetailScreen: View {
     ) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(label)
-                .font(QuickInkText.meta)
+                .font(QuickInkText.caption)
                 .foregroundStyle(QuickInkColors.inkSoft)
             Spacer()
             Text(value)
-                .font(QuickInkText.body)
+                .font(QuickInkText.meta)
                 .foregroundStyle(valueColor)
                 .multilineTextAlignment(.trailing)
                 .lineLimit(2)
@@ -690,10 +690,10 @@ struct ScanDetailScreen: View {
     private func tagsRow(for capture: CaptureSummary) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text("Tags")
-                .font(QuickInkText.meta)
+                .font(QuickInkText.caption)
                 .foregroundStyle(QuickInkColors.inkSoft)
             Spacer()
-            HStack(spacing: QuickInkSpacing.s2) {
+            HStack(spacing: QuickInkSpacing.s1) {
                 if let category = capture.category, !category.isEmpty {
                     Button {
                         showRetagSheet = true
@@ -701,8 +701,8 @@ struct ScanDetailScreen: View {
                         Text(category)
                             .font(QuickInkText.caption)
                             .foregroundStyle(QuickInkColors.accent)
-                            .padding(.horizontal, QuickInkSpacing.s3)
-                            .padding(.vertical, QuickInkSpacing.s2)
+                            .padding(.horizontal, QuickInkSpacing.s2)
+                            .padding(.vertical, 4)
                             .background(QuickInkColors.accentSoft)
                             .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
                     }
@@ -712,9 +712,9 @@ struct ScanDetailScreen: View {
                     showRetagSheet = true
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(QuickInkColors.inkSoft)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 22, height: 22)
                         .background(QuickInkColors.borderSoft)
                         .clipShape(Circle())
                 }
@@ -731,13 +731,13 @@ struct ScanDetailScreen: View {
     /// full-width tappable button with an SF Symbol on the left.
     @ViewBuilder
     private func actionsCard(for capture: CaptureSummary) -> some View {
-        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
             HStack(spacing: QuickInkSpacing.s2) {
                 Image(systemName: "pencil")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(QuickInkColors.inkSoft)
                 Text("Actions")
-                    .font(QuickInkText.heading)
+                    .font(QuickInkText.cardTitle)
                     .foregroundStyle(QuickInkColors.ink)
             }
 
@@ -770,7 +770,7 @@ struct ScanDetailScreen: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(QuickInkSpacing.s4)
+        .padding(QuickInkSpacing.s3)
         .background(QuickInkColors.surface)
         .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
         .overlay(
@@ -796,18 +796,20 @@ struct ScanDetailScreen: View {
     /// directly (inside `Button`) and as the label of a ShareLink.
     @ViewBuilder
     private func actionRowContent(icon: String, label: String, isDestructive: Bool = false) -> some View {
-        HStack(spacing: QuickInkSpacing.s3) {
+        HStack(spacing: QuickInkSpacing.s2) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(isDestructive ? QuickInkColors.danger : QuickInkColors.inkSoft)
-                .frame(width: 24)
+                .frame(width: 18)
             Text(label)
-                .font(QuickInkText.body)
+                .font(QuickInkText.label)
                 .foregroundStyle(isDestructive ? QuickInkColors.danger : QuickInkColors.ink)
-            Spacer()
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, QuickInkSpacing.s3)
+        .padding(.vertical, QuickInkSpacing.s2)
         .contentShape(Rectangle())
     }
 

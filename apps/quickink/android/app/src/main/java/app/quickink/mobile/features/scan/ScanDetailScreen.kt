@@ -988,8 +988,8 @@ private fun DetailsCard(
             .clip(RoundedCornerShape(QuickInkRadius.md))
             .background(colors.surface)
             .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
-            .padding(QuickInkSpacing.s4),
-        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+            .padding(QuickInkSpacing.s3),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
     ) {
         Row(
             verticalAlignment     = Alignment.CenterVertically,
@@ -999,9 +999,9 @@ private fun DetailsCard(
                 imageVector        = Icons.Filled.Description,
                 contentDescription = null,
                 tint               = colors.inkSoft,
-                modifier           = Modifier.size(14.dp),
+                modifier           = Modifier.size(12.dp),
             )
-            Text(text = "Details", style = type.heading, color = colors.ink)
+            Text(text = "Details", style = type.cardTitle, color = colors.ink)
         }
 
         DetailRow(label = "File type", value = fileTypeLabel(capture))
@@ -1033,13 +1033,13 @@ private fun DetailRow(
     ) {
         Text(
             text  = label,
-            style = type.meta,
+            style = type.caption,
             color = colors.inkSoft,
         )
         Spacer(modifier = Modifier.weight(1f))
         Text(
             text     = value,
-            style    = type.body,
+            style    = type.meta,
             color    = valueColor,
             maxLines = 2,
             textAlign = TextAlign.End,
@@ -1056,11 +1056,11 @@ private fun TagsRow(category: String?, onAddTag: () -> Unit) {
         modifier          = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = "Tags", style = type.meta, color = colors.inkSoft)
+        Text(text = "Tags", style = type.caption, color = colors.inkSoft)
         Spacer(modifier = Modifier.weight(1f))
         Row(
             verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1),
         ) {
             if (!category.isNullOrEmpty()) {
                 Box(
@@ -1068,14 +1068,14 @@ private fun TagsRow(category: String?, onAddTag: () -> Unit) {
                         .clip(RoundedCornerShape(QuickInkRadius.pill))
                         .background(colors.accentSoft)
                         .clickable(onClick = onAddTag)
-                        .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
+                        .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
                 ) {
                     Text(text = category, style = type.caption, color = colors.accent)
                 }
             }
             Box(
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(22.dp)
                     .clip(CircleShape)
                     .background(colors.borderSoft)
                     .clickable(onClick = onAddTag),
@@ -1085,7 +1085,7 @@ private fun TagsRow(category: String?, onAddTag: () -> Unit) {
                     imageVector        = Icons.Filled.Add,
                     contentDescription = "Add tag",
                     tint               = colors.inkSoft,
-                    modifier           = Modifier.size(14.dp),
+                    modifier           = Modifier.size(11.dp),
                 )
             }
         }
@@ -1114,8 +1114,8 @@ private fun ActionsCard(
             .clip(RoundedCornerShape(QuickInkRadius.md))
             .background(colors.surface)
             .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
-            .padding(QuickInkSpacing.s4),
-        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+            .padding(QuickInkSpacing.s3),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
     ) {
         Row(
             verticalAlignment     = Alignment.CenterVertically,
@@ -1125,9 +1125,9 @@ private fun ActionsCard(
                 imageVector        = Icons.Filled.Edit,
                 contentDescription = null,
                 tint               = colors.inkSoft,
-                modifier           = Modifier.size(14.dp),
+                modifier           = Modifier.size(12.dp),
             )
-            Text(text = "Actions", style = type.heading, color = colors.ink)
+            Text(text = "Actions", style = type.cardTitle, color = colors.ink)
         }
 
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -1178,19 +1178,25 @@ private fun ActionRow(
         modifier              = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = QuickInkSpacing.s3),
+            .padding(vertical = QuickInkSpacing.s2),
         verticalAlignment     = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
     ) {
-        Box(modifier = Modifier.width(24.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.width(18.dp), contentAlignment = Alignment.Center) {
             Icon(
                 imageVector        = icon,
                 contentDescription = null,
                 tint               = tint,
-                modifier           = Modifier.size(18.dp),
+                modifier           = Modifier.size(14.dp),
             )
         }
-        Text(text = label, style = type.body, color = labelColor)
+        Text(
+            text     = label,
+            style    = type.label,
+            color    = labelColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
