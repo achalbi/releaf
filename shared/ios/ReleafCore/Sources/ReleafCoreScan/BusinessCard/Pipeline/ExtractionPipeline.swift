@@ -64,8 +64,16 @@ public struct ExtractionPipeline: Sendable {
 
         let allCandidates = baseCandidates + addressCandidates
 
+        // Drop candidates whose own text reads as the category
+        // name (or one of its OCR-error aliases). Mirror of the
+        // Android pipeline filter — same stop words, same
+        // alphanumeric-only normalisation.
+        let filteredCandidates = allCandidates.filter { candidate in
+            !Self.categoryStopWords.contains(Self.normaliseForStopCheck(candidate.text))
+        }
+
         let t3 = DispatchTime.now().uptimeNanoseconds
-        let resolved = resolve(allCandidates)
+        let resolved = resolve(filteredCandidates)
         timings["resolve"] = DispatchTime.now().uptimeNanoseconds - t3
 
         let trace = keepTrace
@@ -173,5 +181,22 @@ public struct ExtractionPipeline: Sendable {
             if seen.insert(key).inserted { out.append(c.text) }
         }
         return out
+    }
+
+    /// Strings that should never surface as an extracted field on a
+    /// Business Card capture. Compared against each candidate's
+    /// alphanumeric-only lower-cased text so "Business Card",
+    /// "Business-Card", "businesscard.", and the "8usiness" OCR-
+    /// error aliases all collapse to the same key.
+    private static let categoryStopWords: Set<String> = [
+        "businesscard",
+        "card",
+        "business",
+        "8usinesscard",
+        "8usiness",
+    ]
+
+    private static func normaliseForStopCheck(_ s: String) -> String {
+        s.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 }

@@ -222,6 +222,51 @@ class BusinessCardExtractorTest {
         assertEquals(listOf("aarav@acme.tech"), out.emails)
     }
 
+    @Test fun categoryNameStringsAreNeverSurfacedAsFields() {
+        // OCR sometimes picks up the words "Business Card" off the
+        // card itself (sample / template cards literally print it,
+        // and ML Kit can also stitch the ink-on-paper title that
+        // way). Without a stop-word filter the line trips the
+        // designation vocab ("business") and lands as the
+        // designation field — exactly the wrong thing to surface
+        // since it's the category name, not a designation.
+        val variations = listOf(
+            "Business Card",
+            "BUSINESS CARD",
+            "business card",
+            "Business-Card",
+            "businesscard",
+            "Business Card.",
+            "Card",
+            "card",
+            "8usiness Card",   // OCR error
+        )
+        for (text in variations) {
+            val blocks = listOf(
+                block(0, "Aarav Sharma",        y = 0.05, h = 0.10),
+                block(1, text,                  y = 0.18, h = 0.04),  // the offender
+                block(2, "Acme Pvt Ltd",        y = 0.30, h = 0.06),
+                block(3, "+91 9876543210",      y = 0.45, h = 0.04),
+            )
+            val out = BusinessCardExtractor.extract(blocks)
+            assertEquals("Aarav Sharma", out.name)
+            assertEquals("Acme Pvt Ltd", out.company)
+            // Designation MUST NOT be the category-name string.
+            assertTrue(
+                "designation should not contain '$text', got '${out.designation}'",
+                out.designation == null ||
+                    !out.designation!!.lowercase().filter { it.isLetterOrDigit() }
+                        .let { stripped ->
+                            stripped == "businesscard" ||
+                            stripped == "card" ||
+                            stripped == "business" ||
+                            stripped == "8usinesscard" ||
+                            stripped == "8usiness"
+                        }
+            )
+        }
+    }
+
     @Test fun fallsBackToWhateverEngineEmitsWhenNoLineBlocks() {
         // Defensive: an engine that emits only paragraph-grained
         // (or word-grained) blocks shouldn't return empty — fall

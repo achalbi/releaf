@@ -97,9 +97,22 @@ class ExtractionPipeline(
 
         val all = baseCandidates + addressCandidates
 
+        // Drop candidates whose own text reads as the category
+        // name (or one of its OCR-error aliases). On a Business
+        // Card capture, ML Kit can OCR a line that literally says
+        // "Business Card" — and that single line trips the
+        // designation vocab ("business") + the company-suffix
+        // ("card" isn't a suffix, but "business" can read as
+        // intent), polluting whichever field's resolver picks it.
+        // Removing these here keeps the classifiers vocabulary-
+        // driven for legitimate hits ("Business Development
+        // Manager") while still excluding the category-string-
+        // as-field anti-pattern.
+        val filtered = all.filterNot { it.text.normalisedForStopCheck() in CATEGORY_STOP_WORDS }
+
         // Resolve each field.
         val tResolve = System.nanoTime()
-        val resolved = resolve(all, layout)
+        val resolved = resolve(filtered, layout)
         timings["resolve"] = System.nanoTime() - tResolve
 
         return resolved.copy(
@@ -208,6 +221,28 @@ class ExtractionPipeline(
     ): FieldCandidate? = candidates
         .filter { it.score >= min && it.sourceBlockIndex !in avoidBlocks }
         .maxByOrNull { it.score }
+
+    companion object {
+        /**
+         * Strings that should never surface as an extracted field on
+         * a Business Card capture. Compared against each candidate's
+         * normalised text (lower-case, alphanumerics only) so
+         * "Business Card", "Business-Card", "businesscard.", and the
+         * "8usiness" OCR-error aliases all collapse to the same
+         * key. Mirrors the auto-categorisation alias set in
+         * `ScanFlowController.aliasesFor("Business Card")`.
+         */
+        private val CATEGORY_STOP_WORDS: Set<String> = setOf(
+            "businesscard",
+            "card",
+            "business",
+            "8usinesscard",
+            "8usiness",
+        )
+
+        private fun String.normalisedForStopCheck(): String =
+            lowercase().filter { it.isLetterOrDigit() }
+    }
 
     private fun pickMulti(
         candidates: List<FieldCandidate>,
