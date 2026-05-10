@@ -61,26 +61,55 @@ func drawFamily(ctx: inout GraphicsContext, p: LaunchPalette, t: Double) {
 /// shared by all four characters in the JSX (`<g transform=
 /// "translate(0 -head)"> ... </g>`) without re-rolling four
 /// near-identical inline blocks.
+/// Draw just the skin face circle. Called BEFORE the character's
+/// hair shape so the hair sits on top of the face (matches the JSX
+/// SVG draw order — face circle at z=0, hair on top, eyes/features
+/// above hair). `eyeY` is the centre of the eyes; the face circle
+/// is centred slightly above so the chin doesn't get clipped by
+/// the neck.
 @MainActor
-private func drawHead(
+private func drawFaceCircle(
+    ctx: inout GraphicsContext,
+    skin: Color,
+    radius: Double,
+    eyeY: Double
+) {
+    ctx.fill(
+        Path(ellipseIn: CGRect(
+            x: -radius,
+            y: eyeY - radius,
+            width:  radius * 2,
+            height: radius * 2
+        )),
+        with: .color(skin)
+    )
+}
+
+/// Draw the face features (eyes, brows, smile, optional blush /
+/// bindi) on TOP of the hair so the eyes always read clearly even
+/// where the hair shape would otherwise overlap. Pulled out of the
+/// monolithic `drawHead` so each character can interleave its own
+/// hair shape between `drawFaceCircle` and this call without losing
+/// the eye / smile pass.
+@MainActor
+private func drawFaceFeatures(
     ctx: inout GraphicsContext,
     p: LaunchPalette,
-    skin: Color,
     radius: Double,
     eyeY: Double,
     smileY: Double,
     blush: Bool,
     bigSmile: Bool = false,
-    bindi: Bool = false
+    bindi: Bool = false,
+    time: Double,
+    blinkAt: Double
 ) {
-    // Face circle.
-    ctx.fill(
-        Path(ellipseIn: CGRect(x: -radius, y: eyeY - radius * 0.2 - radius,
-                               width: radius * 2, height: radius * 2)),
-        with: .color(skin)
-    )
-    // Eyes — sclera + pupil.
-    let eyeRX = radius * 0.18, eyeRY = radius * 0.2
+    // Eyes — sclera + pupil + shine. Eye height is squeezed by the
+    // blink scale at this character's `blinkAt` moment so the
+    // family reads as alive rather than mannequin-still.
+    let blink = blinkScale(time, at: blinkAt)
+    let eyeRX = radius * 0.18
+    let eyeRY = radius * 0.2 * blink
     ctx.fill(
         Path(ellipseIn: CGRect(x: -radius * 0.4 - eyeRX, y: eyeY - eyeRY,
                                width: eyeRX * 2, height: eyeRY * 2)),
@@ -91,7 +120,7 @@ private func drawHead(
                                width: eyeRX * 2, height: eyeRY * 2)),
         with: .color(.white)
     )
-    let pupil = radius * 0.11
+    let pupil = radius * 0.11 * max(blink, 0.1)
     ctx.fill(
         Path(ellipseIn: CGRect(x: -radius * 0.4 - pupil + pupil * 0.15,
                                y: eyeY - pupil + pupil * 0.5,
@@ -104,6 +133,29 @@ private func drawHead(
                                width: pupil * 2, height: pupil * 2)),
         with: .color(p.hairBrown)
     )
+    // Eye shine — small white highlight off-centre on each pupil. Only
+    // visible when eyes are at least half-open; under a blink the
+    // shine disappears with the pupil.
+    if blink > 0.5 {
+        let shineR = pupil * 0.32
+        ctx.fill(
+            Path(ellipseIn: CGRect(
+                x: -radius * 0.4 - pupil * 0.2 - shineR,
+                y: eyeY - pupil * 0.2 - shineR,
+                width: shineR * 2, height: shineR * 2
+            )),
+            with: .color(.white)
+        )
+        ctx.fill(
+            Path(ellipseIn: CGRect(
+                x: radius * 0.4 + pupil * 0.05 - shineR,
+                y: eyeY - pupil * 0.2 - shineR,
+                width: shineR * 2, height: shineR * 2
+            )),
+            with: .color(.white)
+        )
+    }
+
     // Brows.
     ctx.stroke(
         Path { pth in
@@ -128,7 +180,9 @@ private func drawHead(
         style: StrokeStyle(lineWidth: 0.9, lineCap: .round)
     )
 
-    // Smile.
+    // Smile + lip line. The JSX prototype has a tiny secondary lip
+    // arc just below the smile in a lighter tone — restoring it
+    // gives the mouths a real upper lip that reads at splash size.
     if bigSmile {
         ctx.fill(
             Path { pth in
@@ -156,6 +210,18 @@ private func drawHead(
             },
             with: .color(Color(launchHex: 0x5a3020)),
             style: StrokeStyle(lineWidth: 0.9, lineCap: .round)
+        )
+        // Lip line — thinner secondary arc just under the smile.
+        ctx.stroke(
+            Path { pth in
+                pth.move(to: CGPoint(x: -radius * 0.2, y: smileY + 1))
+                pth.addQuadCurve(
+                    to:      CGPoint(x: radius * 0.2, y: smileY + 1),
+                    control: CGPoint(x: 0,            y: smileY + 2)
+                )
+            },
+            with: .color(Color(launchHex: 0xa04050)),
+            style: StrokeStyle(lineWidth: 0.7, lineCap: .round)
         )
     }
 
@@ -413,6 +479,9 @@ private func drawMother(
     // Head.
     var head = m
     head.translateBy(x: 0, y: -90)
+    // Skin face circle first — hair will sit on top of this so the
+    // hair frames the face per the JSX draw order.
+    drawFaceCircle(ctx: &head, skin: p.skin, radius: 13.5, eyeY: -15)
     // Long flowing hair behind face.
     head.fill(
         Path { pth in
@@ -448,14 +517,75 @@ private func drawMother(
         },
         with: .color(p.hairBrown)
     )
-    drawHead(
+    // Hair flow strands — thin lighter-tone strokes inside the hair
+    // mass to give it texture rather than reading as a flat brown
+    // helmet. Three strokes on each side following the silhouette
+    // edges, plus a centre parting stroke that catches the light
+    // along the part-line.
+    let hairHi = p.hairLight
+    head.stroke(
+        Path { pth in
+            pth.move(to: CGPoint(x: -10, y: -25))
+            pth.addQuadCurve(
+                to:      CGPoint(x: -13, y: 0),
+                control: CGPoint(x: -14, y: -10)
+            )
+        },
+        with: .color(hairHi),
+        style: StrokeStyle(lineWidth: 0.7, lineCap: .round)
+    )
+    head.stroke(
+        Path { pth in
+            pth.move(to: CGPoint(x: -6, y: -28))
+            pth.addQuadCurve(
+                to:      CGPoint(x: -10, y: 4),
+                control: CGPoint(x: -10, y: -10)
+            )
+        },
+        with: .color(hairHi),
+        style: StrokeStyle(lineWidth: 0.6, lineCap: .round)
+    )
+    head.stroke(
+        Path { pth in
+            pth.move(to: CGPoint(x: 10, y: -25))
+            pth.addQuadCurve(
+                to:      CGPoint(x: 13, y: 0),
+                control: CGPoint(x: 14, y: -10)
+            )
+        },
+        with: .color(hairHi),
+        style: StrokeStyle(lineWidth: 0.7, lineCap: .round)
+    )
+    head.stroke(
+        Path { pth in
+            pth.move(to: CGPoint(x: 6, y: -28))
+            pth.addQuadCurve(
+                to:      CGPoint(x: 10, y: 4),
+                control: CGPoint(x: 10, y: -10)
+            )
+        },
+        with: .color(hairHi),
+        style: StrokeStyle(lineWidth: 0.6, lineCap: .round)
+    )
+    // Centre parting — short stroke along the top of the head where
+    // the hair separates left/right.
+    head.stroke(
+        Path { pth in
+            pth.move(to: CGPoint(x: 0, y: -29))
+            pth.addLine(to: CGPoint(x: 0, y: -22))
+        },
+        with: .color(hairHi),
+        style: StrokeStyle(lineWidth: 0.5, lineCap: .round)
+    )
+    drawFaceFeatures(
         ctx: &head, p: p,
-        skin: p.skin,
         radius: 13.5,
         eyeY:   -15,
         smileY: -10,
         blush:  true,
-        bindi:  true
+        bindi:  true,
+        time:    t,
+        blinkAt: 1.6
     )
 }
 
@@ -597,6 +727,8 @@ private func drawDaughter(
     var head = d
     head.translateBy(x: 0, y: -78)
     head.rotate(by: .degrees(lookUp * 0.7))
+    // Skin face circle first — pigtails sit on top of this.
+    drawFaceCircle(ctx: &head, skin: p.skin, radius: 11, eyeY: -12)
     // Pigtail backdrop hair.
     head.fill(
         Path { pth in
@@ -637,6 +769,47 @@ private func drawDaughter(
         Path(ellipseIn: CGRect(x:  10, y: -13, width: 6, height: 8)),
         with: .color(p.hairBrown)
     )
+    // Pigtail braid texture — three short stripes per pigtail bun
+    // give the kid-style "twisted bunch" feel rather than a smooth
+    // egg-shaped clump. Drawn in the lighter hair tone so they
+    // catch the light.
+    let dHi = p.hairLight
+    for offsetY in [-11.0, -9.0, -7.0] {
+        head.stroke(
+            Path { pth in
+                pth.move(to: CGPoint(x: -16, y: offsetY))
+                pth.addQuadCurve(
+                    to:      CGPoint(x: -10, y: offsetY),
+                    control: CGPoint(x: -13, y: offsetY - 0.6)
+                )
+            },
+            with: .color(dHi),
+            style: StrokeStyle(lineWidth: 0.5, lineCap: .round)
+        )
+        head.stroke(
+            Path { pth in
+                pth.move(to: CGPoint(x: 10, y: offsetY))
+                pth.addQuadCurve(
+                    to:      CGPoint(x: 16, y: offsetY),
+                    control: CGPoint(x: 13, y: offsetY - 0.6)
+                )
+            },
+            with: .color(dHi),
+            style: StrokeStyle(lineWidth: 0.5, lineCap: .round)
+        )
+    }
+    // Top bangs — a few short strokes across the forehead so the
+    // hair doesn't read as bald above the brows.
+    for x in [-5.0, -2.0, 1.0, 4.0] {
+        head.stroke(
+            Path { pth in
+                pth.move(to: CGPoint(x: x, y: -22))
+                pth.addLine(to: CGPoint(x: x + 0.5, y: -16))
+            },
+            with: .color(p.hairBrown),
+            style: StrokeStyle(lineWidth: 0.6, lineCap: .round)
+        )
+    }
     // Ribbons (small diamonds).
     head.fill(
         Path { pth in
@@ -658,13 +831,14 @@ private func drawDaughter(
         },
         with: .color(p.daughterSkirt)
     )
-    drawHead(
+    drawFaceFeatures(
         ctx: &head, p: p,
-        skin: p.skin,
         radius: 11,
         eyeY:   -12,
         smileY:  -8,
-        blush:  true
+        blush:  true,
+        time:    t,
+        blinkAt: 2.4
     )
 }
 
@@ -778,6 +952,8 @@ private func drawSon(
     var head = s
     head.translateBy(x: 0, y: -58)
     head.rotate(by: .degrees(lookUp * 0.9))
+    // Skin face circle first — bowl-cut sits on top.
+    drawFaceCircle(ctx: &head, skin: p.skin, radius: 12, eyeY: -13)
     head.fill(
         Path { pth in
             pth.move(to: CGPoint(x: -12, y: -14))
@@ -813,14 +989,45 @@ private func drawSon(
         },
         with: .color(p.hairDark)
     )
-    drawHead(
+    // Spiky tufts on top — three short upward strokes give the
+    // bowl-cut a "messy boy" feel rather than reading as a flat
+    // dark bowl. Sized to clear the silhouette outline by ~3 px.
+    head.fill(
+        Path { pth in
+            pth.move(to: CGPoint(x: -3, y: -25))
+            pth.addLine(to: CGPoint(x: -1, y: -30))
+            pth.addLine(to: CGPoint(x:  1, y: -27))
+            pth.closeSubpath()
+        },
+        with: .color(p.hairDark)
+    )
+    head.fill(
+        Path { pth in
+            pth.move(to: CGPoint(x: 1, y: -27))
+            pth.addLine(to: CGPoint(x: 3, y: -31))
+            pth.addLine(to: CGPoint(x: 5, y: -27))
+            pth.closeSubpath()
+        },
+        with: .color(p.hairDark)
+    )
+    head.fill(
+        Path { pth in
+            pth.move(to: CGPoint(x: -6, y: -26))
+            pth.addLine(to: CGPoint(x: -4, y: -29))
+            pth.addLine(to: CGPoint(x: -2, y: -26))
+            pth.closeSubpath()
+        },
+        with: .color(p.hairDark)
+    )
+    drawFaceFeatures(
         ctx: &head, p: p,
-        skin: p.skin,
         radius: 12,
         eyeY:   -13,
         smileY:  -8,
         blush:  true,
-        bigSmile: true
+        bigSmile: true,
+        time:    t,
+        blinkAt: 3.0
     )
 }
 
@@ -964,6 +1171,8 @@ private func drawFather(
     // Head.
     var head = f
     head.translateBy(x: 0, y: -92)
+    // Skin face circle first — hair cap sits on top.
+    drawFaceCircle(ctx: &head, skin: p.skin, radius: 14.5, eyeY: -16)
     head.fill(
         Path { pth in
             pth.move(to: CGPoint(x: -14, y: -17))
@@ -995,13 +1204,93 @@ private func drawFather(
         },
         with: .color(p.hairDark)
     )
-    drawHead(
+    // Forehead hairline — a few short downward strokes giving the
+    // hair a "swept" texture along the brow line. Without this,
+    // father reads as wearing a uniform black cap.
+    let fHi = p.hairBrown
+    for x in [-10.0, -7.0, -4.0, -1.0, 2.0, 5.0, 8.0, 11.0] {
+        head.stroke(
+            Path { pth in
+                pth.move(to: CGPoint(x: x, y: -27))
+                pth.addLine(to: CGPoint(x: x + 0.4, y: -22))
+            },
+            with: .color(fHi),
+            style: StrokeStyle(lineWidth: 0.5, lineCap: .round)
+        )
+    }
+    // Side wisps — thin strokes peeking past the temples.
+    head.stroke(
+        Path { pth in
+            pth.move(to: CGPoint(x: -13, y: -19))
+            pth.addLine(to: CGPoint(x: -10, y: -16))
+        },
+        with: .color(p.hairDark),
+        style: StrokeStyle(lineWidth: 0.6, lineCap: .round)
+    )
+    head.stroke(
+        Path { pth in
+            pth.move(to: CGPoint(x: 13, y: -19))
+            pth.addLine(to: CGPoint(x: 10, y: -16))
+        },
+        with: .color(p.hairDark),
+        style: StrokeStyle(lineWidth: 0.6, lineCap: .round)
+    )
+    drawFaceFeatures(
         ctx: &head, p: p,
-        skin: p.skin,
         radius: 14.5,
         eyeY:   -16,
         smileY: -10,
-        blush:  false
+        blush:  false,
+        time:    t,
+        blinkAt: 2.0
+    )
+    // Father bushy brows + mustache hint — read clearly at splash
+    // size and distinguish him from son/daughter at a glance.
+    head.stroke(
+        Path { pth in
+            pth.move(to: CGPoint(x: -8, y: -20))
+            pth.addQuadCurve(
+                to:      CGPoint(x: -2, y: -20),
+                control: CGPoint(x: -5, y: -21.5)
+            )
+        },
+        with: .color(p.hairDark),
+        style: StrokeStyle(lineWidth: 1.3, lineCap: .round)
+    )
+    head.stroke(
+        Path { pth in
+            pth.move(to: CGPoint(x: 2, y: -20))
+            pth.addQuadCurve(
+                to:      CGPoint(x: 8, y: -20),
+                control: CGPoint(x: 5, y: -21.5)
+            )
+        },
+        with: .color(p.hairDark),
+        style: StrokeStyle(lineWidth: 1.3, lineCap: .round)
+    )
+    // Mustache — thin shape under the nose, a step shy of comic.
+    head.fill(
+        Path { pth in
+            pth.move(to: CGPoint(x: -4, y: -11))
+            pth.addQuadCurve(
+                to:      CGPoint(x: 0, y: -11),
+                control: CGPoint(x: -2, y: -10)
+            )
+            pth.addQuadCurve(
+                to:      CGPoint(x: 4, y: -11),
+                control: CGPoint(x: 2, y: -10)
+            )
+            pth.addQuadCurve(
+                to:      CGPoint(x: 0, y: -10),
+                control: CGPoint(x: 2, y: -9.5)
+            )
+            pth.addQuadCurve(
+                to:      CGPoint(x: -4, y: -11),
+                control: CGPoint(x: -2, y: -9.5)
+            )
+            pth.closeSubpath()
+        },
+        with: .color(p.hairDark)
     )
 
     // Front arm — stretches right, holds can handle.

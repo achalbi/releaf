@@ -19,6 +19,7 @@
 
 package app.quickink.mobile.features.home
 
+import app.quickink.mobile.features.settings.SettingsPreferences
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -302,8 +303,7 @@ fun HomeScreen(
             // number on the launch screen.
             LaunchedEffect(totalPagesSaved) {
                 val pts = computeTreeImpact(totalPagesSaved ?: 0).totalPoints
-                app.quickink.mobile.features.settings.SettingsPreferences
-                    .writeCachedTreePoints(context, pts)
+                SettingsPreferences.writeCachedTreePoints(context, pts)
             }
             // "N pending" pill — one tap kicks the upload-only sync
             // (REPLACE policy via `requestUserSync`). Visible only

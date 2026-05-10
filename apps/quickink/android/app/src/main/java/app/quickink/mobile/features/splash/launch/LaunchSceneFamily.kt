@@ -53,63 +53,102 @@ internal fun DrawScope.drawFamily(p: LaunchPalette, t: Double) {
                   ease(LaunchEasing::easeOutCubic, between(t, 2.5, 3.8))).toFloat()
     val motherSway = (sin(t * 1.4) * 1.2).toFloat()
 
-    drawMother  (p, motherSway, op)
-    drawDaughter(p, lookUp, sonBob * 0.5f, op)
-    drawSon     (p, lookUp, sonBob, op)
-    drawFather  (p, fLean, tilt, op)
+    drawMother  (p, motherSway, op, t)
+    drawDaughter(p, lookUp, sonBob * 0.5f, op, t)
+    drawSon     (p, lookUp, sonBob, op, t)
+    drawFather  (p, fLean, tilt, op, t)
 }
 
-// MARK: ─── Shared head helper ──────────────────────────────────────────
+// MARK: ─── Shared head helpers ─────────────────────────────────────────
 
 /**
- * Generic cartoon head — circle face, eyes (white sclera + dark
- * pupil), brows, smile, optional cheek blush. Per-character
- * hair/clothing is drawn around it. Mirrors the head paint pass
- * shared by all four characters in the JSX.
+ * Skin face circle. Drawn BEFORE the character's hair shape so the
+ * hair sits on top of the face (matches the JSX SVG draw order —
+ * face circle at z=0, hair on top, eyes / features above hair).
+ * [eyeY] is the centre of the eyes; the face circle is centred on
+ * eyeY so chin and forehead room are symmetrical.
  */
-private fun DrawScope.drawHead(
-    p: LaunchPalette,
+private fun DrawScope.drawFaceCircle(
     skin: Color,
+    radius: Float,
+    eyeY: Float,
+    parentAlpha: Float,
+) {
+    drawCircle(
+        color = skin,
+        radius = radius,
+        center = Offset(0f, eyeY),
+        alpha = parentAlpha,
+    )
+}
+
+/**
+ * Face features (eyes, brows, smile, optional blush / bindi /
+ * mustache hint) drawn on TOP of the hair so the eyes always read
+ * clearly even where the hair shape would otherwise overlap. Pulled
+ * out of the monolithic `drawHead` so each character can interleave
+ * its own hair shape between [drawFaceCircle] and this call without
+ * losing the eye / smile pass.
+ */
+private fun DrawScope.drawFaceFeatures(
+    p: LaunchPalette,
     radius: Float,
     eyeY: Float,
     smileY: Float,
     blush: Boolean,
     bigSmile: Boolean = false,
     bindi: Boolean = false,
-    parentAlpha: Float
+    time: Double,
+    blinkAt: Double,
+    parentAlpha: Float,
 ) {
-    drawCircle(
-        color = skin,
-        radius = radius,
-        center = Offset(0f, eyeY - radius * 0.2f),
-        alpha = parentAlpha
-    )
-    val eyeRX = radius * 0.18f; val eyeRY = radius * 0.2f
+    // Eye height squeezed by a per-character blink so the four
+    // family members don't all blink in unison.
+    val blink = blinkScale(time, at = blinkAt).toFloat()
+    val eyeRX = radius * 0.18f
+    val eyeRY = radius * 0.2f * blink
     drawOval(
         color = Color.White,
         topLeft = Offset(-radius * 0.4f - eyeRX, eyeY - eyeRY),
         size = Size(eyeRX * 2f, eyeRY * 2f),
-        alpha = parentAlpha
+        alpha = parentAlpha,
     )
     drawOval(
         color = Color.White,
         topLeft = Offset(radius * 0.4f - eyeRX, eyeY - eyeRY),
         size = Size(eyeRX * 2f, eyeRY * 2f),
-        alpha = parentAlpha
+        alpha = parentAlpha,
     )
-    val pupil = radius * 0.11f
+    val pupil = radius * 0.11f * kotlin.math.max(blink, 0.1f)
     drawCircle(
         color = p.hairBrown,
         radius = pupil,
         center = Offset(-radius * 0.4f + pupil * 0.15f, eyeY + pupil * 0.5f),
-        alpha = parentAlpha
+        alpha = parentAlpha,
     )
     drawCircle(
         color = p.hairBrown,
         radius = pupil,
         center = Offset(radius * 0.4f + pupil * 0.4f, eyeY + pupil * 0.5f),
-        alpha = parentAlpha
+        alpha = parentAlpha,
     )
+    // Eye shine — small white highlight off-centre on each pupil.
+    if (blink > 0.5f) {
+        val shineR = pupil * 0.32f
+        drawCircle(
+            color = Color.White,
+            radius = shineR,
+            center = Offset(-radius * 0.4f - pupil * 0.2f, eyeY - pupil * 0.2f),
+            alpha = parentAlpha,
+        )
+        drawCircle(
+            color = Color.White,
+            radius = shineR,
+            center = Offset(radius * 0.4f + pupil * 0.05f, eyeY - pupil * 0.2f),
+            alpha = parentAlpha,
+        )
+    }
+
     val browL = Path().apply {
         moveTo(-radius * 0.7f, eyeY - radius * 0.4f)
         quadraticTo(
@@ -145,6 +184,14 @@ private fun DrawScope.drawHead(
         drawPath(smile, Color(0xFF5A3020),
                  alpha = parentAlpha,
                  style = Stroke(width = 0.9f, cap = StrokeCap.Round))
+        // Lip line — thinner secondary arc just under the smile.
+        val lip = Path().apply {
+            moveTo(-radius * 0.2f, smileY + 1f)
+            quadraticTo(0f, smileY + 2f, radius * 0.2f, smileY + 1f)
+        }
+        drawPath(lip, Color(0xFFA04050),
+                 alpha = parentAlpha,
+                 style = Stroke(width = 0.7f, cap = StrokeCap.Round))
     }
 
     if (bindi) {
@@ -152,7 +199,7 @@ private fun DrawScope.drawHead(
             color = Color(0xFFC4283A),
             radius = 1.4f,
             center = Offset(0f, eyeY - radius * 0.7f),
-            alpha = parentAlpha
+            alpha = parentAlpha,
         )
     }
 
@@ -162,20 +209,22 @@ private fun DrawScope.drawHead(
             color = Color(0xFFF0A890),
             topLeft = Offset(-radius * 0.85f, eyeY + radius * 0.25f),
             size = Size(4f, 4f),
-            alpha = a
+            alpha = a,
         )
         drawOval(
             color = Color(0xFFF0A890),
             topLeft = Offset(radius * 0.65f, eyeY + radius * 0.25f),
             size = Size(4f, 4f),
-            alpha = a
+            alpha = a,
         )
     }
 }
 
 // MARK: ─── Mother ──────────────────────────────────────────────────────
 
-private fun DrawScope.drawMother(p: LaunchPalette, sway: Float, parentAlpha: Float) {
+private fun DrawScope.drawMother(
+    p: LaunchPalette, sway: Float, parentAlpha: Float, time: Double,
+) {
     withTransform({
         translate(70f, 720f)
         rotate(degrees = sway * 0.3f, pivot = Offset.Zero)
@@ -285,6 +334,9 @@ private fun DrawScope.drawMother(p: LaunchPalette, sway: Float, parentAlpha: Flo
 
         // Head.
         withTransform({ translate(0f, -90f) }) {
+            // Skin face circle first — hair frames the face on top.
+            drawFaceCircle(p.skin, radius = 13.5f, eyeY = -15f,
+                           parentAlpha = parentAlpha)
             val hair = Path().apply {
                 moveTo(-13f, -16f)
                 quadraticTo(-16f, -28f, -9f, -30f)
@@ -299,9 +351,44 @@ private fun DrawScope.drawMother(p: LaunchPalette, sway: Float, parentAlpha: Flo
                 close()
             }
             drawPath(hair, p.hairBrown, alpha = parentAlpha)
-            drawHead(p, p.skin, 13.5f, -15f, -10f,
-                     blush = true, bindi = true,
-                     parentAlpha = parentAlpha)
+            // Hair flow strands — thin lighter-tone strokes give the
+            // hair texture rather than reading as a flat brown helmet.
+            val hi = p.hairLight
+            val flow1 = Path().apply {
+                moveTo(-10f, -25f); quadraticTo(-14f, -10f, -13f, 0f)
+            }
+            drawPath(flow1, hi, alpha = parentAlpha,
+                     style = Stroke(width = 0.7f, cap = StrokeCap.Round))
+            val flow2 = Path().apply {
+                moveTo(-6f, -28f); quadraticTo(-10f, -10f, -10f, 4f)
+            }
+            drawPath(flow2, hi, alpha = parentAlpha,
+                     style = Stroke(width = 0.6f, cap = StrokeCap.Round))
+            val flow3 = Path().apply {
+                moveTo(10f, -25f); quadraticTo(14f, -10f, 13f, 0f)
+            }
+            drawPath(flow3, hi, alpha = parentAlpha,
+                     style = Stroke(width = 0.7f, cap = StrokeCap.Round))
+            val flow4 = Path().apply {
+                moveTo(6f, -28f); quadraticTo(10f, -10f, 10f, 4f)
+            }
+            drawPath(flow4, hi, alpha = parentAlpha,
+                     style = Stroke(width = 0.6f, cap = StrokeCap.Round))
+            // Centre parting.
+            drawLine(
+                color = hi,
+                start = Offset(0f, -29f),
+                end   = Offset(0f, -22f),
+                strokeWidth = 0.5f,
+                cap = StrokeCap.Round,
+                alpha = parentAlpha,
+            )
+            drawFaceFeatures(
+                p, radius = 13.5f, eyeY = -15f, smileY = -10f,
+                blush = true, bindi = true,
+                time = time, blinkAt = 1.6,
+                parentAlpha = parentAlpha,
+            )
         }
     }
 }
@@ -309,7 +396,7 @@ private fun DrawScope.drawMother(p: LaunchPalette, sway: Float, parentAlpha: Flo
 // MARK: ─── Daughter ────────────────────────────────────────────────────
 
 private fun DrawScope.drawDaughter(
-    p: LaunchPalette, lookUp: Float, bob: Float, parentAlpha: Float
+    p: LaunchPalette, lookUp: Float, bob: Float, parentAlpha: Float, time: Double,
 ) {
     withTransform({ translate(120f, 720f + bob) }) {
         drawOval(p.hairDark, topLeft = Offset(-9f, -2.5f),
@@ -385,6 +472,9 @@ private fun DrawScope.drawDaughter(
             translate(0f, -78f)
             rotate(degrees = lookUp * 0.7f, pivot = Offset.Zero)
         }) {
+            // Skin face circle first — pigtails sit on top.
+            drawFaceCircle(p.skin, radius = 11f, eyeY = -12f,
+                           parentAlpha = parentAlpha)
             val hair = Path().apply {
                 moveTo(-11f, -13f)
                 quadraticTo(-13f, -22f, -7f, -25f)
@@ -401,6 +491,34 @@ private fun DrawScope.drawDaughter(
                      size = Size(6f, 8f), alpha = parentAlpha)
             drawOval(p.hairBrown, topLeft = Offset( 10f, -13f),
                      size = Size(6f, 8f), alpha = parentAlpha)
+            // Pigtail braid texture — three short stripes per
+            // pigtail bun give the kid-style "twisted bunch" feel.
+            val dHi = p.hairLight
+            for (offsetY in listOf(-11f, -9f, -7f)) {
+                val l = Path().apply {
+                    moveTo(-16f, offsetY)
+                    quadraticTo(-13f, offsetY - 0.6f, -10f, offsetY)
+                }
+                drawPath(l, dHi, alpha = parentAlpha,
+                         style = Stroke(width = 0.5f, cap = StrokeCap.Round))
+                val r = Path().apply {
+                    moveTo(10f, offsetY)
+                    quadraticTo(13f, offsetY - 0.6f, 16f, offsetY)
+                }
+                drawPath(r, dHi, alpha = parentAlpha,
+                         style = Stroke(width = 0.5f, cap = StrokeCap.Round))
+            }
+            // Top bangs across the forehead.
+            for (x in listOf(-5f, -2f, 1f, 4f)) {
+                drawLine(
+                    color = p.hairBrown,
+                    start = Offset(x, -22f),
+                    end   = Offset(x + 0.5f, -16f),
+                    strokeWidth = 0.6f,
+                    cap = StrokeCap.Round,
+                    alpha = parentAlpha,
+                )
+            }
             // Ribbons.
             val ribL = Path().apply {
                 moveTo(-13f, -13f); lineTo(-16f, -12f)
@@ -412,8 +530,12 @@ private fun DrawScope.drawDaughter(
             }
             drawPath(ribL, p.daughterSkirt, alpha = parentAlpha)
             drawPath(ribR, p.daughterSkirt, alpha = parentAlpha)
-            drawHead(p, p.skin, 11f, -12f, -8f,
-                     blush = true, parentAlpha = parentAlpha)
+            drawFaceFeatures(
+                p, radius = 11f, eyeY = -12f, smileY = -8f,
+                blush = true,
+                time = time, blinkAt = 2.4,
+                parentAlpha = parentAlpha,
+            )
         }
     }
 }
@@ -421,7 +543,7 @@ private fun DrawScope.drawDaughter(
 // MARK: ─── Son ─────────────────────────────────────────────────────────
 
 private fun DrawScope.drawSon(
-    p: LaunchPalette, lookUp: Float, bob: Float, parentAlpha: Float
+    p: LaunchPalette, lookUp: Float, bob: Float, parentAlpha: Float, time: Double,
 ) {
     withTransform({ translate(165f, 720f + bob) }) {
         drawOval(p.hairDark, topLeft = Offset(-9f, -2.5f),
@@ -484,6 +606,9 @@ private fun DrawScope.drawSon(
             translate(0f, -58f)
             rotate(degrees = lookUp * 0.9f, pivot = Offset.Zero)
         }) {
+            // Skin face circle first — bowl-cut sits on top.
+            drawFaceCircle(p.skin, radius = 12f, eyeY = -13f,
+                           parentAlpha = parentAlpha)
             val hair = Path().apply {
                 moveTo(-12f, -14f)
                 quadraticTo(-13f, -25f, -7f, -27f)
@@ -496,8 +621,26 @@ private fun DrawScope.drawSon(
                 close()
             }
             drawPath(hair, p.hairDark, alpha = parentAlpha)
-            drawHead(p, p.skin, 12f, -13f, -8f,
-                     blush = true, bigSmile = true, parentAlpha = parentAlpha)
+            // Spiky tufts on top — three short upward triangles give
+            // the bowl-cut a "messy boy" feel.
+            val tuft1 = Path().apply {
+                moveTo(-3f, -25f); lineTo(-1f, -30f); lineTo(1f, -27f); close()
+            }
+            val tuft2 = Path().apply {
+                moveTo(1f, -27f); lineTo(3f, -31f); lineTo(5f, -27f); close()
+            }
+            val tuft3 = Path().apply {
+                moveTo(-6f, -26f); lineTo(-4f, -29f); lineTo(-2f, -26f); close()
+            }
+            drawPath(tuft1, p.hairDark, alpha = parentAlpha)
+            drawPath(tuft2, p.hairDark, alpha = parentAlpha)
+            drawPath(tuft3, p.hairDark, alpha = parentAlpha)
+            drawFaceFeatures(
+                p, radius = 12f, eyeY = -13f, smileY = -8f,
+                blush = true, bigSmile = true,
+                time = time, blinkAt = 3.0,
+                parentAlpha = parentAlpha,
+            )
         }
     }
 }
@@ -505,7 +648,7 @@ private fun DrawScope.drawSon(
 // MARK: ─── Father (with watering can) ──────────────────────────────────
 
 private fun DrawScope.drawFather(
-    p: LaunchPalette, fLean: Float, tilt: Float, parentAlpha: Float
+    p: LaunchPalette, fLean: Float, tilt: Float, parentAlpha: Float, time: Double,
 ) {
     withTransform({
         translate(225f, 720f)
@@ -579,6 +722,9 @@ private fun DrawScope.drawFather(
 
         // Head.
         withTransform({ translate(0f, -92f) }) {
+            // Skin face circle first — hair cap sits on top.
+            drawFaceCircle(p.skin, radius = 14.5f, eyeY = -16f,
+                           parentAlpha = parentAlpha)
             val hair = Path().apply {
                 moveTo(-14f, -17f)
                 quadraticTo(-15f, -29f, -8f, -31f)
@@ -590,8 +736,64 @@ private fun DrawScope.drawFather(
                 close()
             }
             drawPath(hair, p.hairDark, alpha = parentAlpha)
-            drawHead(p, p.skin, 14.5f, -16f, -10f,
-                     blush = false, parentAlpha = parentAlpha)
+            // Forehead hairline + side wisps for texture.
+            for (x in listOf(-10f, -7f, -4f, -1f, 2f, 5f, 8f, 11f)) {
+                drawLine(
+                    color = p.hairBrown,
+                    start = Offset(x, -27f),
+                    end   = Offset(x + 0.4f, -22f),
+                    strokeWidth = 0.5f,
+                    cap = StrokeCap.Round,
+                    alpha = parentAlpha,
+                )
+            }
+            drawLine(
+                color = p.hairDark,
+                start = Offset(-13f, -19f),
+                end   = Offset(-10f, -16f),
+                strokeWidth = 0.6f,
+                cap = StrokeCap.Round,
+                alpha = parentAlpha,
+            )
+            drawLine(
+                color = p.hairDark,
+                start = Offset(13f, -19f),
+                end   = Offset(10f, -16f),
+                strokeWidth = 0.6f,
+                cap = StrokeCap.Round,
+                alpha = parentAlpha,
+            )
+            drawFaceFeatures(
+                p, radius = 14.5f, eyeY = -16f, smileY = -10f,
+                blush = false,
+                time = time, blinkAt = 2.0,
+                parentAlpha = parentAlpha,
+            )
+            // Father bushy brows + mustache hint — drawn AFTER face
+            // features so they sit on top of the standard brows the
+            // helper drew.
+            val browL = Path().apply {
+                moveTo(-8f, -20f)
+                quadraticTo(-5f, -21.5f, -2f, -20f)
+            }
+            val browR = Path().apply {
+                moveTo(2f, -20f)
+                quadraticTo(5f, -21.5f, 8f, -20f)
+            }
+            drawPath(browL, p.hairDark, alpha = parentAlpha,
+                     style = Stroke(width = 1.3f, cap = StrokeCap.Round))
+            drawPath(browR, p.hairDark, alpha = parentAlpha,
+                     style = Stroke(width = 1.3f, cap = StrokeCap.Round))
+            // Mustache — thin shape under the nose.
+            val mustache = Path().apply {
+                moveTo(-4f, -11f)
+                quadraticTo(-2f, -10f, 0f, -11f)
+                quadraticTo(2f, -10f, 4f, -11f)
+                quadraticTo(2f, -9.5f, 0f, -10f)
+                quadraticTo(-2f, -9.5f, -4f, -11f)
+                close()
+            }
+            drawPath(mustache, p.hairDark, alpha = parentAlpha)
         }
 
         // Front arm + can.
