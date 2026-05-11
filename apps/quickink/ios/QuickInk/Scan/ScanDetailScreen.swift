@@ -1175,13 +1175,16 @@ struct ScanDetailScreen: View {
         }
         print("[Location] retry: placemark fields: name=\(placemark.name ?? "nil") thoroughfare=\(placemark.thoroughfare ?? "nil") subThoroughfare=\(placemark.subThoroughfare ?? "nil") subLocality=\(placemark.subLocality ?? "nil") locality=\(placemark.locality ?? "nil") subAdministrativeArea=\(placemark.subAdministrativeArea ?? "nil") administrativeArea=\(placemark.administrativeArea ?? "nil") postalCode=\(placemark.postalCode ?? "nil") country=\(placemark.country ?? "nil") isoCountryCode=\(placemark.isoCountryCode ?? "nil")")
         print("[Location] retry: placemark raw locality=\(placemark.locality ?? "nil") subLocality=\(placemark.subLocality ?? "nil")")
-        // Same dedupe as the write path in LocationService — drop
-        // the sub-locality when it duplicates the locality so the
-        // backfilled row doesn't recreate the "Area = City" UX
-        // problem.
+        // Same region-aware derivation + dedupe as the write path
+        // in LocationService — for Indian placemarks promote the
+        // metropolitan name (subAdministrativeArea, suffix-
+        // stripped) into the "City" slot and demote locality to
+        // "Area"; elsewhere keep the geocoder's own labelling.
+        let derived = LocationService.derivePlaceNames(from: placemark)
+        print("[Location] retry: derive → locality=\(derived.locality ?? "nil") subLocality=\(derived.subLocality ?? "nil")")
         let names = LocationService.dedupePlaceNames(
-            locality:    placemark.locality,
-            subLocality: placemark.subLocality
+            locality:    derived.locality,
+            subLocality: derived.subLocality
         )
         let newAddress = LocationService.formatAddress(from: placemark)
         print("[Location] retry: dedupe → locality=\(names.locality ?? "nil") subLocality=\(names.subLocality ?? "nil") address=\(newAddress ?? "nil")")

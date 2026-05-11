@@ -131,6 +131,64 @@ object LocationService {
     }
 
     /**
+     * Choose which `Address` fields back the "City" + "Area" rows
+     * on the Details card. Most regions are happy with the
+     * geocoder's labelling (`locality` = city, `subLocality` =
+     * area), but India returns the immediate village as `locality`
+     * (e.g. "Kadabagere") and the broader metropolitan name in
+     * `subAdminArea` (e.g. "Bangalore Division"). Users think of
+     * the metropolitan name as their city. For `IN` placemarks
+     * we hoist a suffix-stripped subAdminArea into the "City" slot
+     * and demote the original locality to "Area". Other countries
+     * pass through untouched. Mirror of iOS
+     * `LocationService.derivePlaceNames`.
+     */
+    fun derivePlaceNames(address: android.location.Address): Pair<String?, String?> {
+        val locality    = address.locality?.trim()?.takeIf { it.isNotBlank() }
+        val subLocality = address.subLocality?.trim()?.takeIf { it.isNotBlank() }
+        val subAdmin    = address.subAdminArea?.trim()?.takeIf { it.isNotBlank() }
+        val countryCode = address.countryCode?.uppercase()
+
+        if (countryCode == "IN" && subAdmin != null) {
+            val cleaned = stripIndianAdminSuffixes(subAdmin)
+            if (cleaned.isNotBlank() && cleaned != locality) {
+                // Hoist subAdmin → City, demote original locality →
+                // Area. Original subLocality (a more granular
+                // hyper-local) is dropped; the 2-row UI can't
+                // surface three levels of place name without
+                // bloating the Details card.
+                return cleaned to locality
+            }
+        }
+        return locality to subLocality
+    }
+
+    /**
+     * Strip the trailing admin-division suffix Indian geocoders
+     * often append to the metropolitan name ("Bangalore Division",
+     * "Bengaluru Urban", "Mumbai Suburban District"). Case-
+     * insensitive; one pass is enough — these labels carry at most
+     * one suffix.
+     */
+    private fun stripIndianAdminSuffixes(s: String): String {
+        val suffixes = listOf(
+            " Division",
+            " District",
+            " Urban",
+            " Rural",
+            " Suburban",
+            " Metropolitan",
+        )
+        val trimmed = s.trim()
+        for (suffix in suffixes) {
+            if (trimmed.endsWith(suffix, ignoreCase = true)) {
+                return trimmed.dropLast(suffix.length).trim()
+            }
+        }
+        return trimmed
+    }
+
+    /**
      * Some `Geocoder` results return the same string for `locality`
      * and `subLocality` when neighborhood-level data isn't available
      * — typical for many non-US cities where the geocoder only
@@ -432,9 +490,16 @@ object LocationService {
         for (i in 0..maxLine) {
             Log.i(TAG, "geocoder addressLine[$i]=${address.getAddressLine(i)}")
         }
+        // Region-aware derivation: in India the geocoder returns
+        // the immediate village as `locality` and the metropolitan
+        // name as `subAdminArea`; hoist the latter into "City" and
+        // demote the original locality to "Area". Other regions
+        // pass through unchanged.
+        val (derivedLocality, derivedSubLocality) = derivePlaceNames(address)
+        Log.i(TAG, "geocoder derive: locality=$derivedLocality subLocality=$derivedSubLocality")
         return ResolvedPlace(
-            locality    = address.locality,
-            subLocality = address.subLocality,
+            locality    = derivedLocality,
+            subLocality = derivedSubLocality,
             address     = formatFullAddress(address),
         )
     }

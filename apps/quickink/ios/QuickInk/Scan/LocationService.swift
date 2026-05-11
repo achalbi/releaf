@@ -144,9 +144,12 @@ public final class LocationService: NSObject, @unchecked Sendable, CLLocationMan
             print("[Location] placemark fields: name=\(pm.name ?? "nil") thoroughfare=\(pm.thoroughfare ?? "nil") subThoroughfare=\(pm.subThoroughfare ?? "nil") subLocality=\(pm.subLocality ?? "nil") locality=\(pm.locality ?? "nil") subAdministrativeArea=\(pm.subAdministrativeArea ?? "nil") administrativeArea=\(pm.administrativeArea ?? "nil") postalCode=\(pm.postalCode ?? "nil") country=\(pm.country ?? "nil") isoCountryCode=\(pm.isoCountryCode ?? "nil") areasOfInterest=\(pm.areasOfInterest?.joined(separator: ", ") ?? "nil")")
         }
         print("[Location] captureCurrent: placemark raw locality=\(placemark?.locality ?? "nil") subLocality=\(placemark?.subLocality ?? "nil")")
+        let derived: (locality: String?, subLocality: String?) =
+            placemark.map(Self.derivePlaceNames(from:)) ?? (nil, nil)
+        print("[Location] captureCurrent: derive → locality=\(derived.locality ?? "nil") subLocality=\(derived.subLocality ?? "nil")")
         let names = Self.dedupePlaceNames(
-            locality:    placemark?.locality,
-            subLocality: placemark?.subLocality
+            locality:    derived.locality,
+            subLocality: derived.subLocality
         )
         print("[Location] captureCurrent: dedupe → locality=\(names.locality ?? "nil") subLocality=\(names.subLocality ?? "nil")")
         let address = placemark.flatMap(Self.formatAddress(from:))
@@ -252,6 +255,74 @@ extension LocationService {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return single.isEmpty ? nil : single
     }
+}
+
+// MARK: - Place-name derivation (region-aware)
+
+extension LocationService {
+    /// Choose which `CLPlacemark` fields back the "City" + "Area"
+    /// rows on the Details card. Most regions are happy with the
+    /// geocoder's own labelling (`locality` = city, `subLocality` =
+    /// area), but India returns the immediate village as `locality`
+    /// (e.g. "Kadabagere") and the broader metropolitan name in
+    /// `subAdministrativeArea` (e.g. "Bangalore Division"). Users
+    /// there think of the metropolitan name as their city. For
+    /// `IN` placemarks we hoist a suffix-stripped subAdministrative-
+    /// Area into the "City" slot and demote the original locality
+    /// to "Area". Other countries pass through untouched.
+    public static func derivePlaceNames(
+        from placemark: CLPlacemark
+    ) -> (locality: String?, subLocality: String?) {
+        let locality    = placemark.locality?.trimmingCharacters(in: .whitespaces).nilIfEmpty
+        let subLocality = placemark.subLocality?.trimmingCharacters(in: .whitespaces).nilIfEmpty
+        let subAdmin    = placemark.subAdministrativeArea?
+            .trimmingCharacters(in: .whitespaces).nilIfEmpty
+        let countryCode = placemark.isoCountryCode?.uppercased()
+
+        if countryCode == "IN", let subAdmin = subAdmin {
+            let cleaned = stripIndianAdminSuffixes(subAdmin)
+            if !cleaned.isEmpty, cleaned != locality {
+                // Hoist subAdmin → City, demote original locality →
+                // Area. Original subLocality (a more granular
+                // hyper-local) is dropped; the 2-row UI can't
+                // surface three levels of place name without
+                // bloating the Details card, and "Area" carrying
+                // the immediate town/suburb reads better than a
+                // street-level cul-de-sac name.
+                return (locality: cleaned, subLocality: locality)
+            }
+        }
+        return (locality: locality, subLocality: subLocality)
+    }
+
+    /// Strip the trailing admin-division suffix Indian geocoders
+    /// often append to the metropolitan name ("Bangalore Division",
+    /// "Bengaluru Urban", "Mumbai Suburban District"). Case-
+    /// insensitive; one pass is enough — these labels carry at
+    /// most one suffix.
+    private static func stripIndianAdminSuffixes(_ s: String) -> String {
+        let suffixes = [
+            " Division",
+            " District",
+            " Urban",
+            " Rural",
+            " Suburban",
+            " Metropolitan",
+        ]
+        let trimmed = s.trimmingCharacters(in: .whitespaces)
+        let lower = trimmed.lowercased()
+        for suffix in suffixes {
+            if lower.hasSuffix(suffix.lowercased()) {
+                return String(trimmed.dropLast(suffix.count))
+                    .trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return trimmed
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 // MARK: - Place-name dedupe
