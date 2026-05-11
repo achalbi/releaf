@@ -69,6 +69,16 @@ struct ScanDetailScreen: View {
     /// review sheet. Triggers presentation of the system
     /// CNContactViewController.
     @State private var pendingContactForm: IdentifiedForm? = nil
+    /// Temp-file URLs for the "Share as Image" workflow. Set after
+    /// the PDF pages have been rasterised to JPEGs; presenting the
+    /// `.sheet(item:)` against this opens UIActivityViewController
+    /// over those files. Nil while idle or while rendering is in
+    /// flight.
+    @State private var imageShareItems: IdentifiedURLs? = nil
+    /// True while [prepareImageShare] is rasterising pages. Drives
+    /// the row's label ("Preparing…") and disables further taps so
+    /// a double-tap doesn't queue two renders.
+    @State private var isPreparingImageShare = false
 
     init(
         captureId: String,
@@ -247,6 +257,14 @@ struct ScanDetailScreen: View {
             )
             .ignoresSafeArea()
         }
+        // Share-as-Image sheet — opens once [prepareImageShare]
+        // finishes rasterising the scan's pages to temp JPEGs. The
+        // wrapper struct's `id` cycles every render so a second
+        // share-as-image tap re-presents the sheet rather than no-
+        // opping on identical state.
+        .sheet(item: $imageShareItems) { wrapper in
+            ActivityView(activityItems: wrapper.urls)
+        }
         // Fullscreen flipbook viewer — opens when the user taps the
         // overlay fullscreen button on the inline preview. Only
         // meaningful when a real PDF resolves on disk; the
@@ -295,13 +313,21 @@ struct ScanDetailScreen: View {
         if let pdfURL = pdfURL(from: capture) {
             if capture.pageCount > 1 {
                 pageTurnViewer(for: pdfURL, capture: capture)
+                    .contentShape(Rectangle())
+                    .onTapGesture { showFullscreenViewer = true }
                     .overlay(alignment: .topTrailing) { fullscreenChip }
             } else {
-                PDFKitView(url: pdfURL, backgroundColor: QuickInkColors.bg)
+                PDFKitView(
+                    url: pdfURL,
+                    backgroundColor: QuickInkColors.bg,
+                    interactionsEnabled: false
+                )
                     .frame(maxWidth: .infinity)
                     .frame(height: pdfPreviewHeight(for: capture))
                     .background(QuickInkColors.bg)
                     .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+                    .contentShape(Rectangle())
+                    .onTapGesture { showFullscreenViewer = true }
                     .overlay(alignment: .topTrailing) { fullscreenChip }
             }
         } else if let image = loadedPreviewImage(for: capture) {
@@ -408,8 +434,9 @@ struct ScanDetailScreen: View {
                 }
             } else {
                 PageTurnPdfView(
-                    pageImages:  pageImages,
-                    currentPage: $selectedPageIndex
+                    pageImages:         pageImages,
+                    currentPage:        $selectedPageIndex,
+                    interactionsEnabled: false
                 )
                     .frame(maxWidth: .infinity)
                     .aspectRatio(pageAspectRatio, contentMode: .fit)
@@ -639,7 +666,7 @@ struct ScanDetailScreen: View {
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(QuickInkColors.inkSoft)
                 Text("Details")
-                    .font(QuickInkText.cardTitle)
+                    .font(QuickInkFont.ui(13, weight: .semibold))
                     .foregroundStyle(QuickInkColors.ink)
             }
 
@@ -647,10 +674,22 @@ struct ScanDetailScreen: View {
                 detailRow(label: "File type", value: fileTypeLabel(for: capture))
                 detailRow(label: "Size", value: pdfFileSize.map(formatBytes) ?? "—")
                 detailRow(
-                    label: "Location",
+                    label: "Folder",
                     value: capture.category ?? "Unsorted",
                     valueColor: capture.category != nil ? QuickInkColors.accent : QuickInkColors.inkSoft
                 )
+                // Geographic Area / City rows — hidden when the
+                // capture has no reverse-geocoded place name (older
+                // rows, location toggle off, denied permission, or a
+                // failed geocode). Coordinates without a place name
+                // aren't surfaced here — they'd read as raw numbers,
+                // not useful for the average user.
+                if let subLocality = capture.subLocality, !subLocality.isEmpty {
+                    detailRow(label: "Area", value: subLocality)
+                }
+                if let locality = capture.locality, !locality.isEmpty {
+                    detailRow(label: "City", value: locality)
+                }
                 tagsRow(for: capture)
             }
         }
@@ -729,8 +768,10 @@ struct ScanDetailScreen: View {
     // MARK: - Actions card
 
     /// Quick-actions card matching the mockup: header + rows for
-    /// Export as PDF, Share, Move to folder, Delete. Each row is a
-    /// full-width tappable button with an SF Symbol on the left.
+    /// Share as Image, Export as PDF, Move to folder, Delete (plus
+    /// a business-card-only "Add to contact" row at the top). Each
+    /// row is a full-width tappable button with an SF Symbol on the
+    /// left.
     @ViewBuilder
     private func actionsCard(for capture: CaptureSummary) -> some View {
         VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
@@ -739,7 +780,7 @@ struct ScanDetailScreen: View {
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(QuickInkColors.inkSoft)
                 Text("Actions")
-                    .font(QuickInkText.cardTitle)
+                    .font(QuickInkFont.ui(13, weight: .semibold))
                     .foregroundStyle(QuickInkColors.ink)
             }
 
@@ -757,11 +798,23 @@ struct ScanDetailScreen: View {
                     actionDivider
                 }
 
+                if canShareAsImage(capture) {
+                    Button {
+                        Task { await prepareImageShare() }
+                    } label: {
+                        actionRowContent(
+                            icon: "photo",
+                            label: isPreparingImageShare ? "Preparing…" : "Share as Image"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isPreparingImageShare)
+                    actionDivider
+                }
+
                 if let pdfURL = shareablePdfURL(from: capture) {
-                    actionRow(icon: "square.and.arrow.up", label: "Share") {
-                        ShareLink(item: pdfURL) {
-                            actionRowContent(icon: "square.and.arrow.up", label: "Share")
-                        }
+                    ShareLink(item: pdfURL) {
+                        actionRowContent(icon: "arrow.down.doc", label: "Export as PDF")
                     }
                     actionDivider
                 }
@@ -786,19 +839,6 @@ struct ScanDetailScreen: View {
             RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
                 .stroke(QuickInkColors.border, lineWidth: 1)
         )
-    }
-
-    /// Wrapper for an action row whose content needs to be a custom
-    /// view (e.g. a `ShareLink` that wraps the row content). Plain
-    /// taps that just call a closure should use `Button` directly
-    /// with `actionRowContent` as the label.
-    @ViewBuilder
-    private func actionRow<Content: View>(
-        icon: String,
-        label: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        content()
     }
 
     /// The visual content of an action row — icon + label. Used both
@@ -940,6 +980,77 @@ struct ScanDetailScreen: View {
         self.pdfFileSize = size
     }
 
+    // MARK: - Share as image
+
+    /// True when there's *something* we can rasterise for the
+    /// Share-as-Image row — either a PDF on disk (rendered per-page)
+    /// or the legacy single-frame preview JPEG. Drives whether the
+    /// row appears at all; if neither is available we hide it rather
+    /// than showing a row that fails on tap.
+    private func canShareAsImage(_ capture: CaptureSummary) -> Bool {
+        if pdfURL(from: capture) != nil { return true }
+        return loadedPreviewImage(for: capture) != nil
+    }
+
+    /// Render the capture into one JPEG per page and present the
+    /// system share sheet against those files. Guarded by
+    /// [isPreparingImageShare] so a double-tap doesn't queue a second
+    /// render in parallel.
+    private func prepareImageShare() async {
+        guard !isPreparingImageShare else { return }
+        isPreparingImageShare = true
+        defer { isPreparingImageShare = false }
+        let urls = await renderImageURLs()
+        guard !urls.isEmpty else { return }
+        imageShareItems = IdentifiedURLs(urls: urls)
+    }
+
+    /// Rasterise the capture to one JPEG per page in the temp dir
+    /// and return the resulting file URLs. Falls back to the preview
+    /// JPEG for image-only (PDF-less) captures. Returns an empty
+    /// array when neither path is available — the caller bails before
+    /// presenting the share sheet.
+    private func renderImageURLs() async -> [URL] {
+        let id = captureId
+        if let pdfURL = pdfURL(from: capture) {
+            return await Task.detached(priority: .userInitiated) {
+                guard let doc = PDFDocument(url: pdfURL) else { return [] }
+                let images = doc.renderPageImages(scale: 2.0)
+                return ScanDetailScreen.writeJpegsToTemp(images, base: id)
+            }.value
+        }
+        if let cap = capture, let img = loadedPreviewImage(for: cap) {
+            return await Task.detached(priority: .userInitiated) { [img] in
+                ScanDetailScreen.writeJpegsToTemp([img], base: id)
+            }.value
+        }
+        return []
+    }
+
+    /// Write a batch of UIImages out as JPEGs in a fresh per-call temp
+    /// subdirectory. The unique-per-call subdir keeps file names
+    /// (`page-1.jpg`, `page-2.jpg`, …) human-readable in the iOS share
+    /// sheet preview without clobbering a previous share's files when
+    /// the user opens the same scan twice in quick succession.
+    private static func writeJpegsToTemp(_ images: [UIImage], base: String) -> [URL] {
+        let dirName = "quickink-share-\(base)-\(UUID().uuidString.prefix(8))"
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(dirName)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            return []
+        }
+        var urls: [URL] = []
+        for (index, image) in images.enumerated() {
+            guard let data = image.jpegData(compressionQuality: 0.92) else { continue }
+            let url = dir.appendingPathComponent("page-\(index + 1).jpg")
+            if (try? data.write(to: url)) != nil {
+                urls.append(url)
+            }
+        }
+        return urls
+    }
+
     // MARK: - Load
 
     /// Soft-delete the in-view capture and dismiss back to Home.
@@ -997,7 +1108,8 @@ struct ScanDetailScreen: View {
         do {
             let result = try await dbQueue.read { db -> CaptureSummary? in
                 try CaptureSummary.fetchOne(db, sql: """
-                    SELECT id, title, preview_uri, pdf_uri, category, page_count, created_at, source
+                    SELECT id, title, preview_uri, pdf_uri, category, page_count,
+                           created_at, source, latitude, longitude, locality, sub_locality
                     FROM captures
                     WHERE id = ? AND deleted_at IS NULL
                     LIMIT 1
@@ -1047,6 +1159,28 @@ private struct IdentifiedExtraction: Identifiable {
 private struct IdentifiedForm: Identifiable {
     let id = UUID()
     let form: EditableContact
+}
+
+/// Identifiable wrapper around the temp-file URLs produced for the
+/// Share-as-Image flow. The fresh `id` per instance ensures
+/// `.sheet(item:)` re-presents when the user shares twice in a row.
+private struct IdentifiedURLs: Identifiable {
+    let id = UUID()
+    let urls: [URL]
+}
+
+/// Lightweight UIKit bridge for UIActivityViewController. SwiftUI's
+/// ShareLink only takes statically-resolvable items, but the
+/// Share-as-Image flow renders pages on demand — so we drive it via
+/// the bridged activity controller against the rendered file URLs.
+private struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 /// Split a comma- (or newline-) separated string into trimmed,

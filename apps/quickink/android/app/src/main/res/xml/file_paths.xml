@@ -25,6 +25,18 @@
         name="camera"
         path="camera/" />
     <!--
+      Share-as-Image temp dir. The scan detail screen rasterises a
+      capture's PDF pages to JPEGs under
+      `<cacheDir>/share-images/<per-call-subdir>/page-N.jpg` and
+      hands those file URIs to the system share sheet via this
+      provider. Per-call subdirectories keep file names readable
+      in the chooser preview without clobbering a previous share's
+      output.
+    -->
+    <cache-path
+        name="share-images"
+        path="share-images/" />
+    <!--
       QuickInkApp.onCreate sets AttachmentStorage.appFolderName to
       "quickink" so synced attachments land at
       `<filesDir>/quickink/attachments/<uuid>.<ext>`. Historic

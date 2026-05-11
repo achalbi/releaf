@@ -22,6 +22,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,9 +51,10 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.LocalOffer
 import androidx.compose.material.icons.outlined.PersonAdd
-import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.PictureAsPdf
 import app.quickink.mobile.features.scan.businesscard.AddContactReviewSheet
 import app.quickink.mobile.features.scan.businesscard.launchAddContactIntent
 import app.quickink.mobile.features.scan.businesscard.runBusinessCardExtraction
@@ -84,6 +86,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.sync.QuickInkBinarySync
@@ -165,6 +168,10 @@ fun ScanDetailScreen(
     // sheet. Set on tap of "Add to contact"; the sheet observes it
     // through the non-null check, and clearing it dismisses.
     var businessCardExtraction by remember(captureId) { mutableStateOf<ExtractedContact?>(null) }
+    // True while the Share-as-Image action is rasterising pages to
+    // JPEGs. Drives the row's label ("Preparing…") and the disabled
+    // tap-state so a double-tap doesn't queue a second render.
+    var isPreparingImageShare by remember(captureId) { mutableStateOf(false) }
 
     // Live category list — populated from the same DAO the home
     // grid + review screen read, scoped to the current user. The
@@ -366,12 +373,29 @@ fun ScanDetailScreen(
                     val isBusinessCard = current.category
                         ?.equals("Business Card", ignoreCase = true) == true
                     ActionsCard(
-                        capture        = current,
-                        onShare        = {
-                            sharePdf(context, current.pdfUri, current.previewUri)
+                        capture               = current,
+                        onShareAsImage        = {
+                            if (!isPreparingImageShare) {
+                                scope.launch {
+                                    isPreparingImageShare = true
+                                    try {
+                                        shareAsImage(
+                                            context    = context,
+                                            pdfUri     = current.pdfUri,
+                                            previewUri = current.previewUri,
+                                        )
+                                    } finally {
+                                        isPreparingImageShare = false
+                                    }
+                                }
+                            }
                         },
-                        onMoveToFolder = { showRetagSheet = true },
-                        onDelete       = { showDeleteConfirm = true },
+                        isPreparingImageShare = isPreparingImageShare,
+                        onExportPdf           = {
+                            exportAsPdf(context, current.pdfUri)
+                        },
+                        onMoveToFolder        = { showRetagSheet = true },
+                        onDelete              = { showDeleteConfirm = true },
                         // Business-card-only Add-to-contact row.
                         // Runs the full bbox-aware extraction
                         // pipeline over the capture's stored OCR
@@ -379,7 +403,7 @@ fun ScanDetailScreen(
                         // sheet so the user can fix any
                         // mis-classifications before the final
                         // contact intent fires.
-                        onAddToContact = if (isBusinessCard) {
+                        onAddToContact        = if (isBusinessCard) {
                             {
                                 scope.launch {
                                     businessCardExtraction = runCatching {
@@ -388,7 +412,7 @@ fun ScanDetailScreen(
                                 }
                             }
                         } else null,
-                        modifier       = Modifier.weight(1f),
+                        modifier              = Modifier.weight(1f),
                     )
                 }
             }
@@ -565,30 +589,50 @@ private fun PreviewImage(
 
     when {
         pdfPresent -> {
+            // Tap-anywhere-to-fullscreen modifier — gives the user a
+            // visible affordance to enter the interactive viewer
+            // since the inline PDF surfaces are now non-interactive
+            // (so vertical drags can reach the outer `verticalScroll`).
+            // No indication ripple — a Material ripple over the page
+            // surface reads as a glitch on a "thumbnail" preview.
+            val previewTap = onFullscreenClick?.let { handler ->
+                Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication        = null,
+                    onClick           = handler,
+                )
+            } ?: Modifier
+
             // Multi-page captures get the swipe + page-turn viewer;
             // single-page captures keep the scrollable PdfPagesView
             // since it already handles pinch-to-zoom and there's
-            // nothing to swipe to anyway.
+            // nothing to swipe to anyway. Both run with
+            // `interactionsEnabled = false` here — the fullscreen
+            // viewer carries the full pinch / pan / swipe UX.
             if (capture.pageCount > 1) {
                 PageTurnPdfView(
                     pdfUri              = pdfUri!!,
                     onFullscreenClick   = onFullscreenClick,
                     currentPage         = currentPage,
                     onCurrentPageChange = onCurrentPageChange,
+                    interactionsEnabled = false,
                     modifier = modifier
                         .fillMaxWidth()
                         .aspectRatio(0.707f) // A4-ish portrait until pages render
                         .clip(RoundedCornerShape(QuickInkRadius.md))
                         .background(colors.surface)
-                        .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md)),
+                        .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
+                        .then(previewTap),
                 )
             } else {
                 PdfPagesView(
-                    pdfUri            = pdfUri,
-                    onFullscreenClick = onFullscreenClick,
+                    pdfUri              = pdfUri,
+                    onFullscreenClick   = onFullscreenClick,
+                    interactionsEnabled = false,
                     modifier = modifier
                         .fillMaxWidth()
-                        .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md)),
+                        .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
+                        .then(previewTap),
                 )
             }
         }
@@ -661,67 +705,194 @@ private fun PreviewImage(
 }
 
 /**
- * Hand the capture's content off to the system share sheet. Tries
- * the PDF first (richest result); falls back to the preview JPEG if
- * the PDF URI is missing or unshareable.
+ * Render the capture's pages to JPEGs and hand them to the system
+ * share sheet as image content. Multi-page captures use
+ * `ACTION_SEND_MULTIPLE`; single-page captures use `ACTION_SEND`.
+ * Falls back to copying the preview JPEG when the PDF isn't on
+ * disk; surfaces a Toast when neither is available.
  *
- * URI handling matters here: after sync (or a Drive restore) the
- * `pdf_uri` / `preview_uri` rows are `file://` URIs rooted at
- * AttachmentStorage's directory (`<filesDir>/quickink/attachments/`
- * once QuickInkApp.onCreate's `appFolderName` override has run, with
- * historic rows migrated in by `migrateLegacyAttachmentsFolder`).
- * Modern Android forbids forwarding `file://` URIs from app-private
- * storage to other apps — the chooser opens but the receiving app
- * can't read the bytes (FLAG_GRANT_READ only takes effect on
- * `content://` URIs). So we wrap any `file://` URI through our
- * FileProvider to get a content:// URI that does carry a usable
- * grant. Fresh captures from ML Kit's scanner already arrive as
- * content:// URIs; those are forwarded as-is.
- *
- * Failures surface via Toast so the user knows the tap registered —
- * silent failure was reported as "share button not wired".
+ * Mirror of iOS `prepareImageShare` + `ActivityView`. URI grants
+ * follow the same FileProvider pattern as [exportAsPdf] (see
+ * [shareableUri] below).
  */
-private fun sharePdf(
+private suspend fun shareAsImage(
     context: android.content.Context,
     pdfUri: String?,
     previewUri: String?,
 ) {
-    val candidates = listOfNotNull(
-        pdfUri?.takeIf { it.isNotBlank() }     to "application/pdf",
-        previewUri?.takeIf { it.isNotBlank() } to "image/jpeg",
-    ).mapNotNull { (uri, type) -> uri?.let { it to type } }
-
-    if (candidates.isEmpty()) {
+    val files = withContext(Dispatchers.IO) {
+        prepareShareImageFiles(context, pdfUri, previewUri)
+    }
+    if (files.isEmpty()) {
         android.widget.Toast.makeText(
-            context, "Nothing to share for this scan", android.widget.Toast.LENGTH_SHORT
+            context, "Nothing to share for this scan",
+            android.widget.Toast.LENGTH_SHORT,
         ).show()
         return
     }
+    val authority = "${context.packageName}.fileprovider"
+    val uris = files.mapNotNull {
+        runCatching { FileProvider.getUriForFile(context, authority, it) }.getOrNull()
+    }
+    if (uris.isEmpty()) {
+        android.widget.Toast.makeText(
+            context, "Couldn't prepare scan for sharing",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+        return
+    }
+    val intent = buildImageShareIntent(uris)
+    try {
+        context.startActivity(Intent.createChooser(intent, "Share scan"))
+    } catch (_: Exception) {
+        android.widget.Toast.makeText(
+            context, "Couldn't open the share sheet for this scan",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+    }
+}
 
-    for ((rawUri, mime) in candidates) {
-        val shareUri = shareableUri(context, rawUri) ?: continue
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = mime
-            putExtra(Intent.EXTRA_STREAM, shareUri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            // Without `clipData`, the grant flag isn't honored on
-            // some receivers (notably anything routed through a
-            // chooser target on API 24+). Mirroring EXTRA_STREAM into
-            // clipData is the documented workaround.
-            clipData = android.content.ClipData.newRawUri(null, shareUri)
+/**
+ * IO-bound helper for [shareAsImage]: writes one JPEG per page to a
+ * fresh per-call subdirectory under the app's cache dir, falling
+ * back to copying the preview JPEG when the PDF isn't on disk.
+ * Returns an empty list when neither path resolves; the caller
+ * surfaces a Toast in that case. Unique-per-call subdir keeps file
+ * names (`page-1.jpg` etc.) human-readable in the share-sheet
+ * preview without clobbering a previous share's files.
+ */
+private fun prepareShareImageFiles(
+    context: android.content.Context,
+    pdfUri: String?,
+    previewUri: String?,
+): List<File> {
+    // Nest under `<cacheDir>/share-images/<per-call-subdir>/` so the
+    // FileProvider's `share-images` cache-path entry covers every
+    // file we hand out. The per-call subdir keeps a second share
+    // from clobbering the first's files while the chooser is still
+    // up.
+    val callDir = "share-${java.util.UUID.randomUUID().toString().take(8)}"
+    val outDir = File(File(context.cacheDir, "share-images"), callDir)
+        .also { it.mkdirs() }
+
+    if (!pdfUri.isNullOrBlank() && localFileExists(pdfUri)) {
+        val bitmaps = runCatching {
+            renderPdfPages(context, Uri.parse(pdfUri))
+        }.getOrDefault(emptyList())
+        val files = bitmaps.mapIndexedNotNull { index, bm ->
+            val out = File(outDir, "page-${index + 1}.jpg")
+            runCatching {
+                java.io.FileOutputStream(out).use { os ->
+                    bm.compress(Bitmap.CompressFormat.JPEG, 92, os)
+                }
+                out
+            }.getOrNull()
         }
-        try {
-            context.startActivity(Intent.createChooser(intent, "Share scan"))
-            return // success
-        } catch (_: Exception) {
-            // Try the next candidate (e.g. PDF rejected → fall to JPEG).
-        }
+        if (files.isNotEmpty()) return files
     }
 
-    android.widget.Toast.makeText(
-        context, "Couldn't open the share sheet for this scan",
-        android.widget.Toast.LENGTH_SHORT,
-    ).show()
+    if (!previewUri.isNullOrBlank()) {
+        val parsed = runCatching { Uri.parse(previewUri) }.getOrNull()
+        val out = File(outDir, "scan.jpg")
+        val copied = runCatching {
+            val input = when (parsed?.scheme) {
+                "file"    -> parsed.path?.let(::File)?.inputStream()
+                null      -> File(previewUri).inputStream()
+                "content" -> context.contentResolver.openInputStream(parsed)
+                else      -> null
+            } ?: return@runCatching null
+            input.use { src -> java.io.FileOutputStream(out).use { src.copyTo(it) } }
+            out
+        }.getOrNull()
+        if (copied != null) return listOf(copied)
+    }
+
+    return emptyList()
+}
+
+/**
+ * Build the share intent for one or more image URIs. Single-image
+ * shares use `ACTION_SEND`; multi-image shares use
+ * `ACTION_SEND_MULTIPLE`. `clipData` mirrors `EXTRA_STREAM` so the
+ * URI grant survives the chooser hop (see [exportAsPdf]'s note).
+ */
+private fun buildImageShareIntent(uris: List<Uri>): Intent {
+    if (uris.size == 1) {
+        return Intent(Intent.ACTION_SEND).apply {
+            type = "image/jpeg"
+            putExtra(Intent.EXTRA_STREAM, uris[0])
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            clipData = android.content.ClipData.newRawUri(null, uris[0])
+        }
+    }
+    return Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+        type = "image/jpeg"
+        putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val clip = android.content.ClipData.newRawUri(null, uris[0])
+        for (i in 1 until uris.size) {
+            clip.addItem(android.content.ClipData.Item(uris[i]))
+        }
+        clipData = clip
+    }
+}
+
+/**
+ * Hand the capture's PDF off to the system share sheet. PDF-only —
+ * the legacy "Share" affordance fell back to the preview JPEG, but
+ * that behaviour now lives in [shareAsImage] under its own row.
+ *
+ * URI handling matters here: after sync (or a Drive restore) the
+ * `pdf_uri` row is a `file://` URI rooted at AttachmentStorage's
+ * directory (`<filesDir>/quickink/attachments/` once
+ * QuickInkApp.onCreate's `appFolderName` override has run, with
+ * historic rows migrated in by `migrateLegacyAttachmentsFolder`).
+ * Modern Android forbids forwarding `file://` URIs from app-private
+ * storage to other apps, so we wrap them through our FileProvider
+ * to get a `content://` URI with a usable read grant.
+ *
+ * Failures surface via Toast so the user knows the tap registered —
+ * silent failure was reported as "share button not wired".
+ *
+ * Mirror of iOS `ShareLink(item: pdfURL)` on the Export-as-PDF row.
+ */
+private fun exportAsPdf(
+    context: android.content.Context,
+    pdfUri: String?,
+) {
+    if (pdfUri.isNullOrBlank() || !localFileExists(pdfUri)) {
+        android.widget.Toast.makeText(
+            context, "PDF isn't available for this scan",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+        return
+    }
+    val shareUri = shareableUri(context, pdfUri)
+    if (shareUri == null) {
+        android.widget.Toast.makeText(
+            context, "Couldn't prepare PDF for export",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+        return
+    }
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "application/pdf"
+        putExtra(Intent.EXTRA_STREAM, shareUri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // Without `clipData`, the grant flag isn't honored on some
+        // receivers (notably anything routed through a chooser
+        // target on API 24+). Mirroring EXTRA_STREAM into clipData
+        // is the documented workaround.
+        clipData = android.content.ClipData.newRawUri(null, shareUri)
+    }
+    try {
+        context.startActivity(Intent.createChooser(intent, "Export scan as PDF"))
+    } catch (_: Exception) {
+        android.widget.Toast.makeText(
+            context, "Couldn't open the export sheet for this scan",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+    }
 }
 
 /// Translate a stored capture URI string into something the share
@@ -1013,7 +1184,11 @@ private fun DetailsCard(
                 tint               = colors.inkSoft,
                 modifier           = Modifier.size(16.dp),
             )
-            Text(text = "Details", style = type.cardTitle, color = colors.ink)
+            Text(
+                text  = "Details",
+                style = type.cardTitle.copy(fontSize = 13.sp),
+                color = colors.ink,
+            )
         }
 
         DetailRow(label = "File type", value = fileTypeLabel(capture))
@@ -1022,10 +1197,22 @@ private fun DetailsCard(
             value = pdfFileSize?.let { android.text.format.Formatter.formatFileSize(context, it) } ?: "—",
         )
         DetailRow(
-            label      = "Location",
+            label      = "Folder",
             value      = capture.category ?: "Unsorted",
             valueColor = if (capture.category != null) colors.accent else colors.inkSoft,
         )
+        // Area / City rows render only when the reverse-geocoded
+        // place name landed on the capture row. Captures taken
+        // before Phase 7, with the location toggle off, with the
+        // permission denied, or with a failed geocode lookup all
+        // omit these rows. Raw coordinates without a place name
+        // aren't surfaced — they'd read as opaque decimals.
+        capture.subLocality
+            ?.takeIf { it.isNotBlank() }
+            ?.let { DetailRow(label = "Area", value = it) }
+        capture.locality
+            ?.takeIf { it.isNotBlank() }
+            ?.let { DetailRow(label = "City", value = it) }
         TagsRow(category = capture.category, onAddTag = onAddTag)
     }
 }
@@ -1104,16 +1291,25 @@ private fun TagsRow(category: String?, onAddTag: () -> Unit) {
 }
 
 /**
- * Quick-actions card matching the mockup: header + rows for Export
- * as PDF, Share, Move to folder, Delete. Each row is a full-width
- * tappable surface with an icon on the left.
+ * Quick-actions card matching the mockup: header + rows for Share
+ * as Image, Export as PDF, Move to folder, Delete (plus a business-
+ * card-only "Add to contact" row at the top). Each row is a full-
+ * width tappable surface with an icon on the left.
  */
 @Composable
 private fun ActionsCard(
     capture: CaptureEntity,
-    onShare: () -> Unit,
+    onShareAsImage: () -> Unit,
+    onExportPdf: () -> Unit,
     onMoveToFolder: () -> Unit,
     onDelete: () -> Unit,
+    /**
+     * True while the parent is rasterising the capture's pages for
+     * the Share-as-Image flow. Swaps the row's label to "Preparing…"
+     * and disables further taps so a double-tap doesn't queue a
+     * second render.
+     */
+    isPreparingImageShare: Boolean = false,
     /**
      * Optional Add-to-contact action. Non-null only for Business
      * Card captures — the parent gates this so other categories
@@ -1125,6 +1321,16 @@ private fun ActionsCard(
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
+
+    // Gate the rows on what's actually available on disk: hide
+    // "Share as Image" when there's nothing to rasterise, and hide
+    // "Export as PDF" when the PDF file is missing. Matches the iOS
+    // `canShareAsImage` / `shareablePdfURL` checks.
+    val pdfPresent = capture.pdfUri.isNotBlank() && localFileExists(capture.pdfUri)
+    val previewPresent = !capture.previewUri.isNullOrBlank() &&
+        localFileExists(capture.previewUri)
+    val canShareAsImage = pdfPresent || previewPresent
+    val canExportPdf = pdfPresent
 
     Column(
         modifier = modifier
@@ -1145,7 +1351,11 @@ private fun ActionsCard(
                 tint               = colors.inkSoft,
                 modifier           = Modifier.size(16.dp),
             )
-            Text(text = "Actions", style = type.cardTitle, color = colors.ink)
+            Text(
+                text  = "Actions",
+                style = type.cardTitle.copy(fontSize = 13.sp),
+                color = colors.ink,
+            )
         }
 
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -1157,16 +1367,27 @@ private fun ActionsCard(
                 )
                 ActionDivider()
             }
+            if (canShareAsImage) {
+                ActionRow(
+                    icon    = Icons.Outlined.Image,
+                    label   = if (isPreparingImageShare) "Preparing…" else "Share as Image",
+                    onClick = onShareAsImage,
+                    enabled = !isPreparingImageShare,
+                )
+                ActionDivider()
+            }
+            if (canExportPdf) {
+                ActionRow(
+                    icon    = Icons.Outlined.PictureAsPdf,
+                    label   = "Export as PDF",
+                    onClick = onExportPdf,
+                )
+                ActionDivider()
+            }
             ActionRow(
-                icon         = Icons.Outlined.Share,
-                label        = "Share",
-                onClick      = onShare,
-            )
-            ActionDivider()
-            ActionRow(
-                icon         = Icons.Outlined.Folder,
-                label        = "Move to folder",
-                onClick      = onMoveToFolder,
+                icon    = Icons.Outlined.Folder,
+                label   = "Move to folder",
+                onClick = onMoveToFolder,
             )
             ActionDivider()
             ActionRow(
@@ -1185,6 +1406,7 @@ private fun ActionRow(
     label: String,
     onClick: () -> Unit,
     isDestructive: Boolean = false,
+    enabled: Boolean = true,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
@@ -1193,7 +1415,7 @@ private fun ActionRow(
     Row(
         modifier              = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = QuickInkSpacing.s2),
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
