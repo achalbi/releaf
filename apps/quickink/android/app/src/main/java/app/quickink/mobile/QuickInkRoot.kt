@@ -255,14 +255,22 @@ private fun MainShell(
             pipeline       = OcrPipeline(MlKitTextRecognizer(app)),
             notepadDao     = app.database.notepadDao(),
             scope          = scope,
-            // Drive sync is user-initiated only — no auto-kick after
-            // a scan. The user can tap Settings → "Sync now" when
-            // they want their captures pushed to Drive. The analytics
-            // outbox runs on a separate pipeline (different cadence,
-            // different failure mode) — every pass enqueues a row +
-            // opportunistically flushes so the dashboard reflects
-            // the capture within seconds.
+            // Two pipelines fire on every completed scan/import pass:
+            //
+            //   1. Drive sync — kick a one-shot push so the fresh
+            //      capture lands in the user's Drive without waiting
+            //      for the 60s foreground ticker. KEEP coalesces a
+            //      burst of back-to-back scans into one worker run,
+            //      and the worker still respects the user's "Back up
+            //      to Google Drive" toggle + AUTH_REJECTED gate
+            //      internally. Settings → "Sync now" remains the
+            //      manual force-retry path.
+            //   2. Analytics outbox — separate cadence, separate
+            //      failure mode. Every pass enqueues a row +
+            //      opportunistically flushes so the dashboard
+            //      reflects the capture within seconds.
             onPassComplete = { summary ->
+                QuickInkSyncScheduler.requestImmediate(context)
                 scope.launch {
                     try {
                         AnalyticsRepository(app.database.analyticsOutboxDao())
@@ -344,6 +352,12 @@ private fun MainShell(
         }
         if (result != null) {
             controller.onScanComplete(result, source = "import")
+            // `onScanComplete` already kicks `requestImmediate` via
+            // the controller's `onPassComplete` callback when OCR
+            // finishes — no additional schedule here would be
+            // redundant. Mentioned explicitly so a future reader
+            // doesn't add a second call thinking imports were
+            // skipped.
         }
         // Always clear the pending share — even on a null result
         // (corrupt PDF, all-images-failed-to-decode), so a retry

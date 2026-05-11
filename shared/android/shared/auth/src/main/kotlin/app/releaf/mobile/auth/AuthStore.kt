@@ -122,13 +122,46 @@ class AuthStore private constructor(
     // MARK: — persistence
 
     private fun restore(): AuthState {
-        val userId      = prefs.getString(KEY_USER_ID, null) ?: return AuthState.SignedOut
-        val email       = prefs.getString(KEY_EMAIL, null)   ?: return AuthState.SignedOut
-        val access      = prefs.getString(KEY_ACCESS, null)  ?: return AuthState.SignedOut
+        val userId      = prefs.getString(KEY_USER_ID, null)
+        val email       = prefs.getString(KEY_EMAIL, null)
+        val access      = prefs.getString(KEY_ACCESS, null)
         val refresh     = prefs.getString(KEY_REFRESH, null)
         val displayName = prefs.getString(KEY_DISPLAY, null)
-        val expiresAt   = prefs.getLong(KEY_EXPIRES, 0L).takeIf { it > 0 }?.let(Instant::ofEpochSecond)
-            ?: return AuthState.SignedOut
+        val expiresRaw  = prefs.getLong(KEY_EXPIRES, 0L)
+        val expiresAt   = expiresRaw.takeIf { it > 0 }?.let(Instant::ofEpochSecond)
+
+        // Diagnostic — print exactly which keys came back and the
+        // token prefix so a "user gets bounced to SignIn on every
+        // restart" report can be triaged from `adb logcat -s
+        // QuickInkAuth`. Token is truncated to 12 chars so the log
+        // is safe to share; full access tokens are sensitive.
+        Log.i(
+            "QuickInkAuth",
+            "restore: " +
+                "userId=${if (userId == null) "<missing>" else userId.take(8) + "…"} " +
+                "email=${if (email == null) "<missing>" else "<present>"} " +
+                "accessPrefix=${access?.take(12) ?: "<missing>"} " +
+                "expiresEpoch=$expiresRaw " +
+                "nowEpoch=${Instant.now().epochSecond} " +
+                "secondsUntilExpiry=${expiresAt?.let { it.epochSecond - Instant.now().epochSecond } ?: "n/a"}"
+        )
+
+        if (userId == null) {
+            Log.i("QuickInkAuth", "restore: → SignedOut (KEY_USER_ID missing)")
+            return AuthState.SignedOut
+        }
+        if (email == null) {
+            Log.i("QuickInkAuth", "restore: → SignedOut (KEY_EMAIL missing)")
+            return AuthState.SignedOut
+        }
+        if (access == null) {
+            Log.i("QuickInkAuth", "restore: → SignedOut (KEY_ACCESS missing)")
+            return AuthState.SignedOut
+        }
+        if (expiresAt == null) {
+            Log.i("QuickInkAuth", "restore: → SignedOut (KEY_EXPIRES missing or <= 0)")
+            return AuthState.SignedOut
+        }
 
         // Stub-poisoning guard. If a previous build was wired to
         // `StubGoogleAuthClient` and the user signed in, EncryptedSharedPreferences
@@ -152,6 +185,7 @@ class AuthStore private constructor(
             return AuthState.SignedOut
         }
 
+        Log.i("QuickInkAuth", "restore: → SignedIn")
         return AuthState.SignedIn(
             GoogleAuthSession(
                 userId = userId,
