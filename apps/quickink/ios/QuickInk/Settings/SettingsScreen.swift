@@ -143,6 +143,21 @@ struct SettingsScreen: View {
                         driveFolderRow
                     }
 
+                    section(title: "Location") {
+                        // Master switch for the scan + import flows'
+                        // geolocation attach. When off, the capture
+                        // saves with NULL latitude / longitude /
+                        // locality columns — Details card simply
+                        // omits the Area + City rows. The system
+                        // permission grant is unrelated; revoking it
+                        // there shuts the feature off independently.
+                        toggleRow(
+                            label: "Attach location to scans",
+                            help:  "Each scan records the city and area it was taken in so you can find scans by place.",
+                            isOn:  $settings.locationForScansEnabled
+                        )
+                    }
+
                     if let onManageCategories {
                         section(title: "Categories") {
                             categoriesRow(onTap: onManageCategories)

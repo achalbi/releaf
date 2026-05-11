@@ -22,7 +22,7 @@ import androidx.compose.runtime.setValue
 
 class OnboardingState {
 
-    enum class Step { Welcome, Permissions, SignIn }
+    enum class Step { Welcome, Permissions, Location, SignIn }
 
     var step by mutableStateOf(Step.Welcome)
         private set
@@ -38,7 +38,8 @@ class OnboardingState {
     fun advance() {
         step = when (step) {
             Step.Welcome     -> Step.Permissions
-            Step.Permissions -> Step.SignIn
+            Step.Permissions -> Step.Location
+            Step.Location    -> Step.SignIn
             Step.SignIn      -> Step.SignIn  // terminal — caller invokes onComplete instead
         }
     }

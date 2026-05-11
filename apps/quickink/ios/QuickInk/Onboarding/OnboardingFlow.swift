@@ -37,6 +37,8 @@ public struct OnboardingFlow: View {
             WelcomeScreen(onContinue: { state.advance() })
         case .permissions:
             PermissionsScreen(onContinue: { state.advance() })
+        case .location:
+            LocationPermissionScreen(onContinue: { state.advance() })
         case .signIn:
             SignInScreen(
                 state:      state,

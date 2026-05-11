@@ -62,15 +62,24 @@ public final class CaptureRepository: @unchecked Sendable {
         /// VisionKit's document scanner. `"import"` — picked from
         /// the system photo picker. Drives the "Import" pill in
         /// the Library cards.
-        source: String = "scan"
+        source: String = "scan",
+        /// Optional geolocation captured at scan/import time. All
+        /// four fields are nullable in the schema; pass `nil` when
+        /// the user has the "Location for scans" toggle off, when
+        /// the system permission is denied, or when the fetch /
+        /// geocode failed. The struct keeps lat+lon + place name
+        /// atomic — we never write half of it.
+        location: CapturedLocation? = nil
     ) async throws {
         let now = IsoClock.nowIso()
         try await dbQueue.write { db in
             try db.execute(sql: """
                 INSERT INTO captures (
                     id, user_id, title, pdf_uri, preview_uri,
-                    page_count, category, source, created_at, updated_at, dirty
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    page_count, category, source,
+                    latitude, longitude, locality, sub_locality,
+                    created_at, updated_at, dirty
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """, arguments: [
                     id,
                     userId,
@@ -80,6 +89,10 @@ public final class CaptureRepository: @unchecked Sendable {
                     pageCount,
                     category,
                     source,
+                    location?.latitude,
+                    location?.longitude,
+                    location?.locality,
+                    location?.subLocality,
                     now,
                     now,
                 ])

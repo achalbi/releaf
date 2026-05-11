@@ -141,6 +141,18 @@ public final class ScanFlowController: ObservableObject {
         let pipeline = self.pipeline
 
         activeTask = Task { @MainActor [weak self] in
+            // 0. Best-effort location fetch — gated by the Settings
+            //    toggle (off → skip) and the system permission state
+            //    (denied → nil). Runs concurrently with the capture
+            //    insert below would be nicer, but the insert needs
+            //    the location to write the row in one shot, and
+            //    `CLLocationManager.requestLocation` typically resolves
+            //    in well under a second on a warm-started manager.
+            //    Errors of any kind here just leave the capture
+            //    without coordinates; we never block the scan on the
+            //    location service.
+            let location = await Self.captureLocationIfEnabled()
+
             // 1. Persist the parent capture so OCR row foreign keys
             //    have something to reference.
             do {
@@ -152,7 +164,8 @@ public final class ScanFlowController: ObservableObject {
                     previewURL: previewURL,
                     pageCount:  totalPages,
                     category:   category,
-                    source:     source
+                    source:     source,
+                    location:   location
                 )
             } catch {
                 self?.state = .failed(message: "Couldn't save scan: \(error.localizedDescription)")
@@ -299,6 +312,32 @@ public final class ScanFlowController: ObservableObject {
             )
             self?.onPassComplete(summary)
         }
+    }
+
+    // MARK: - Geolocation
+
+    /// Resolve the device's current location for the capture row, or
+    /// return `nil` when the feature is off, permission isn't granted,
+    /// or the system can't produce a fix. Driven by `SettingsState.
+    /// locationForScansEnabled` — when the user has turned the toggle
+    /// off in Settings we short-circuit without touching the system
+    /// service. The capture flow treats `nil` as "save without
+    /// coordinates"; the Details card simply omits the Area/City
+    /// rows in that case.
+    private static func captureLocationIfEnabled() async -> CapturedLocation? {
+        // `SettingsState` is `@MainActor` so we read it from the
+        // controller's @MainActor task context (this is called from
+        // inside the `Task { @MainActor … }` block in `onScanComplete`).
+        // Allocating a fresh `SettingsState` is cheap — it just
+        // reads UserDefaults — and avoids threading an env-object
+        // through the controller's constructor.
+        let settings = await MainActor.run { SettingsState() }
+        guard settings.locationForScansEnabled else { return nil }
+        let status = LocationService.shared.authorizationStatus
+        guard status == .authorizedWhenInUse || status == .authorizedAlways else {
+            return nil
+        }
+        return await LocationService.shared.captureCurrent()
     }
 
     // MARK: - Append-to-today's-entry

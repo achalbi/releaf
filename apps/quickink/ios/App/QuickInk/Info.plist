@@ -48,6 +48,16 @@
 	-->
 	<key>NSCameraUsageDescription</key>
 	<string>QuickInk uses the camera to scan business cards in-frame and to let you take a fresh profile photo without leaving the app.</string>
+	<!--
+	  Location-permission rationale. Shown the first time the app
+	  asks for "When in Use" location, which happens (a) during
+	  onboarding's Location step and (b) lazily at first scan if the
+	  user skipped it. Stays brief — iOS truncates after ~150 chars
+	  in the system prompt — and explains the user-visible benefit
+	  (the area / city pill on each scan's details).
+	-->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>QuickInk attaches the area and city where each scan was taken so you can find scans by place later. You can turn this off in Settings.</string>
 	<key>CFBundleGetInfoString</key>
 	<string></string>
 	<!--

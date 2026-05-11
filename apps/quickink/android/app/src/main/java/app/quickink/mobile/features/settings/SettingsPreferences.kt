@@ -54,6 +54,22 @@ class SettingsPreferences(context: Context) {
         }
 
     /**
+     * When true, the scan + import flows fetch the device's current
+     * location (with reverse-geocoded city / area) and attach it to
+     * the capture row. When false, the scan flow skips the fetch
+     * entirely — captures save with NULL latitude / longitude /
+     * locality columns. Default true so users who grant permission
+     * during onboarding see the feature working immediately; the
+     * Settings → Location row lets them turn it off without
+     * revoking system permission.
+     */
+    var locationForScansEnabled: Boolean
+        get() = prefs.getBoolean(KEY_LOCATION_FOR_SCANS, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_LOCATION_FOR_SCANS, value).apply()
+        }
+
+    /**
      * User-overridden display name shown on the Home greeting. Empty
      * string means "fall back to the Google account's display name" —
      * resolved at the Home screen call site. Editable from the
@@ -204,6 +220,7 @@ class SettingsPreferences(context: Context) {
         private const val PREFS_NAME              = "quickink.settings"
         private const val KEY_DRIVE_BACKUP        = "drive_backup_enabled"
         private const val KEY_SEARCHABLE_PDF      = "searchable_pdf_export_enabled"
+        private const val KEY_LOCATION_FOR_SCANS  = "location_for_scans_enabled"
         private const val KEY_CUSTOM_DISPLAY_NAME = "custom_display_name"
         private const val KEY_PHONE_NUMBER        = "phone_number"
         private const val KEY_PROFILE_PHOTO_URI   = "profile_photo_uri"

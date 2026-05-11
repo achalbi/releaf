@@ -261,6 +261,25 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
     /// didn't write the field; the column-level default in the
     /// captures schema mirrors this.
     public let source: String
+    /// Decimal-degree latitude captured at scan time (Phase 7 —
+    /// Geolocation). Both lat + lon are nullable, and `nil` on the
+    /// wire when the user has the "Location for scans" toggle off,
+    /// when permission is denied, or for captures from older clients
+    /// that hadn't shipped the feature yet.
+    public let latitude: Double?
+    /// Decimal-degree longitude. Pairs with [latitude] — either both
+    /// non-nil or both nil; the writer never emits one without the
+    /// other.
+    public let longitude: Double?
+    /// Reverse-geocoded city (e.g. "San Francisco"). Sourced from
+    /// `CLPlacemark.locality` at write time. Round-trips through
+    /// Drive verbatim — we don't re-geocode on import so the
+    /// receiver sees exactly what the capturing device's locale
+    /// produced.
+    public let locality: String?
+    /// Reverse-geocoded neighbourhood / area (e.g. "Mission
+    /// District"). `CLPlacemark.subLocality`.
+    public let subLocality: String?
     public let createdAt: String
     public let updatedAt: String
 
@@ -275,6 +294,10 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         pdfDriveFileId: String? = nil,
         previewDriveFileId: String? = nil,
         source: String = "scan",
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        locality: String? = nil,
+        subLocality: String? = nil,
         createdAt: String,
         updatedAt: String
     ) {
@@ -288,6 +311,10 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         self.pdfDriveFileId = pdfDriveFileId
         self.previewDriveFileId = previewDriveFileId
         self.source = source
+        self.latitude = latitude
+        self.longitude = longitude
+        self.locality = locality
+        self.subLocality = subLocality
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -308,6 +335,14 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         // such an older payload should read back as a scan rather
         // than crash on a missing key.
         self.source             = (try c.decodeIfPresent(String.self, forKey: .source)) ?? "scan"
+        // Geolocation keys landed in Phase 7. Tolerate their absence
+        // (older payloads, captures from clients that haven't shipped
+        // the feature, or captures the user took with location off)
+        // — all of them read back as `nil`.
+        self.latitude           = try c.decodeIfPresent(Double.self, forKey: .latitude)
+        self.longitude          = try c.decodeIfPresent(Double.self, forKey: .longitude)
+        self.locality           = try c.decodeIfPresent(String.self, forKey: .locality)
+        self.subLocality        = try c.decodeIfPresent(String.self, forKey: .subLocality)
         self.createdAt          = try c.decode(String.self, forKey: .createdAt)
         self.updatedAt          = try c.decode(String.self, forKey: .updatedAt)
     }
@@ -323,6 +358,10 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         case pdfDriveFileId     = "pdf_drive_file_id"
         case previewDriveFileId = "preview_drive_file_id"
         case source
+        case latitude
+        case longitude
+        case locality
+        case subLocality        = "sub_locality"
         case createdAt          = "created_at"
         case updatedAt          = "updated_at"
     }

@@ -22,7 +22,7 @@ import SwiftUI
 public final class OnboardingState: ObservableObject {
 
     public enum Step: Sendable {
-        case welcome, permissions, signIn
+        case welcome, permissions, location, signIn
     }
 
     @Published public private(set) var step: Step = .welcome
@@ -38,7 +38,8 @@ public final class OnboardingState: ObservableObject {
     public func advance() {
         step = switch step {
         case .welcome:     .permissions
-        case .permissions: .signIn
+        case .permissions: .location
+        case .location:    .signIn
         case .signIn:      .signIn  // terminal — caller invokes onComplete instead
         }
     }

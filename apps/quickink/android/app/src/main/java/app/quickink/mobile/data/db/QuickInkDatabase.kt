@@ -56,10 +56,13 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         ProfileSettingsEntity::class,
         AnalyticsOutboxEntity::class,
     ],
-    // v6 — adds the `analytics_outbox` table that AnalyticsRepository
-    // writes capture / identify events into for the QuickInk backend
-    // (api-quickink.thoughtbasics.com). Mirror of iOS GRDB
-    // `v5_analytics_outbox` migration. v5 — adds `captures.source`
+    // v7 — adds latitude / longitude / locality / sub_locality
+    // columns to `captures` so each scan can carry its capture-time
+    // geolocation (Phase 7 — Geolocation). Mirror of iOS GRDB
+    // `v6_capture_geolocation` migration. v6 added the
+    // `analytics_outbox` table that AnalyticsRepository writes
+    // capture / identify events into for the QuickInk backend
+    // (api-quickink.thoughtbasics.com). v5 — adds `captures.source`
     // ("scan" / "import") so the Library cards can flag captures
     // that came in from the system photo picker rather than the
     // document scanner. v4 — adds the `profile_settings` table
@@ -71,7 +74,7 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // categories table + captures.category column.
     // `fallbackToDestructiveMigration` below handles the rebuild;
     // when real users have data we'll register real Migration objects.
-    version       = 6,
+    version       = 7,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {

@@ -33,6 +33,20 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
     /// search-result construction site (and rows synced from older
     /// clients) reading back as scans.
     public let source: String
+    /// Geographic latitude (decimal degrees) captured at scan time
+    /// when the user has "Location for scans" enabled. `nil` for
+    /// captures taken with location off, denied, or older rows.
+    public let latitude: Double?
+    /// Geographic longitude. Pairs with [latitude] — either both are
+    /// set or both are nil; never half-resolved.
+    public let longitude: Double?
+    /// Reverse-geocoded city. `CLPlacemark.locality` — usually the
+    /// formal city name in the device's locale. Surfaced by the
+    /// Details card on `ScanDetailScreen` as the "City" row.
+    public let locality: String?
+    /// Reverse-geocoded neighbourhood / area. `CLPlacemark.sub-
+    /// Locality`. Surfaced by the Details card as the "Area" row.
+    public let subLocality: String?
 
     public init(
         id: String,
@@ -42,43 +56,62 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         category: String?,
         pageCount: Int,
         createdAt: String,
-        source: String = "scan"
+        source: String = "scan",
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        locality: String? = nil,
+        subLocality: String? = nil
     ) {
-        self.id         = id
-        self.title      = title
-        self.previewUri = previewUri
-        self.pdfUri     = pdfUri
-        self.category   = category
-        self.pageCount  = pageCount
-        self.createdAt  = createdAt
-        self.source     = source
+        self.id          = id
+        self.title       = title
+        self.previewUri  = previewUri
+        self.pdfUri      = pdfUri
+        self.category    = category
+        self.pageCount   = pageCount
+        self.createdAt   = createdAt
+        self.source      = source
+        self.latitude    = latitude
+        self.longitude   = longitude
+        self.locality    = locality
+        self.subLocality = subLocality
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.id         = try c.decode(String.self, forKey: .id)
-        self.title      = try c.decodeIfPresent(String.self, forKey: .title)
-        self.previewUri = try c.decodeIfPresent(String.self, forKey: .previewUri)
-        self.pdfUri     = try c.decode(String.self, forKey: .pdfUri)
-        self.category   = try c.decodeIfPresent(String.self, forKey: .category)
-        self.pageCount  = try c.decode(Int.self, forKey: .pageCount)
-        self.createdAt  = try c.decode(String.self, forKey: .createdAt)
+        self.id          = try c.decode(String.self, forKey: .id)
+        self.title       = try c.decodeIfPresent(String.self, forKey: .title)
+        self.previewUri  = try c.decodeIfPresent(String.self, forKey: .previewUri)
+        self.pdfUri      = try c.decode(String.self, forKey: .pdfUri)
+        self.category    = try c.decodeIfPresent(String.self, forKey: .category)
+        self.pageCount   = try c.decode(Int.self, forKey: .pageCount)
+        self.createdAt   = try c.decode(String.self, forKey: .createdAt)
         // Tolerate rows where SELECT didn't pull `source` (e.g. an
         // older callsite that hasn't been updated) by defaulting
         // to "scan". The schema column is NOT NULL DEFAULT 'scan'
         // so a real DB row always has a value.
-        self.source     = (try c.decodeIfPresent(String.self, forKey: .source)) ?? "scan"
+        self.source      = (try c.decodeIfPresent(String.self, forKey: .source)) ?? "scan"
+        // Geolocation columns landed in v6 and remain nullable — a
+        // SELECT that doesn't request them, or a row from before the
+        // migration ran, reads back as `nil`.
+        self.latitude    = try c.decodeIfPresent(Double.self, forKey: .latitude)
+        self.longitude   = try c.decodeIfPresent(Double.self, forKey: .longitude)
+        self.locality    = try c.decodeIfPresent(String.self, forKey: .locality)
+        self.subLocality = try c.decodeIfPresent(String.self, forKey: .subLocality)
     }
 
     public enum CodingKeys: String, CodingKey {
         case id
         case title
-        case previewUri = "preview_uri"
-        case pdfUri     = "pdf_uri"
+        case previewUri  = "preview_uri"
+        case pdfUri      = "pdf_uri"
         case category
-        case pageCount  = "page_count"
-        case createdAt  = "created_at"
+        case pageCount   = "page_count"
+        case createdAt   = "created_at"
         case source
+        case latitude
+        case longitude
+        case locality
+        case subLocality = "sub_locality"
     }
 }
 

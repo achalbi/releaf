@@ -71,6 +71,40 @@ data class CaptureEntity(
     @ColumnInfo(name = "source", defaultValue = "scan")
     val source: String = "scan",
 
+    /**
+     * Decimal-degree latitude captured at scan / import time. Null
+     * when the user has the "Attach location to scans" toggle off,
+     * when system location permission is denied, or when the fetch
+     * failed (offline / no signal). Pairs with [longitude] — either
+     * both set or both null; the writer never persists half of a
+     * coordinate. Round-trips through Drive sync via
+     * `CapturePayloadV2`.
+     */
+    @ColumnInfo(name = "latitude")
+    val latitude: Double? = null,
+
+    /** Paired with [latitude]. See that field's docstring. */
+    @ColumnInfo(name = "longitude")
+    val longitude: Double? = null,
+
+    /**
+     * Reverse-geocoded city (e.g. "San Francisco"). Sourced from
+     * Android's `Geocoder.getFromLocation` `locality` field at write
+     * time. Stays as the producer device's locale-aware string —
+     * we don't re-geocode on cross-device sync. Surfaced as the
+     * "City" row on the Details card.
+     */
+    @ColumnInfo(name = "locality")
+    val locality: String? = null,
+
+    /**
+     * Reverse-geocoded neighbourhood / area (e.g. "Mission District").
+     * `Geocoder.subLocality`. Surfaced as the "Area" row on the
+     * Details card.
+     */
+    @ColumnInfo(name = "sub_locality")
+    val subLocality: String? = null,
+
     @ColumnInfo(name = "conflict_stub")
     val conflictStub: String?,
 

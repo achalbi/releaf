@@ -255,6 +255,13 @@ private fun MainShell(
             pipeline       = OcrPipeline(MlKitTextRecognizer(app)),
             notepadDao     = app.database.notepadDao(),
             scope          = scope,
+            // Application context drives the per-scan location
+            // fetch + reverse-geocode (gated by the
+            // `locationForScansEnabled` Settings toggle and the
+            // ACCESS_COARSE_LOCATION permission). Captured once
+            // from the keyed Compose context so the controller's
+            // lifetime can outlive any individual screen.
+            appContext     = context.applicationContext,
             // Two pipelines fire on every completed scan/import pass:
             //
             //   1. Drive sync — kick a one-shot push so the fresh

@@ -149,6 +149,24 @@ data class CapturePayloadV2(
      * captures schema mirrors this.
      */
     @SerialName("source")                val source: String = "scan",
+    /**
+     * Decimal-degree latitude captured at scan time (Phase 7 —
+     * Geolocation). `null` on the wire when the user has the
+     * "Attach location to scans" toggle off, when permission is
+     * denied, or for captures from older clients. Pairs with
+     * [longitude] — writers never emit one without the other.
+     */
+    @SerialName("latitude")              val latitude: Double? = null,
+    @SerialName("longitude")             val longitude: Double? = null,
+    /**
+     * Reverse-geocoded city, sourced from `Geocoder.locality` at
+     * write time. Round-trips through Drive verbatim — we don't
+     * re-geocode on receive so the receiver sees exactly what the
+     * capturing device's locale produced.
+     */
+    @SerialName("locality")              val locality: String? = null,
+    /** Reverse-geocoded neighbourhood / area. `Geocoder.subLocality`. */
+    @SerialName("sub_locality")          val subLocality: String? = null,
     @SerialName("created_at")            val createdAt: String,
     @SerialName("updated_at")            val updatedAt: String,
 )
@@ -164,6 +182,10 @@ fun CaptureEntity.toV2Payload(): CapturePayloadV2 = CapturePayloadV2(
     pdfDriveFileId     = pdfDriveFileId,
     previewDriveFileId = previewDriveFileId,
     source             = source,
+    latitude           = latitude,
+    longitude          = longitude,
+    locality           = locality,
+    subLocality        = subLocality,
     createdAt          = createdAt,
     updatedAt          = updatedAt,
 )
@@ -177,6 +199,10 @@ fun CapturePayloadV2.toEntity(driveFileId: String?): CaptureEntity = CaptureEnti
     pageCount          = pageCount,
     category           = category,
     source             = source,
+    latitude           = latitude,
+    longitude          = longitude,
+    locality           = locality,
+    subLocality        = subLocality,
     conflictStub       = null,
     driveFileId        = driveFileId,
     pdfDriveFileId     = pdfDriveFileId,

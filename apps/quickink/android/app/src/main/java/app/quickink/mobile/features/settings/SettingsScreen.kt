@@ -118,6 +118,7 @@ fun SettingsScreen(
 
     var driveBackupEnabled by remember { mutableStateOf(preferences.driveBackupEnabled) }
     var searchablePdfExportEnabled by remember { mutableStateOf(preferences.searchablePdfExportEnabled) }
+    var locationForScansEnabled by remember { mutableStateOf(preferences.locationForScansEnabled) }
     var customDisplayName by remember { mutableStateOf(preferences.customDisplayName) }
 
     // "Syncing now…" feedback combines two signals:
@@ -471,6 +472,25 @@ fun SettingsScreen(
                     )
                 }
                 DriveFolderRow(context = context)
+            }
+
+            Section(title = "Location") {
+                // Master switch for the scan + import flows'
+                // geolocation attach. When off, captures save with
+                // NULL latitude / locality / sub_locality columns —
+                // the Details card simply omits the Area + City
+                // rows. Independent of the system permission grant
+                // (revoking that in OS Settings shuts the feature
+                // off regardless of the toggle here).
+                ToggleRow(
+                    label   = "Attach location to scans",
+                    help    = "Each scan records the city and area it was taken in so you can find scans by place.",
+                    checked = locationForScansEnabled,
+                    onCheckedChange = { value ->
+                        locationForScansEnabled = value
+                        preferences.locationForScansEnabled = value
+                    },
+                )
             }
 
             if (onManageCategories != null) {

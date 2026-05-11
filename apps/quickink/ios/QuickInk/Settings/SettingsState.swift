@@ -37,6 +37,17 @@ public final class SettingsState: ObservableObject {
         didSet { UserDefaults.standard.set(searchablePdfExportEnabled, forKey: Keys.searchablePdfExport) }
     }
 
+    /// When true, the scan + import flows fetch the device's current
+    /// location (with reverse-geocoded city / area) and attach it to
+    /// the capture row. When false, the scan flow skips the fetch
+    /// entirely — captures save with NULL location columns. Defaults
+    /// to true so users who grant permission during onboarding see
+    /// the feature working immediately; the Settings → Sync row lets
+    /// them turn it off without revoking system permission.
+    @Published public var locationForScansEnabled: Bool {
+        didSet { UserDefaults.standard.set(locationForScansEnabled, forKey: Keys.locationForScans) }
+    }
+
     /// User-overridden display name shown on the Home greeting. Empty
     /// string means "fall back to the Google account's display name"
     /// — the resolver lives in the Home screen's `resolvedDisplayName`
@@ -142,6 +153,14 @@ public final class SettingsState: ObservableObject {
         // user toggles it — that gate isn't wired yet; this is a
         // pure runtime flag for Slice 5.
         self.searchablePdfExportEnabled = defaults.bool(forKey: Keys.searchablePdfExport)
+        // Location-for-scans defaults to true so the onboarding step
+        // can prompt for system permission and have the toggle
+        // already "on" the first time the user opens Settings.
+        if defaults.object(forKey: Keys.locationForScans) == nil {
+            self.locationForScansEnabled = true
+        } else {
+            self.locationForScansEnabled = defaults.bool(forKey: Keys.locationForScans)
+        }
         // Custom display name defaults to "" (empty = use the Google
         // session's name). Read as a plain string so SwiftUI bindings
         // bind cleanly to a TextField.
@@ -224,6 +243,7 @@ public final class SettingsState: ObservableObject {
     private enum Keys {
         static let driveBackup          = "quickink.settings.drive_backup_enabled"
         static let searchablePdfExport  = "quickink.settings.searchable_pdf_export_enabled"
+        static let locationForScans     = "quickink.settings.location_for_scans_enabled"
         static let customDisplayName    = "quickink.settings.custom_display_name"
         static let phoneNumber          = "quickink.settings.phone_number"
         static let profilePhotoUri      = "quickink.settings.profile_photo_uri"

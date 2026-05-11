@@ -40,6 +40,9 @@ fun OnboardingFlow(
         OnboardingState.Step.Permissions ->
             PermissionsScreen(onContinue = state::advance)
 
+        OnboardingState.Step.Location ->
+            LocationPermissionScreen(onContinue = state::advance)
+
         OnboardingState.Step.SignIn ->
             SignInScreen(
                 state      = state,

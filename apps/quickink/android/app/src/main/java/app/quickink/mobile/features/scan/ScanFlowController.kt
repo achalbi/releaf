@@ -22,6 +22,7 @@
 package app.quickink.mobile.features.scan
 
 import app.quickink.mobile.data.capture.CaptureRepository
+import app.quickink.mobile.data.capture.CapturedLocation
 import app.quickink.mobile.data.category.CategoryDao
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
@@ -44,6 +45,14 @@ class ScanFlowController(
     private val pipeline: OcrPipeline,
     private val notepadDao: NotepadDao,
     private val scope: CoroutineScope,
+    /**
+     * Application context — used by [onScanComplete] to read the
+     * "Attach location to scans" preference and call
+     * `LocationService.captureCurrent`. Optional with a null default
+     * so existing test / preview construction sites keep compiling;
+     * location capture silently no-ops when not supplied.
+     */
+    private val appContext: android.content.Context? = null,
     /**
      * DAO for the user's category list. Read once at the end of
      * each OCR pass so the controller can auto-pick a category from
@@ -172,6 +181,17 @@ class ScanFlowController(
         )
 
         activeJob = scope.launch {
+            // 0. Best-effort location fetch — gated by the
+            //    `locationForScansEnabled` setting and the system
+            //    permission grant. Runs before the insert so the
+            //    row writes in one shot; LocationService's internal
+            //    timeout (5s for the fix, 5s for the geocode)
+            //    bounds the wait so a stuck provider never blocks
+            //    the scan path. Any failure surfaces as `null`,
+            //    which writes NULL location columns and quietly
+            //    hides the Area / City rows in the Details card.
+            val location = captureLocationIfEnabled()
+
             // 1. Persist the parent capture so OCR row foreign
             //    keys have something to reference.
             try {
@@ -184,6 +204,7 @@ class ScanFlowController(
                     pageCount  = totalPages,
                     category   = category,
                     source     = source,
+                    location   = location,
                 )
             } catch (e: Exception) {
                 _state.value = State.Failed("Couldn't save scan: ${e.message.orEmpty()}")
@@ -382,6 +403,27 @@ class ScanFlowController(
         is State.Recognizing -> current.captureId
         is State.Complete    -> current.captureId
         is State.Idle, is State.Failed -> null
+    }
+
+    // ─── Geolocation ──────────────────────────────────────────────
+
+    /**
+     * Resolve the device's current location for the capture row, or
+     * return `null` when the feature is off, permission isn't
+     * granted, the context wasn't wired through, or the system
+     * can't produce a fix. Driven by `SettingsPreferences.
+     * locationForScansEnabled` — when the user has turned the
+     * toggle off in Settings we short-circuit without touching the
+     * system service. The capture flow treats `null` as "save
+     * without coordinates"; the Details card simply omits the Area
+     * / City rows in that case.
+     */
+    private suspend fun captureLocationIfEnabled(): CapturedLocation? {
+        val ctx = appContext ?: return null
+        val prefs = app.quickink.mobile.features.settings.SettingsPreferences(ctx)
+        if (!prefs.locationForScansEnabled) return null
+        if (!LocationService.hasPermission(ctx)) return null
+        return LocationService.captureCurrent(ctx)
     }
 
     // ─── Append-to-today's-entry ──────────────────────────────────

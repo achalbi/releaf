@@ -350,6 +350,33 @@ public final class QuickInkDatabase: @unchecked Sendable {
                 """)
         }
 
+        // ─── v6_capture_geolocation ─────────────────────────────
+        //
+        // Adds geolocation fields to `captures` so a scan can carry
+        // the device's last-known position at the time of capture +
+        // the reverse-geocoded place name (sub-locality and locality)
+        // for display on the detail card and search-by-place follow-
+        // ups. All four columns are nullable — older rows, captures
+        // taken with the user's "Location for scans" toggle off, or
+        // failed reverse-geocode attempts all read back as NULL.
+        //
+        // Schema choices:
+        //   - latitude / longitude as REAL keeps the on-disk format
+        //     simple (no compound type) and matches the precision
+        //     CLLocationCoordinate2D returns from CoreLocation.
+        //   - locality is the city (CLPlacemark.locality), sub-
+        //     locality is the neighbourhood / area (CLPlacemark.sub-
+        //     Locality). Both are TEXT so we round-trip the user's
+        //     locale-aware string verbatim through Drive sync.
+        //
+        // Mirror of Android's Room v7 schema bump.
+        migrator.registerMigration("v6_capture_geolocation") { db in
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN latitude REAL")
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN longitude REAL")
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN locality TEXT")
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN sub_locality TEXT")
+        }
+
         return migrator
     }
 }

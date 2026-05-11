@@ -52,6 +52,16 @@ class CaptureRepository(
          * picker. Drives the "Import" pill in the Library cards.
          */
         source: String = "scan",
+        /**
+         * Optional geolocation captured at scan / import time. Pass
+         * `null` when the user has the "Attach location to scans"
+         * setting off, when location permission is denied, or when
+         * the fetch / reverse-geocode failed. Either all four fields
+         * (lat / lon / locality / sub-locality) are written or the
+         * caller passes a null struct; we never persist half of a
+         * coordinate pair.
+         */
+        location: CapturedLocation? = null,
     ) {
         val now = IsoClock.nowIso()
         captureDao.insert(
@@ -64,6 +74,10 @@ class CaptureRepository(
                 pageCount    = pageCount,
                 category     = category,
                 source       = source,
+                latitude     = location?.latitude,
+                longitude    = location?.longitude,
+                locality     = location?.locality,
+                subLocality  = location?.subLocality,
                 conflictStub = null,
                 driveFileId  = null,
                 createdAt    = now,

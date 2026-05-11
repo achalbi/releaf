@@ -108,6 +108,10 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                     // read for safety so an unexpected schema state
                     // doesn't crash the sync export.
                     source:             (row["source"] as String?) ?? "scan",
+                    latitude:           row["latitude"] as Double?,
+                    longitude:          row["longitude"] as Double?,
+                    locality:           row["locality"] as String?,
+                    subLocality:        row["sub_locality"] as String?,
                     createdAt:          row["created_at"],
                     updatedAt:          row["updated_at"]
                 )
@@ -474,8 +478,9 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             INSERT INTO captures (
                 id, user_id, title, pdf_uri, preview_uri, page_count,
                 category, source, drive_file_id, pdf_drive_file_id, preview_drive_file_id,
+                latitude, longitude, locality, sub_locality,
                 created_at, updated_at, dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ON CONFLICT(id) DO UPDATE SET
                 user_id               = excluded.user_id,
                 title                 = excluded.title,
@@ -487,6 +492,10 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 drive_file_id         = excluded.drive_file_id,
                 pdf_drive_file_id     = excluded.pdf_drive_file_id,
                 preview_drive_file_id = excluded.preview_drive_file_id,
+                latitude              = excluded.latitude,
+                longitude             = excluded.longitude,
+                locality              = excluded.locality,
+                sub_locality          = excluded.sub_locality,
                 updated_at            = excluded.updated_at,
                 dirty                 = 0
             WHERE captures.updated_at < excluded.updated_at
@@ -495,6 +504,8 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 resolvedPdfUri, resolvedPreviewUri, payload.pageCount,
                 payload.category, payload.source, driveFileId,
                 payload.pdfDriveFileId, payload.previewDriveFileId,
+                payload.latitude, payload.longitude,
+                payload.locality, payload.subLocality,
                 payload.createdAt, payload.updatedAt,
             ])
     }
