@@ -275,6 +275,19 @@ class QuickInkApp : Application() {
      * AUTH_REJECTED and the Settings banner takes over — same dead-
      * end the app had before this hook, so we don't regress.
      */
+    /**
+     * Public trigger for the foreground token-refresh hook. UI sites
+     * that have a special reason to nudge a refresh outside the
+     * usual on-resume / 60s-ticker schedule (Settings open, banner
+     * appearance, Sync-now tap, etc.) call this. No-ops cleanly
+     * when there's no foreground Activity or the cached token is
+     * still healthy — same gates as the on-resume call.
+     */
+    fun requestTokenRefresh() {
+        val activity = topActivityRef?.get() ?: return
+        maybeRefreshTokenInForeground(activity)
+    }
+
     private fun maybeRefreshTokenInForeground(activity: Activity) {
         val webClientId = getString(R.string.google_web_client_id)
         if (webClientId == "REPLACE_WITH_GOOGLE_WEB_CLIENT_ID") {

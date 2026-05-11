@@ -261,6 +261,35 @@ class RealGoogleAuthClient(
         // (same reasoning as signIn() — see comment above).
         val authResult = authorize(email = session.email)
         if (authResult.hasResolution()) {
+            // Diagnostic — when refresh fails with hasResolution=true
+            // right after a successful interactive consent, we want
+            // to know WHY Google is asking for UI again. Print
+            // anything the AuthorizationResult exposes pre-throw so
+            // `adb logcat -s QuickInkAuth` shows us:
+            //   - which scopes the result already lists as granted
+            //     (sometimes populated even when the user has to
+            //     re-confirm)
+            //   - which package the consent intent would launch into
+            //   - the email we pinned the request to (for "device
+            //     account mismatch" hypotheses)
+            //   - the token prefix we tried to refresh (for "expired
+            //     beyond the underlying-grant window" hypotheses)
+            val granted = runCatching { authResult.grantedScopes }
+                .getOrNull()
+                ?.joinToString(",")
+                .orEmpty()
+            val intentSenderPkg = runCatching {
+                authResult.pendingIntent?.creatorPackage
+            }.getOrNull().orEmpty()
+            android.util.Log.w(
+                TAG,
+                "refresh: hasResolution=true — Google wants UI. " +
+                    "pinnedEmail=${session.email} " +
+                    "tokenPrefix=${session.accessToken.take(12)} " +
+                    "secondsUntilExpiry=${session.expiresAt.epochSecond - Instant.now().epochSecond} " +
+                    "grantedScopesOnResult=[$granted] " +
+                    "consentLaunchPkg=$intentSenderPkg"
+            )
             // Revoked / needs re-consent. Caller should sign out and back in.
             throw GoogleAuthError.Underlying("Drive scope no longer granted")
         }

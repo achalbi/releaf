@@ -63,6 +63,7 @@ import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.sync.QuickInkRestoreWorker
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.data.sync.QuickInkSyncWorker
+import app.quickink.mobile.features.auth.rememberQuickInkSignInAction
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
@@ -225,6 +226,32 @@ fun SettingsScreen(
     val lastSyncErrorCode = errorCodeRow?.value.orEmpty()
     val isSignedIn = authState is AuthState.SignedIn
 
+    // Reconnect action for the AuthRejectedBanner. Reuses the same
+    // sign-in plumbing the onboarding SignIn screen uses — when
+    // invoked, runs CredentialManager identity + AuthorizationClient
+    // authorize, surfacing the Drive consent sheet via the
+    // ActivityResultLauncher held by `rememberQuickInkSignInAction`.
+    // Hoisting it here keeps the launcher rooted on this screen so
+    // a banner tap doesn't have to navigate elsewhere first.
+    val reconnectAction = rememberQuickInkSignInAction(authStore)
+
+    // Fire one silent token refresh when Settings opens, and another
+    // every time the AUTH_REJECTED banner shows up. The on-resume
+    // hook in QuickInkApp also runs; this is an extra nudge so a
+    // user who has just opened Settings (often because they noticed
+    // sync isn't working) gets a fresh attempt without having to
+    // tap anything. `requestTokenRefresh` no-ops cleanly when the
+    // cached token is still healthy, when there's no foreground
+    // Activity, or when a refresh is already in flight.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        app.requestTokenRefresh()
+    }
+    androidx.compose.runtime.LaunchedEffect(lastSyncErrorCode) {
+        if (lastSyncErrorCode == SyncErrorCodes.AUTH_REJECTED) {
+            app.requestTokenRefresh()
+        }
+    }
+
     // Last restore outcome — surfaces a transient banner under the
     // Sync section's action buttons so the user sees what just
     // happened without staring at a logcat. Cleared on dismiss or
@@ -339,7 +366,10 @@ fun SettingsScreen(
                 // the Drive checkbox is ticked. Banner clears
                 // automatically once a sync succeeds.
                 if (lastSyncErrorCode == SyncErrorCodes.AUTH_REJECTED && isSignedIn) {
-                    AuthRejectedBanner(onSignOut = { authStore.signOut() })
+                    AuthRejectedBanner(
+                        onReconnect = reconnectAction,
+                        onSignOut   = { authStore.signOut() },
+                    )
                 }
                 Spacer(Modifier.size(QuickInkSpacing.s1))
                 Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
@@ -957,7 +987,10 @@ private fun RestoreOutcomeBanner(
  * SUCCESS path writes an empty string to LAST_SYNC_ERROR_CODE).
  */
 @Composable
-private fun AuthRejectedBanner(onSignOut: () -> Unit) {
+private fun AuthRejectedBanner(
+    onReconnect: () -> Unit,
+    onSignOut: () -> Unit,
+) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     Column(
@@ -979,16 +1012,61 @@ private fun AuthRejectedBanner(onSignOut: () -> Unit) {
             color = colors.ink,
         )
         Text(
-            text  = "Google rejected your token (401/403). Sign out and " +
-                    "sign back in — when prompted, make sure to grant access " +
-                    "to Google Drive on the consent screen.",
+            text  = "Google needs to renew your Drive permission. " +
+                    "Tap Reconnect — when prompted, make sure to grant access " +
+                    "to Google Drive on the consent screen. Use Sign out only " +
+                    "if Reconnect keeps failing.",
             style = type.meta,
             color = colors.inkSoft,
+        )
+        // Reconnect is the primary CTA. It runs the same
+        // CredentialManager + AuthorizationClient flow the
+        // onboarding SignIn button uses — which, unlike
+        // RealGoogleAuthClient.refresh(), gracefully surfaces a
+        // consent sheet when Google says hasResolution=true instead
+        // of throwing "Drive scope no longer granted". For the
+        // common "token aged out / device-side grant lost" case the
+        // consent sheet is enough to restore the session in-place.
+        PrimaryBannerButton(
+            label    = "Reconnect",
+            onClick  = onReconnect,
+            modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
         )
         SecondaryButton(
             label    = "Sign out",
             onClick  = onSignOut,
             modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/**
+ * Local accent-filled CTA for the AuthRejectedBanner's Reconnect
+ * action. Kept inline rather than promoted to a shared button so
+ * the banner stays self-contained — the rest of Settings only
+ * needs [SecondaryButton]. Same pill shape and vertical padding as
+ * SecondaryButton, just accent fill + on-accent label colour.
+ */
+@Composable
+private fun PrimaryBannerButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(QuickInkRadius.pill))
+            .background(colors.accent)
+            .clickable(onClick = onClick)
+            .padding(vertical = QuickInkSpacing.s3),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text  = label,
+            style = type.label,
+            color = colors.textOnAccent,
         )
     }
 }
