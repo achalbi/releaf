@@ -77,6 +77,12 @@ fun PdfPagesView(
     pdfUri: Uri,
     modifier: Modifier = Modifier,
     onFullscreenClick: (() -> Unit)? = null,
+    /// When false, per-page pinch / pan / double-tap gesture
+    /// detectors are skipped so vertical drags pass through to a
+    /// parent `verticalScroll` instead of being captured. The inline
+    /// preview on `ScanDetailScreen` passes `false` so the page
+    /// scrolls normally; the fullscreen viewer keeps the default.
+    interactionsEnabled: Boolean = true,
 ) {
     val context = LocalContext.current
     val colors = LocalQuickInkColors.current
@@ -128,8 +134,9 @@ fun PdfPagesView(
                 else -> {
                     pages!!.forEachIndexed { index, bitmap ->
                         ZoomablePage(
-                            bitmap = bitmap,
-                            modifier = Modifier
+                            bitmap              = bitmap,
+                            interactionsEnabled = interactionsEnabled,
+                            modifier            = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(QuickInkRadius.md))
                                 .background(colors.surface),
@@ -178,17 +185,23 @@ fun PdfPagesView(
 }
 
 @Composable
-private fun ZoomablePage(bitmap: Bitmap, modifier: Modifier = Modifier) {
+private fun ZoomablePage(
+    bitmap: Bitmap,
+    modifier: Modifier = Modifier,
+    interactionsEnabled: Boolean = true,
+) {
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     val aspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat().coerceAtLeast(1f)
 
-    Image(
-        bitmap = bitmap.asImageBitmap(),
-        contentDescription = null,
-        contentScale = ContentScale.Fit,
-        modifier = modifier
-            .aspectRatio(aspectRatio.coerceIn(0.5f, 2.0f))
+    // Build the base image modifier, then conditionally append the
+    // pinch / pan / double-tap pointerInput modifiers. When
+    // [interactionsEnabled] is false (inline preview), we skip the
+    // gesture detectors so vertical drags pass through to a parent
+    // `verticalScroll` instead of being captured by
+    // `detectTransformGestures`.
+    val gestureModifier = if (interactionsEnabled) {
+        Modifier
             .pointerInput(Unit) {
                 detectTransformGestures { _, pan, zoom, _ ->
                     val newScale = (scale * zoom).coerceIn(1f, 4f)
@@ -208,6 +221,17 @@ private fun ZoomablePage(bitmap: Bitmap, modifier: Modifier = Modifier) {
                     if (scale == 1f) offset = Offset.Zero
                 })
             }
+    } else {
+        Modifier
+    }
+
+    Image(
+        bitmap = bitmap.asImageBitmap(),
+        contentDescription = null,
+        contentScale = ContentScale.Fit,
+        modifier = modifier
+            .aspectRatio(aspectRatio.coerceIn(0.5f, 2.0f))
+            .then(gestureModifier)
             .graphicsLayer {
                 scaleX        = scale
                 scaleY        = scale

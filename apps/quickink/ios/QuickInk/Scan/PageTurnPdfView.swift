@@ -35,6 +35,13 @@ struct PageTurnPdfView: View {
     /// local `@State Int` — the view writes back through it on
     /// swipe so internal state stays consistent.
     @Binding var currentPage: Int
+    /// When false, the swipe + pinch + double-tap gestures are
+    /// skipped entirely — vertical drags pass through to a parent
+    /// `ScrollView` instead of being captured for the page-turn
+    /// animation. Used by the inline preview on `ScanDetailScreen`
+    /// so the user can scroll the page while their finger is on the
+    /// preview; the fullscreen viewer keeps the default (true).
+    var interactionsEnabled: Bool = true
 
     @State private var dragOffset: CGFloat = 0
     /// Pinch-to-zoom scale for the ACTIVE page. Reset to 1 whenever
@@ -77,7 +84,13 @@ struct PageTurnPdfView: View {
             // the same touch sequence. The drag handler internally
             // routes to either pan-when-zoomed or swipe-to-turn
             // based on `isZoomed`, so the two intents never collide.
-            .gesture(combinedGesture(pageWidth: pageWidth, pageHeight: pageHeight))
+            // When `interactionsEnabled == false` we skip the gesture
+            // entirely so vertical drags pass through to a parent
+            // ScrollView (the inline preview uses this path).
+            .pageTurnGesture(
+                enabled: interactionsEnabled,
+                gesture: combinedGesture(pageWidth: pageWidth, pageHeight: pageHeight)
+            )
             .overlay(alignment: .bottom) {
                 if pageImages.count > 1 {
                     pageIndicator
@@ -298,6 +311,25 @@ struct PageTurnPdfView: View {
             .padding(.vertical, QuickInkSpacing.s1)
             .background(QuickInkColors.surface.opacity(0.85))
             .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+    }
+}
+
+// MARK: - Conditional gesture modifier
+
+private extension View {
+    /// Apply `gesture` only when `enabled` is true; otherwise leave
+    /// the view's gesture stack untouched so the surrounding hit-test
+    /// reaches the parent (e.g. a SwiftUI `ScrollView`). Built as a
+    /// helper because `.gesture(_:)` itself doesn't accept an
+    /// optional Gesture and a ternary on the gesture argument won't
+    /// type-check when the branches differ.
+    @ViewBuilder
+    func pageTurnGesture<G: Gesture>(enabled: Bool, gesture: G) -> some View {
+        if enabled {
+            self.gesture(gesture)
+        } else {
+            self
+        }
     }
 }
 

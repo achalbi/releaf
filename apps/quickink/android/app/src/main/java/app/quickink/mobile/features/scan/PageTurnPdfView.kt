@@ -116,6 +116,12 @@ fun PageTurnPdfView(
     /// programmatic scroll). Lets the caller mirror state — e.g. so
     /// the thumbnails strip's selected chip follows the swipe.
     onCurrentPageChange: (Int) -> Unit = {},
+    /// When false, the swipe / pinch / pan / double-tap detectors
+    /// are skipped and the HorizontalPager is scroll-locked, so
+    /// vertical drags fall through to a parent `verticalScroll`. The
+    /// inline preview on `ScanDetailScreen` passes `false`; the
+    /// fullscreen dialog keeps the default.
+    interactionsEnabled: Boolean = true,
 ) {
     val context = LocalContext.current
     val colors = LocalQuickInkColors.current
@@ -152,6 +158,7 @@ fun PageTurnPdfView(
                     onFullscreenClick   = onFullscreenClick,
                     currentPage         = currentPage,
                     onCurrentPageChange = onCurrentPageChange,
+                    interactionsEnabled = interactionsEnabled,
                 )
             }
         }
@@ -164,6 +171,7 @@ private fun PageTurnPager(
     onFullscreenClick: (() -> Unit)? = null,
     currentPage: Int = 0,
     onCurrentPageChange: (Int) -> Unit = {},
+    interactionsEnabled: Boolean = true,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
@@ -218,7 +226,11 @@ private fun PageTurnPager(
             // Lock the pager while the active page is zoomed — pinch
             // + pan get exclusive ownership of touch in that state,
             // so a horizontal pan doesn't accidentally flip pages.
-            userScrollEnabled = !isZoomed,
+            // Also locked when [interactionsEnabled] is false (inline
+            // preview): scroll-locked + per-page gesture detectors
+            // skipped → vertical drags fall through to the parent
+            // `verticalScroll`, and the user taps to enter fullscreen.
+            userScrollEnabled = interactionsEnabled && !isZoomed,
             modifier          = Modifier.fillMaxSize(),
         ) { pageIndex ->
             // Distance of THIS page from the currently centred page.
@@ -237,13 +249,14 @@ private fun PageTurnPager(
             val pageScale = if (isActive) zoomScale else 1f
             val pagePan   = if (isActive) panOffset else Offset.Zero
 
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = "Page ${pageIndex + 1}",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .aspectRatio(ratio)
+            // Per-page gesture modifier — pinch / pan / double-tap.
+            // When [interactionsEnabled] is false (inline preview),
+            // we skip the pointerInput modifiers entirely so single-
+            // finger vertical drags fall through to the parent
+            // `verticalScroll`. The user enters fullscreen via the
+            // tap-on-preview affordance set up in `ScanDetailScreen`.
+            val pageGestureModifier = if (interactionsEnabled) {
+                Modifier
                     .pointerInput(pageIndex) {
                         // Pinch + pan handler. Only the active page
                         // accepts these — non-active pages are mid-
@@ -300,6 +313,18 @@ private fun PageTurnPager(
                             }
                         )
                     }
+            } else {
+                Modifier
+            }
+
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "Page ${pageIndex + 1}",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .aspectRatio(ratio)
+                    .then(pageGestureModifier)
                     .graphicsLayer {
                         // Apply zoom + pan FIRST so they happen
                         // relative to the page's natural bounds.

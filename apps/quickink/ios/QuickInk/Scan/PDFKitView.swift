@@ -18,6 +18,13 @@ struct PDFKitView: UIViewRepresentable {
 
     let url: URL
     let backgroundColor: Color
+    /// When false, the underlying `PDFView` is rendered as a static
+    /// thumbnail — vertical drags pass through to a parent
+    /// `ScrollView` instead of being captured by `PDFView`'s internal
+    /// scroll/zoom gestures. The inline preview on `ScanDetailScreen`
+    /// passes `false` so the page scrolls normally; the fullscreen
+    /// viewer keeps the default (true) for full pinch/scroll.
+    var interactionsEnabled: Bool = true
 
     func makeUIView(context: Context) -> PDFView {
         let view = PDFView()
@@ -29,6 +36,7 @@ struct PDFKitView: UIViewRepresentable {
         view.maxScaleFactor      = 4.0
         view.pageBreakMargins    = .init(top: 8, left: 0, bottom: 8, right: 0)
         view.backgroundColor     = .clear
+        view.isUserInteractionEnabled = interactionsEnabled
         return view
     }
 
@@ -40,5 +48,6 @@ struct PDFKitView: UIViewRepresentable {
             uiView.document       = PDFDocument(url: url)
             uiView.minScaleFactor = uiView.scaleFactorForSizeToFit
         }
+        uiView.isUserInteractionEnabled = interactionsEnabled
     }
 }
