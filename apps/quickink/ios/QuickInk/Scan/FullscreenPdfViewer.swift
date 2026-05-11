@@ -49,18 +49,35 @@ struct FullscreenPdfViewer: View {
     /// the fullscreen viewer doesn't surface page state to its parent
     /// so this is just a private holder for the swipe to mutate.
     @State private var fullscreenCurrentPage: Int = 0
+    /// Vertical translation accumulated during a swipe-down-to-dismiss
+    /// gesture. Tracks downward motion only; reset to 0 on release
+    /// unless the dismiss threshold was crossed (in which case
+    /// `onDismiss` fires before this resets). Drives the content's
+    /// `.offset(y:)` so the user sees the page follow their finger
+    /// during the swipe.
+    @State private var dismissDragOffset: CGFloat = 0
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
             content
+                .offset(y: dismissDragOffset)
+                // Swipe-down-to-dismiss. Runs as a `simultaneousGesture`
+                // so it coexists with the multi-page pinch / page-swipe
+                // gestures inside `PageTurnPdfView` and the
+                // single-page pinch / double-tap on `Image`. Filters
+                // for downward, vertical-dominant drags so an
+                // accidental diagonal page-swipe doesn't dismiss.
+                .simultaneousGesture(swipeDownToDismiss)
 
             // Top-trailing close affordance. Lives outside `content`
             // so it stays reachable even while the user is mid-pinch
             // on a zoomed page (PageTurnPdfView eats touches inside
             // its own bounds, so the button needs to be a sibling
-            // overlay, not a child of the viewer).
+            // overlay, not a child of the viewer). Stays put through
+            // the swipe-down-to-dismiss drag too, so the user always
+            // has a tap target to bail out.
             VStack {
                 HStack {
                     Spacer()
@@ -153,5 +170,43 @@ struct FullscreenPdfViewer: View {
     private var pageAspectRatio: CGFloat {
         guard let first = pageImages.first, first.size.height > 0 else { return 0.707 }
         return first.size.width / first.size.height
+    }
+
+    /// Vertical-dominant downward drag that dismisses the viewer
+    /// when released past the distance/velocity threshold. Filtering
+    /// for `|dy| > |dx|` keeps the gesture from firing on horizontal
+    /// page-turn swipes inside `PageTurnPdfView` — those are
+    /// horizontal-dominant and stay in the page-swipe domain.
+    private var swipeDownToDismiss: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onChanged { value in
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if dy > 0 && abs(dy) > abs(dx) {
+                    dismissDragOffset = dy
+                } else {
+                    // Horizontal-dominant or upward — don't follow,
+                    // and clear any leftover offset from earlier in
+                    // the gesture so the page sits flat while the
+                    // user finishes a horizontal page-swipe.
+                    if dismissDragOffset != 0 { dismissDragOffset = 0 }
+                }
+            }
+            .onEnded { value in
+                let dx = value.translation.width
+                let dy = value.translation.height
+                let predictedDy = value.predictedEndTranslation.height
+                let isVertical = abs(dy) > abs(dx)
+                let distanceThreshold: CGFloat = 150
+                let velocityThreshold: CGFloat = 600
+                if isVertical && dy > 0 &&
+                   (dy > distanceThreshold || predictedDy > velocityThreshold) {
+                    onDismiss()
+                } else {
+                    withAnimation(.easeOut(duration: 0.22)) {
+                        dismissDragOffset = 0
+                    }
+                }
+            }
     }
 }

@@ -33,16 +33,20 @@ import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -59,6 +63,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,8 +77,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
@@ -112,6 +119,7 @@ private fun FullscreenPdfContent(
 ) {
     val context = LocalContext.current
     val type = LocalQuickInkTypography.current
+    val scope = rememberCoroutineScope()
 
     var pages by remember(pdfUri) { mutableStateOf<List<Bitmap>?>(null) }
     var error by remember(pdfUri) { mutableStateOf<String?>(null) }
@@ -124,34 +132,86 @@ private fun FullscreenPdfContent(
         }
     }
 
+    // Swipe-down-to-dismiss state. Tracks downward motion (px) and
+    // animates back to 0 when released below the threshold, or fires
+    // `onClose` past it. `detectVerticalDragGestures` only consumes
+    // events after vertical pointer slop is exceeded, so horizontal
+    // page-swipes inside `HorizontalPager` still flow through.
+    var dismissDragOffset by remember { mutableStateOf(0f) }
+    val density = LocalDensity.current
+    val dismissDistanceThresholdPx = with(density) { 150.dp.toPx() }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(Color.Black)
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragStart = { dismissDragOffset = 0f },
+                    onDragCancel = {
+                        scope.launch {
+                            animate(
+                                initialValue = dismissDragOffset,
+                                targetValue  = 0f,
+                                animationSpec = tween(durationMillis = 220),
+                            ) { value, _ -> dismissDragOffset = value }
+                        }
+                    },
+                    onDragEnd = {
+                        if (dismissDragOffset > dismissDistanceThresholdPx) {
+                            onClose()
+                        } else {
+                            scope.launch {
+                                animate(
+                                    initialValue = dismissDragOffset,
+                                    targetValue  = 0f,
+                                    animationSpec = tween(durationMillis = 220),
+                                ) { value, _ -> dismissDragOffset = value }
+                            }
+                        }
+                    },
+                    onVerticalDrag = { _, dragAmount ->
+                        // Only follow downward motion — clamp to 0 so
+                        // an upward overshoot doesn't pull the page
+                        // above its natural position.
+                        dismissDragOffset = (dismissDragOffset + dragAmount)
+                            .coerceAtLeast(0f)
+                    },
+                )
+            },
         contentAlignment = Alignment.Center,
     ) {
-        when {
-            error != null -> {
-                Text(
-                    text  = error!!,
-                    style = type.meta,
-                    color = Color.White.copy(alpha = 0.85f),
-                    modifier = Modifier.padding(QuickInkSpacing.s4),
-                )
-            }
-            pages == null -> {
-                CircularProgressIndicator(color = Color.White)
-            }
-            else -> {
-                FullscreenFlipbook(
-                    pages       = pages!!,
-                    initialPage = initialPage.coerceIn(0, (pages!!.size - 1).coerceAtLeast(0)),
-                )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .offset { IntOffset(0, dismissDragOffset.toInt()) },
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                error != null -> {
+                    Text(
+                        text  = error!!,
+                        style = type.meta,
+                        color = Color.White.copy(alpha = 0.85f),
+                        modifier = Modifier.padding(QuickInkSpacing.s4),
+                    )
+                }
+                pages == null -> {
+                    CircularProgressIndicator(color = Color.White)
+                }
+                else -> {
+                    FullscreenFlipbook(
+                        pages       = pages!!,
+                        initialPage = initialPage.coerceIn(0, (pages!!.size - 1).coerceAtLeast(0)),
+                    )
+                }
             }
         }
 
         // Top bar overlays. Sit above the content so the close hit
-        // target stays reachable even while a page is zoomed.
+        // target stays reachable even while a page is zoomed. Stays
+        // in place during the swipe-down drag too — the close button
+        // is always a tap away.
         val topInsets = WindowInsets.statusBars.asPaddingValues()
         Box(
             modifier = Modifier
