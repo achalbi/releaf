@@ -173,3 +173,28 @@ public final class LocationService: NSObject, @unchecked Sendable, CLLocationMan
         cont?.resume(returning: nil)
     }
 }
+
+// MARK: - One-shot prompt tracking
+
+extension LocationService {
+    /// UserDefaults key — bumped when the location-prompt UX
+    /// changes meaningfully so existing users re-see the prompt
+    /// the first time after upgrade.
+    private static let promptHandledKey = "quickink.location.prompt_handled.v1"
+
+    /// True when we've already asked the user about location
+    /// (either via the onboarding step OR the post-onboarding
+    /// one-shot trigger in `MainShell`). Suppresses the one-shot
+    /// re-ask on every app launch.
+    public static var wasPromptHandled: Bool {
+        UserDefaults.standard.bool(forKey: promptHandledKey)
+    }
+
+    /// Mark the prompt as handled. Called from the onboarding
+    /// LocationPermissionScreen (whether the user tapped Allow or
+    /// Skip) and from the MainShell's one-shot trigger so the two
+    /// paths share a single flag.
+    public static func markPromptHandled() {
+        UserDefaults.standard.set(true, forKey: promptHandledKey)
+    }
+}

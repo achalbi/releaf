@@ -43,9 +43,14 @@ struct LocationPermissionScreen: View {
             // "Skip" escape hatch — sits just below the scaffold's
             // CTA. We don't disable it during the request because a
             // user who taps it mid-prompt has already decided not to
-            // wait around for the dialog. Calling `onContinue` here
-            // means the flow advances regardless of permission state.
-            Button(action: onContinue) {
+            // wait around for the dialog. Marking the prompt handled
+            // here suppresses the post-onboarding one-shot re-ask in
+            // MainShell — a user who explicitly skipped shouldn't
+            // see the system dialog two seconds later.
+            Button(action: {
+                LocationService.markPromptHandled()
+                onContinue()
+            }) {
                 Text("Skip for now")
                     .font(QuickInkText.label)
                     .foregroundStyle(QuickInkColors.inkSoft)
@@ -63,6 +68,10 @@ struct LocationPermissionScreen: View {
     private func requestAndAdvance() async {
         isRequesting = true
         _ = await LocationService.shared.requestAuthorization()
+        // Mark handled BEFORE advancing so MainShell's one-shot
+        // location ask sees the flag set and doesn't re-trigger
+        // the system dialog the moment the user lands on Home.
+        LocationService.markPromptHandled()
         isRequesting = false
         onContinue()
     }

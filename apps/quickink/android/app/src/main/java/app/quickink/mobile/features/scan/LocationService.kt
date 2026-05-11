@@ -57,6 +57,15 @@ import kotlin.coroutines.resume
 object LocationService {
 
     /**
+     * SharedPreferences name + key for the one-shot prompt tracking
+     * flag. Distinct from the main `quickink.settings` namespace so
+     * a future `clearAllUserOverrides` in SettingsPreferences won't
+     * accidentally re-prompt the user on the next launch.
+     */
+    private const val PROMPT_PREFS_NAME = "quickink.location"
+    private const val PROMPT_HANDLED_KEY = "prompt_handled_v1"
+
+    /**
      * True when the user has granted (at least) coarse location
      * permission. Checked synchronously so the caller can short-
      * circuit before kicking off the coroutine in [captureCurrent].
@@ -65,6 +74,30 @@ object LocationService {
         return ContextCompat.checkSelfPermission(
             context, Manifest.permission.ACCESS_COARSE_LOCATION,
         ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /**
+     * True when we've already asked the user about location (via the
+     * onboarding step OR the post-onboarding one-shot trigger in
+     * MainShell). Suppresses the one-shot re-ask on every app
+     * launch. Mirror of iOS `LocationService.wasPromptHandled`.
+     */
+    fun wasPromptHandled(context: Context): Boolean {
+        val prefs = context.applicationContext
+            .getSharedPreferences(PROMPT_PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(PROMPT_HANDLED_KEY, false)
+    }
+
+    /**
+     * Mark the prompt as handled. Called from the onboarding
+     * LocationPermissionScreen (whether the user tapped Allow or
+     * Skip) and from the MainShell's one-shot trigger so the two
+     * paths share a single flag.
+     */
+    fun markPromptHandled(context: Context) {
+        val prefs = context.applicationContext
+            .getSharedPreferences(PROMPT_PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(PROMPT_HANDLED_KEY, true).apply()
     }
 
     /**

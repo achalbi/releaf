@@ -19,7 +19,10 @@
 
 package app.quickink.mobile
 
+import android.Manifest
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -48,6 +51,7 @@ import app.quickink.mobile.features.onboarding.OnboardingFlow
 import app.quickink.mobile.features.onboarding.OnboardingPreferences
 import app.quickink.mobile.features.onboarding.OnboardingState
 import app.quickink.mobile.features.onboarding.SignInScreen
+import app.quickink.mobile.features.scan.LocationService
 import app.quickink.mobile.features.scan.PendingShare
 import app.quickink.mobile.features.scan.QuickCaptureScreen
 import app.quickink.mobile.features.scan.ScanDetailScreen
@@ -321,6 +325,39 @@ private fun MainShell(
             // safe to call on every launch.
             repo.migrateLegacyStudyToBusinessCardIfNeeded(context, userId)
         } catch (_: Exception) { /* best-effort */ }
+    }
+
+    // One-shot post-onboarding location-permission ask. Existing
+    // users who completed onboarding before the Location step
+    // shipped (Phase 7) would otherwise never see the system
+    // dialog — `OnboardingPreferences.isCompleted` skips the whole
+    // flow on launch. This effect launches the contract once on
+    // first launch after the upgrade, then sets a flag so we never
+    // re-ask without a Settings flip. New users hit the flag inside
+    // `LocationPermissionScreen` so this branch no-ops for them.
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { _ ->
+        LocationService.markPromptHandled(context)
+    }
+    LaunchedEffect(Unit) {
+        if (LocationService.wasPromptHandled(context)) return@LaunchedEffect
+        if (!settingsPrefs.locationForScansEnabled) {
+            // Toggle is off — no point asking. Mark handled so the
+            // user can flip the toggle later and trigger a fresh
+            // ask through a future Settings-toggle-on path.
+            LocationService.markPromptHandled(context)
+            return@LaunchedEffect
+        }
+        if (LocationService.hasPermission(context)) {
+            // Already granted — common when re-installing on a
+            // device that previously granted permission. Mark
+            // handled so we don't re-fire the launcher on each
+            // recomposition.
+            LocationService.markPromptHandled(context)
+            return@LaunchedEffect
+        }
+        locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
     }
 
     val scanState by controller.state.collectAsState()

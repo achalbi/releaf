@@ -385,6 +385,17 @@ private struct MainShell: View {
             // that included "Study". Idempotent + flag-guarded;
             // safe to call on every launch.
             try? await categoryRepo.migrateLegacyStudyToBusinessCardIfNeeded(userId: userId)
+            // One-shot post-onboarding location-permission ask.
+            // Existing users who completed onboarding before the
+            // Location step shipped (Phase 7) would otherwise never
+            // see the system dialog — onboarding's `isCompleted`
+            // gate skips the whole flow. This task brings up the
+            // dialog directly on first launch after the upgrade,
+            // then sets a flag so we never re-ask without a
+            // Settings flip. New users hit the flag inside
+            // `LocationPermissionScreen` so this branch no-ops for
+            // them.
+            await Self.requestLocationIfNeeded(settings: settings)
         }
         // Quick-capture modal lifted from HomeScreen so the ⚡ FAB
         // on Library / Search / Settings can present it too. Same
@@ -424,6 +435,34 @@ private struct MainShell: View {
     /// `UIColor(dynamicProvider:)` reads — without it, the SwiftUI-
     /// level `.preferredColorScheme()` is invisible to our dynamic
     /// colors.
+    /// One-shot location-permission ask invoked from the MainShell's
+    /// `.task`. Only fires for users who haven't been through the
+    /// onboarding Location step yet AND have the Settings toggle on
+    /// AND haven't been asked at the system level. Once we ask
+    /// (regardless of outcome) we mark the flag so we don't re-ask
+    /// on every launch — the user can change their mind via the
+    /// system Settings app or the in-app Location toggle.
+    private static func requestLocationIfNeeded(settings: SettingsState) async {
+        if LocationService.wasPromptHandled { return }
+        guard settings.locationForScansEnabled else {
+            // Toggle is off — no point asking. Mark handled so the
+            // user can flip the toggle later and trigger a fresh
+            // ask through a future Settings-toggle-on path.
+            LocationService.markPromptHandled()
+            return
+        }
+        let status = LocationService.shared.authorizationStatus
+        guard status == .notDetermined else {
+            // Already decided (granted, denied, or restricted). No
+            // dialog to show — just mark handled so we don't re-
+            // check on every shell mount.
+            LocationService.markPromptHandled()
+            return
+        }
+        _ = await LocationService.shared.requestAuthorization()
+        LocationService.markPromptHandled()
+    }
+
     private func applyWindowInterfaceStyle(_ mode: ThemeMode) {
         #if canImport(UIKit)
         let style: UIUserInterfaceStyle = {

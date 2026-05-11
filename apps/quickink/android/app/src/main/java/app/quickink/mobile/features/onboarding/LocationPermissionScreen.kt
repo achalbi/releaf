@@ -38,7 +38,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import app.quickink.mobile.features.scan.LocationService
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkSpacing
@@ -47,6 +49,7 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
 fun LocationPermissionScreen(onContinue: () -> Unit) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
+    val context = LocalContext.current
 
     // Disables the CTA between the launch + the result so a double-
     // tap doesn't queue two dialogs. The contract's callback fires
@@ -64,7 +67,11 @@ fun LocationPermissionScreen(onContinue: () -> Unit) {
     ) { _ ->
         // Either grant or deny advances — denied users can re-grant
         // later from Settings. We don't show an "Are you sure?" gate
-        // because permission can always be re-asked.
+        // because permission can always be re-asked. Mark handled
+        // BEFORE advancing so MainShell's one-shot location ask
+        // sees the flag set and doesn't re-trigger the system
+        // dialog the moment the user lands on Home.
+        LocationService.markPromptHandled(context)
         isRequesting = false
         onContinue()
     }
@@ -84,7 +91,10 @@ fun LocationPermissionScreen(onContinue: () -> Unit) {
 
     // "Skip" escape hatch — lets users continue without granting.
     // Sits as an overlay at the bottom of the screen, anchored
-    // beneath the OnboardingScaffold's coral CTA.
+    // beneath the OnboardingScaffold's coral CTA. Marking the
+    // prompt handled here suppresses MainShell's post-onboarding
+    // one-shot re-ask — a user who explicitly skipped shouldn't
+    // see the system dialog two seconds later.
     Box(
         modifier         = Modifier.padding(bottom = QuickInkSpacing.s5),
         contentAlignment = Alignment.BottomCenter,
@@ -94,7 +104,10 @@ fun LocationPermissionScreen(onContinue: () -> Unit) {
             style    = type.label,
             color    = colors.inkSoft,
             modifier = Modifier
-                .clickable(onClick = onContinue)
+                .clickable {
+                    LocationService.markPromptHandled(context)
+                    onContinue()
+                }
                 .padding(QuickInkSpacing.s2),
         )
     }
