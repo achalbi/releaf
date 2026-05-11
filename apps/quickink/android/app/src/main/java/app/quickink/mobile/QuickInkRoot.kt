@@ -336,7 +336,7 @@ private fun MainShell(
     // re-ask without a Settings flip. New users hit the flag inside
     // `LocationPermissionScreen` so this branch no-ops for them.
     val locationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
     ) { _ ->
         LocationService.markPromptHandled(context)
     }
@@ -349,15 +349,18 @@ private fun MainShell(
             LocationService.markPromptHandled(context)
             return@LaunchedEffect
         }
-        if (LocationService.hasPermission(context)) {
-            // Already granted — common when re-installing on a
-            // device that previously granted permission. Mark
-            // handled so we don't re-fire the launcher on each
-            // recomposition.
+        // Re-ask when we have coarse but no fine — the v2 dialog
+        // surfaces the Precise / Approximate toggle that v1 (coarse-
+        // only) suppressed. Already-fine users see no dialog
+        // because the launcher returns granted immediately.
+        if (LocationService.hasPermission(context) && LocationService.hasFinePermission(context)) {
             LocationService.markPromptHandled(context)
             return@LaunchedEffect
         }
-        locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+        locationPermissionLauncher.launch(arrayOf(
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ))
     }
 
     val scanState by controller.state.collectAsState()

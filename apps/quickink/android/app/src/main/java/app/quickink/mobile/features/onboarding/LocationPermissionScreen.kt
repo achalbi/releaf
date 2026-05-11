@@ -58,12 +58,14 @@ fun LocationPermissionScreen(onContinue: () -> Unit) {
     // continue the flow).
     var isRequesting by remember { mutableStateOf(false) }
 
-    // Permission contract for ACCESS_COARSE_LOCATION. Coarse is what
-    // the scan flow needs (city / sub-locality precision), and asking
-    // for coarse-only avoids the multi-step "precise vs approximate"
-    // chooser fine-location triggers on Android 12+.
+    // Permission contract for BOTH ACCESS_COARSE_LOCATION and
+    // ACCESS_FINE_LOCATION. Requesting both surfaces the Android
+    // 12+ Precise / Approximate toggle on the system dialog —
+    // asking for coarse alone caps precision at city-block
+    // triangulation and produced wrong-city reverse-geocodes for
+    // the early dogfood users (see Phase 7.2 fix).
     val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
     ) { _ ->
         // Either grant or deny advances — denied users can re-grant
         // later from Settings. We don't show an "Are you sure?" gate
@@ -83,7 +85,10 @@ fun LocationPermissionScreen(onContinue: () -> Unit) {
         stepIndex  = 2,
         onContinue = {
             isRequesting = true
-            launcher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+            launcher.launch(arrayOf(
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            ))
         },
     ) {
         LocationIllustration()

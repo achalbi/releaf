@@ -64,7 +64,12 @@ object LocationService {
      * accidentally re-prompt the user on the next launch.
      */
     private const val PROMPT_PREFS_NAME = "quickink.location"
-    private const val PROMPT_HANDLED_KEY = "prompt_handled_v1"
+    // v2 — re-asks existing users who only granted ACCESS_COARSE_-
+    // LOCATION the first time around. The new dialog requests both
+    // coarse + fine so the system can show the Precise / Approximate
+    // toggle (Android 12+); without re-asking, those users stay
+    // capped at city-block triangulation accuracy.
+    private const val PROMPT_HANDLED_KEY = "prompt_handled_v2"
 
     /**
      * Log tag for the geolocation pipeline. Grep `adb logcat -s
@@ -82,6 +87,19 @@ object LocationService {
     fun hasPermission(context: Context): Boolean {
         return ContextCompat.checkSelfPermission(
             context, Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /**
+     * True when the user has granted `ACCESS_FINE_LOCATION` — the
+     * gate for GPS-level fixes. When false but `hasPermission` is
+     * true, [fetchLocation] falls back to NETWORK_PROVIDER (cell-
+     * tower / Wi-Fi triangulation), which is much less accurate
+     * but doesn't require GPS warmup.
+     */
+    fun hasFinePermission(context: Context): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION,
         ) == PackageManager.PERMISSION_GRANTED
     }
 
@@ -198,12 +216,16 @@ object LocationService {
         val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
             ?: return null
         if (!LocationManagerCompat.isLocationEnabled(manager)) return null
+        val fineGranted = hasFinePermission(context)
+        Log.i(TAG, "fetchLocation: fineGranted=$fineGranted")
 
-        // Walk every enabled provider for a recent cached reading.
-        // A fix from the network provider that's < 5 minutes old is
-        // plenty fresh for city-level place names — no need to wake
-        // GPS for a per-scan attach.
-        val freshnessThresholdMs = 5 * 60 * 1000L
+        // Walk every enabled provider for a recent + accurate cached
+        // reading. The original 5-minute / no-accuracy-filter window
+        // produced wrong-city reverse-geocodes when a stale fix from
+        // earlier in the day or a 1-km-radius cell triangulation got
+        // picked up. Now: 60s window AND accuracy must be < 100m.
+        val freshnessThresholdMs = 60 * 1000L
+        val accuracyCeilingMeters = 100f
         val nowMs = System.currentTimeMillis()
         val cached = manager.allProviders
             .mapNotNull { provider ->
@@ -214,14 +236,19 @@ object LocationService {
                 }
             }
             .filter { nowMs - it.time < freshnessThresholdMs }
+            .filter { it.hasAccuracy() && it.accuracy < accuracyCeilingMeters }
             .maxByOrNull { it.time }
-        if (cached != null) return cached
+        if (cached != null) {
+            Log.i(TAG, "fetchLocation: using cached fix accuracy=${cached.accuracy}m age=${nowMs - cached.time}ms provider=${cached.provider}")
+            return cached
+        }
 
-        // No fresh cache → one-shot request. 5s timeout via withTimeoutOrNull;
-        // a "never resolved" path (provider stuck) bails cleanly rather
-        // than blocking the scan flow forever.
+        // No fresh-enough cache → one-shot request. 5s timeout via
+        // withTimeoutOrNull; a "never resolved" path (provider
+        // stuck) bails cleanly rather than blocking the scan flow
+        // forever.
         return withTimeoutOrNull(5_000L) {
-            requestSingleLocation(manager)
+            requestSingleLocation(manager, fineGranted = fineGranted)
         }
     }
 
@@ -233,15 +260,32 @@ object LocationService {
      * unavailable.
      */
     @SuppressLint("MissingPermission")
-    private suspend fun requestSingleLocation(manager: LocationManager): Location? {
-        // Pick the best available provider for a one-shot read.
-        // NETWORK is cheap and usually accurate to a city block;
-        // PASSIVE picks up whatever's already on; GPS as last resort.
-        val provider = listOf(
-            LocationManager.NETWORK_PROVIDER,
-            LocationManager.PASSIVE_PROVIDER,
-            LocationManager.GPS_PROVIDER,
-        ).firstOrNull { manager.isProviderEnabled(it) } ?: return null
+    private suspend fun requestSingleLocation(
+        manager: LocationManager,
+        fineGranted: Boolean,
+    ): Location? {
+        // Provider preference order — GPS first when ACCESS_FINE_-
+        // LOCATION is granted (street-level accuracy, ~5m typical).
+        // Without fine permission GPS is off-limits, so we fall
+        // back to NETWORK (~city-block triangulation). PASSIVE is
+        // a "use whatever's already on" hint and is fine either
+        // way. Previously NETWORK was first regardless, which
+        // capped accuracy at city-block precision and produced the
+        // wrong-city geocodes from earlier reports.
+        val preferred = if (fineGranted) {
+            listOf(
+                LocationManager.GPS_PROVIDER,
+                LocationManager.NETWORK_PROVIDER,
+                LocationManager.PASSIVE_PROVIDER,
+            )
+        } else {
+            listOf(
+                LocationManager.NETWORK_PROVIDER,
+                LocationManager.PASSIVE_PROVIDER,
+            )
+        }
+        val provider = preferred.firstOrNull { manager.isProviderEnabled(it) } ?: return null
+        Log.i(TAG, "requestSingleLocation: provider=$provider")
 
         return suspendCancellableCoroutine { cont ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

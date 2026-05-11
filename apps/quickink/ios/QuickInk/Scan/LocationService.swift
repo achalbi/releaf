@@ -66,11 +66,16 @@ public final class LocationService: NSObject, @unchecked Sendable, CLLocationMan
         manager = CLLocationManager()
         super.init()
         manager.delegate = self
-        // Hundred-metre accuracy is plenty for sub-locality / locality
-        // reverse-geocoding and meaningfully cheaper to obtain (no
-        // GPS warm-up). City names don't get more precise at finer
-        // accuracy, and we don't pin a scan to a specific street.
-        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        // GPS-grade accuracy. The 100m setting we shipped first was
+        // catching reverse-geocodes for the wrong city near boundary
+        // areas + producing imprecise full addresses (which were the
+        // explicit reasons for adding `address` in v7). `kCL-
+        // LocationAccuracyBest` asks iOS for the best fix it can
+        // produce; with "Precise Location" granted in the system
+        // dialog the result is street-accurate. With Approximate the
+        // user gets ~few-km accuracy regardless of what we ask for,
+        // which is the system's choice.
+        manager.desiredAccuracy = kCLLocationAccuracyBest
     }
 
     /// Current system permission status, read straight from
