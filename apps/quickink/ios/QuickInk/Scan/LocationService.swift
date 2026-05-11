@@ -239,21 +239,65 @@ private extension CLAuthorizationStatus {
 
 extension LocationService {
     /// Build a single-line formatted street address from a
-    /// `CLPlacemark`. Uses `CNPostalAddressFormatter` so the field
-    /// order respects the placemark's locale (US "Street, City,
-    /// State ZIP" vs European "Street, ZIP City"), then collapses
-    /// the formatter's newlines into ", " so the string fits on a
-    /// single Details-card row that wraps to two lines if needed.
-    /// Returns `nil` when the placemark carries no `postalAddress`.
+    /// `CLPlacemark`. We compose the parts ourselves rather than
+    /// using `CNPostalAddressFormatter` because the system
+    /// formatter omits `subAdministrativeArea` — the field that
+    /// carries the broader metropolitan name (e.g. "Bangalore
+    /// Division") in Indian addresses. Including it gives the user
+    /// the familiar city name in the Address row alongside the
+    /// granular village locality.
+    ///
+    /// Order: street → sub-locality → locality → sub-admin area →
+    /// state + postal code → country. Sub-locality and sub-admin
+    /// area are skipped when they duplicate adjacent parts so US
+    /// addresses don't render "San Francisco, San Francisco
+    /// County".
     public static func formatAddress(from placemark: CLPlacemark) -> String? {
-        guard let postal = placemark.postalAddress else { return nil }
-        let formatter = CNPostalAddressFormatter()
-        formatter.style = .mailingAddress
-        let multiline = formatter.string(from: postal)
-        let single = multiline
-            .replacingOccurrences(of: "\n", with: ", ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return single.isEmpty ? nil : single
+        var parts: [String] = []
+
+        // Street ("423 Rashi Residency Road")
+        let streetBits = [placemark.subThoroughfare, placemark.thoroughfare].compactMap { $0?.trimmingCharacters(in: .whitespaces).nilIfEmpty }
+        if !streetBits.isEmpty { parts.append(streetBits.joined(separator: " ")) }
+
+        let locality = placemark.locality?.trimmingCharacters(in: .whitespaces).nilIfEmpty
+        let subLocality = placemark.subLocality?.trimmingCharacters(in: .whitespaces).nilIfEmpty
+        let subAdmin = placemark.subAdministrativeArea?.trimmingCharacters(in: .whitespaces).nilIfEmpty
+
+        // Sub-locality (neighborhood) — skip when it duplicates the
+        // locality (some geocoders return both the same string).
+        if let subLocality, subLocality.caseInsensitiveCompare(locality ?? "") != .orderedSame {
+            parts.append(subLocality)
+        }
+
+        if let locality { parts.append(locality) }
+
+        // Sub-admin area — include only when it carries information
+        // beyond the locality. Strip Indian admin suffixes for the
+        // comparison so "Bangalore Division" vs "Kadabagere" reads
+        // as distinct. Comparing case-insensitively + via substring
+        // catches the typical US case where locality "San Francisco"
+        // appears inside subAdmin "San Francisco County".
+        if let subAdmin {
+            let cleaned = stripIndianAdminSuffixes(subAdmin)
+            let localityLower = (locality ?? "").lowercased()
+            let cleanedLower = cleaned.lowercased()
+            let redundant = !localityLower.isEmpty &&
+                (cleanedLower.contains(localityLower) ||
+                 localityLower.contains(cleanedLower))
+            if !redundant { parts.append(subAdmin) }
+        }
+
+        // State + postal code joined into one part ("Karnataka 562130").
+        let stateZipBits = [placemark.administrativeArea, placemark.postalCode]
+            .compactMap { $0?.trimmingCharacters(in: .whitespaces).nilIfEmpty }
+        if !stateZipBits.isEmpty { parts.append(stateZipBits.joined(separator: " ")) }
+
+        if let country = placemark.country?.trimmingCharacters(in: .whitespaces).nilIfEmpty {
+            parts.append(country)
+        }
+
+        let joined = parts.joined(separator: ", ")
+        return joined.isEmpty ? nil : joined
     }
 }
 

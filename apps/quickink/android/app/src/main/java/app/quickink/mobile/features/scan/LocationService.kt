@@ -505,21 +505,66 @@ object LocationService {
     }
 
     /**
-     * Join every `Address.getAddressLine(i)` line with ", " to
-     * produce a single-line full address. The geocoder fills
-     * `getAddressLine(0)` for most regions already; the loop covers
-     * the rare case where it splits across multiple lines (some
-     * locales / providers). Returns `null` when no lines are
-     * present so the Details card simply hides the row.
+     * Compose a single-line full address from the geocoder's
+     * `Address` parts. The framework's `getAddressLine(0)` omits
+     * `subAdminArea` — the field that carries the broader
+     * metropolitan name (e.g. "Bangalore Division") in Indian
+     * addresses. We build the address ourselves so users see the
+     * familiar metropolitan name in the Address row alongside the
+     * granular village locality.
+     *
+     * Order: street → sub-locality → locality → sub-admin area →
+     * state + postal code → country. Sub-locality and sub-admin
+     * area are skipped when they duplicate adjacent parts so US
+     * addresses don't render "San Francisco, San Francisco
+     * County".
      */
     private fun formatFullAddress(address: android.location.Address): String? {
-        val max = address.maxAddressLineIndex
-        if (max < 0) return null
-        val parts = (0..max)
-            .mapNotNull { address.getAddressLine(it) }
+        val parts = mutableListOf<String>()
+
+        // Street ("423 Rashi Residency Road")
+        val streetBits = listOfNotNull(address.subThoroughfare, address.thoroughfare)
             .map { it.trim() }
             .filter { it.isNotEmpty() }
-        if (parts.isEmpty()) return null
-        return parts.joinToString(separator = ", ")
+        if (streetBits.isNotEmpty()) parts.add(streetBits.joinToString(" "))
+
+        val locality    = address.locality?.trim()?.takeIf { it.isNotEmpty() }
+        val subLocality = address.subLocality?.trim()?.takeIf { it.isNotEmpty() }
+        val subAdmin    = address.subAdminArea?.trim()?.takeIf { it.isNotEmpty() }
+
+        // Sub-locality (neighborhood) — skip when it duplicates the
+        // locality (some geocoders return both the same string).
+        if (subLocality != null && !subLocality.equals(locality, ignoreCase = true)) {
+            parts.add(subLocality)
+        }
+
+        if (locality != null) parts.add(locality)
+
+        // Sub-admin area — include only when it carries information
+        // beyond the locality. Strip Indian admin suffixes for the
+        // comparison so "Bangalore Division" vs "Kadabagere" reads
+        // as distinct. Comparing case-insensitively + via substring
+        // catches the typical US case where locality "San Francisco"
+        // appears inside subAdmin "San Francisco County".
+        if (subAdmin != null) {
+            val cleaned = stripIndianAdminSuffixes(subAdmin)
+            val localityLower = locality?.lowercase().orEmpty()
+            val cleanedLower = cleaned.lowercase()
+            val redundant = localityLower.isNotEmpty() &&
+                (cleanedLower.contains(localityLower) ||
+                 localityLower.contains(cleanedLower))
+            if (!redundant) parts.add(subAdmin)
+        }
+
+        // State + postal code joined into one part ("Karnataka 562130").
+        val stateZipBits = listOfNotNull(address.adminArea, address.postalCode)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        if (stateZipBits.isNotEmpty()) parts.add(stateZipBits.joinToString(" "))
+
+        val country = address.countryName?.trim()?.takeIf { it.isNotEmpty() }
+        if (country != null) parts.add(country)
+
+        return parts.joinToString(", ").takeIf { it.isNotEmpty() }
     }
 }
