@@ -300,6 +300,28 @@ dependencies {
     // the `file://` URIs that `captures.preview_uri` stores.
     implementation(libs.coil.compose)
 
+    // CameraX — drives QuickInk's Business Card capture surface (an
+    // in-app preview + ImageAnalysis pipeline + still-capture path).
+    // Document mode is unaffected; it keeps using Google's system
+    // `GmsDocumentScanning` intent, which owns its own camera in a
+    // separate process.
+    //
+    // The detector itself is pure Kotlin operating on the YUV luma
+    // plane CameraX hands to the ImageAnalysis callback — no OpenCV
+    // dependency. See `cardcapture/CardImageOps.kt` for the rationale
+    // and the operation set: grayscale (free from YUV), separable
+    // Gaussian blur, adaptive threshold, contour border-follow,
+    // RDP polygon approximation, perspective warp. The full op set
+    // weighs ~25 KB of Kotlin against the ~25 MB of native libs the
+    // opencv-android AAR would have pulled in across the four
+    // shipping ABIs; the quality bar of "find a high-contrast 1.586:1
+    // rectangle inside a fixed ROI" is well below where SIMD-tuned CV
+    // pays off.
+    implementation(libs.camerax.core)
+    implementation(libs.camerax.camera2)
+    implementation(libs.camerax.lifecycle)
+    implementation(libs.camerax.view)
+
     // Phase 4 Slice 4.4 — unit-test toolchain. Keeps the test
     // dep set minimal (junit + kotlinx-serialization for the
     // canonical-JSON interop test). Match the version pins

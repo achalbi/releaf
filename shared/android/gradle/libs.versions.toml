@@ -86,6 +86,13 @@ google-firebase-crashlytics = "3.0.7"
 # source content through a `RenderEffect` blur on API 32+ and a
 # fallback tint on lower APIs. ~50 KB AAR.
 haze                 = "1.5.3"
+# CameraX — in-app camera surface for QuickInk's Business Card capture
+# mode. Document mode keeps using Google's `GmsDocumentScanning` system
+# intent (out-of-process camera, no CameraX needed), so this dep is
+# pulled in by `:apps:quickink` only — not by any of the `:shared:*`
+# modules. 1.4.x is the current stable, paired with `view` 1.4.x for
+# the Compose-interop PreviewView.
+camerax              = "1.4.0"
 
 [plugins]
 android-application  = { id = "com.android.application",                     version.ref = "agp" }
@@ -199,3 +206,14 @@ credentials-play-services-auth = { module = "androidx.credentials:credentials-pl
 googleid                  = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
 play-services-auth        = { module = "com.google.android.gms:play-services-auth", version.ref = "play-services-auth" }
 firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashlytics", version.ref = "firebase-crashlytics" }
+
+# CameraX — in-app camera surface for QuickInk's Business Card mode.
+#   - camera-core / camera-camera2: capture session + Camera2 binding
+#   - camera-lifecycle: bindToLifecycle() so the session follows the
+#     hosting Composable's lifecycle (released on dispose, rebound on
+#     resume) without manual start/stop wiring
+#   - camera-view: PreviewView for AndroidView interop in Compose
+camerax-core      = { module = "androidx.camera:camera-core",      version.ref = "camerax" }
+camerax-camera2   = { module = "androidx.camera:camera-camera2",   version.ref = "camerax" }
+camerax-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
+camerax-view      = { module = "androidx.camera:camera-view",      version.ref = "camerax" }

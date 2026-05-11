@@ -116,6 +116,16 @@ public final class SettingsState: ObservableObject {
         didSet { UserDefaults.standard.set(themeMode.rawValue, forKey: Keys.themeMode) }
     }
 
+    /// Last capture surface the user picked on QuickCaptureScreen
+    /// — Document or BusinessCard. Persisted across sessions so
+    /// the pill toggle remembers their choice. First-launch
+    /// fallback is `.document`; landing card-first would surprise
+    /// users who came for document scanning. Storage key matches
+    /// Android: `quickink.capture.last_mode`.
+    @Published public var lastCaptureMode: CaptureMode {
+        didSet { UserDefaults.standard.set(lastCaptureMode.analyticsKey, forKey: Keys.lastCaptureMode) }
+    }
+
     public init() {
         let defaults = UserDefaults.standard
         // Drive backup defaults to true — Drive sync is the value
@@ -151,6 +161,10 @@ public final class SettingsState: ObservableObject {
             ?? .coral
         self.themeMode    = ThemeMode(rawValue: defaults.string(forKey: Keys.themeMode) ?? "")
             ?? .system
+        // Last capture surface — falls back to .document on
+        // first launch (when the key is absent) and on any
+        // corrupted value via `fromAnalyticsKey`'s default.
+        self.lastCaptureMode = CaptureMode.fromAnalyticsKey(defaults.string(forKey: Keys.lastCaptureMode))
     }
 
     /// Called from the onboarding sign-in screen after
@@ -218,5 +232,9 @@ public final class SettingsState: ObservableObject {
         static let primaryColor         = "quickink.settings.primary_color"
         static let themeMode            = "quickink.settings.theme_mode"
         static let cachedTreePoints     = "quickink.settings.cached_tree_points"
+        // Public key per spec (`quickink.capture.last_mode`).
+        // Literal here so the on-disk shape stays grep-able and
+        // matches the Android SharedPreferences key 1:1.
+        static let lastCaptureMode      = "quickink.capture.last_mode"
     }
 }

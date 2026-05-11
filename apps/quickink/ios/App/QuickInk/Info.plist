@@ -33,13 +33,21 @@
 	<key>AnalyticsBaseURL</key>
 	<string>https://api-quickink.thoughtbasics.com</string>
 	<!--
-	  Required for the profile-photo "Take Photo" flow on the
-	  Profile screen. The system shows this string in the camera-
-	  permission prompt the first time the user opts to capture a
-	  fresh profile photo (rather than picking from their library).
+	  Camera-permission rationale. iOS shows this string the
+	  first time camera access is requested; the system uses
+	  one string for all access prompts, so it has to cover
+	  every feature that touches the camera:
+	    - profile-photo "Take Photo" flow (Profile screen)
+	    - Business Card capture mode on QuickCaptureScreen (the
+	      in-app AVCaptureSession surface for the card-shaped
+	      auto-capture flow)
+	  Document mode uses VisionKit's
+	  VNDocumentCameraViewController, which handles its own
+	  permission prompt internally — we don't need to mention
+	  it here.
 	-->
 	<key>NSCameraUsageDescription</key>
-	<string>QuickInk uses the camera so you can take a fresh profile photo without leaving the app.</string>
+	<string>QuickInk uses the camera to scan business cards in-frame and to let you take a fresh profile photo without leaving the app.</string>
 	<key>CFBundleGetInfoString</key>
 	<string></string>
 	<!--

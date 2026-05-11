@@ -27,6 +27,7 @@ package app.quickink.mobile.features.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import app.quickink.mobile.features.scan.CaptureMode
 import app.quickink.mobile.ui.theme.PrimaryColor
 import app.quickink.mobile.ui.theme.ThemeMode
 
@@ -185,6 +186,20 @@ class SettingsPreferences(context: Context) {
             prefs.edit().putString(KEY_THEME_MODE, value.key).apply()
         }
 
+    /**
+     * Last capture surface the user picked on QuickCaptureScreen
+     * — Document or BusinessCard. Persisted across sessions so the
+     * pill toggle remembers their choice. First-launch fallback is
+     * Document; landing card-first would surprise users who came
+     * for document scanning. Storage key matches iOS:
+     * `quickink.capture.last_mode`.
+     */
+    var lastCaptureMode: CaptureMode
+        get() = CaptureMode.fromAnalyticsKey(prefs.getString(KEY_LAST_CAPTURE_MODE, null))
+        set(value) {
+            prefs.edit().putString(KEY_LAST_CAPTURE_MODE, value.analyticsKey).apply()
+        }
+
     companion object {
         private const val PREFS_NAME              = "quickink.settings"
         private const val KEY_DRIVE_BACKUP        = "drive_backup_enabled"
@@ -199,6 +214,10 @@ class SettingsPreferences(context: Context) {
         private const val KEY_PRIMARY_COLOR       = "primary_color"
         private const val KEY_THEME_MODE          = "theme_mode"
         private const val KEY_CACHED_TREE_POINTS  = "cached_tree_points"
+        // Public key per spec (`quickink.capture.last_mode`). Kept
+        // literal here so the on-disk shape stays grep-able and
+        // matches the iOS UserDefaults key 1:1.
+        private const val KEY_LAST_CAPTURE_MODE   = "quickink.capture.last_mode"
 
         /**
          * Last-known lifetime Tree-points balance. Written by

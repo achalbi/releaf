@@ -2,27 +2,30 @@
 <!--
   QuickInk Android manifest.
 
-  Permissions: just INTERNET. The document scanner is launched via
-  ML Kit's `GmsDocumentScanning` system activity (see
-  `:shared:scan/DocumentScannerLauncher.kt`), which manages its own
-  camera / storage permission UX in-process — we do not need to
-  declare CAMERA, READ_EXTERNAL_STORAGE, or READ_MEDIA_IMAGES.
+  Permissions:
+   - INTERNET: Drive REST traffic + the ML Kit module download.
+   - CAMERA:   the Business Card capture mode runs an in-app
+               CameraX preview (the document scanner still runs
+               in GMS, but the card surface is in-process).
+               Requested at runtime when the user first opens the
+               Business Card mode on QuickCaptureScreen; falls
+               through to a permission-rationale view in-screen.
   Sync runs as a WorkManager periodic worker, not a foreground
-  service, so POST_NOTIFICATIONS is not required either.
-
-  Drive REST traffic + the ML Kit module download both need
-  INTERNET; that's why it's the single declared permission.
+  service, so POST_NOTIFICATIONS is not required.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
 
     <!--
-      Camera is required by the document scanner the app launches,
-      but the camera is owned by GMS, not by us. `required="false"`
-      keeps the app installable on cameraless tablets where users
-      can still view and edit synced scans.
+      Camera is required for the in-app Business Card surface AND
+      for the system document scanner (the latter runs in GMS,
+      but `uses-feature` covers both). `required="false"` keeps
+      the app installable on cameraless tablets where users can
+      still view and edit synced scans plus use Document mode
+      via the Import path.
     -->
     <uses-feature
         android:name="android.hardware.camera"
