@@ -219,6 +219,29 @@ object LocationService {
     }
 
     /**
+     * Public reverse-geocode entry point used by `ScanDetailScreen`'s
+     * post-load retry: when a capture has lat/lon but no locality /
+     * sub-locality (Geocoder was rate-limited / offline at scan
+     * time), Details re-runs this and persists the result. Builds
+     * a transient `Location` so the inner [reverseGeocode] overload
+     * doesn't need a second copy of the API-level branching.
+     *
+     * Returns `null` on any failure — same contract as the inner
+     * overload, so callers can no-op cleanly.
+     */
+    suspend fun reverseGeocode(
+        context: Context,
+        latitude: Double,
+        longitude: Double,
+    ): Pair<String?, String?>? {
+        val loc = Location("manual").apply {
+            this.latitude  = latitude
+            this.longitude = longitude
+        }
+        return reverseGeocode(context, loc)
+    }
+
+    /**
      * Reverse-geocode a `Location` to (locality, subLocality). Uses
      * the API ≥ 33 callback form when available so we don't block on
      * the network call from the IO dispatcher; falls back to the

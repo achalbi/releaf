@@ -237,6 +237,28 @@ interface CaptureDao {
     suspend fun setTitle(id: String, title: String?, timestamp: String)
 
     /**
+     * Backfill the reverse-geocoded place name on a capture whose
+     * coordinates landed without a locality / sub-locality at scan
+     * time (rate-limited Geocoder, offline, or a remote area the
+     * system couldn't resolve). Called from the Details screen on
+     * open when the row has lat/lon but missing place names — the
+     * re-tried geocode persists here and propagates to other
+     * devices on the next Drive push (dirty=1 + updated_at bumped).
+     */
+    @Query("""
+        UPDATE captures
+        SET locality = :locality, sub_locality = :subLocality,
+            updated_at = :timestamp, dirty = 1
+        WHERE id = :id
+    """)
+    suspend fun setLocality(
+        id: String,
+        locality: String?,
+        subLocality: String?,
+        timestamp: String,
+    )
+
+    /**
      * Bulk-update [oldName] → [newName] across every capture for
      * the given user. Used by [CategoryRepository.renameAndPropagate]
      * so a category rename in Settings doesn't orphan historical

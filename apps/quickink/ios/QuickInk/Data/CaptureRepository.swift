@@ -128,6 +128,28 @@ public final class CaptureRepository: @unchecked Sendable {
         }
     }
 
+    /// Backfill the reverse-geocoded place name on a capture whose
+    /// coordinates landed without a locality / sub-locality at scan
+    /// time (rate-limited CLGeocoder, no network, or a remote area
+    /// the system couldn't resolve). Called from the Details screen
+    /// on open when the row has lat/lon but missing place names —
+    /// the re-tried geocode persists here and propagates to other
+    /// devices on the next Drive push (dirty=1 + updated_at bumped).
+    public func updateLocality(
+        captureId: String,
+        locality: String?,
+        subLocality: String?
+    ) async throws {
+        let now = IsoClock.nowIso()
+        try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE captures
+                SET locality = ?, sub_locality = ?, updated_at = ?, dirty = 1
+                WHERE id = ?
+                """, arguments: [locality, subLocality, now, captureId])
+        }
+    }
+
     /// Replace the OCR text on a single page row. Used by the scan
     /// detail editor when the user corrects the recognised text.
     /// Sets the dirty bit + bumps `updated_at` so the next sync

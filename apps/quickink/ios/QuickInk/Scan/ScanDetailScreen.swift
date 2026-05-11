@@ -12,6 +12,7 @@
 import SwiftUI
 import GRDB
 import PDFKit
+import CoreLocation
 import ReleafCoreScan
 
 struct ScanDetailScreen: View {
@@ -169,6 +170,12 @@ struct ScanDetailScreen: View {
             // pdf_uri before we can stat the file) so it runs after
             // loadCapture lands.
             await loadFileSize()
+            // Backfill the reverse-geocoded place name on captures
+            // whose coordinates landed without a locality at scan
+            // time (rate-limited CLGeocoder, offline, remote area).
+            // Runs once on every Details open; CLGeocoder's own
+            // rate-limit naturally caps the retry frequency.
+            await retryReverseGeocodeIfNeeded()
         }
         .alert("Delete this scan?", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
@@ -1118,6 +1125,43 @@ struct ScanDetailScreen: View {
             self.capture = result
         } catch {
             print("ScanDetailScreen.loadCapture failed: \(error)")
+        }
+    }
+
+    /// When the capture has lat/lon but no place names — typical
+    /// outcome when `CLGeocoder` was rate-limited or offline at scan
+    /// time — retry the reverse geocode here and persist the
+    /// result. Runs in the background; the UI reloads via
+    /// [loadCapture] when the new values land. No retry tracking
+    /// state: CLGeocoder's own rate-limit caps the retry frequency,
+    /// and an opened-twice-in-a-row screen is fine to ask twice.
+    private func retryReverseGeocodeIfNeeded() async {
+        guard let cap = capture,
+              let lat = cap.latitude,
+              let lon = cap.longitude else { return }
+        let hasLocality    = !(cap.locality?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
+        let hasSubLocality = !(cap.subLocality?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
+        if hasLocality && hasSubLocality { return }
+
+        let clLocation = CLLocation(latitude: lat, longitude: lon)
+        guard let placemark = try? await CLGeocoder().reverseGeocodeLocation(clLocation).first else {
+            return
+        }
+        let newLocality    = placemark.locality
+        let newSubLocality = placemark.subLocality
+        // Bail when the retry yields nothing useful — saves a
+        // pointless write + a no-op sync push.
+        guard newLocality != nil || newSubLocality != nil else { return }
+
+        do {
+            try await CaptureRepository().updateLocality(
+                captureId:   captureId,
+                locality:    newLocality    ?? cap.locality,
+                subLocality: newSubLocality ?? cap.subLocality
+            )
+            await loadCapture()
+        } catch {
+            print("ScanDetailScreen.retryReverseGeocode failed: \(error)")
         }
     }
 

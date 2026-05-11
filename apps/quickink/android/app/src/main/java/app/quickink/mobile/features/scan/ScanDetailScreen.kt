@@ -184,6 +184,40 @@ fun ScanDetailScreen(
         capture = captureDao.findById(captureId)
     }
 
+    // Backfill the reverse-geocoded place name on captures whose
+    // coordinates landed without a locality / sub-locality at scan
+    // time (rate-limited Geocoder, offline, or a remote area the
+    // system couldn't resolve). Re-runs only when the in-screen
+    // capture row changes (new open / after a sync refresh) so we
+    // don't loop on a missing-data row.
+    LaunchedEffect(capture?.id, capture?.locality, capture?.subLocality) {
+        val cap = capture ?: return@LaunchedEffect
+        val lat = cap.latitude ?: return@LaunchedEffect
+        val lon = cap.longitude ?: return@LaunchedEffect
+        val hasLocality    = !cap.locality.isNullOrBlank()
+        val hasSubLocality = !cap.subLocality.isNullOrBlank()
+        if (hasLocality && hasSubLocality) return@LaunchedEffect
+
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                LocationService.reverseGeocode(context, lat, lon)
+            }.getOrNull()
+        } ?: return@LaunchedEffect
+
+        val (newLocality, newSubLocality) = result
+        if (newLocality.isNullOrBlank() && newSubLocality.isNullOrBlank()) return@LaunchedEffect
+
+        runCatching {
+            captureDao.setLocality(
+                id          = captureId,
+                locality    = newLocality ?: cap.locality,
+                subLocality = newSubLocality ?: cap.subLocality,
+                timestamp   = IsoClock.nowIso(),
+            )
+            capture = captureDao.findById(captureId)
+        }
+    }
+
     // Resolve the on-disk PDF size after the capture row lands.
     // Best-effort — leaves `pdfFileSize = null` if the file isn't
     // readable, in which case the Details row falls back to "—".
