@@ -351,16 +351,20 @@ private final class CardCaptureSession: NSObject, ObservableObject,
     }
 
     func updateOverlayMetrics(_ metrics: GuideMetrics) {
-        // Translate the canvas-space guide rect into pixel
-        // buffer coordinates using the same fractional layout
-        // the detector's analyzer guide uses. Both spaces use
-        // `videoGravity = .resizeAspectFill`, so the fractions
-        // map 1:1.
+        // Carry through the canvas dimensions so the detector's
+        // analyzer guide and the post-processor's bitmap crop
+        // can both apply the resizeAspectFill center-crop math
+        // the preview layer uses on-screen. Without this the
+        // detector reasons about a wider region than the user
+        // sees, and the still capture extracts a region that
+        // doesn't line up with the on-screen overlay.
         latestGuideMetrics = metrics
         guard analyzerSize != .zero else { return }
         latestGuideInBuffer = computeAnalyzerGuide(
-            width:  Int(analyzerSize.width),
-            height: Int(analyzerSize.height),
+            width:      Int(analyzerSize.width),
+            height:     Int(analyzerSize.height),
+            viewWidth:  Float(metrics.canvasSize.width),
+            viewHeight: Float(metrics.canvasSize.height),
         )
     }
 
@@ -447,9 +451,26 @@ private final class CardCaptureSession: NSObject, ObservableObject,
         if detector == nil || analyzerSize != sz {
             detector = BusinessCardDetector(analyzerWidth: width, analyzerHeight: height)
             analyzerSize = sz
-            latestGuideInBuffer = computeAnalyzerGuide(width: width, height: height)
+            // Re-derive the analyzer guide with the most-recent
+            // canvas dims when we know them, so the first frame
+            // after the overlay lays out already targets the
+            // user-visible sub-rect.
+            if let metrics = latestGuideMetrics {
+                latestGuideInBuffer = computeAnalyzerGuide(
+                    width:      width,
+                    height:     height,
+                    viewWidth:  Float(metrics.canvasSize.width),
+                    viewHeight: Float(metrics.canvasSize.height),
+                )
+            }
         }
-        let guide = latestGuideInBuffer ?? computeAnalyzerGuide(width: width, height: height)
+        // Skip detection until both the analyzer and the overlay
+        // have published their dimensions — we have no
+        // user-visible guide to test against otherwise.
+        guard let guide = latestGuideInBuffer else {
+            onOverlayState?(.neutral)
+            return
+        }
         let result = detector?.detect(pixelBuffer: pixelBuffer, guide: guide) ?? .none
 
         switch result {
@@ -504,26 +525,28 @@ private final class CardCaptureSession: NSObject, ObservableObject,
             onCaptureComplete?()
             return
         }
-        // Scale the latest analyzer-space quad / guide into the
-        // photo's pixel grid. The photo is portrait-oriented
-        // (we set videoOrientation = .portrait above), so its
-        // dimensions are width = sensor portrait width, height =
-        // sensor portrait height; both analyzer and photo
-        // share the same aspect ratio, so a single scale
-        // factor maps fractions cleanly.
+        // Both the video data output and the photo output are
+        // bound to the same `.photo` session preset, so they
+        // share a single aspect ratio (4:3 on iPhone). A single
+        // scale factor maps the detected quad cleanly from
+        // pixel-buffer space into the still's coordinate grid.
         let photoSize = CGSize(width: cgImage.width, height: cgImage.height)
         let sx = Float(photoSize.width)  / Float(analyzerSize.width  == 0 ? 1 : analyzerSize.width)
         let sy = Float(photoSize.height) / Float(analyzerSize.height == 0 ? 1 : analyzerSize.height)
         let quadInPhoto = latestValidQuad?.scaled(sx: sx, sy: sy)
-        let guideInPhoto = computeAnalyzerGuide(
-            width:  Int(photoSize.width),
-            height: Int(photoSize.height),
-        )
+        // The post-processor needs the on-screen canvas
+        // dimensions so it can apply the same resizeAspectFill
+        // center-crop the preview layer applied. Falls back to
+        // the photo's own size when the overlay hasn't
+        // published metrics yet — produces a sensible
+        // full-frame crop instead of a Swift trap.
+        let canvas: CGSize = latestGuideMetrics?.canvasSize ?? photoSize
         await Task.detached(priority: .userInitiated) {
             _ = await BusinessCardPostProcessor.process(
                 source:       cgImage,
                 quadInImage:  quadInPhoto,
-                guideInImage: guideInPhoto,
+                viewWidth:    Float(canvas.width),
+                viewHeight:   Float(canvas.height),
                 controller:   controller,
             )
         }.value
@@ -531,25 +554,24 @@ private final class CardCaptureSession: NSObject, ObservableObject,
     }
 }
 
-/// Compute the analyzer-space guide rect from analyzer
-/// dimensions using the same fractional layout
-/// (`GuideMetrics.guideWidthFraction`, ISO 7810 ID-1 aspect,
-/// centered horizontally at 50% / vertically at 45%). Used
-/// by both the live preview and the at-capture rescale so
-/// they agree on the same target region.
-internal func computeAnalyzerGuide(width: Int, height: Int) -> GuideRect {
-    let aw = Float(width)
-    let ah = Float(height)
-    let targetW = aw * Float(GuideMetrics.guideWidthFraction)
-    let targetH = targetW / Float(GuideMetrics.cardAspectRatio)
-    let cx = aw * 0.5
-    let cy = ah * 0.45
-    let left = max(0, cx - targetW * 0.5)
-    let top  = max(0, cy - targetH * 0.5)
-    return GuideRect(
-        left: left,
-        top: top,
-        right: min(aw, left + targetW),
-        bottom: min(ah, top + targetH),
+/// Compute the analyzer-space guide rect that lines up with
+/// the on-screen overlay, accounting for the
+/// resizeAspectFill center-crop the preview layer applies.
+/// Mirrors Android's `computeAnalyzerGuide` —
+/// `visibleRectForViewAspect` finds the center sub-rect of
+/// the buffer the user sees, then `guideRectInside` plants
+/// the 70%-of-width / 1.586:1 / 45%-vertical guide inside.
+internal func computeAnalyzerGuide(
+    width: Int,
+    height: Int,
+    viewWidth: Float,
+    viewHeight: Float,
+) -> GuideRect {
+    let visible = CardImageOps.visibleRectForViewAspect(
+        imageWidth:  width,
+        imageHeight: height,
+        viewWidth:   viewWidth,
+        viewHeight:  viewHeight,
     )
+    return CardImageOps.guideRectInside(visible)
 }

@@ -62,13 +62,13 @@ import android.view.Surface
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -277,7 +277,7 @@ private fun ActiveBusinessCardSurface(
                                         }
                                     }
                                 },
-                                onAutoFire       = { quadInStill, guideInStill, elapsedMs ->
+                                onAutoFire       = { quadInStill, elapsedMs ->
                                     previewView.post {
                                         // Medium-tap haptic on auto-fire per spec.
                                         view.performHapticFeedback(
@@ -293,22 +293,24 @@ private fun ActiveBusinessCardSurface(
                                     // — we don't have a meaningful frame to
                                     // capture against in that window, so skip
                                     // this fire and rely on the next stable
-                                    // streak. Implicit-label local returns
-                                    // don't work from a non-trailing lambda
-                                    // arg, hence the if-else rather than a
-                                    // `?: return@onAutoFire` early-out.
+                                    // streak. Same for the canvas metrics: if
+                                    // the overlay hasn't laid out yet, the
+                                    // post-processor has no view-aspect to
+                                    // crop the bitmap with.
                                     val ah = detectorHolder.analyzerSize
-                                    if (ah != null) {
+                                    val gc = guideCanvas
+                                    if (ah != null && gc != null) {
                                         triggerCapture(
-                                            context             = ctx,
-                                            imageCapture        = imageCaptureHolder.value,
-                                            captureExecutor     = captureExecutor,
-                                            processingScope     = processingScope,
-                                            controller          = controller,
-                                            quadInAnalyzer      = quadInStill,
-                                            guideInAnalyzer     = guideInStill,
-                                            analyzerSize        = ah,
-                                            onComplete          = { previewView.post { onDismiss() } },
+                                            context         = ctx,
+                                            imageCapture    = imageCaptureHolder.value,
+                                            captureExecutor = captureExecutor,
+                                            processingScope = processingScope,
+                                            controller      = controller,
+                                            quadInAnalyzer  = quadInStill,
+                                            analyzerSize    = ah,
+                                            viewWidth       = gc.canvasWidth,
+                                            viewHeight      = gc.canvasHeight,
+                                            onComplete      = { previewView.post { onDismiss() } },
                                         )
                                     }
                                 },
@@ -349,23 +351,25 @@ private fun ActiveBusinessCardSurface(
                     view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                     CaptureAnalytics.manualFired(CaptureMode.BusinessCard)
                     // analyzerSize is null until the camera has
-                    // delivered its first frame. Tap before then
-                    // is a no-op — no haptic regret, the
-                    // CaptureAnalytics event still records the
-                    // user's intent.
+                    // delivered its first frame; guideCanvas is
+                    // null until the overlay has laid out. Tap
+                    // before either is a no-op — the haptic +
+                    // analytics still fire to record the user's
+                    // intent.
                     val ah = detectorHolder.analyzerSize
-                    if (ah != null) {
-                        val guideInAnalyzer = computeAnalyzerGuide(ah.width, ah.height)
+                    val gc = guideCanvas
+                    if (ah != null && gc != null) {
                         triggerCapture(
-                            context           = context,
-                            imageCapture      = imageCaptureHolder.value,
-                            captureExecutor   = captureExecutor,
-                            processingScope   = processingScope,
-                            controller        = controller,
-                            quadInAnalyzer    = null,
-                            guideInAnalyzer   = guideInAnalyzer,
-                            analyzerSize      = ah,
-                            onComplete        = { onDismiss() },
+                            context         = context,
+                            imageCapture    = imageCaptureHolder.value,
+                            captureExecutor = captureExecutor,
+                            processingScope = processingScope,
+                            controller      = controller,
+                            quadInAnalyzer  = null,
+                            analyzerSize    = ah,
+                            viewWidth       = gc.canvasWidth,
+                            viewHeight      = gc.canvasHeight,
+                            onComplete      = { onDismiss() },
                         )
                     }
                 },
@@ -399,27 +403,51 @@ private fun bindCameraX(
     cameraProviderFuture.addListener({
         val cameraProvider = cameraProviderFuture.get()
 
-        // Resolution preference — favor 1280×720 for analysis;
-        // the spec's "1280×720 for detection" callout. Still
-        // capture uses the camera's highest available JPEG
-        // resolution (CameraX picks by default).
-        val analyzerResolution = ResolutionSelector.Builder()
+        // All three use cases share the SAME 4:3 aspect ratio so
+        // the detector's analyzer frame and the still capture
+        // bitmap line up pixel-for-pixel under a single uniform
+        // scale factor. Mismatch here (previously the analyzer
+        // was pinned at 1280×720 = 16:9 while ImageCapture used
+        // setTargetAspectRatio(RATIO_4_3)) caused sx != sy when
+        // mapping the analyzer quad / guide to the bitmap, which
+        // vertically squashed the warped output.
+        //
+        // The shared strategy is 4:3 with auto fallback — every
+        // back camera advertises a 4:3 output, and the
+        // RATIO_4_3_FALLBACK_AUTO_STRATEGY tolerates the rare
+        // device that doesn't.
+        val sharedAspect = AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
+
+        val analyzerSelector = ResolutionSelector.Builder()
+            .setAspectRatioStrategy(sharedAspect)
+            // 720×960 (4:3 portrait) keeps the detector fast on
+            // mid-range Android — under a 40 ms per-frame budget
+            // at 24 fps on a Pixel 6a-class device. CameraX
+            // picks the closest available 4:3 resolution.
             .setResolutionStrategy(
                 ResolutionStrategy(
-                    /* boundSize = */ Size(1280, 720),
-                    /* fallbackRule = */ ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                    Size(720, 960),
+                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
                 ),
             )
             .build()
 
+        val previewSelector = ResolutionSelector.Builder()
+            .setAspectRatioStrategy(sharedAspect)
+            .build()
+
+        val captureSelector = ResolutionSelector.Builder()
+            .setAspectRatioStrategy(sharedAspect)
+            .build()
+
         val preview = Preview.Builder()
-            .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+            .setResolutionSelector(previewSelector)
             .setTargetRotation(Surface.ROTATION_0)
             .build()
             .also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
         val analyzer = ImageAnalysis.Builder()
-            .setResolutionSelector(analyzerResolution)
+            .setResolutionSelector(analyzerSelector)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setTargetRotation(Surface.ROTATION_0)
             .build()
@@ -430,8 +458,8 @@ private fun bindCameraX(
             }
 
         val imageCapture = ImageCapture.Builder()
+            .setResolutionSelector(captureSelector)
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-            .setTargetAspectRatio(AspectRatio.RATIO_4_3)
             .setTargetRotation(Surface.ROTATION_0)
             .build()
         imageCaptureHolder.value = imageCapture
@@ -453,7 +481,7 @@ private fun handleAnalyzerFrame(
     detectorHolder: DetectorHolder,
     stabilityGate: StabilityGate,
     onState: (OverlayState) -> Unit,
-    onAutoFire: (quadInAnalyzer: DetectedQuad, guideInAnalyzer: GuideRect, elapsedMs: Long) -> Unit,
+    onAutoFire: (quadInAnalyzer: DetectedQuad, elapsedMs: Long) -> Unit,
 ) {
     // Width/height after CameraX's setTargetRotation(0) — these
     // are the dimensions the luma plane uses, not the raw
@@ -466,20 +494,26 @@ private fun handleAnalyzerFrame(
         detectorHolder.detector = BusinessCardDetector(w, h)
         detectorHolder.analyzerSize = Size(w, h)
     }
-    if (guideCanvas == null) {
+    if (guideCanvas == null || guideCanvas.canvasWidth <= 0f || guideCanvas.canvasHeight <= 0f) {
         // Canvas hasn't published its guide rect yet — first
         // frames before the overlay lays out. Treat as no
         // detection and let the next frame run.
         onState(OverlayState.Neutral)
         return
     }
-    // The overlay draws the guide as a fixed fraction of its
-    // canvas (70% width, 1.586:1, centered at 50%/45%). The
-    // CameraX preview is pinned to the same aspect ratio (4:3,
-    // FILL_CENTER), so the analyzer's guide rect is the same
-    // fraction of the analyzer frame — compute it from the
-    // analyzer dimensions directly rather than mapping pixels.
-    val guideAnalyzer = computeAnalyzerGuide(w, h)
+    // The PreviewView uses FILL_CENTER, so the user sees the
+    // center sub-rect of the analyzer frame whose aspect
+    // matches the on-screen canvas. The analyzer guide is the
+    // 70%-of-width / 1.586:1 / 45%-vertical rect inside THAT
+    // sub-rect — not inside the full analyzer frame — so the
+    // IoU check matches what the user actually sees behind the
+    // on-screen overlay.
+    val guideAnalyzer = computeAnalyzerGuide(
+        analyzerWidth  = w,
+        analyzerHeight = h,
+        viewWidth      = guideCanvas.canvasWidth,
+        viewHeight     = guideCanvas.canvasHeight,
+    )
     val detector = detectorHolder.detector!!
     val result = detector.detect(proxy, guideAnalyzer)
 
@@ -497,36 +531,43 @@ private fun handleAnalyzerFrame(
             val fired = stabilityGate.vote(result.quad)
             if (fired) {
                 val elapsed = stabilityGate.streakElapsedMs()
-                onAutoFire(result.quad, guideAnalyzer, elapsed)
+                onAutoFire(result.quad, elapsed)
             }
         }
     }
 }
 
 /**
- * Compute the guide rect in analyzer-frame coordinates. Same
- * fractional layout as [GuideMetrics.compute] — 70% width,
- * 1.586:1, centered horizontally at 50% and vertically at 45%
- * — applied to analyzer dimensions instead of canvas
- * dimensions. The Preview/Analyzer/ImageCapture chain shares
- * a single aspect ratio (4:3, FILL_CENTER), so the same
- * fractions land on matching pixel regions in every space.
+ * Compute the guide rect in analyzer-frame coordinates, taking
+ * the on-screen canvas dimensions into account so the rect
+ * lines up with what the user sees behind the FILL_CENTER
+ * preview. We map the on-screen 70% / 1.586:1 / 45%-vertical
+ * guide back to the analyzer pixel grid via
+ * [CardImageOps.visibleRectForViewAspect] (the same
+ * center-crop the PreviewView applies) and
+ * [CardImageOps.guideRectInside].
+ *
+ * When the canvas aspect ≠ analyzer aspect (the typical
+ * 19.5:9 view ÷ 4:3 sensor case), the analyzer-space rect is
+ * NOT 70% of the analyzer's width — it's 70% of the visible
+ * center crop's width. Without this correction the detector's
+ * IoU gate fires against a region larger than the user's
+ * overlay box, and the manual shutter crops a region wider
+ * than the on-screen rect.
  */
-internal fun computeAnalyzerGuide(analyzerWidth: Int, analyzerHeight: Int): GuideRect {
-    val aw = analyzerWidth.toFloat()
-    val ah = analyzerHeight.toFloat()
-    val targetW = aw * GuideMetrics.GUIDE_WIDTH_FRACTION
-    val targetH = targetW / GuideMetrics.CARD_ASPECT_RATIO
-    val cx = aw * 0.5f
-    val cy = ah * 0.45f
-    val left = cx - targetW * 0.5f
-    val top  = cy - targetH * 0.5f
-    return GuideRect(
-        left   = left.coerceAtLeast(0f),
-        top    = top.coerceAtLeast(0f),
-        right  = (left + targetW).coerceAtMost(aw),
-        bottom = (top + targetH).coerceAtMost(ah),
+internal fun computeAnalyzerGuide(
+    analyzerWidth: Int,
+    analyzerHeight: Int,
+    viewWidth: Float,
+    viewHeight: Float,
+): GuideRect {
+    val visible = CardImageOps.visibleRectForViewAspect(
+        imageWidth  = analyzerWidth,
+        imageHeight = analyzerHeight,
+        viewWidth   = viewWidth,
+        viewHeight  = viewHeight,
     )
+    return CardImageOps.guideRectInside(visible)
 }
 
 /**
@@ -543,8 +584,9 @@ private fun triggerCapture(
     processingScope: CoroutineScope,
     controller: ScanFlowController,
     quadInAnalyzer: DetectedQuad?,
-    guideInAnalyzer: GuideRect,
     analyzerSize: Size,
+    viewWidth: Float,
+    viewHeight: Float,
     onComplete: () -> Unit,
 ) {
     val ic = imageCapture ?: return
@@ -562,22 +604,23 @@ private fun triggerCapture(
                             withContext(Dispatchers.Main) { onComplete() }
                             return@launch
                         }
+                        // The analyzer + still capture now share
+                        // a single aspect ratio (4:3, configured
+                        // via shared AspectRatioStrategy), so sx
+                        // ≈ sy and the detected quad scales
+                        // uniformly into bitmap pixels without
+                        // aspect distortion.
                         val sx = bitmap.width  / analyzerSize.width.toFloat()
                         val sy = bitmap.height / analyzerSize.height.toFloat()
                         val quadInBitmap = quadInAnalyzer?.scaled(sx, sy)
-                        val guideInBitmap = GuideRect(
-                            left   = guideInAnalyzer.left   * sx,
-                            top    = guideInAnalyzer.top    * sy,
-                            right  = guideInAnalyzer.right  * sx,
-                            bottom = guideInAnalyzer.bottom * sy,
-                        )
                         withContext(Dispatchers.Default) {
                             BusinessCardPostProcessor.process(
-                                context       = context,
-                                source        = bitmap,
-                                quadInBitmap  = quadInBitmap,
-                                guideInBitmap = guideInBitmap,
-                                controller    = controller,
+                                context      = context,
+                                source       = bitmap,
+                                quadInBitmap = quadInBitmap,
+                                viewWidth    = viewWidth,
+                                viewHeight   = viewHeight,
+                                controller   = controller,
                             )
                         }
                         withContext(Dispatchers.Main) { onComplete() }

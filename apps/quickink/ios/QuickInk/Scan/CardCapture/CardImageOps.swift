@@ -545,6 +545,88 @@ public enum CardImageOps {
         return Int(sum / Int64(src.count))
     }
 
+    // ── FILL_CENTER-aware guide rect ───────────────────────────
+    //
+    // The AVCaptureVideoPreviewLayer uses `resizeAspectFill`,
+    // mirroring Android's PreviewView FILL_CENTER. The user only
+    // ever sees a CENTER SUB-RECT of the underlying camera frame
+    // — not the full frame. The card-shaped guide overlay is
+    // drawn relative to the on-screen canvas, so the
+    // corresponding pixel-buffer region is offset and scaled
+    // relative to the visible sub-rect, NOT the full buffer.
+    //
+    // `visibleRectForViewAspect` returns the sub-rect of an
+    // image (analyzer pixel buffer OR still CGImage) that the
+    // user actually sees through a resizeAspectFill preview of
+    // width:height `viewWidth:viewHeight`.
+    // `guideRectInside` plants the 70%-of-width / 1.586:1 /
+    // 45%-vertical-center guide rect inside that visible region.
+    // Identical math powers the detector's IoU check and the
+    // post-processor's crop, so they agree on "which pixels the
+    // user pointed at."
+
+    /// ISO 7810 ID-1 aspect — mirror of `GuideMetrics.cardAspectRatio`.
+    public static let cardAspectRatio: Float = 1.586
+    /// Guide width as a fraction of the visible-region width.
+    public static let guideWidthFraction: Float = 0.70
+    /// Vertical center of the guide as a fraction of visible-region height.
+    public static let guideVerticalBias: Float = 0.45
+
+    public static func visibleRectForViewAspect(
+        imageWidth: Int,
+        imageHeight: Int,
+        viewWidth: Float,
+        viewHeight: Float,
+    ) -> GuideRect {
+        if viewWidth <= 0 || viewHeight <= 0 {
+            return GuideRect(
+                left: 0, top: 0,
+                right: Float(imageWidth), bottom: Float(imageHeight),
+            )
+        }
+        let viewAspect = viewWidth / viewHeight
+        let srcAspect = Float(imageWidth) / Float(imageHeight)
+        if viewAspect > srcAspect {
+            // View is wider than the image — vertical
+            // center-crop. Rare on portrait phones with a 4:3
+            // sensor, but covers iPads / landscape mounts.
+            let visibleH = Float(imageWidth) / viewAspect
+            let top = (Float(imageHeight) - visibleH) * 0.5
+            return GuideRect(
+                left: 0,
+                top: top,
+                right: Float(imageWidth),
+                bottom: top + visibleH,
+            )
+        } else {
+            // View is taller — horizontal center-crop. Typical
+            // phone case: 4:3 camera inside a 9:19+ view.
+            let visibleW = Float(imageHeight) * viewAspect
+            let left = (Float(imageWidth) - visibleW) * 0.5
+            return GuideRect(
+                left: left,
+                top: 0,
+                right: left + visibleW,
+                bottom: Float(imageHeight),
+            )
+        }
+    }
+
+    public static func guideRectInside(_ visible: GuideRect) -> GuideRect {
+        let targetW = visible.width * guideWidthFraction
+        let targetH = targetW / cardAspectRatio
+        let cx = visible.centerX
+        let cy = visible.top + visible.height * guideVerticalBias
+        let left = cx - targetW * 0.5
+        let top  = cy - targetH * 0.5
+        return GuideRect(
+            left: left,
+            top: top,
+            right: left + targetW,
+            bottom: top + targetH,
+        )
+    }
+
     private static func clamp(_ v: Int, lo: Int, hi: Int) -> Int {
         v < lo ? lo : (v > hi ? hi : v)
     }

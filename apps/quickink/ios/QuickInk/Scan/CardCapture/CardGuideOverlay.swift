@@ -32,6 +32,11 @@ public enum OverlayState: Sendable {
 public struct GuideMetrics: Equatable, Sendable {
     public let rect: CGRect
     public let cornerRadius: CGFloat
+    /// The canvas size this metrics block was computed against,
+    /// in points. Carried through to the detector + post-
+    /// processor so they can apply the same resizeAspectFill
+    /// center-crop math the preview layer uses on-screen.
+    public let canvasSize: CGSize
 
     /// ISO 7810 ID-1 aspect — same number as the spec's 1.586:1.
     public static let cardAspectRatio: CGFloat = 1.586
@@ -51,7 +56,11 @@ public struct GuideMetrics: Equatable, Sendable {
             width: targetW,
             height: targetH,
         )
-        return GuideMetrics(rect: rect, cornerRadius: targetW * 0.04)
+        return GuideMetrics(
+            rect: rect,
+            cornerRadius: targetW * 0.04,
+            canvasSize: canvasSize,
+        )
     }
 }
 

@@ -57,6 +57,14 @@ object BusinessCardPostProcessor {
      * so the caller (the surface) can show an in-screen confirm
      * animation if it wants.
      *
+     * The user-visible region of the bitmap is the FILL_CENTER
+     * center crop whose aspect matches [viewWidth]:[viewHeight]
+     * (the on-screen canvas behind the overlay). The guide rect
+     * we crop to is the 70%-of-width / 1.586:1 / 45%-vertical
+     * sub-rect inside THAT visible region — identical math to
+     * the overlay's draw + the detector's IoU check, so what
+     * gets warped is exactly what the user framed.
+     *
      * Threading: the bitmap warp + JPEG encode are CPU-bound
      * (Canvas + Bitmap.compress); the controller's
      * `onScanComplete` kicks coroutines internally so it's
@@ -66,9 +74,11 @@ object BusinessCardPostProcessor {
         context: Context,
         source: Bitmap,
         quadInBitmap: DetectedQuad?,
-        guideInBitmap: GuideRect,
+        viewWidth: Float,
+        viewHeight: Float,
         controller: ScanFlowController,
     ): Uri? {
+        val guideInBitmap = computeGuideInBitmap(source, viewWidth, viewHeight)
         val quad = quadInBitmap ?: guideInBitmap.asQuad()
         val warped = warpToCardSize(source, quad) ?: return null
         val jpegUri = saveJpeg(context, warped) ?: return null
@@ -137,6 +147,23 @@ object BusinessCardPostProcessor {
         }
         canvas.drawBitmap(source, matrix, paint)
         return out
+    }
+
+    /**
+     * Compute the in-bitmap guide rect that corresponds to the
+     * on-screen overlay, accounting for the FILL_CENTER center
+     * crop the PreviewView applies. Same arithmetic as the
+     * detector's analyzer-guide computation; centralized in
+     * [CardImageOps] so both sides agree.
+     */
+    fun computeGuideInBitmap(source: Bitmap, viewWidth: Float, viewHeight: Float): GuideRect {
+        val visible = CardImageOps.visibleRectForViewAspect(
+            imageWidth  = source.width,
+            imageHeight = source.height,
+            viewWidth   = viewWidth,
+            viewHeight  = viewHeight,
+        )
+        return CardImageOps.guideRectInside(visible)
     }
 
     /**

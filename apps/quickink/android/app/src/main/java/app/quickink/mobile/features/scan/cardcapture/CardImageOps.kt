@@ -819,5 +819,93 @@ object CardImageOps {
         return (sum / length).toInt()
     }
 
+    // ─── FILL_CENTER-aware guide rect computation ────────────────────
+    //
+    // The PreviewView (and the AVCaptureVideoPreviewLayer on iOS)
+    // uses FILL_CENTER / resizeAspectFill: the camera frame is
+    // uniformly scaled until it fills the on-screen canvas, and
+    // anything that doesn't fit is center-cropped. This means the
+    // user only ever sees a CENTER SUB-RECT of the sensor frame
+    // — not the full frame. The card-shaped guide overlay is
+    // drawn relative to the on-screen canvas, so the corresponding
+    // sensor-coordinate region is offset and scaled relative to
+    // the visible sub-rect, NOT the full sensor.
+    //
+    // [visibleRectForViewAspect] returns the sub-rect of an image
+    // (analyzer frame or still bitmap) that the user actually
+    // sees through a FILL_CENTER preview of width:height
+    // `viewWidth:viewHeight`. [guideRectInside] then plants the
+    // 70%-of-width / 1.586:1 / 45%-vertical-center guide rect
+    // inside that visible region. Identical math powers the
+    // detector's IoU check and the post-processor's crop, so
+    // they agree on "which pixels the user pointed at."
+
+    fun visibleRectForViewAspect(
+        imageWidth: Int,
+        imageHeight: Int,
+        viewWidth: Float,
+        viewHeight: Float,
+    ): GuideRect {
+        if (viewWidth <= 0f || viewHeight <= 0f) {
+            return GuideRect(0f, 0f, imageWidth.toFloat(), imageHeight.toFloat())
+        }
+        val viewAspect = viewWidth / viewHeight
+        val srcAspect = imageWidth.toFloat() / imageHeight.toFloat()
+        return if (viewAspect > srcAspect) {
+            // View is wider relative to its height than the
+            // image — to fill the view, the image scales until
+            // it covers the view's width, and the resulting
+            // overflow gets center-cropped on the vertical axis.
+            val visibleH = imageWidth.toFloat() / viewAspect
+            val top = (imageHeight.toFloat() - visibleH) * 0.5f
+            GuideRect(
+                left   = 0f,
+                top    = top,
+                right  = imageWidth.toFloat(),
+                bottom = top + visibleH,
+            )
+        } else {
+            // View is taller (or equal aspect). Horizontal
+            // center-crop. Most modern phones land here — 4:3
+            // sensor inside a 9:19+ view.
+            val visibleW = imageHeight.toFloat() * viewAspect
+            val left = (imageWidth.toFloat() - visibleW) * 0.5f
+            GuideRect(
+                left   = left,
+                top    = 0f,
+                right  = left + visibleW,
+                bottom = imageHeight.toFloat(),
+            )
+        }
+    }
+
+    /**
+     * Plant a 70%-of-width / 1.586:1 / vertically-centered-at-45%
+     * guide rect inside [visible]. Same fractional layout
+     * `GuideMetrics.compute` uses on the on-screen canvas, so the
+     * sensor-space rect lines up with what the user sees.
+     */
+    fun guideRectInside(visible: GuideRect): GuideRect {
+        val targetW = visible.width * GUIDE_WIDTH_FRACTION
+        val targetH = targetW / CARD_ASPECT_RATIO
+        val cx = visible.centerX
+        val cy = visible.top + visible.height * GUIDE_VERTICAL_BIAS
+        val left = cx - targetW * 0.5f
+        val top  = cy - targetH * 0.5f
+        return GuideRect(
+            left   = left,
+            top    = top,
+            right  = left + targetW,
+            bottom = top + targetH,
+        )
+    }
+
+    /** Card ratio (ISO 7810 ID-1) — matches `GuideMetrics.CARD_ASPECT_RATIO`. */
+    const val CARD_ASPECT_RATIO: Float = 1.586f
+    /** Guide width as a fraction of the visible-region width. */
+    const val GUIDE_WIDTH_FRACTION: Float = 0.70f
+    /** Vertical center of the guide as a fraction of the visible-region height. */
+    const val GUIDE_VERTICAL_BIAS: Float = 0.45f
+
     private fun clamp(v: Int, lo: Int, hi: Int): Int = if (v < lo) lo else if (v > hi) hi else v
 }

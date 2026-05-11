@@ -61,13 +61,18 @@ enum class OverlayState {
 
 /**
  * Card-frame dimensions in canvas pixels. The same arithmetic
- * powers both the drawn rect and the analyzer-frame
- * [GuideRect] — the surface re-derives the analyzer-space rect
- * by scaling these numbers by analyzer-width / canvas-width.
+ * powers both the drawn rect AND the in-bitmap guide rect the
+ * post-processor crops to — the surface re-derives the
+ * sensor-space rect by passing [canvasWidth] / [canvasHeight]
+ * to `CardImageOps.visibleRectForViewAspect` +
+ * `CardImageOps.guideRectInside`, which apply the same
+ * FILL_CENTER center-crop math the preview uses on-screen.
  */
 data class GuideMetrics(
     val rect: Rect,
     val cornerRadiusPx: Float,
+    val canvasWidth: Float,
+    val canvasHeight: Float,
 ) {
     companion object {
         /** ISO 7810 ID-1 aspect — same as the spec's 1.586:1. */
@@ -85,8 +90,10 @@ data class GuideMetrics(
             val left = cx - targetW / 2f
             val top  = cy - targetH / 2f
             return GuideMetrics(
-                rect = Rect(left, top, left + targetW, top + targetH),
+                rect           = Rect(left, top, left + targetW, top + targetH),
                 cornerRadiusPx = targetW * 0.04f,
+                canvasWidth    = canvasWidth,
+                canvasHeight   = canvasHeight,
             )
         }
     }

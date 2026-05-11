@@ -42,6 +42,15 @@ public enum BusinessCardPostProcessor {
     /// the surface can show an in-screen confirm animation if
     /// it wants.
     ///
+    /// The user-visible region of the image is the
+    /// resizeAspectFill center crop whose aspect matches
+    /// `viewWidth`:`viewHeight` (the on-screen canvas behind
+    /// the overlay). The guide rect we crop to is the
+    /// 70%-of-width / 1.586:1 / 45%-vertical sub-rect inside
+    /// THAT visible region — identical math to the overlay's
+    /// draw + the detector's IoU check, so what gets warped is
+    /// exactly what the user framed.
+    ///
     /// Threading: warp + JPEG encode are CPU/GPU-bound; the
     /// controller's `onScanComplete` kicks Tasks internally so
     /// it doesn't block. Call from a non-MainActor context.
@@ -49,9 +58,15 @@ public enum BusinessCardPostProcessor {
     public static func process(
         source: CGImage,
         quadInImage: DetectedQuad?,
-        guideInImage: GuideRect,
+        viewWidth: Float,
+        viewHeight: Float,
         controller: ScanFlowController,
     ) async -> URL? {
+        let guideInImage = computeGuideInImage(
+            source:     source,
+            viewWidth:  viewWidth,
+            viewHeight: viewHeight,
+        )
         let quad = quadInImage ?? guideInImage.asQuad
         guard let warpedURL = await warpAndSave(source: source, quad: quad) else {
             return nil
@@ -63,6 +78,25 @@ public enum BusinessCardPostProcessor {
             category:   "Business Card",
         )
         return warpedURL
+    }
+
+    /// Compute the in-image guide rect that corresponds to the
+    /// on-screen overlay, accounting for the resizeAspectFill
+    /// center crop the preview layer applies. Centralized in
+    /// [CardImageOps] so the detector + post-processor agree on
+    /// the user-visible region.
+    public static func computeGuideInImage(
+        source: CGImage,
+        viewWidth: Float,
+        viewHeight: Float,
+    ) -> GuideRect {
+        let visible = CardImageOps.visibleRectForViewAspect(
+            imageWidth:  source.width,
+            imageHeight: source.height,
+            viewWidth:   viewWidth,
+            viewHeight:  viewHeight,
+        )
+        return CardImageOps.guideRectInside(visible)
     }
 
     /// Apply Core Image's `CIPerspectiveCorrection` filter to
