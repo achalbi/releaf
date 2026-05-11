@@ -41,6 +41,9 @@ import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import app.quickink.mobile.data.capture.CapturedLocation
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -212,20 +215,20 @@ object LocationService {
      * keeps a slow GPS warm-up from blocking the scan path.
      */
     @SuppressLint("MissingPermission")
-    private suspend fun fetchLocation(context: Context): Location? {
+    private suspend fun fetchLocation(context: Context): Location? = coroutineScope {
         val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-            ?: return null
-        if (!LocationManagerCompat.isLocationEnabled(manager)) return null
+            ?: return@coroutineScope null
+        if (!LocationManagerCompat.isLocationEnabled(manager)) return@coroutineScope null
         val fineGranted = hasFinePermission(context)
         Log.i(TAG, "fetchLocation: fineGranted=$fineGranted")
 
-        // Walk every enabled provider for a recent + accurate cached
-        // reading. The original 5-minute / no-accuracy-filter window
-        // produced wrong-city reverse-geocodes when a stale fix from
-        // earlier in the day or a 1-km-radius cell triangulation got
-        // picked up. Now: 60s window AND accuracy must be < 100m.
+        // Cached fix — 60 s freshness window. No tight accuracy
+        // filter: NETWORK-provider cached fixes typically report
+        // 500–3000 m accuracy, which is still useful for a city /
+        // sub-locality reverse geocode. A genuinely garbage fix
+        // (10+ km) gets cut at 5 km below.
         val freshnessThresholdMs = 60 * 1000L
-        val accuracyCeilingMeters = 100f
+        val cacheAccuracyCeilingMeters = 5_000f
         val nowMs = System.currentTimeMillis()
         val cached = manager.allProviders
             .mapNotNull { provider ->
@@ -236,20 +239,60 @@ object LocationService {
                 }
             }
             .filter { nowMs - it.time < freshnessThresholdMs }
-            .filter { it.hasAccuracy() && it.accuracy < accuracyCeilingMeters }
-            .maxByOrNull { it.time }
+            .filter { !it.hasAccuracy() || it.accuracy < cacheAccuracyCeilingMeters }
+            // Best accuracy wins among recent fixes — earlier code
+            // picked newest, which would prefer a stale NETWORK fix
+            // over a fresh GPS one.
+            .minByOrNull { if (it.hasAccuracy()) it.accuracy else Float.MAX_VALUE }
         if (cached != null) {
-            Log.i(TAG, "fetchLocation: using cached fix accuracy=${cached.accuracy}m age=${nowMs - cached.time}ms provider=${cached.provider}")
-            return cached
+            Log.i(
+                TAG,
+                "fetchLocation: using cached fix provider=${cached.provider} accuracy=${cached.accuracy}m age=${nowMs - cached.time}ms",
+            )
+            return@coroutineScope cached
         }
 
-        // No fresh-enough cache → one-shot request. 5s timeout via
-        // withTimeoutOrNull; a "never resolved" path (provider
-        // stuck) bails cleanly rather than blocking the scan flow
-        // forever.
-        return withTimeoutOrNull(5_000L) {
-            requestSingleLocation(manager, fineGranted = fineGranted)
+        // Fresh fetch — race GPS + NETWORK in parallel inside one
+        // shared budget. GPS gets street-level accuracy but warms
+        // up slow (5–30 s typical, longer indoors); NETWORK is
+        // ~1 s with city-block accuracy. Running them concurrently
+        // means an indoor session where GPS never fixes still
+        // returns a NETWORK result inside the budget, and an
+        // outdoor session gets the better GPS reading without
+        // serial waits.
+        val gpsBudgetMs     = 10_000L
+        val networkBudgetMs = 8_000L
+        val gpsJob = if (fineGranted && manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            async {
+                val fix = withTimeoutOrNull(gpsBudgetMs) {
+                    requestFromProvider(manager, LocationManager.GPS_PROVIDER)
+                }
+                Log.i(TAG, "fetchLocation: GPS result=${fix?.let { "fix accuracy=${it.accuracy}m" } ?: "null/timeout"}")
+                fix
+            }
+        } else null
+        val networkJob = if (manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+            async {
+                val fix = withTimeoutOrNull(networkBudgetMs) {
+                    requestFromProvider(manager, LocationManager.NETWORK_PROVIDER)
+                }
+                Log.i(TAG, "fetchLocation: NETWORK result=${fix?.let { "fix accuracy=${it.accuracy}m" } ?: "null/timeout"}")
+                fix
+            }
+        } else null
+        if (gpsJob == null && networkJob == null) {
+            Log.i(TAG, "fetchLocation: no provider enabled, returning null")
+            return@coroutineScope null
         }
+
+        // awaitAll waits for both to finish (success or timeout),
+        // then we prefer GPS over NETWORK. The 10 s upper bound
+        // (max of the two budgets) is acceptable for scan UX —
+        // the user typically waits a few seconds for OCR anyway.
+        val results = listOfNotNull(gpsJob, networkJob).awaitAll()
+        val gpsResult = gpsJob?.let { results[0] }
+        val networkResult = networkJob?.let { results[results.size - 1] }
+        gpsResult ?: networkResult
     }
 
     /**
@@ -259,34 +302,19 @@ object LocationService {
      * `null` when cancelled or when the provider stack reports
      * unavailable.
      */
+    /**
+     * Bridge `LocationManager.getCurrentLocation` (API ≥ 30) /
+     * `requestSingleUpdate` (older API levels) to a suspending call
+     * for the given provider. Resolves with the first fix the
+     * provider produces, or `null` when the provider reports
+     * unavailable or the caller cancels (typically via the parent
+     * `withTimeoutOrNull` budget set by [fetchLocation]).
+     */
     @SuppressLint("MissingPermission")
-    private suspend fun requestSingleLocation(
+    private suspend fun requestFromProvider(
         manager: LocationManager,
-        fineGranted: Boolean,
+        provider: String,
     ): Location? {
-        // Provider preference order — GPS first when ACCESS_FINE_-
-        // LOCATION is granted (street-level accuracy, ~5m typical).
-        // Without fine permission GPS is off-limits, so we fall
-        // back to NETWORK (~city-block triangulation). PASSIVE is
-        // a "use whatever's already on" hint and is fine either
-        // way. Previously NETWORK was first regardless, which
-        // capped accuracy at city-block precision and produced the
-        // wrong-city geocodes from earlier reports.
-        val preferred = if (fineGranted) {
-            listOf(
-                LocationManager.GPS_PROVIDER,
-                LocationManager.NETWORK_PROVIDER,
-                LocationManager.PASSIVE_PROVIDER,
-            )
-        } else {
-            listOf(
-                LocationManager.NETWORK_PROVIDER,
-                LocationManager.PASSIVE_PROVIDER,
-            )
-        }
-        val provider = preferred.firstOrNull { manager.isProviderEnabled(it) } ?: return null
-        Log.i(TAG, "requestSingleLocation: provider=$provider")
-
         return suspendCancellableCoroutine { cont ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val cancellation = CancellationSignal()
