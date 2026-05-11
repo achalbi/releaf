@@ -690,11 +690,18 @@ struct ScanDetailScreen: View {
                 // rows, location toggle off, denied permission, or a
                 // failed geocode). Coordinates without a place name
                 // aren't surfaced here — they'd read as raw numbers,
-                // not useful for the average user.
-                if let subLocality = capture.subLocality, !subLocality.isEmpty {
+                // not useful for the average user. Dedupe at render
+                // time so existing rows where the geocoder fell back
+                // to the city for both fields don't show identical
+                // Area + City rows.
+                let names = LocationService.dedupePlaceNames(
+                    locality:    capture.locality,
+                    subLocality: capture.subLocality
+                )
+                if let subLocality = names.subLocality, !subLocality.isEmpty {
                     detailRow(label: "Area", value: subLocality)
                 }
-                if let locality = capture.locality, !locality.isEmpty {
+                if let locality = names.locality, !locality.isEmpty {
                     detailRow(label: "City", value: locality)
                 }
                 tagsRow(for: capture)
@@ -1147,17 +1154,23 @@ struct ScanDetailScreen: View {
         guard let placemark = try? await CLGeocoder().reverseGeocodeLocation(clLocation).first else {
             return
         }
-        let newLocality    = placemark.locality
-        let newSubLocality = placemark.subLocality
+        // Same dedupe as the write path in LocationService — drop
+        // the sub-locality when it duplicates the locality so the
+        // backfilled row doesn't recreate the "Area = City" UX
+        // problem.
+        let names = LocationService.dedupePlaceNames(
+            locality:    placemark.locality,
+            subLocality: placemark.subLocality
+        )
         // Bail when the retry yields nothing useful — saves a
         // pointless write + a no-op sync push.
-        guard newLocality != nil || newSubLocality != nil else { return }
+        guard names.locality != nil || names.subLocality != nil else { return }
 
         do {
             try await CaptureRepository().updateLocality(
                 captureId:   captureId,
-                locality:    newLocality    ?? cap.locality,
-                subLocality: newSubLocality ?? cap.subLocality
+                locality:    names.locality    ?? cap.locality,
+                subLocality: names.subLocality ?? cap.subLocality
             )
             await loadCapture()
         } catch {

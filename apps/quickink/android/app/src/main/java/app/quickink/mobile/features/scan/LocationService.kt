@@ -101,6 +101,32 @@ object LocationService {
     }
 
     /**
+     * Some `Geocoder` results return the same string for `locality`
+     * and `subLocality` when neighborhood-level data isn't available
+     * — typical for many non-US cities where the geocoder only
+     * resolves to the city, not the neighborhood. Dropping the
+     * redundant sub-locality here keeps the Details card from
+     * rendering an "Area" and a "City" row with identical values.
+     *
+     * Called by `captureCurrent` (write-time, so new scans land
+     * clean), by `ScanDetailScreen`'s lazy retry (so backfilled
+     * rows land clean too), and by the Details render path (so
+     * existing rows with duplicate values render correctly without
+     * a DB migration). Mirror of iOS `LocationService.dedupePlaceNames`.
+     */
+    fun dedupePlaceNames(
+        locality: String?,
+        subLocality: String?,
+    ): Pair<String?, String?> {
+        val trimmedLoc = locality?.trim()
+        val trimmedSub = subLocality?.trim()
+        if (!trimmedLoc.isNullOrEmpty() && trimmedLoc == trimmedSub) {
+            return locality to null
+        }
+        return locality to subLocality
+    }
+
+    /**
      * Fetch a single location reading + reverse-geocode it. Returns
      * `null` when:
      *   - location permission isn't granted,
@@ -117,11 +143,15 @@ object LocationService {
         return withContext(Dispatchers.IO) {
             val location = fetchLocation(appContext) ?: return@withContext null
             val placemark = reverseGeocode(appContext, location)
+            val (locality, subLocality) = dedupePlaceNames(
+                locality    = placemark?.first,
+                subLocality = placemark?.second,
+            )
             CapturedLocation(
                 latitude    = location.latitude,
                 longitude   = location.longitude,
-                locality    = placemark?.first,
-                subLocality = placemark?.second,
+                locality    = locality,
+                subLocality = subLocality,
             )
         }
     }

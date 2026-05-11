@@ -113,11 +113,15 @@ public final class LocationService: NSObject, @unchecked Sendable, CLLocationMan
         // don't merit logging. `try?` swallows them — the capture
         // simply records the coordinates without the place name.
         let placemark = try? await CLGeocoder().reverseGeocodeLocation(location).first
+        let names = Self.dedupePlaceNames(
+            locality:    placemark?.locality,
+            subLocality: placemark?.subLocality
+        )
         return CapturedLocation(
             latitude:    location.coordinate.latitude,
             longitude:   location.coordinate.longitude,
-            locality:    placemark?.locality,
-            subLocality: placemark?.subLocality
+            locality:    names.locality,
+            subLocality: names.subLocality
         )
     }
 
@@ -171,6 +175,34 @@ public final class LocationService: NSObject, @unchecked Sendable, CLLocationMan
         locationContinuation = nil
         stateLock.unlock()
         cont?.resume(returning: nil)
+    }
+}
+
+// MARK: - Place-name dedupe
+
+extension LocationService {
+    /// Some `CLGeocoder` results return the same string for
+    /// `locality` and `subLocality` when neighborhood-level data
+    /// isn't available — typical for many non-US cities where the
+    /// geocoder only resolves to the city, not the neighborhood.
+    /// Dropping the redundant sub-locality here keeps the Details
+    /// card from rendering an "Area" and a "City" row with
+    /// identical values.
+    ///
+    /// Called by `captureCurrent` (write-time, so new scans land
+    /// clean) and by `ScanDetailScreen`'s render path (so existing
+    /// rows with duplicate values render correctly without a
+    /// DB migration).
+    public static func dedupePlaceNames(
+        locality: String?,
+        subLocality: String?
+    ) -> (locality: String?, subLocality: String?) {
+        let trimmedLoc = locality?.trimmingCharacters(in: .whitespaces)
+        let trimmedSub = subLocality?.trimmingCharacters(in: .whitespaces)
+        if let l = trimmedLoc, !l.isEmpty, l == trimmedSub {
+            return (locality: locality, subLocality: nil)
+        }
+        return (locality: locality, subLocality: subLocality)
     }
 }
 

@@ -204,7 +204,14 @@ fun ScanDetailScreen(
             }.getOrNull()
         } ?: return@LaunchedEffect
 
-        val (newLocality, newSubLocality) = result
+        // Same dedupe as the write path in LocationService — drop
+        // the sub-locality when it duplicates the locality so the
+        // backfilled row doesn't recreate the "Area = City" UX
+        // problem.
+        val (newLocality, newSubLocality) = LocationService.dedupePlaceNames(
+            locality    = result.first,
+            subLocality = result.second,
+        )
         if (newLocality.isNullOrBlank() && newSubLocality.isNullOrBlank()) return@LaunchedEffect
 
         runCatching {
@@ -1240,11 +1247,18 @@ private fun DetailsCard(
         // before Phase 7, with the location toggle off, with the
         // permission denied, or with a failed geocode lookup all
         // omit these rows. Raw coordinates without a place name
-        // aren't surfaced — they'd read as opaque decimals.
-        capture.subLocality
+        // aren't surfaced — they'd read as opaque decimals. Dedupe
+        // at render time so existing rows where the geocoder fell
+        // back to the city for both fields don't show identical
+        // Area + City rows.
+        val (locOut, subOut) = LocationService.dedupePlaceNames(
+            locality    = capture.locality,
+            subLocality = capture.subLocality,
+        )
+        subOut
             ?.takeIf { it.isNotBlank() }
             ?.let { DetailRow(label = "Area", value = it) }
-        capture.locality
+        locOut
             ?.takeIf { it.isNotBlank() }
             ?.let { DetailRow(label = "City", value = it) }
         TagsRow(category = capture.category, onAddTag = onAddTag)
