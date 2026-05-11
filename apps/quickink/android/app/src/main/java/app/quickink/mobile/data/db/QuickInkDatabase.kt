@@ -56,25 +56,28 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         ProfileSettingsEntity::class,
         AnalyticsOutboxEntity::class,
     ],
-    // v7 — adds latitude / longitude / locality / sub_locality
-    // columns to `captures` so each scan can carry its capture-time
-    // geolocation (Phase 7 — Geolocation). Mirror of iOS GRDB
-    // `v6_capture_geolocation` migration. v6 added the
-    // `analytics_outbox` table that AnalyticsRepository writes
-    // capture / identify events into for the QuickInk backend
-    // (api-quickink.thoughtbasics.com). v5 — adds `captures.source`
-    // ("scan" / "import") so the Library cards can flag captures
-    // that came in from the system photo picker rather than the
-    // document scanner. v4 — adds the `profile_settings` table
-    // (display name, phone, personality punchline, photo URI/Drive
-    // id) so profile state syncs across devices instead of being
-    // stuck in local SharedPreferences. v3 —
-    // captures.pdf_drive_file_id + captures.preview_drive_file_id
-    // (Drive ids of the per-row binary uploads). v2 added the
-    // categories table + captures.category column.
-    // `fallbackToDestructiveMigration` below handles the rebuild;
-    // when real users have data we'll register real Migration objects.
-    version       = 7,
+    // v8 — adds `captures.address`, the formatted full street
+    // address built from `Geocoder.getFromLocation` results
+    // (Phase 7.1 — Address). Mirror of iOS GRDB
+    // `v7_capture_address` migration. v7 added latitude /
+    // longitude / locality / sub_locality columns to `captures`
+    // so each scan can carry its capture-time geolocation. v6
+    // added the `analytics_outbox` table that AnalyticsRepository
+    // writes capture / identify events into for the QuickInk
+    // backend (api-quickink.thoughtbasics.com). v5 — adds
+    // `captures.source` ("scan" / "import") so the Library cards
+    // can flag captures that came in from the system photo
+    // picker rather than the document scanner. v4 — adds the
+    // `profile_settings` table (display name, phone, personality
+    // punchline, photo URI/Drive id) so profile state syncs
+    // across devices instead of being stuck in local
+    // SharedPreferences. v3 — captures.pdf_drive_file_id +
+    // captures.preview_drive_file_id (Drive ids of the per-row
+    // binary uploads). v2 added the categories table +
+    // captures.category column. `fallbackToDestructiveMigration`
+    // below handles the rebuild; when real users have data we'll
+    // register real Migration objects.
+    version       = 8,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {

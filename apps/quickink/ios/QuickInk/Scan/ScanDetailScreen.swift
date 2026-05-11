@@ -685,15 +685,19 @@ struct ScanDetailScreen: View {
                     value: capture.category ?? "Unsorted",
                     valueColor: capture.category != nil ? QuickInkColors.accent : QuickInkColors.inkSoft
                 )
-                // Geographic Area / City rows — hidden when the
-                // capture has no reverse-geocoded place name (older
-                // rows, location toggle off, denied permission, or a
-                // failed geocode). Coordinates without a place name
-                // aren't surfaced here — they'd read as raw numbers,
-                // not useful for the average user. Dedupe at render
-                // time so existing rows where the geocoder fell back
-                // to the city for both fields don't show identical
-                // Area + City rows.
+                // Geographic Area / City / Address rows — hidden
+                // when the capture has no reverse-geocoded place
+                // name (older rows, location toggle off, denied
+                // permission, or a failed geocode). Coordinates
+                // without a place name aren't surfaced here — they'd
+                // read as raw numbers, not useful for the average
+                // user. Dedupe at render time so existing rows
+                // where the geocoder fell back to the city for both
+                // fields don't show identical Area + City rows.
+                if let address = capture.address?.trimmingCharacters(in: .whitespaces),
+                   !address.isEmpty {
+                    detailRow(label: "Address", value: address)
+                }
                 let names = LocationService.dedupePlaceNames(
                     locality:    capture.locality,
                     subLocality: capture.subLocality
@@ -1123,7 +1127,8 @@ struct ScanDetailScreen: View {
             let result = try await dbQueue.read { db -> CaptureSummary? in
                 try CaptureSummary.fetchOne(db, sql: """
                     SELECT id, title, preview_uri, pdf_uri, category, page_count,
-                           created_at, source, latitude, longitude, locality, sub_locality
+                           created_at, source, latitude, longitude,
+                           locality, sub_locality, address
                     FROM captures
                     WHERE id = ? AND deleted_at IS NULL
                     LIMIT 1
@@ -1147,15 +1152,19 @@ struct ScanDetailScreen: View {
             print("[Location] retry: no capture loaded, skip")
             return
         }
-        print("[Location] retry: row state lat=\(cap.latitude.map { "\($0)" } ?? "nil") lon=\(cap.longitude.map { "\($0)" } ?? "nil") locality=\(cap.locality ?? "nil") subLocality=\(cap.subLocality ?? "nil")")
+        print("[Location] retry: row state lat=\(cap.latitude.map { "\($0)" } ?? "nil") lon=\(cap.longitude.map { "\($0)" } ?? "nil") locality=\(cap.locality ?? "nil") subLocality=\(cap.subLocality ?? "nil") address=\(cap.address ?? "nil")")
         guard let lat = cap.latitude, let lon = cap.longitude else {
             print("[Location] retry: no coordinates, nothing to backfill")
             return
         }
         let hasLocality    = !(cap.locality?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
         let hasSubLocality = !(cap.subLocality?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
-        if hasLocality && hasSubLocality {
-            print("[Location] retry: already have both names, skip")
+        let hasAddress     = !(cap.address?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
+        // Skip when every geocoded field is already populated.
+        // Otherwise re-run — we want to backfill any of the three
+        // that the original geocode missed.
+        if hasLocality && hasSubLocality && hasAddress {
+            print("[Location] retry: already have locality + subLocality + address, skip")
             return
         }
 
@@ -1173,19 +1182,21 @@ struct ScanDetailScreen: View {
             locality:    placemark.locality,
             subLocality: placemark.subLocality
         )
-        print("[Location] retry: dedupe → locality=\(names.locality ?? "nil") subLocality=\(names.subLocality ?? "nil")")
+        let newAddress = LocationService.formatAddress(from: placemark)
+        print("[Location] retry: dedupe → locality=\(names.locality ?? "nil") subLocality=\(names.subLocality ?? "nil") address=\(newAddress ?? "nil")")
         // Bail when the retry yields nothing useful — saves a
         // pointless write + a no-op sync push.
-        guard names.locality != nil || names.subLocality != nil else {
+        guard names.locality != nil || names.subLocality != nil || newAddress != nil else {
             print("[Location] retry: nothing useful to persist, skip")
             return
         }
 
         do {
-            try await CaptureRepository().updateLocality(
+            try await CaptureRepository().updateLocation(
                 captureId:   captureId,
                 locality:    names.locality    ?? cap.locality,
-                subLocality: names.subLocality ?? cap.subLocality
+                subLocality: names.subLocality ?? cap.subLocality,
+                address:     newAddress        ?? cap.address
             )
             print("[Location] retry: persisted update for capture=\(captureId)")
             await loadCapture()

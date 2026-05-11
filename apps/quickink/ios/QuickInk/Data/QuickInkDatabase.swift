@@ -377,6 +377,26 @@ public final class QuickInkDatabase: @unchecked Sendable {
             try db.execute(sql: "ALTER TABLE captures ADD COLUMN sub_locality TEXT")
         }
 
+        // ─── v7_capture_address ─────────────────────────────────
+        //
+        // Adds the formatted full street address alongside the
+        // (locality, sub_locality) pair. The composed string —
+        // built from CLPlacemark via CNPostalAddressFormatter —
+        // gives the Details card a "1234 Main St, Mission
+        // District, San Francisco, CA 94110, USA"-style line that
+        // carries the street + ZIP + country which the
+        // city/area pair alone can't surface.
+        //
+        // Nullable for the same reasons as the v6 columns: older
+        // rows, location toggle off, denied permission, or a
+        // failed geocode all read back as NULL. Round-trips through
+        // Drive via `CapturePayloadV2.address`.
+        //
+        // Mirror of Android's Room v8 schema bump.
+        migrator.registerMigration("v7_capture_address") { db in
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN address TEXT")
+        }
+
         return migrator
     }
 }

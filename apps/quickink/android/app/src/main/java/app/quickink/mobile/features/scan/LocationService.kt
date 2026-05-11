@@ -159,21 +159,33 @@ object LocationService {
                 return@withContext null
             }
             Log.i(TAG, "captureCurrent: got fix lat=${location.latitude} lon=${location.longitude}")
-            val placemark = reverseGeocode(appContext, location)
-            Log.i(TAG, "captureCurrent: placemark raw locality=${placemark?.first} subLocality=${placemark?.second}")
+            val resolved = reverseGeocodeFull(appContext, location)
+            Log.i(TAG, "captureCurrent: placemark raw locality=${resolved?.locality} subLocality=${resolved?.subLocality} address=${resolved?.address}")
             val (locality, subLocality) = dedupePlaceNames(
-                locality    = placemark?.first,
-                subLocality = placemark?.second,
+                locality    = resolved?.locality,
+                subLocality = resolved?.subLocality,
             )
-            Log.i(TAG, "captureCurrent: dedupe -> locality=$locality subLocality=$subLocality")
+            Log.i(TAG, "captureCurrent: dedupe -> locality=$locality subLocality=$subLocality address=${resolved?.address}")
             CapturedLocation(
                 latitude    = location.latitude,
                 longitude   = location.longitude,
                 locality    = locality,
                 subLocality = subLocality,
+                address     = resolved?.address,
             )
         }
     }
+
+    /**
+     * Bundle of fields a single geocode call produces — kept as a
+     * tight value type so the call sites get a labelled triple
+     * rather than juggling three positional `Pair`s.
+     */
+    data class ResolvedPlace(
+        val locality: String?,
+        val subLocality: String?,
+        val address: String?,
+    )
 
     /**
      * Try the cheap path first: the most recent cached fix from any
@@ -269,75 +281,94 @@ object LocationService {
 
     /**
      * Public reverse-geocode entry point used by `ScanDetailScreen`'s
-     * post-load retry: when a capture has lat/lon but no locality /
-     * sub-locality (Geocoder was rate-limited / offline at scan
-     * time), Details re-runs this and persists the result. Builds
-     * a transient `Location` so the inner [reverseGeocode] overload
-     * doesn't need a second copy of the API-level branching.
+     * post-load retry: when a capture has lat/lon but no place names
+     * (Geocoder was rate-limited / offline at scan time), Details
+     * re-runs this and persists the result. Returns a tight
+     * `ResolvedPlace` triple — locality + sub-locality + formatted
+     * address — so the caller doesn't need to peek into `Address`
+     * directly.
      *
      * Returns `null` on any failure — same contract as the inner
      * overload, so callers can no-op cleanly.
      */
-    suspend fun reverseGeocode(
+    suspend fun reverseGeocodeFull(
         context: Context,
         latitude: Double,
         longitude: Double,
-    ): Pair<String?, String?>? {
+    ): ResolvedPlace? {
         val loc = Location("manual").apply {
             this.latitude  = latitude
             this.longitude = longitude
         }
-        return reverseGeocode(context, loc)
+        return reverseGeocodeFull(context, loc)
     }
 
     /**
-     * Reverse-geocode a `Location` to (locality, subLocality). Uses
-     * the API ≥ 33 callback form when available so we don't block on
-     * the network call from the IO dispatcher; falls back to the
-     * synchronous overload on older devices.
+     * Reverse-geocode a `Location` into a `ResolvedPlace` (locality,
+     * sub-locality, full formatted address). Uses the API ≥ 33
+     * callback form when available so we don't block on the network
+     * call from the IO dispatcher; falls back to the synchronous
+     * overload on older devices.
      *
      * Returns `null` on any failure — empty results, IO error, or a
      * null address list — so the caller writes the coordinates
      * without place names rather than failing the whole capture.
      */
-    private suspend fun reverseGeocode(
+    private suspend fun reverseGeocodeFull(
         context: Context,
         location: Location,
-    ): Pair<String?, String?>? {
+    ): ResolvedPlace? {
         val geocoder = runCatching {
             Geocoder(context, Locale.getDefault())
         }.getOrNull() ?: return null
 
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val address: android.location.Address? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             withTimeoutOrNull(5_000L) {
-                suspendCancellableCoroutine<Pair<String?, String?>?> { cont ->
+                suspendCancellableCoroutine<android.location.Address?> { cont ->
                     geocoder.getFromLocation(
                         location.latitude,
                         location.longitude,
                         1,
                     ) { addresses ->
-                        val address = addresses.firstOrNull()
-                        if (address == null) {
-                            if (cont.isActive) cont.resume(null)
-                        } else {
-                            if (cont.isActive) {
-                                cont.resume(address.locality to address.subLocality)
-                            }
-                        }
+                        if (cont.isActive) cont.resume(addresses.firstOrNull())
                     }
                 }
             }
         } else {
             runCatching {
                 @Suppress("DEPRECATION")
-                val list = geocoder.getFromLocation(
+                geocoder.getFromLocation(
                     location.latitude,
                     location.longitude,
                     1,
-                )
-                val address = list?.firstOrNull() ?: return@runCatching null
-                address.locality to address.subLocality
+                )?.firstOrNull()
             }.getOrNull()
         }
+
+        if (address == null) return null
+        return ResolvedPlace(
+            locality    = address.locality,
+            subLocality = address.subLocality,
+            address     = formatFullAddress(address),
+        )
+    }
+
+    /**
+     * Join every `Address.getAddressLine(i)` line with ", " to
+     * produce a single-line full address. The geocoder fills
+     * `getAddressLine(0)` for most regions already; the loop covers
+     * the rare case where it splits across multiple lines (some
+     * locales / providers). Returns `null` when no lines are
+     * present so the Details card simply hides the row.
+     */
+    private fun formatFullAddress(address: android.location.Address): String? {
+        val max = address.maxAddressLineIndex
+        if (max < 0) return null
+        val parts = (0..max)
+            .mapNotNull { address.getAddressLine(it) }
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        if (parts.isEmpty()) return null
+        return parts.joinToString(separator = ", ")
     }
 }

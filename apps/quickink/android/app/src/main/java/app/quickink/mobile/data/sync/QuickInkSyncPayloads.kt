@@ -167,6 +167,13 @@ data class CapturePayloadV2(
     @SerialName("locality")              val locality: String? = null,
     /** Reverse-geocoded neighbourhood / area. `Geocoder.subLocality`. */
     @SerialName("sub_locality")          val subLocality: String? = null,
+    /**
+     * Formatted full street address built from `Geocoder` results.
+     * Round-trips through Drive verbatim — we don't re-format on
+     * receive so the receiver sees exactly what the capturing
+     * device's locale produced.
+     */
+    @SerialName("address")               val address: String? = null,
     @SerialName("created_at")            val createdAt: String,
     @SerialName("updated_at")            val updatedAt: String,
 )
@@ -186,6 +193,7 @@ fun CaptureEntity.toV2Payload(): CapturePayloadV2 = CapturePayloadV2(
     longitude          = longitude,
     locality           = locality,
     subLocality        = subLocality,
+    address            = address,
     createdAt          = createdAt,
     updatedAt          = updatedAt,
 )
@@ -203,6 +211,7 @@ fun CapturePayloadV2.toEntity(driveFileId: String?): CaptureEntity = CaptureEnti
     longitude          = longitude,
     locality           = locality,
     subLocality        = subLocality,
+    address            = address,
     conflictStub       = null,
     driveFileId        = driveFileId,
     pdfDriveFileId     = pdfDriveFileId,

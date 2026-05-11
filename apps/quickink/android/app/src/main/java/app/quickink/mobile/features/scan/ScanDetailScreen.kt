@@ -190,11 +190,11 @@ fun ScanDetailScreen(
     // system couldn't resolve). Re-runs only when the in-screen
     // capture row changes (new open / after a sync refresh) so we
     // don't loop on a missing-data row.
-    LaunchedEffect(capture?.id, capture?.locality, capture?.subLocality) {
+    LaunchedEffect(capture?.id, capture?.locality, capture?.subLocality, capture?.address) {
         val cap = capture ?: return@LaunchedEffect
         android.util.Log.i(
             "QuickInkLocation",
-            "retry: row state lat=${cap.latitude} lon=${cap.longitude} locality=${cap.locality} subLocality=${cap.subLocality}",
+            "retry: row state lat=${cap.latitude} lon=${cap.longitude} locality=${cap.locality} subLocality=${cap.subLocality} address=${cap.address}",
         )
         val lat = cap.latitude
         val lon = cap.longitude
@@ -204,23 +204,24 @@ fun ScanDetailScreen(
         }
         val hasLocality    = !cap.locality.isNullOrBlank()
         val hasSubLocality = !cap.subLocality.isNullOrBlank()
-        if (hasLocality && hasSubLocality) {
-            android.util.Log.i("QuickInkLocation", "retry: already have both names, skip")
+        val hasAddress     = !cap.address.isNullOrBlank()
+        if (hasLocality && hasSubLocality && hasAddress) {
+            android.util.Log.i("QuickInkLocation", "retry: already have locality + subLocality + address, skip")
             return@LaunchedEffect
         }
 
-        val result = withContext(Dispatchers.IO) {
+        val resolved = withContext(Dispatchers.IO) {
             runCatching {
-                LocationService.reverseGeocode(context, lat, lon)
+                LocationService.reverseGeocodeFull(context, lat, lon)
             }.getOrNull()
         }
-        if (result == null) {
+        if (resolved == null) {
             android.util.Log.i("QuickInkLocation", "retry: geocode failed")
             return@LaunchedEffect
         }
         android.util.Log.i(
             "QuickInkLocation",
-            "retry: placemark raw locality=${result.first} subLocality=${result.second}",
+            "retry: placemark raw locality=${resolved.locality} subLocality=${resolved.subLocality} address=${resolved.address}",
         )
 
         // Same dedupe as the write path in LocationService — drop
@@ -228,23 +229,25 @@ fun ScanDetailScreen(
         // backfilled row doesn't recreate the "Area = City" UX
         // problem.
         val (newLocality, newSubLocality) = LocationService.dedupePlaceNames(
-            locality    = result.first,
-            subLocality = result.second,
+            locality    = resolved.locality,
+            subLocality = resolved.subLocality,
         )
+        val newAddress = resolved.address
         android.util.Log.i(
             "QuickInkLocation",
-            "retry: dedupe -> locality=$newLocality subLocality=$newSubLocality",
+            "retry: dedupe -> locality=$newLocality subLocality=$newSubLocality address=$newAddress",
         )
-        if (newLocality.isNullOrBlank() && newSubLocality.isNullOrBlank()) {
+        if (newLocality.isNullOrBlank() && newSubLocality.isNullOrBlank() && newAddress.isNullOrBlank()) {
             android.util.Log.i("QuickInkLocation", "retry: nothing useful to persist, skip")
             return@LaunchedEffect
         }
 
         runCatching {
-            captureDao.setLocality(
+            captureDao.setLocation(
                 id          = captureId,
                 locality    = newLocality ?: cap.locality,
                 subLocality = newSubLocality ?: cap.subLocality,
+                address     = newAddress ?: cap.address,
                 timestamp   = IsoClock.nowIso(),
             )
             capture = captureDao.findById(captureId)
@@ -1271,15 +1274,18 @@ private fun DetailsCard(
             value      = capture.category ?: "Unsorted",
             valueColor = if (capture.category != null) colors.accent else colors.inkSoft,
         )
-        // Area / City rows render only when the reverse-geocoded
-        // place name landed on the capture row. Captures taken
-        // before Phase 7, with the location toggle off, with the
-        // permission denied, or with a failed geocode lookup all
-        // omit these rows. Raw coordinates without a place name
-        // aren't surfaced — they'd read as opaque decimals. Dedupe
-        // at render time so existing rows where the geocoder fell
-        // back to the city for both fields don't show identical
-        // Area + City rows.
+        // Address / Area / City rows render only when the reverse-
+        // geocoded place name landed on the capture row. Captures
+        // taken before Phase 7, with the location toggle off, with
+        // the permission denied, or with a failed geocode lookup
+        // all omit these rows. Raw coordinates without a place
+        // name aren't surfaced — they'd read as opaque decimals.
+        // Dedupe at render time so existing rows where the geocoder
+        // fell back to the city for both fields don't show
+        // identical Area + City rows.
+        capture.address
+            ?.takeIf { it.isNotBlank() }
+            ?.let { DetailRow(label = "Address", value = it) }
         val (locOut, subOut) = LocationService.dedupePlaceNames(
             locality    = capture.locality,
             subLocality = capture.subLocality,

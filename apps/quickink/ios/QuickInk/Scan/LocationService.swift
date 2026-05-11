@@ -26,6 +26,7 @@
 
 import Foundation
 import CoreLocation
+import Contacts
 
 /// Result of a one-shot location capture. All four fields are
 /// optional from the caller's perspective: `latitude` and `longitude`
@@ -38,6 +39,12 @@ public struct CapturedLocation: Equatable, Sendable {
     public let longitude: Double
     public let locality: String?
     public let subLocality: String?
+    /// Formatted full street address built from the placemark via
+    /// `CNPostalAddressFormatter` — single-line, locale-aware,
+    /// e.g. "1234 Main St, Mission District, San Francisco CA
+    /// 94110, USA". Nil when the geocoder didn't return a
+    /// postalAddress (offline, rate-limited, or remote area).
+    public let address: String?
 }
 
 /// One-call helper for "give me the current location with a
@@ -128,11 +135,14 @@ public final class LocationService: NSObject, @unchecked Sendable, CLLocationMan
             subLocality: placemark?.subLocality
         )
         print("[Location] captureCurrent: dedupe → locality=\(names.locality ?? "nil") subLocality=\(names.subLocality ?? "nil")")
+        let address = placemark.flatMap(Self.formatAddress(from:))
+        print("[Location] captureCurrent: address=\(address ?? "nil")")
         return CapturedLocation(
             latitude:    lat,
             longitude:   lon,
             locality:    names.locality,
-            subLocality: names.subLocality
+            subLocality: names.subLocality,
+            address:     address
         )
     }
 
@@ -205,6 +215,28 @@ private extension CLAuthorizationStatus {
         case .authorizedWhenInUse: return "authorizedWhenInUse"
         @unknown default:          return "unknown(\(self.rawValue))"
         }
+    }
+}
+
+// MARK: - Address formatting
+
+extension LocationService {
+    /// Build a single-line formatted street address from a
+    /// `CLPlacemark`. Uses `CNPostalAddressFormatter` so the field
+    /// order respects the placemark's locale (US "Street, City,
+    /// State ZIP" vs European "Street, ZIP City"), then collapses
+    /// the formatter's newlines into ", " so the string fits on a
+    /// single Details-card row that wraps to two lines if needed.
+    /// Returns `nil` when the placemark carries no `postalAddress`.
+    public static func formatAddress(from placemark: CLPlacemark) -> String? {
+        guard let postal = placemark.postalAddress else { return nil }
+        let formatter = CNPostalAddressFormatter()
+        formatter.style = .mailingAddress
+        let multiline = formatter.string(from: postal)
+        let single = multiline
+            .replacingOccurrences(of: "\n", with: ", ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return single.isEmpty ? nil : single
     }
 }
 

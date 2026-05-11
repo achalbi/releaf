@@ -47,6 +47,12 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
     /// Reverse-geocoded neighbourhood / area. `CLPlacemark.sub-
     /// Locality`. Surfaced by the Details card as the "Area" row.
     public let subLocality: String?
+    /// Formatted full street address from `CLPlacemark` (via
+    /// `CNPostalAddressFormatter`) — e.g. "1234 Main St, Mission
+    /// District, San Francisco, CA 94110, USA". Surfaced as the
+    /// "Address" row on the Details card. Nil when the geocode
+    /// failed or the location toggle was off.
+    public let address: String?
 
     public init(
         id: String,
@@ -60,7 +66,8 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         latitude: Double? = nil,
         longitude: Double? = nil,
         locality: String? = nil,
-        subLocality: String? = nil
+        subLocality: String? = nil,
+        address: String? = nil
     ) {
         self.id          = id
         self.title       = title
@@ -74,6 +81,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         self.longitude   = longitude
         self.locality    = locality
         self.subLocality = subLocality
+        self.address     = address
     }
 
     public init(from decoder: Decoder) throws {
@@ -92,11 +100,13 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         self.source      = (try c.decodeIfPresent(String.self, forKey: .source)) ?? "scan"
         // Geolocation columns landed in v6 and remain nullable — a
         // SELECT that doesn't request them, or a row from before the
-        // migration ran, reads back as `nil`.
+        // migration ran, reads back as `nil`. `address` joined them
+        // in v7 with the same nullability story.
         self.latitude    = try c.decodeIfPresent(Double.self, forKey: .latitude)
         self.longitude   = try c.decodeIfPresent(Double.self, forKey: .longitude)
         self.locality    = try c.decodeIfPresent(String.self, forKey: .locality)
         self.subLocality = try c.decodeIfPresent(String.self, forKey: .subLocality)
+        self.address     = try c.decodeIfPresent(String.self, forKey: .address)
     }
 
     public enum CodingKeys: String, CodingKey {
@@ -112,6 +122,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         case longitude
         case locality
         case subLocality = "sub_locality"
+        case address
     }
 }
 

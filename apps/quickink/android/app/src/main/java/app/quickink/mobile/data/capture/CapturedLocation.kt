@@ -35,4 +35,11 @@ data class CapturedLocation(
     val longitude: Double,
     val locality: String?,
     val subLocality: String?,
+    /**
+     * Formatted full street address — e.g. "1234 Main St, Mission
+     * District, San Francisco, CA 94110, USA". Built from
+     * `Geocoder.getFromLocation`'s `Address.getAddressLine` output.
+     * Nil when the geocoder doesn't return an address line.
+     */
+    val address: String?,
 )

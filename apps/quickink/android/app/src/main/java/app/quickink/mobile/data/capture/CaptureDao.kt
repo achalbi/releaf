@@ -237,24 +237,26 @@ interface CaptureDao {
     suspend fun setTitle(id: String, title: String?, timestamp: String)
 
     /**
-     * Backfill the reverse-geocoded place name on a capture whose
-     * coordinates landed without a locality / sub-locality at scan
-     * time (rate-limited Geocoder, offline, or a remote area the
-     * system couldn't resolve). Called from the Details screen on
-     * open when the row has lat/lon but missing place names — the
-     * re-tried geocode persists here and propagates to other
-     * devices on the next Drive push (dirty=1 + updated_at bumped).
+     * Backfill the reverse-geocoded place name + full address on a
+     * capture whose coordinates landed without them at scan time
+     * (rate-limited Geocoder, offline, or a remote area the system
+     * couldn't resolve). Called from the Details screen on open
+     * when the row has lat/lon but missing names — the re-tried
+     * geocode persists here and propagates to other devices on the
+     * next Drive push (dirty=1 + updated_at bumped).
      */
     @Query("""
         UPDATE captures
         SET locality = :locality, sub_locality = :subLocality,
+            address = :address,
             updated_at = :timestamp, dirty = 1
         WHERE id = :id
     """)
-    suspend fun setLocality(
+    suspend fun setLocation(
         id: String,
         locality: String?,
         subLocality: String?,
+        address: String?,
         timestamp: String,
     )
 

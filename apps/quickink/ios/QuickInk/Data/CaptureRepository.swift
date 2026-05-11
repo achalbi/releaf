@@ -64,10 +64,10 @@ public final class CaptureRepository: @unchecked Sendable {
         /// the Library cards.
         source: String = "scan",
         /// Optional geolocation captured at scan/import time. All
-        /// four fields are nullable in the schema; pass `nil` when
-        /// the user has the "Location for scans" toggle off, when
-        /// the system permission is denied, or when the fetch /
-        /// geocode failed. The struct keeps lat+lon + place name
+        /// fields are nullable in the schema; pass `nil` when the
+        /// user has the "Location for scans" toggle off, when the
+        /// system permission is denied, or when the fetch / geocode
+        /// failed. The struct keeps lat+lon + place name + address
         /// atomic — we never write half of it.
         location: CapturedLocation? = nil
     ) async throws {
@@ -77,9 +77,9 @@ public final class CaptureRepository: @unchecked Sendable {
                 INSERT INTO captures (
                     id, user_id, title, pdf_uri, preview_uri,
                     page_count, category, source,
-                    latitude, longitude, locality, sub_locality,
+                    latitude, longitude, locality, sub_locality, address,
                     created_at, updated_at, dirty
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """, arguments: [
                     id,
                     userId,
@@ -93,6 +93,7 @@ public final class CaptureRepository: @unchecked Sendable {
                     location?.longitude,
                     location?.locality,
                     location?.subLocality,
+                    location?.address,
                     now,
                     now,
                 ])
@@ -128,25 +129,27 @@ public final class CaptureRepository: @unchecked Sendable {
         }
     }
 
-    /// Backfill the reverse-geocoded place name on a capture whose
-    /// coordinates landed without a locality / sub-locality at scan
-    /// time (rate-limited CLGeocoder, no network, or a remote area
-    /// the system couldn't resolve). Called from the Details screen
-    /// on open when the row has lat/lon but missing place names —
-    /// the re-tried geocode persists here and propagates to other
+    /// Backfill the reverse-geocoded place name + full address on a
+    /// capture whose coordinates landed without them at scan time
+    /// (rate-limited CLGeocoder, no network, or a remote area the
+    /// system couldn't resolve). Called from the Details screen on
+    /// open when the row has lat/lon but missing names — the
+    /// re-tried geocode persists here and propagates to other
     /// devices on the next Drive push (dirty=1 + updated_at bumped).
-    public func updateLocality(
+    public func updateLocation(
         captureId: String,
         locality: String?,
-        subLocality: String?
+        subLocality: String?,
+        address: String?
     ) async throws {
         let now = IsoClock.nowIso()
         try await dbQueue.write { db in
             try db.execute(sql: """
                 UPDATE captures
-                SET locality = ?, sub_locality = ?, updated_at = ?, dirty = 1
+                SET locality = ?, sub_locality = ?, address = ?,
+                    updated_at = ?, dirty = 1
                 WHERE id = ?
-                """, arguments: [locality, subLocality, now, captureId])
+                """, arguments: [locality, subLocality, address, now, captureId])
         }
     }
 

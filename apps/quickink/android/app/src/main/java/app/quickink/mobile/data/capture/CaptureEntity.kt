@@ -105,6 +105,16 @@ data class CaptureEntity(
     @ColumnInfo(name = "sub_locality")
     val subLocality: String? = null,
 
+    /**
+     * Formatted full street address built from `Geocoder` results —
+     * e.g. "1234 Main St, Mission District, San Francisco, CA
+     * 94110, USA". Surfaced as the "Address" row on the Details
+     * card. Round-trips through Drive verbatim — receivers see
+     * exactly what the capturing device's locale produced.
+     */
+    @ColumnInfo(name = "address")
+    val address: String? = null,
+
     @ColumnInfo(name = "conflict_stub")
     val conflictStub: String?,
 

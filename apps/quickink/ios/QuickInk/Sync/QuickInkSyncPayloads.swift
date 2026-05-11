@@ -280,6 +280,11 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
     /// Reverse-geocoded neighbourhood / area (e.g. "Mission
     /// District"). `CLPlacemark.subLocality`.
     public let subLocality: String?
+    /// Formatted full street address built from `CLPlacemark` via
+    /// `CNPostalAddressFormatter`. Round-trips through Drive
+    /// verbatim — we don't re-format on receive so the receiver
+    /// sees exactly what the capturing device's locale produced.
+    public let address: String?
     public let createdAt: String
     public let updatedAt: String
 
@@ -298,6 +303,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         longitude: Double? = nil,
         locality: String? = nil,
         subLocality: String? = nil,
+        address: String? = nil,
         createdAt: String,
         updatedAt: String
     ) {
@@ -315,6 +321,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         self.longitude = longitude
         self.locality = locality
         self.subLocality = subLocality
+        self.address = address
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -338,11 +345,13 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         // Geolocation keys landed in Phase 7. Tolerate their absence
         // (older payloads, captures from clients that haven't shipped
         // the feature, or captures the user took with location off)
-        // — all of them read back as `nil`.
+        // — all of them read back as `nil`. `address` joined them
+        // in Phase 7.1 with the same back-compat story.
         self.latitude           = try c.decodeIfPresent(Double.self, forKey: .latitude)
         self.longitude          = try c.decodeIfPresent(Double.self, forKey: .longitude)
         self.locality           = try c.decodeIfPresent(String.self, forKey: .locality)
         self.subLocality        = try c.decodeIfPresent(String.self, forKey: .subLocality)
+        self.address            = try c.decodeIfPresent(String.self, forKey: .address)
         self.createdAt          = try c.decode(String.self, forKey: .createdAt)
         self.updatedAt          = try c.decode(String.self, forKey: .updatedAt)
     }
@@ -362,6 +371,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         case longitude
         case locality
         case subLocality        = "sub_locality"
+        case address
         case createdAt          = "created_at"
         case updatedAt          = "updated_at"
     }

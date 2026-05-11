@@ -112,6 +112,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                     longitude:          row["longitude"] as Double?,
                     locality:           row["locality"] as String?,
                     subLocality:        row["sub_locality"] as String?,
+                    address:            row["address"] as String?,
                     createdAt:          row["created_at"],
                     updatedAt:          row["updated_at"]
                 )
@@ -478,9 +479,9 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             INSERT INTO captures (
                 id, user_id, title, pdf_uri, preview_uri, page_count,
                 category, source, drive_file_id, pdf_drive_file_id, preview_drive_file_id,
-                latitude, longitude, locality, sub_locality,
+                latitude, longitude, locality, sub_locality, address,
                 created_at, updated_at, dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ON CONFLICT(id) DO UPDATE SET
                 user_id               = excluded.user_id,
                 title                 = excluded.title,
@@ -496,6 +497,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 longitude             = excluded.longitude,
                 locality              = excluded.locality,
                 sub_locality          = excluded.sub_locality,
+                address               = excluded.address,
                 updated_at            = excluded.updated_at,
                 dirty                 = 0
             WHERE captures.updated_at < excluded.updated_at
@@ -505,7 +507,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 payload.category, payload.source, driveFileId,
                 payload.pdfDriveFileId, payload.previewDriveFileId,
                 payload.latitude, payload.longitude,
-                payload.locality, payload.subLocality,
+                payload.locality, payload.subLocality, payload.address,
                 payload.createdAt, payload.updatedAt,
             ])
     }

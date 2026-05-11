@@ -78,6 +78,7 @@ class CaptureRepository(
                 longitude    = location?.longitude,
                 locality     = location?.locality,
                 subLocality  = location?.subLocality,
+                address      = location?.address,
                 conflictStub = null,
                 driveFileId  = null,
                 createdAt    = now,
