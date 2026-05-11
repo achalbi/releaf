@@ -36,6 +36,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.os.CancellationSignal
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import app.quickink.mobile.data.capture.CapturedLocation
@@ -64,6 +65,14 @@ object LocationService {
      */
     private const val PROMPT_PREFS_NAME = "quickink.location"
     private const val PROMPT_HANDLED_KEY = "prompt_handled_v1"
+
+    /**
+     * Log tag for the geolocation pipeline. Grep `adb logcat -s
+     * QuickInkLocation:*` to filter the capture flow's diagnostic
+     * trail (auth check → fetch → reverse-geocode → dedupe →
+     * persist).
+     */
+    private const val TAG = "QuickInkLocation"
 
     /**
      * True when the user has granted (at least) coarse location
@@ -138,15 +147,25 @@ object LocationService {
      * work hops onto `Dispatchers.IO` internally.
      */
     suspend fun captureCurrent(context: Context): CapturedLocation? {
-        if (!hasPermission(context)) return null
+        if (!hasPermission(context)) {
+            Log.i(TAG, "captureCurrent: no permission, returning null")
+            return null
+        }
         val appContext = context.applicationContext
         return withContext(Dispatchers.IO) {
-            val location = fetchLocation(appContext) ?: return@withContext null
+            val location = fetchLocation(appContext)
+            if (location == null) {
+                Log.i(TAG, "captureCurrent: fetchLocation returned null")
+                return@withContext null
+            }
+            Log.i(TAG, "captureCurrent: got fix lat=${location.latitude} lon=${location.longitude}")
             val placemark = reverseGeocode(appContext, location)
+            Log.i(TAG, "captureCurrent: placemark raw locality=${placemark?.first} subLocality=${placemark?.second}")
             val (locality, subLocality) = dedupePlaceNames(
                 locality    = placemark?.first,
                 subLocality = placemark?.second,
             )
+            Log.i(TAG, "captureCurrent: dedupe -> locality=$locality subLocality=$subLocality")
             CapturedLocation(
                 latitude    = location.latitude,
                 longitude   = location.longitude,

@@ -1143,17 +1143,28 @@ struct ScanDetailScreen: View {
     /// state: CLGeocoder's own rate-limit caps the retry frequency,
     /// and an opened-twice-in-a-row screen is fine to ask twice.
     private func retryReverseGeocodeIfNeeded() async {
-        guard let cap = capture,
-              let lat = cap.latitude,
-              let lon = cap.longitude else { return }
+        guard let cap = capture else {
+            print("[Location] retry: no capture loaded, skip")
+            return
+        }
+        print("[Location] retry: row state lat=\(cap.latitude.map { "\($0)" } ?? "nil") lon=\(cap.longitude.map { "\($0)" } ?? "nil") locality=\(cap.locality ?? "nil") subLocality=\(cap.subLocality ?? "nil")")
+        guard let lat = cap.latitude, let lon = cap.longitude else {
+            print("[Location] retry: no coordinates, nothing to backfill")
+            return
+        }
         let hasLocality    = !(cap.locality?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
         let hasSubLocality = !(cap.subLocality?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
-        if hasLocality && hasSubLocality { return }
+        if hasLocality && hasSubLocality {
+            print("[Location] retry: already have both names, skip")
+            return
+        }
 
         let clLocation = CLLocation(latitude: lat, longitude: lon)
         guard let placemark = try? await CLGeocoder().reverseGeocodeLocation(clLocation).first else {
+            print("[Location] retry: geocode failed")
             return
         }
+        print("[Location] retry: placemark raw locality=\(placemark.locality ?? "nil") subLocality=\(placemark.subLocality ?? "nil")")
         // Same dedupe as the write path in LocationService — drop
         // the sub-locality when it duplicates the locality so the
         // backfilled row doesn't recreate the "Area = City" UX
@@ -1162,9 +1173,13 @@ struct ScanDetailScreen: View {
             locality:    placemark.locality,
             subLocality: placemark.subLocality
         )
+        print("[Location] retry: dedupe → locality=\(names.locality ?? "nil") subLocality=\(names.subLocality ?? "nil")")
         // Bail when the retry yields nothing useful — saves a
         // pointless write + a no-op sync push.
-        guard names.locality != nil || names.subLocality != nil else { return }
+        guard names.locality != nil || names.subLocality != nil else {
+            print("[Location] retry: nothing useful to persist, skip")
+            return
+        }
 
         do {
             try await CaptureRepository().updateLocality(
@@ -1172,9 +1187,10 @@ struct ScanDetailScreen: View {
                 locality:    names.locality    ?? cap.locality,
                 subLocality: names.subLocality ?? cap.subLocality
             )
+            print("[Location] retry: persisted update for capture=\(captureId)")
             await loadCapture()
         } catch {
-            print("ScanDetailScreen.retryReverseGeocode failed: \(error)")
+            print("[Location] retry: persist failed \(error)")
         }
     }
 

@@ -419,11 +419,26 @@ class ScanFlowController(
      * / City rows in that case.
      */
     private suspend fun captureLocationIfEnabled(): CapturedLocation? {
-        val ctx = appContext ?: return null
+        val ctx = appContext
+        if (ctx == null) {
+            android.util.Log.i("QuickInkLocation", "gate: appContext null, skipping capture")
+            return null
+        }
         val prefs = app.quickink.mobile.features.settings.SettingsPreferences(ctx)
-        if (!prefs.locationForScansEnabled) return null
-        if (!LocationService.hasPermission(ctx)) return null
-        return LocationService.captureCurrent(ctx)
+        android.util.Log.i("QuickInkLocation", "gate: toggleEnabled=${prefs.locationForScansEnabled}")
+        if (!prefs.locationForScansEnabled) {
+            android.util.Log.i("QuickInkLocation", "gate: toggle off, skipping capture")
+            return null
+        }
+        val granted = LocationService.hasPermission(ctx)
+        android.util.Log.i("QuickInkLocation", "gate: hasPermission=$granted")
+        if (!granted) {
+            android.util.Log.i("QuickInkLocation", "gate: permission not granted, skipping capture")
+            return null
+        }
+        val result = LocationService.captureCurrent(ctx)
+        android.util.Log.i("QuickInkLocation", "gate: result locality=${result?.locality} subLocality=${result?.subLocality} lat=${result?.latitude} lon=${result?.longitude}")
+        return result
     }
 
     // ─── Append-to-today's-entry ──────────────────────────────────

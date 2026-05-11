@@ -79,6 +79,7 @@ public final class LocationService: NSObject, @unchecked Sendable, CLLocationMan
     /// the caller doesn't need a separate `if` ladder.
     public func requestAuthorization() async -> CLAuthorizationStatus {
         let current = manager.authorizationStatus
+        print("[Location] requestAuthorization: current status = \(current.debugLabel)")
         if current != .notDetermined { return current }
         return await withCheckedContinuation { cont in
             stateLock.lock()
@@ -104,22 +105,32 @@ public final class LocationService: NSObject, @unchecked Sendable, CLLocationMan
     /// cases the caller writes the capture without location columns.
     public func captureCurrent() async -> CapturedLocation? {
         let status = manager.authorizationStatus
+        print("[Location] captureCurrent: status = \(status.debugLabel)")
         guard status == .authorizedWhenInUse || status == .authorizedAlways else {
+            print("[Location] captureCurrent: not authorized, returning nil")
             return nil
         }
-        guard let location = await requestSingleLocation() else { return nil }
+        guard let location = await requestSingleLocation() else {
+            print("[Location] captureCurrent: requestSingleLocation returned nil")
+            return nil
+        }
+        let lat = location.coordinate.latitude
+        let lon = location.coordinate.longitude
+        print("[Location] captureCurrent: got fix lat=\(lat) lon=\(lon)")
         // `reverseGeocodeLocation` is rate-limited by Apple's
         // service; intermittent failures are common in the field and
         // don't merit logging. `try?` swallows them — the capture
         // simply records the coordinates without the place name.
         let placemark = try? await CLGeocoder().reverseGeocodeLocation(location).first
+        print("[Location] captureCurrent: placemark raw locality=\(placemark?.locality ?? "nil") subLocality=\(placemark?.subLocality ?? "nil")")
         let names = Self.dedupePlaceNames(
             locality:    placemark?.locality,
             subLocality: placemark?.subLocality
         )
+        print("[Location] captureCurrent: dedupe → locality=\(names.locality ?? "nil") subLocality=\(names.subLocality ?? "nil")")
         return CapturedLocation(
-            latitude:    location.coordinate.latitude,
-            longitude:   location.coordinate.longitude,
+            latitude:    lat,
+            longitude:   lon,
             locality:    names.locality,
             subLocality: names.subLocality
         )
@@ -175,6 +186,25 @@ public final class LocationService: NSObject, @unchecked Sendable, CLLocationMan
         locationContinuation = nil
         stateLock.unlock()
         cont?.resume(returning: nil)
+    }
+}
+
+// MARK: - Debug helpers
+
+private extension CLAuthorizationStatus {
+    /// Human-readable label for `print` lines — the enum's
+    /// numeric raw value is opaque in logs ("status = 3" tells
+    /// you nothing); these labels match Apple's documentation
+    /// names so a grep for "authorizedWhenInUse" finds them.
+    var debugLabel: String {
+        switch self {
+        case .notDetermined:       return "notDetermined"
+        case .restricted:          return "restricted"
+        case .denied:              return "denied"
+        case .authorizedAlways:    return "authorizedAlways"
+        case .authorizedWhenInUse: return "authorizedWhenInUse"
+        @unknown default:          return "unknown(\(self.rawValue))"
+        }
     }
 }
 

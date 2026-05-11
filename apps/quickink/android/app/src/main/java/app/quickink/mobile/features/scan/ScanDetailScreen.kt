@@ -192,17 +192,36 @@ fun ScanDetailScreen(
     // don't loop on a missing-data row.
     LaunchedEffect(capture?.id, capture?.locality, capture?.subLocality) {
         val cap = capture ?: return@LaunchedEffect
-        val lat = cap.latitude ?: return@LaunchedEffect
-        val lon = cap.longitude ?: return@LaunchedEffect
+        android.util.Log.i(
+            "QuickInkLocation",
+            "retry: row state lat=${cap.latitude} lon=${cap.longitude} locality=${cap.locality} subLocality=${cap.subLocality}",
+        )
+        val lat = cap.latitude
+        val lon = cap.longitude
+        if (lat == null || lon == null) {
+            android.util.Log.i("QuickInkLocation", "retry: no coordinates, nothing to backfill")
+            return@LaunchedEffect
+        }
         val hasLocality    = !cap.locality.isNullOrBlank()
         val hasSubLocality = !cap.subLocality.isNullOrBlank()
-        if (hasLocality && hasSubLocality) return@LaunchedEffect
+        if (hasLocality && hasSubLocality) {
+            android.util.Log.i("QuickInkLocation", "retry: already have both names, skip")
+            return@LaunchedEffect
+        }
 
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 LocationService.reverseGeocode(context, lat, lon)
             }.getOrNull()
-        } ?: return@LaunchedEffect
+        }
+        if (result == null) {
+            android.util.Log.i("QuickInkLocation", "retry: geocode failed")
+            return@LaunchedEffect
+        }
+        android.util.Log.i(
+            "QuickInkLocation",
+            "retry: placemark raw locality=${result.first} subLocality=${result.second}",
+        )
 
         // Same dedupe as the write path in LocationService — drop
         // the sub-locality when it duplicates the locality so the
@@ -212,7 +231,14 @@ fun ScanDetailScreen(
             locality    = result.first,
             subLocality = result.second,
         )
-        if (newLocality.isNullOrBlank() && newSubLocality.isNullOrBlank()) return@LaunchedEffect
+        android.util.Log.i(
+            "QuickInkLocation",
+            "retry: dedupe -> locality=$newLocality subLocality=$newSubLocality",
+        )
+        if (newLocality.isNullOrBlank() && newSubLocality.isNullOrBlank()) {
+            android.util.Log.i("QuickInkLocation", "retry: nothing useful to persist, skip")
+            return@LaunchedEffect
+        }
 
         runCatching {
             captureDao.setLocality(
@@ -222,6 +248,9 @@ fun ScanDetailScreen(
                 timestamp   = IsoClock.nowIso(),
             )
             capture = captureDao.findById(captureId)
+            android.util.Log.i("QuickInkLocation", "retry: persisted update for capture=$captureId")
+        }.onFailure {
+            android.util.Log.i("QuickInkLocation", "retry: persist failed ${it.message}")
         }
     }
 

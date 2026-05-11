@@ -332,12 +332,20 @@ public final class ScanFlowController: ObservableObject {
         // reads UserDefaults — and avoids threading an env-object
         // through the controller's constructor.
         let settings = await MainActor.run { SettingsState() }
-        guard settings.locationForScansEnabled else { return nil }
-        let status = LocationService.shared.authorizationStatus
-        guard status == .authorizedWhenInUse || status == .authorizedAlways else {
+        print("[Location] gate: toggleEnabled=\(settings.locationForScansEnabled)")
+        guard settings.locationForScansEnabled else {
+            print("[Location] gate: toggle off, skipping capture")
             return nil
         }
-        return await LocationService.shared.captureCurrent()
+        let status = LocationService.shared.authorizationStatus
+        print("[Location] gate: authorizationStatus=\(status.rawValue)")
+        guard status == .authorizedWhenInUse || status == .authorizedAlways else {
+            print("[Location] gate: not authorized, skipping capture")
+            return nil
+        }
+        let result = await LocationService.shared.captureCurrent()
+        print("[Location] gate: result locality=\(result?.locality ?? "nil") subLocality=\(result?.subLocality ?? "nil") lat=\(result.map { "\($0.latitude)" } ?? "nil") lon=\(result.map { "\($0.longitude)" } ?? "nil")")
+        return result
     }
 
     // MARK: - Append-to-today's-entry
