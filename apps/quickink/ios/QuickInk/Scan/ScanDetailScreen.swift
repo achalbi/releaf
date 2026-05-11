@@ -1173,6 +1173,7 @@ struct ScanDetailScreen: View {
             print("[Location] retry: geocode failed")
             return
         }
+        print("[Location] retry: placemark fields: name=\(placemark.name ?? "nil") thoroughfare=\(placemark.thoroughfare ?? "nil") subThoroughfare=\(placemark.subThoroughfare ?? "nil") subLocality=\(placemark.subLocality ?? "nil") locality=\(placemark.locality ?? "nil") subAdministrativeArea=\(placemark.subAdministrativeArea ?? "nil") administrativeArea=\(placemark.administrativeArea ?? "nil") postalCode=\(placemark.postalCode ?? "nil") country=\(placemark.country ?? "nil") isoCountryCode=\(placemark.isoCountryCode ?? "nil")")
         print("[Location] retry: placemark raw locality=\(placemark.locality ?? "nil") subLocality=\(placemark.subLocality ?? "nil")")
         // Same dedupe as the write path in LocationService — drop
         // the sub-locality when it duplicates the locality so the

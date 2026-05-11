@@ -134,6 +134,15 @@ public final class LocationService: NSObject, @unchecked Sendable, CLLocationMan
         // don't merit logging. `try?` swallows them — the capture
         // simply records the coordinates without the place name.
         let placemark = try? await CLGeocoder().reverseGeocodeLocation(location).first
+        if let pm = placemark {
+            // Verbose dump of every CLPlacemark field. Lets us see
+            // which one matches what the user expects to see for
+            // "City" without guessing — different regions surface
+            // the meaningful name on different fields (`locality`
+            // for US; `subAdministrativeArea` for many Indian
+            // metropolitan areas; etc.).
+            print("[Location] placemark fields: name=\(pm.name ?? "nil") thoroughfare=\(pm.thoroughfare ?? "nil") subThoroughfare=\(pm.subThoroughfare ?? "nil") subLocality=\(pm.subLocality ?? "nil") locality=\(pm.locality ?? "nil") subAdministrativeArea=\(pm.subAdministrativeArea ?? "nil") administrativeArea=\(pm.administrativeArea ?? "nil") postalCode=\(pm.postalCode ?? "nil") country=\(pm.country ?? "nil") isoCountryCode=\(pm.isoCountryCode ?? "nil") areasOfInterest=\(pm.areasOfInterest?.joined(separator: ", ") ?? "nil")")
+        }
         print("[Location] captureCurrent: placemark raw locality=\(placemark?.locality ?? "nil") subLocality=\(placemark?.subLocality ?? "nil")")
         let names = Self.dedupePlaceNames(
             locality:    placemark?.locality,

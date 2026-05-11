@@ -418,6 +418,20 @@ object LocationService {
         }
 
         if (address == null) return null
+        // Verbose dump of every field the geocoder returns. Lets
+        // us see which one matches what the user expects to see
+        // for "City" without guessing — different regions surface
+        // the meaningful name on different fields (`locality` for
+        // most US addresses; `subAdminArea` for many Indian
+        // metropolitan areas; etc.).
+        Log.i(
+            TAG,
+            "geocoder fields: featureName=${address.featureName} locality=${address.locality} subLocality=${address.subLocality} adminArea=${address.adminArea} subAdminArea=${address.subAdminArea} thoroughfare=${address.thoroughfare} subThoroughfare=${address.subThoroughfare} premises=${address.premises} postalCode=${address.postalCode} countryName=${address.countryName} countryCode=${address.countryCode}",
+        )
+        val maxLine = address.maxAddressLineIndex
+        for (i in 0..maxLine) {
+            Log.i(TAG, "geocoder addressLine[$i]=${address.getAddressLine(i)}")
+        }
         return ResolvedPlace(
             locality    = address.locality,
             subLocality = address.subLocality,
