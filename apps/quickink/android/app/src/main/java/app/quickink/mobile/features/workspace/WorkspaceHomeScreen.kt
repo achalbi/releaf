@@ -1,0 +1,648 @@
+/*
+ * WorkspaceHomeScreen.kt
+ *
+ * Workspace v1 home (Screen 1 from the design brief). Replaces the
+ * Library tab when [WorkspaceFeatureFlag.isEnabled] returns true.
+ *
+ * Composition (top → bottom):
+ *   - Header row     — "Workspace" title + folder count subtitle +
+ *                      bell + avatar.
+ *   - Search bar     — pill that routes to the existing SearchScreen.
+ *   - Continue card  — dark hero with the most-recently-opened
+ *                      capture; null state when nothing's been
+ *                      opened yet.
+ *   - Folders list   — active folders, color-coded, with item-count
+ *                      meta. Tap → folder detail (Phase B.1).
+ *   - Tag cloud      — top tags by capture count.
+ *   - Bottom nav     — Workspace tab active.
+ *
+ * Deferred to later phases:
+ *   - Smart collections strip (Phase C)
+ *   - AI bar (Phase E — out of v1)
+ *   - "New folder" affordance (Phase B.1 — folder CRUD)
+ *   - Tag library "Browse all" link (Phase D)
+ *
+ * Mirror of `WorkspaceHomeScreen.swift` (lands in the iOS Phase B
+ * pass).
+ */
+
+@file:OptIn(
+    androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
+)
+
+package app.quickink.mobile.features.workspace
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.quickink.mobile.QuickInkApp
+import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.capturetag.TagCount
+import app.quickink.mobile.data.folder.FolderEntity
+import app.quickink.mobile.data.tag.TagEntity
+import app.quickink.mobile.features.nav.NavTab
+import app.quickink.mobile.features.nav.QuickInkBottomNavBar
+import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
+import app.quickink.mobile.ui.theme.LocalQuickInkColors
+import app.quickink.mobile.ui.theme.LocalQuickInkTypography
+import app.quickink.mobile.ui.theme.QuickInkRadius
+import app.quickink.mobile.ui.theme.QuickInkSpacing
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+
+@Composable
+fun WorkspaceHomeScreen(
+    userId: String,
+    onOpenSearch: () -> Unit,
+    onOpenFolder: (FolderEntity) -> Unit,
+    onOpenContinue: (CaptureEntity) -> Unit,
+    onOpenProfile: () -> Unit,
+    onOpenTag: (TagEntity) -> Unit,
+    onHome: () -> Unit,
+    onScan: () -> Unit,
+    onSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors  = LocalQuickInkColors.current
+    val context = LocalContext.current
+    val app     = remember(context) { context.applicationContext as QuickInkApp }
+
+    // Per-tab observers. `userId` keys the flow rebuild so a sign-out
+    // / sign-in doesn't leak state across users.
+    val folders by produceState(
+        initialValue = emptyList<FolderEntity>(),
+        key1         = userId,
+    ) {
+        app.database.folderDao()
+            .observeActive(userId)
+            .collect { value = it }
+    }
+
+    val tags by produceState(
+        initialValue = emptyList<TagEntity>(),
+        key1         = userId,
+    ) {
+        app.database.tagDao()
+            .observeActive(userId)
+            .collect { value = it }
+    }
+
+    val tagCounts by produceState(
+        initialValue = emptyList<TagCount>(),
+        key1         = userId,
+    ) {
+        app.database.captureTagDao()
+            .observeTagCounts(userId)
+            .collect { value = it }
+    }
+
+    val continueCandidate by produceState<CaptureEntity?>(
+        initialValue = null,
+        key1         = userId,
+    ) {
+        // Polling the most-recent capture isn't ideal — Phase B.2 swaps
+        // this for a Flow-based query (`observeContinueCandidate`).
+        // For now the home re-queries once on first composition; the
+        // PDF reader explicitly invalidates by calling
+        // `setLastOpened` which dirties the row but does NOT push a
+        // change event here. Refresh on resume covers the common
+        // re-open-after-reading case.
+        value = app.database.captureDao().findContinueCandidate(userId)
+    }
+
+    val folderCaptureCounts by produceState(
+        initialValue = emptyMap<String, Int>(),
+        key1         = userId,
+    ) {
+        // Fetched eagerly. Phase B.1 swaps for a JOIN-driven Flow
+        // so badges update live as captures move between folders.
+        val counts = app.database.captureDao().countByFolder(userId)
+        value = counts.associate { it.folderId to it.count }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(colors.bg),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(
+                    top    = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+                              + QuickInkSpacing.s2,
+                    bottom = QuickInkBottomNavReservedHeight,
+                ),
+        ) {
+            WorkspaceHeader(
+                folderCount = folders.size,
+                onOpenProfile = onOpenProfile,
+            )
+
+            Spacer(Modifier.height(QuickInkSpacing.s3))
+
+            WorkspaceSearchBar(onClick = onOpenSearch)
+
+            Spacer(Modifier.height(QuickInkSpacing.s3))
+
+            continueCandidate?.let { capture ->
+                ContinueCard(
+                    capture = capture,
+                    onClick = { onOpenContinue(capture) },
+                )
+                Spacer(Modifier.height(QuickInkSpacing.s4))
+            }
+
+            FoldersSection(
+                folders = folders,
+                folderCaptureCounts = folderCaptureCounts,
+                onOpenFolder = onOpenFolder,
+            )
+
+            Spacer(Modifier.height(QuickInkSpacing.s4))
+
+            TagsSection(
+                tags = tags,
+                tagCounts = tagCounts,
+                onOpenTag = onOpenTag,
+            )
+
+            Spacer(Modifier.height(QuickInkSpacing.s6))
+        }
+
+        QuickInkBottomNavBar(
+            activeTab  = NavTab.Workspace,
+            onHome     = onHome,
+            onWorkspace = { /* current tab — no-op */ },
+            onScan     = onScan,
+            onSearch   = onOpenSearch,
+            onSettings = onSettings,
+            modifier   = Modifier.align(Alignment.BottomCenter),
+        )
+    }
+}
+
+// ─── Header ──────────────────────────────────────────────────────
+
+@Composable
+private fun WorkspaceHeader(
+    folderCount: Int,
+    onOpenProfile: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Workspace",
+                style = type.display.copy(fontSize = 30.sp, fontWeight = FontWeight.Medium),
+                color = colors.ink,
+            )
+            Text(
+                text = "$folderCount ${if (folderCount == 1) "folder" else "folders"}",
+                style = type.meta,
+                color = colors.muted,
+            )
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = { /* notifications — out of scope for B.0 */ }),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Notifications,
+                    contentDescription = "Notifications",
+                    tint = colors.ink,
+                    modifier = Modifier.size(19.dp),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(colors.accent)
+                    .clickable(onClick = onOpenProfile),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text  = "A",
+                    color = Color.White,
+                    style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
+                )
+            }
+        }
+    }
+}
+
+// ─── Search ──────────────────────────────────────────────────────
+
+@Composable
+private fun WorkspaceSearchBar(onClick: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val shape  = RoundedCornerShape(QuickInkRadius.md)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4)
+            .clip(shape)
+            .background(colors.surface, shape)
+            .border(1.dp, colors.border, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = QuickInkSpacing.s3, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Search,
+            contentDescription = null,
+            tint = colors.muted,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(QuickInkSpacing.s2))
+        Text(
+            text     = "Search documents, tags…",
+            style    = type.body.copy(fontSize = 13.sp),
+            color    = colors.muted,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            modifier = Modifier
+                .width(1.dp)
+                .height(18.dp)
+                .background(colors.border),
+        )
+        Spacer(Modifier.width(QuickInkSpacing.s2))
+        Icon(
+            imageVector = Icons.Outlined.Tune,
+            contentDescription = null,
+            tint = colors.inkSoft,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
+// ─── Continue card ───────────────────────────────────────────────
+
+@Composable
+private fun ContinueCard(
+    capture: CaptureEntity,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val shape  = RoundedCornerShape(18.dp)
+
+    val title = capture.title?.takeIf { it.isNotBlank() }
+        ?: capture.category?.takeIf { it.isNotBlank() }
+        ?: "Untitled scan"
+    val page  = capture.lastOpenedPage ?: 1
+    val total = capture.pageCount.coerceAtLeast(1)
+    val progressFraction = (page.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4)
+            .clip(shape)
+            .background(colors.ink, shape)
+            .clickable(onClick = onClick)
+            .padding(QuickInkSpacing.s3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Thumbnail placeholder — lined-paper texture would be nicer
+        // but a flat tinted surface is fine for v1.
+        Box(
+            modifier = Modifier
+                .width(56.dp)
+                .height(70.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(colors.bg),
+        )
+
+        Spacer(Modifier.width(QuickInkSpacing.s3))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text  = "CONTINUE",
+                color = Color(0xFFCFCAC1),
+                style = type.label.copy(letterSpacing = 1.2.sp, fontSize = 10.sp),
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = title,
+                color = Color(0xFFF5F0E5),
+                style = type.editorial.copy(fontSize = 17.sp, fontWeight = FontWeight.Medium),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Page $page of $total",
+                color = Color(0xCCF5F0E5),
+                style = type.meta.copy(fontSize = 11.5.sp),
+            )
+            Spacer(Modifier.height(QuickInkSpacing.s1))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color(0x33F5F0E5)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progressFraction)
+                        .height(3.dp)
+                        .background(colors.accent),
+                )
+            }
+        }
+
+        Spacer(Modifier.width(QuickInkSpacing.s2))
+
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(colors.accent),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "Continue",
+                tint = Color.White,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+// ─── Folders ─────────────────────────────────────────────────────
+
+@Composable
+private fun FoldersSection(
+    folders: List<FolderEntity>,
+    folderCaptureCounts: Map<String, Int>,
+    onOpenFolder: (FolderEntity) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text  = "Folders",
+            style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
+            color = colors.ink,
+        )
+        // "New folder" affordance is Phase B.1 — folder CRUD.
+        Text(
+            text     = "",
+            style    = type.label.copy(letterSpacing = 1.2.sp, fontSize = 10.5.sp),
+            color    = colors.accent,
+        )
+    }
+
+    Spacer(Modifier.height(QuickInkSpacing.s2))
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4),
+    ) {
+        folders.forEach { folder ->
+            FolderRow(
+                folder      = folder,
+                captureCount = folderCaptureCounts[folder.id] ?: 0,
+                onClick     = { onOpenFolder(folder) },
+            )
+        }
+        if (folders.isEmpty()) {
+            Text(
+                text  = "No folders yet.",
+                style = type.meta,
+                color = colors.muted,
+                modifier = Modifier.padding(vertical = QuickInkSpacing.s3),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FolderRow(
+    folder: FolderEntity,
+    captureCount: Int,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val tint   = runCatching { Color(android.graphics.Color.parseColor(folder.color)) }
+        .getOrDefault(colors.accent)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Folder glyph — a colored rounded square. Compose-side
+        // SVG would be ideal but a tinted Box is faithful enough.
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(tint),
+        )
+
+        Spacer(Modifier.width(QuickInkSpacing.s3))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text  = folder.name,
+                style = type.body.copy(fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
+                color = colors.ink,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text  = "$captureCount ${if (captureCount == 1) "item" else "items"}",
+                style = type.meta.copy(fontSize = 11.5.sp),
+                color = colors.muted,
+            )
+        }
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = colors.muted,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+// ─── Tag cloud ───────────────────────────────────────────────────
+
+@Composable
+private fun TagsSection(
+    tags: List<TagEntity>,
+    tagCounts: List<TagCount>,
+    onOpenTag: (TagEntity) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    val countById = remember(tagCounts) { tagCounts.associate { it.tagId to it.docCount } }
+    // Show top 10 tags by usage, or all when there are fewer.
+    val ranked = remember(tags, countById) {
+        tags
+            .map { it to (countById[it.id] ?: 0) }
+            .sortedByDescending { it.second }
+            .take(10)
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text  = "Tags",
+            style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
+            color = colors.ink,
+        )
+        // "Browse all" → Tag library (Screen 4, Phase D). Out of B.0.
+    }
+
+    Spacer(Modifier.height(QuickInkSpacing.s2))
+
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (ranked.isEmpty()) {
+            Text(
+                text  = "No tags yet.",
+                style = type.meta,
+                color = colors.muted,
+            )
+            return@FlowRow
+        }
+        ranked.forEach { (tag, count) ->
+            TagChip(tag = tag, count = count, onClick = { onOpenTag(tag) })
+        }
+    }
+}
+
+@Composable
+private fun TagChip(
+    tag: TagEntity,
+    count: Int,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val shape  = RoundedCornerShape(999.dp)
+
+    Row(
+        modifier = Modifier
+            .clip(shape)
+            .background(colors.surface, shape)
+            .border(1.dp, colors.border, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text  = "#",
+            style = type.label.copy(fontWeight = FontWeight.Bold, fontSize = 11.5.sp),
+            color = colors.accent,
+        )
+        Text(
+            text  = tag.name,
+            style = type.label.copy(fontSize = 11.5.sp),
+            color = colors.inkSoft,
+            modifier = Modifier.padding(start = 2.dp),
+        )
+        if (count > 0) {
+            Spacer(Modifier.width(5.dp))
+            Text(
+                text  = count.toString(),
+                style = type.meta.copy(fontSize = 10.sp),
+                color = colors.muted,
+            )
+        }
+    }
+}

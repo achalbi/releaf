@@ -122,7 +122,7 @@ fun ScanDetailScreen(
     // don't host a tab bar. When all five are supplied, the floating
     // QuickInkBottomNavBar renders below the content.
     onHome: (() -> Unit)? = null,
-    onLibrary: (() -> Unit)? = null,
+    onWorkspace: (() -> Unit)? = null,
     onScan: (() -> Unit)? = null,
     onSearch: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
@@ -332,7 +332,7 @@ fun ScanDetailScreen(
     }
 
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val hasBottomNav = onHome != null && onLibrary != null && onScan != null &&
+    val hasBottomNav = onHome != null && onWorkspace != null && onScan != null &&
         onSearch != null && onSettings != null
 
     Box(
@@ -497,12 +497,12 @@ fun ScanDetailScreen(
     // ScrollView above reserves QuickInkBottomNavReservedHeight at
     // the bottom of its content padding so the last card isn't hidden
     // behind the bar.
-    if (onHome != null && onLibrary != null && onScan != null &&
+    if (onHome != null && onWorkspace != null && onScan != null &&
         onSearch != null && onSettings != null) {
         QuickInkBottomNavBar(
             activeTab  = NavTab.None,
             onHome     = onHome,
-            onLibrary  = onLibrary,
+            onWorkspace  = onWorkspace,
             onScan     = onScan,
             onSearch   = onSearch,
             onSettings = onSettings,

@@ -106,7 +106,7 @@ fun SettingsScreen(
     /// Settings tab paints itself active; tapping it is a no-op
     /// (we're already here).
     onHome: () -> Unit = onBack,
-    onLibrary: () -> Unit = {},
+    onWorkspace: () -> Unit = {},
     onScan: () -> Unit = {},
     onSearch: () -> Unit = {},
     onSettings: () -> Unit = {},
@@ -521,7 +521,7 @@ fun SettingsScreen(
         QuickInkBottomNavBar(
             activeTab  = NavTab.Settings,
             onHome     = onHome,
-            onLibrary  = onLibrary,
+            onWorkspace  = onWorkspace,
             onScan     = onScan,
             onSearch   = onSearch,
             onSettings = onSettings,

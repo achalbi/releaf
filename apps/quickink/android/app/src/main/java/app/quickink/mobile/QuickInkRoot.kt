@@ -42,6 +42,8 @@ import app.quickink.mobile.data.analytics.AnalyticsRepository
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.folder.FolderRepository
 import app.quickink.mobile.data.tag.TagRepository
+import app.quickink.mobile.features.workspace.WorkspaceFeatureFlag
+import app.quickink.mobile.features.workspace.WorkspaceHomeScreen
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import kotlinx.coroutines.launch
 import app.quickink.mobile.features.home.CategoryEntriesScreen
@@ -184,6 +186,9 @@ private object Routes {
     // `name` is encoded so categories with spaces ("Manage Categories")
     // round-trip cleanly through the nav arg.
     const val CATEGORY_ENTRIES  = "category_entries/{name}"
+
+    /** Workspace v1 home (Phase B). Gated by [WorkspaceFeatureFlag]. */
+    const val WORKSPACE_HOME    = "workspace_home"
 
     fun noteEditor(entryId: String): String =
         "note_editor/${Uri.encode(entryId)}"
@@ -460,6 +465,17 @@ private fun MainShell(
         }
     }
 
+    // Workspace v1 (Phase B) — when the feature flag is on, the
+    // bottom-nav "Workspace" tab routes to the new WorkspaceHomeScreen.
+    // When off, it routes to the legacy NotesListScreen so the rest of
+    // the UI keeps shipping unchanged. Read once per composition; flips
+    // require a process restart, which is acceptable for a dev-only
+    // toggle.
+    val workspaceTabRoute = remember(context) {
+        if (WorkspaceFeatureFlag.isEnabled(context)) Routes.WORKSPACE_HOME
+        else Routes.NOTES_LIST
+    }
+
     /// Variant of [navToTab] used by ScanDetailScreen's bottom nav.
     /// Skips `restoreState` so tapping Library / Search from the
     /// detail screen lands on a fresh tab view (top of list, no
@@ -479,7 +495,7 @@ private fun MainShell(
             HomeScreen(
                 controller     = controller,
                 userId         = userId,
-                onOpenNotes    = { navToTab(Routes.NOTES_LIST) },
+                onOpenNotes    = { navToTab(workspaceTabRoute) },
                 onOpenSettings = { navToTab(Routes.SETTINGS) },
                 onOpenSearch   = { navToTab(Routes.SEARCH) },
                 onTapCategory  = { name ->
@@ -508,7 +524,7 @@ private fun MainShell(
                     navController.navigate(Routes.scanDetail(captureId))
                 },
                 onHome     = { navToTab(Routes.HOME) },
-                onLibrary  = { navToTab(Routes.NOTES_LIST) },
+                onWorkspace  = { navToTab(workspaceTabRoute) },
                 onScan     = { showQuickCapture = true },
                 onSearch   = { /* current tab — no-op */ },
                 onSettings = { navToTab(Routes.SETTINGS) },
@@ -521,9 +537,33 @@ private fun MainShell(
                     navController.navigate(Routes.scanDetail(captureId))
                 },
                 onHome     = { navToTab(Routes.HOME) },
-                onLibrary  = { /* current tab — no-op */ },
+                onWorkspace  = { /* current tab — no-op */ },
                 onScan     = { showQuickCapture = true },
                 onSearch   = { navToTab(Routes.SEARCH) },
+                onSettings = { navToTab(Routes.SETTINGS) },
+            )
+        }
+        composable(Routes.WORKSPACE_HOME) {
+            WorkspaceHomeScreen(
+                userId         = userId,
+                onOpenSearch   = { navToTab(Routes.SEARCH) },
+                onOpenFolder   = { _ ->
+                    // Folder detail (Screen 2) lands in Phase C — tap is a
+                    // no-op for B.0. Wire to a "FolderDetailScreen" route
+                    // when that screen exists.
+                },
+                onOpenContinue = { capture ->
+                    navController.navigate(Routes.scanDetail(capture.id))
+                },
+                onOpenProfile  = { navController.navigate(Routes.PROFILE) },
+                onOpenTag      = { tag ->
+                    // Tap → drill into captures with this tag. Re-uses the
+                    // legacy CATEGORY_ENTRIES route (filter-by-name) for
+                    // now; will move to a tag-id-based filter in Phase D.
+                    navController.navigate(Routes.categoryEntries(tag.name))
+                },
+                onHome     = { navToTab(Routes.HOME) },
+                onScan     = { showQuickCapture = true },
                 onSettings = { navToTab(Routes.SETTINGS) },
             )
         }
@@ -549,7 +589,7 @@ private fun MainShell(
                 onPrimaryColorChange       = onPrimaryColorChange,
                 onThemeModeChange          = onThemeModeChange,
                 onHome                     = { navToTab(Routes.HOME) },
-                onLibrary                  = { navToTab(Routes.NOTES_LIST) },
+                onWorkspace                  = { navToTab(workspaceTabRoute) },
                 onScan                     = { showQuickCapture = true },
                 onSearch                   = { navToTab(Routes.SEARCH) },
                 onSettings                 = { /* current tab — no-op */ },
@@ -582,7 +622,7 @@ private fun MainShell(
                 // tab's default view, not the saved state from
                 // before the user opened the detail.
                 onHome     = { navToTabFresh(Routes.HOME) },
-                onLibrary  = { navToTabFresh(Routes.NOTES_LIST) },
+                onWorkspace  = { navToTabFresh(workspaceTabRoute) },
                 onScan     = { showQuickCapture = true },
                 onSearch   = { navToTabFresh(Routes.SEARCH) },
                 onSettings = { navToTabFresh(Routes.SETTINGS) },

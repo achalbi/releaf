@@ -357,7 +357,7 @@ fun HomeScreen(
         QuickInkBottomNavBar(
             activeTab  = NavTab.Home,
             onHome     = { /* current */ },
-            onLibrary  = onOpenNotes,
+            onWorkspace  = onOpenNotes,
             onScan     = { showQuickCapture = true },
             onSearch   = { onOpenSearch?.invoke() },
             onSettings = onOpenSettings,

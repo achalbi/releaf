@@ -89,7 +89,7 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
  * (e.g. ScanDetail) that host the bar but aren't themselves a
  * destination — passing [NavTab.None] paints no active cell.
  */
-enum class NavTab { Home, Library, Search, Settings, None }
+enum class NavTab { Home, Workspace, Search, Settings, None }
 
 /**
  * The reserved space the bottom nav occupies on screens that own a
@@ -104,7 +104,7 @@ val QuickInkBottomNavReservedHeight = 140.dp
 fun QuickInkBottomNavBar(
     activeTab: NavTab,
     onHome: () -> Unit,
-    onLibrary: () -> Unit,
+    onWorkspace: () -> Unit,
     onScan: () -> Unit,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
@@ -160,10 +160,10 @@ fun QuickInkBottomNavBar(
             )
             RegularTabAsset(
                 drawableId = R.drawable.ic_note,
-                label      = "Library",
-                isSelected = activeTab == NavTab.Library,
+                label      = "Workspace",
+                isSelected = activeTab == NavTab.Workspace,
                 modifier   = Modifier.weight(1f),
-                onClick    = onLibrary,
+                onClick    = onWorkspace,
             )
             BrandTab(
                 modifier = Modifier.weight(1f),

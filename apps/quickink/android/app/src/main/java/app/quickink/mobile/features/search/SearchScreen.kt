@@ -137,7 +137,7 @@ fun SearchScreen(
     /// but now that the back arrow is replaced by the date-range
     /// filter, callers must wire the Home callback explicitly.
     onHome: () -> Unit = {},
-    onLibrary: () -> Unit = {},
+    onWorkspace: () -> Unit = {},
     onScan: () -> Unit = {},
     onSearch: () -> Unit = {},
     onSettings: () -> Unit = {},
@@ -333,7 +333,7 @@ fun SearchScreen(
         QuickInkBottomNavBar(
             activeTab  = NavTab.Search,
             onHome     = onHome,
-            onLibrary  = onLibrary,
+            onWorkspace  = onWorkspace,
             onScan     = onScan,
             onSearch   = onSearch,
             onSettings = onSettings,

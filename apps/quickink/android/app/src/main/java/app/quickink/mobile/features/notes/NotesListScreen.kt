@@ -164,7 +164,7 @@ fun NotesListScreen(
     /// in-header arrow. `onHome` defaults to a no-op here for the
     /// same reason — callers are expected to wire it explicitly.
     onHome: () -> Unit = {},
-    onLibrary: () -> Unit = {},
+    onWorkspace: () -> Unit = {},
     onScan: () -> Unit = {},
     onSearch: () -> Unit = {},
     onSettings: () -> Unit = {},
@@ -435,9 +435,9 @@ fun NotesListScreen(
         // a no-op (we're already here). The other callbacks switch
         // tabs; the FAB launches the scanner.
         QuickInkBottomNavBar(
-            activeTab  = NavTab.Library,
+            activeTab  = NavTab.Workspace,
             onHome     = onHome,
-            onLibrary  = onLibrary,
+            onWorkspace  = onWorkspace,
             onScan     = onScan,
             onSearch   = onSearch,
             onSettings = onSettings,

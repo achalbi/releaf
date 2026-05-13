@@ -358,6 +358,22 @@ interface CaptureDao {
     suspend fun findContinueCandidate(userId: String): CaptureEntity?
 
     /**
+     * Active-capture count per folder for the user. Drives the
+     * "N items" badges on the Workspace home folder list. Captures
+     * without a folder_id (post-migration backfill should leave
+     * none) are excluded.
+     */
+    @Query("""
+        SELECT folder_id AS folder_id, COUNT(*) AS count
+        FROM captures
+        WHERE user_id = :userId
+          AND folder_id IS NOT NULL
+          AND deleted_at IS NULL
+        GROUP BY folder_id
+    """)
+    suspend fun countByFolder(userId: String): List<FolderCaptureCount>
+
+    /**
      * Captures whose category contains the substring (case-
      * insensitive, space-insensitive). Used as the "fast" pass of
      * search. Spaces are stripped from both sides of the comparison
@@ -502,4 +518,13 @@ data class CaptureSearchRow(
     @ColumnInfo(name = "page_count")  val pageCount: Int,
     @ColumnInfo(name = "created_at")  val createdAt: String,
     @ColumnInfo(name = "ocr_snippet") val ocrSnippet: String?,
+)
+
+/**
+ * Projection for [CaptureDao.countByFolder]. One row per folder
+ * with active (non-tombstoned) captures.
+ */
+data class FolderCaptureCount(
+    @ColumnInfo(name = "folder_id") val folderId: String,
+    @ColumnInfo(name = "count")     val count: Int,
 )
