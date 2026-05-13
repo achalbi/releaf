@@ -92,7 +92,7 @@ struct ProfileScreen: View {
     /// VMs then publish empty arrays and the stats render their
     /// empty state, which is the right behaviour.
     @StateObject private var capturesVM: CaptureListViewModel
-    @StateObject private var categoriesVM: CategoryListViewModel
+    @StateObject private var categoriesVM: TagListViewModel
     @ObservedObject private var syncState = SyncStateStore.shared
 
     init(
@@ -108,7 +108,7 @@ struct ProfileScreen: View {
             return ""
         }()
         _capturesVM   = StateObject(wrappedValue: CaptureListViewModel(userId: userId))
-        _categoriesVM = StateObject(wrappedValue: CategoryListViewModel(userId: userId))
+        _categoriesVM = StateObject(wrappedValue: TagListViewModel(userId: userId))
     }
 
     var body: some View {

@@ -386,7 +386,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
 // the same chip set follows the user across devices.
 // =====================================================================
 
-public struct CategoryPayloadV1: Codable, Equatable, Sendable {
+public struct TagPayloadV1: Codable, Equatable, Sendable {
     public let id: String
     public let userId: String
     public let name: String

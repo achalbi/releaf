@@ -25,13 +25,13 @@ struct ScanReviewScreen: View {
     @ObservedObject var controller: ScanFlowController
     let userId: String
 
-    @StateObject private var categoriesVM: CategoryListViewModel
+    @StateObject private var categoriesVM: TagListViewModel
 
     init(controller: ScanFlowController, userId: String) {
         self.controller = controller
         self.userId = userId
         _categoriesVM = StateObject(
-            wrappedValue: CategoryListViewModel(userId: userId)
+            wrappedValue: TagListViewModel(userId: userId)
         )
     }
 

@@ -31,7 +31,7 @@ struct ScanDetailScreen: View {
     let onSearch: (() -> Void)?
     let onSettings: (() -> Void)?
 
-    @StateObject private var categoriesVM: CategoryListViewModel
+    @StateObject private var categoriesVM: TagListViewModel
 
     @State private var capture: CaptureSummary?
     @State private var showDeleteConfirm = false
@@ -100,7 +100,7 @@ struct ScanDetailScreen: View {
         self.onSearch = onSearch
         self.onSettings = onSettings
         _categoriesVM = StateObject(
-            wrappedValue: CategoryListViewModel(userId: userId)
+            wrappedValue: TagListViewModel(userId: userId)
         )
     }
 

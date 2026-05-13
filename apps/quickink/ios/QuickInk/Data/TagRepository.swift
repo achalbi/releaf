@@ -1,5 +1,5 @@
 /*
- * CategoryRepository.swift
+ * TagRepository.swift
  *
  * GRDB-backed repository for the `categories` table. Wraps the CRUD
  * operations Settings → Categories needs:
@@ -7,7 +7,7 @@
  *   - insert / rename / soft-delete / reorder
  *   - first-launch seeding of the default 6 names
  *
- * Mirror of `CategoryRepository.kt` in QuickInk's Android target.
+ * Mirror of `TagRepository.kt` in QuickInk's Android target.
  *
  * `categories.name` has a UNIQUE (user_id, name) constraint per the
  * v2 migration; callers should treat name collisions as a no-op (or
@@ -19,7 +19,7 @@ import Combine
 import GRDB
 import ReleafCoreData
 
-public final class CategoryRepository: @unchecked Sendable {
+public final class TagRepository: @unchecked Sendable {
 
     /// Default seed names rendered as the user's starting set. The
     /// canonical list per QuickInk's Phase 5 spec — preserved here
@@ -50,9 +50,9 @@ public final class CategoryRepository: @unchecked Sendable {
     /// Live publisher of a user's active (non-tombstone) categories,
     /// ordered by `position` ascending then `name` for stable output
     /// when positions tie. Empty list before the seed pass runs.
-    public func observe(userId: String) -> AnyPublisher<[CategoryEntity], Error> {
+    public func observe(userId: String) -> AnyPublisher<[TagEntity], Error> {
         ValueObservation.tracking { db in
-            try CategoryEntity
+            try TagEntity
                 .filter(Column("user_id") == userId)
                 .filter(Column("deleted_at") == nil)
                 .order(Column("position").asc, Column("name").asc)
@@ -64,9 +64,9 @@ public final class CategoryRepository: @unchecked Sendable {
 
     /// One-shot fetch — used by the seed-if-empty path during app
     /// launch. Synchronous-equivalent via `dbQueue.read`.
-    public func listActive(userId: String) async throws -> [CategoryEntity] {
+    public func listActive(userId: String) async throws -> [TagEntity] {
         try await dbQueue.read { db in
-            try CategoryEntity
+            try TagEntity
                 .filter(Column("user_id") == userId)
                 .filter(Column("deleted_at") == nil)
                 .order(Column("position").asc, Column("name").asc)

@@ -379,7 +379,7 @@ private struct MainShell: View {
             // ScanReviewScreen + the Settings → Categories list
             // both observe the same table — a freshly-seeded user
             // sees the chips on the very next scan.
-            let categoryRepo = CategoryRepository()
+            let categoryRepo = TagRepository()
             try? await categoryRepo.seedDefaultsIfEmpty(userId: userId)
             // One-shot migration for users on the previous seed
             // that included "Study". Idempotent + flag-guarded;

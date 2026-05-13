@@ -77,7 +77,7 @@ struct HomeScreen: View {
     /// visually consistent across the two sibling apps.
     @State private var showProfileDrawer = false
     @StateObject private var capturesVM: CaptureListViewModel
-    @StateObject private var categoriesVM: CategoryListViewModel
+    @StateObject private var categoriesVM: TagListViewModel
     @ObservedObject private var syncState = SyncStateStore.shared
     /// Watches the scheduler's published `isRunning` so the pending-
     /// sync pill can flip into its "Backing up…" state mid-pass. Mirror
@@ -129,7 +129,7 @@ struct HomeScreen: View {
             wrappedValue: CaptureListViewModel(userId: userId)
         )
         _categoriesVM = StateObject(
-            wrappedValue: CategoryListViewModel(userId: userId)
+            wrappedValue: TagListViewModel(userId: userId)
         )
     }
 
@@ -621,7 +621,7 @@ struct HomeScreen: View {
     /// parse step is needed. Categories with no captures in the
     /// loaded window fall to the end (empty-string key sorts smallest
     /// in descending order). Mirror of Android's `sorted` block.
-    private var sortedCategories: [CategoryEntity] {
+    private var sortedCategories: [TagEntity] {
         let latestByName: [String: String] = Dictionary(
             grouping: capturesVM.captures
         ) { ($0.category ?? "").lowercased() }

@@ -2,7 +2,7 @@
  * CategoriesSettingsScreen.swift
  *
  * Settings → Categories. CRUD list of the user's categories.
- * Backed by `CategoryRepository` — same data source the scan-
+ * Backed by `TagRepository` — same data source the scan-
  * review chip picker reads, so an add/remove here flows back into
  * the picker on the next scan with no extra wiring.
  *
@@ -20,19 +20,19 @@ struct CategoriesSettingsScreen: View {
     let userId: String
     let onBack: () -> Void
 
-    @StateObject private var vm: CategoryListViewModel
+    @StateObject private var vm: TagListViewModel
     @State private var newCategoryName: String = ""
     @State private var addError: String?
-    @State private var renameTarget: CategoryEntity?
+    @State private var renameTarget: TagEntity?
     @State private var renameDraft: String = ""
 
     init(userId: String, onBack: @escaping () -> Void) {
         self.userId = userId
         self.onBack = onBack
-        _vm = StateObject(wrappedValue: CategoryListViewModel(userId: userId))
+        _vm = StateObject(wrappedValue: TagListViewModel(userId: userId))
     }
 
-    private let repository = CategoryRepository()
+    private let repository = TagRepository()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -173,8 +173,8 @@ struct CategoriesSettingsScreen: View {
     }
 
     @ViewBuilder
-    private func categoryRow(cat: CategoryEntity) -> some View {
-        let isPredefined = CategoryRepository.isPredefined(cat.name)
+    private func categoryRow(cat: TagEntity) -> some View {
+        let isPredefined = TagRepository.isPredefined(cat.name)
         HStack(spacing: QuickInkSpacing.s2) {
             Text(cat.name)
                 .font(QuickInkText.body)
@@ -221,13 +221,13 @@ struct CategoriesSettingsScreen: View {
         )
     }
 
-    private func delete(cat: CategoryEntity) {
+    private func delete(cat: TagEntity) {
         Task {
             try? await repository.softDelete(id: cat.id)
         }
     }
 
-    private func startRename(cat: CategoryEntity) {
+    private func startRename(cat: TagEntity) {
         renameDraft = cat.name
         renameTarget = cat
     }

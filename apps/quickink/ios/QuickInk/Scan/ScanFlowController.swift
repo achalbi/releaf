@@ -356,7 +356,7 @@ public final class ScanFlowController: ObservableObject {
     /// concatenate into the same row's `notes` column. The
     /// row's `category` is overwritten with the latest capture's
     /// pick — derived data, cheap to refresh, matches the design
-    /// note in CategoryRepository's header.
+    /// note in TagRepository's header.
     private func appendOcrToTodayEntry(
         pageTexts: [Int: String],
         category: String?
@@ -529,7 +529,7 @@ public final class ScanFlowController: ObservableObject {
     /// "Ideas", "Story" still matches "Stories", and so on.
     /// Returns the canonical (database-cased) name on a hit,
     /// `nil` otherwise. Reads the shared GRDB queue directly to
-    /// avoid coupling the controller to `CategoryRepository`'s
+    /// avoid coupling the controller to `TagRepository`'s
     /// observation API — we only need a one-shot read here.
     private func matchCategoryName(tokens: [String]) async -> String? {
         guard !tokens.isEmpty else { return nil }

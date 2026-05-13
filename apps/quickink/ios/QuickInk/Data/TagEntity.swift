@@ -1,21 +1,21 @@
 /*
- * CategoryEntity.swift
+ * TagEntity.swift
  *
  * GRDB record for the `categories` table — user-configurable tags
  * shown in the scan-review screen's picker and managed in
  * Settings → Categories. Schema mirrors
  * `shared/design-system/migrations/quickink/v2_capture_categories.sql`.
  *
- * Mirror of `CategoryEntity.kt` in QuickInk's Android target.
+ * Mirror of `TagEntity.kt` in QuickInk's Android target.
  */
 
 import Foundation
 import GRDB
 
-public struct CategoryEntity: Codable, FetchableRecord, PersistableRecord, Equatable, Sendable {
+public struct TagEntity: Codable, FetchableRecord, PersistableRecord, Equatable, Sendable {
 
     /// Table renamed from `categories` → `tags` in v8_workspace.
-    /// The Swift type name stays `CategoryEntity` for one more
+    /// The Swift type name stays `TagEntity` for one more
     /// commit so the callsites can be migrated to `TagEntity`
     /// independently (iOS A.2).
     public static let databaseTableName = "tags"

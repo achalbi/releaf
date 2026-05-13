@@ -47,7 +47,7 @@ struct NotesListScreen: View {
     let onSettings: () -> Void
 
     @StateObject private var capturesVM:   CaptureListViewModel
-    @StateObject private var categoriesVM: CategoryListViewModel
+    @StateObject private var categoriesVM: TagListViewModel
 
     @State private var viewMode: ViewMode = .grid
     @State private var activeCategory: String = "All"
@@ -84,7 +84,7 @@ struct NotesListScreen: View {
         self.onSettings = onSettings
 
         _capturesVM   = StateObject(wrappedValue: CaptureListViewModel(userId: userId))
-        _categoriesVM = StateObject(wrappedValue: CategoryListViewModel(userId: userId))
+        _categoriesVM = StateObject(wrappedValue: TagListViewModel(userId: userId))
     }
 
     var body: some View {

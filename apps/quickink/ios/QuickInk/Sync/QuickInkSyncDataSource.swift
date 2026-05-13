@@ -129,13 +129,13 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             }
 
             // ---- categories (typed record) ----
-            let categoryRows = try CategoryEntity
+            let categoryRows = try TagEntity
                 .filter(Column("user_id") == userId)
                 .filter(Column("dirty") == true)
                 .filter(Column("deleted_at") == nil)
                 .fetchAll(db)
             for row in categoryRows {
-                let payload = CategoryPayloadV1(
+                let payload = TagPayloadV1(
                     id:        row.id,
                     userId:    row.userId,
                     name:      row.name,
@@ -280,7 +280,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 try Self.upsertOcrResultRow(db, payload: p, driveFileId: driveFileId)
 
             case DrivePath.kindCategory:
-                let p = try decoder.decode(CategoryPayloadV1.self, from: change.payload)
+                let p = try decoder.decode(TagPayloadV1.self, from: change.payload)
                 try Self.upsertCategoryRow(db, payload: p, driveFileId: driveFileId)
 
             default:
@@ -411,7 +411,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
 
     /// Upsert a categories row from a remote payload. Last-write-wins
     /// on `updated_at`. Mirror of `upsertCaptureRow` shape.
-    private static func upsertCategoryRow(_ db: Database, payload: CategoryPayloadV1, driveFileId: String?) throws {
+    private static func upsertCategoryRow(_ db: Database, payload: TagPayloadV1, driveFileId: String?) throws {
         try db.execute(sql: """
             INSERT INTO tags (
                 id, user_id, name, position,

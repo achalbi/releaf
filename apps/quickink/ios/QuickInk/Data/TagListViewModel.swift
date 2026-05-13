@@ -1,7 +1,7 @@
 /*
- * CategoryListViewModel.swift
+ * TagListViewModel.swift
  *
- * Lightweight observable wrapper around `CategoryRepository.observe`
+ * Lightweight observable wrapper around `TagRepository.observe`
  * for SwiftUI views. Bound from the scan-review picker chips and
  * the Settings → Categories screen.
  *
@@ -13,16 +13,16 @@ import Foundation
 import Combine
 
 @MainActor
-public final class CategoryListViewModel: ObservableObject {
+public final class TagListViewModel: ObservableObject {
 
-    @Published public private(set) var categories: [CategoryEntity] = []
+    @Published public private(set) var categories: [TagEntity] = []
 
-    private let repository: CategoryRepository
+    private let repository: TagRepository
     private let userId: String
     private var cancellable: AnyCancellable?
 
     public init(
-        repository: CategoryRepository = CategoryRepository(),
+        repository: TagRepository = TagRepository(),
         userId: String
     ) {
         self.repository = repository
