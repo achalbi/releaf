@@ -27,14 +27,17 @@
  */
 
 @file:OptIn(
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
     androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
 )
 
 package app.quickink.mobile.features.workspace
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -66,8 +69,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -84,6 +90,7 @@ import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capturetag.TagCount
 import app.quickink.mobile.data.folder.FolderEntity
+import app.quickink.mobile.data.folder.FolderRepository
 import app.quickink.mobile.data.tag.TagEntity
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
@@ -92,10 +99,7 @@ import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.launch
 
 @Composable
 fun WorkspaceHomeScreen(
@@ -113,6 +117,24 @@ fun WorkspaceHomeScreen(
     val colors  = LocalQuickInkColors.current
     val context = LocalContext.current
     val app     = remember(context) { context.applicationContext as QuickInkApp }
+    val scope   = rememberCoroutineScope()
+
+    val folderRepo = remember(app) {
+        FolderRepository(
+            folderDao     = app.database.folderDao(),
+            captureDao    = app.database.captureDao(),
+            tagDao        = app.database.tagDao(),
+            captureTagDao = app.database.captureTagDao(),
+        )
+    }
+
+    // Folder CRUD modal state. `editorTarget` is non-null while the
+    // create / rename / recolor dialog is up; `actionsForFolder` is
+    // the long-pressed folder showing the action sheet; the delete
+    // confirmation pops independently.
+    var editorTarget       by remember { mutableStateOf<FolderEditorTarget?>(null) }
+    var actionsForFolder   by remember { mutableStateOf<FolderEntity?>(null) }
+    var confirmDeleteFolder by remember { mutableStateOf<FolderEntity?>(null) }
 
     // Per-tab observers. `userId` keys the flow rebuild so a sign-out
     // / sign-in doesn't leak state across users.
@@ -200,6 +222,8 @@ fun WorkspaceHomeScreen(
                 folders = folders,
                 folderCaptureCounts = folderCaptureCounts,
                 onOpenFolder = onOpenFolder,
+                onLongPressFolder = { folder -> actionsForFolder = folder },
+                onNewFolder = { editorTarget = FolderEditorTarget.Create },
             )
 
             Spacer(Modifier.height(QuickInkSpacing.s4))
@@ -223,6 +247,94 @@ fun WorkspaceHomeScreen(
             modifier   = Modifier.align(Alignment.BottomCenter),
         )
     }
+
+    // ─── Folder CRUD modals ──────────────────────────────────────
+
+    editorTarget?.let { target ->
+        val initialName  = if (target is FolderEditorTarget.Edit) target.folder.name  else ""
+        val initialColor = if (target is FolderEditorTarget.Edit) target.folder.color
+                           else WorkspaceFolderPalette.first()
+        val mode = when (target) {
+            FolderEditorTarget.Create     -> FolderEditorMode.Create
+            is FolderEditorTarget.Edit    -> target.mode
+        }
+        FolderEditorDialog(
+            mode         = mode,
+            initialName  = initialName,
+            initialColor = initialColor,
+            onDismiss    = { editorTarget = null },
+            onSubmit     = { newName, newColor ->
+                scope.launch {
+                    when (target) {
+                        FolderEditorTarget.Create -> {
+                            folderRepo.create(
+                                userId   = userId,
+                                name     = newName,
+                                color    = newColor,
+                                position = folders.size,
+                            )
+                        }
+                        is FolderEditorTarget.Edit -> {
+                            if (target.mode != FolderEditorMode.Recolor &&
+                                newName != target.folder.name
+                            ) {
+                                folderRepo.rename(target.folder.id, newName)
+                            }
+                            if (target.mode != FolderEditorMode.Rename &&
+                                !newColor.equals(target.folder.color, ignoreCase = true)
+                            ) {
+                                folderRepo.setColor(target.folder.id, newColor)
+                            }
+                        }
+                    }
+                    editorTarget = null
+                }
+            },
+        )
+    }
+
+    actionsForFolder?.let { folder ->
+        FolderActionSheet(
+            folder        = folder,
+            onDismiss     = { actionsForFolder = null },
+            onRename      = {
+                actionsForFolder = null
+                editorTarget = FolderEditorTarget.Edit(folder, FolderEditorMode.Rename)
+            },
+            onChangeColor = {
+                actionsForFolder = null
+                editorTarget = FolderEditorTarget.Edit(folder, FolderEditorMode.Recolor)
+            },
+            onDelete      = {
+                actionsForFolder = null
+                confirmDeleteFolder = folder
+            },
+        )
+    }
+
+    confirmDeleteFolder?.let { folder ->
+        FolderDeleteConfirmDialog(
+            folder       = folder,
+            captureCount = folderCaptureCounts[folder.id] ?: 0,
+            onDismiss    = { confirmDeleteFolder = null },
+            onConfirm    = {
+                scope.launch {
+                    folderRepo.softDelete(userId, folder.id)
+                    confirmDeleteFolder = null
+                }
+            },
+        )
+    }
+}
+
+/** Discriminates between the create flow and an edit-in-place flow
+ *  for the [FolderEditorDialog]. Internal to this screen file. */
+private sealed interface FolderEditorTarget {
+    object Create : FolderEditorTarget
+    data class Edit(
+        val folder: FolderEntity,
+        val mode: FolderEditorMode,
+    ) : FolderEditorTarget
 }
 
 // ─── Header ──────────────────────────────────────────────────────
@@ -442,6 +554,8 @@ private fun FoldersSection(
     folders: List<FolderEntity>,
     folderCaptureCounts: Map<String, Int>,
     onOpenFolder: (FolderEntity) -> Unit,
+    onLongPressFolder: (FolderEntity) -> Unit,
+    onNewFolder: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
@@ -458,11 +572,12 @@ private fun FoldersSection(
             style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
             color = colors.ink,
         )
-        // "New folder" affordance is Phase B.1 — folder CRUD.
         Text(
-            text     = "",
-            style    = type.label.copy(letterSpacing = 1.2.sp, fontSize = 10.5.sp),
+            text     = "NEW FOLDER",
+            style    = type.label.copy(letterSpacing = 1.2.sp, fontSize = 10.5.sp,
+                                       fontWeight = FontWeight.SemiBold),
             color    = colors.accent,
+            modifier = Modifier.clickable(onClick = onNewFolder),
         )
     }
 
@@ -475,9 +590,10 @@ private fun FoldersSection(
     ) {
         folders.forEach { folder ->
             FolderRow(
-                folder      = folder,
+                folder       = folder,
                 captureCount = folderCaptureCounts[folder.id] ?: 0,
-                onClick     = { onOpenFolder(folder) },
+                onClick      = { onOpenFolder(folder) },
+                onLongPress  = { onLongPressFolder(folder) },
             )
         }
         if (folders.isEmpty()) {
@@ -496,16 +612,19 @@ private fun FolderRow(
     folder: FolderEntity,
     captureCount: Int,
     onClick: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
-    val tint   = runCatching { Color(android.graphics.Color.parseColor(folder.color)) }
-        .getOrDefault(colors.accent)
+    val tint   = parseFolderColor(folder.color)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick     = onClick,
+                onLongClick = onLongPress,
+            )
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
