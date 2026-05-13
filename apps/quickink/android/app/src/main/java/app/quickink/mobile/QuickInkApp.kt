@@ -304,6 +304,40 @@ class QuickInkApp : Application() {
      * the on-resume hook uses, so a sync-worker pre-flight that
      * collides with an in-flight on-resume refresh just returns.
      */
+    /**
+     * Background-safe silent token refresh used by
+     * `QuickInkSyncWorker` after a 401 from Drive. Wraps
+     * `RealGoogleAuthClient.refreshSilentBackground` with the same
+     * single-flight guard the foreground refresh uses; on success
+     * adopts the rotated session through `authStore` so the next
+     * worker pass sees the new access token.
+     *
+     * Returns the rotated session when GMS still has the user's
+     * authorization cached; returns `null` when it would need a
+     * UI prompt (revoked consent, cleared cache, etc.) — the
+     * caller falls back to the existing AUTH_REJECTED banner path.
+     */
+    suspend fun attemptBackgroundSilentRefresh(
+        session: GoogleAuthSession,
+    ): GoogleAuthSession? {
+        val webClientId = getString(R.string.google_web_client_id)
+        if (webClientId == "REPLACE_WITH_GOOGLE_WEB_CLIENT_ID") return null
+        if (!refreshInFlight.compareAndSet(false, true)) {
+            Log.i("QuickInkAuth", "background-silent-refresh: already in flight, skip")
+            return null
+        }
+        return try {
+            val client = RealGoogleAuthClient(this, webClientId)
+            val fresh = client.refreshSilentBackground(session)
+            if (fresh != null) {
+                authStore.adoptSession(fresh)
+            }
+            fresh
+        } finally {
+            refreshInFlight.set(false)
+        }
+    }
+
     suspend fun ensureFreshSessionForSyncIfPossible(): Boolean {
         val webClientId = getString(R.string.google_web_client_id)
         if (webClientId == "REPLACE_WITH_GOOGLE_WEB_CLIENT_ID") return false

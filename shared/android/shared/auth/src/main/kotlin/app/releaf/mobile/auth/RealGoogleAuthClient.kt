@@ -255,6 +255,71 @@ class RealGoogleAuthClient(
         return buildSession(identity, authResult)
     }
 
+    /**
+     * Background-safe silent token refresh. Used by QuickInk's sync
+     * worker after a 401 from Drive: if GMS still has the user's
+     * authorization cached, this returns a freshly-rotated session
+     * without ever touching the UI surface. Returns `null` when
+     * GMS would need to prompt the user again (revoked consent,
+     * cleared cache, etc.) — caller falls back to the existing
+     * AUTH_REJECTED banner path.
+     *
+     * Crucially we use `Identity.getAuthorizationClient(context.
+     * applicationContext)` instead of the lazy [authorizationClient]
+     * field that pins itself to an Activity. The authorize() call
+     * for an already-authorized account completes silently with no
+     * UI; if the result reports `hasResolution()` we KNOW the
+     * system needs an Activity to host the consent flow and we
+     * bail with `null` rather than launching the PendingIntent
+     * (which has nothing to attach to from a worker context and
+     * would emit the GMS "Request cancelled by quickink" toast).
+     *
+     * Doesn't touch any of the cached ID-token state — that
+     * pipeline stays gated on a foreground call from
+     * [AnalyticsFlushWorker]. This method is strictly for the
+     * Drive access-token rotation path.
+     */
+    suspend fun refreshSilentBackground(session: GoogleAuthSession): GoogleAuthSession? {
+        return try {
+            val client = Identity.getAuthorizationClient(context.applicationContext)
+            val request = AuthorizationRequest.Builder()
+                .setRequestedScopes(listOf(Scope(DRIVE_FILE_SCOPE)))
+                .setAccount(Account(session.email, GOOGLE_ACCOUNT_TYPE))
+                .build()
+            val result = client.authorize(request).awaitTask()
+            if (result.hasResolution()) {
+                android.util.Log.i(
+                    TAG,
+                    "refreshSilentBackground: GMS needs UI consent — returning null",
+                )
+                return null
+            }
+            val token = result.accessToken
+            if (token.isNullOrBlank()) {
+                android.util.Log.w(
+                    TAG,
+                    "refreshSilentBackground: result had no access token — returning null",
+                )
+                return null
+            }
+            android.util.Log.i(
+                TAG,
+                "refreshSilentBackground: ok (rotated access token, " +
+                    "scopes=${result.grantedScopes})",
+            )
+            session.copy(
+                accessToken = token,
+                expiresAt = Instant.now().plusSeconds(ACCESS_TOKEN_TTL_SECONDS),
+            )
+        } catch (e: Exception) {
+            android.util.Log.w(
+                TAG,
+                "refreshSilentBackground: failed (${e::class.java.simpleName}: ${e.message})",
+            )
+            null
+        }
+    }
+
     override suspend fun refresh(session: GoogleAuthSession): GoogleAuthSession {
         // Pin to the signed-in account so the silent refresh path
         // never surfaces an account picker on multi-account devices

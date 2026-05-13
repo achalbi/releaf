@@ -337,54 +337,72 @@ class QuickInkSyncWorker(
             Result.retry()
         } catch (e: DriveError.Unauthenticated) {
             // Drive rejected the token (401, or a 403 that was not a
-            // rate/quota response). DELIBERATELY do NOT sign the user
-            // out here — a single bad response should not bounce the
-            // user to the SignIn screen and risk another loop. The
-            // Settings banner gives them an explicit recovery path.
-            //
-            // Conservative posture: log loudly, mark the pass as
-            // permanently-failed (no retry — repeating won't help
-            // if the auth is actually dead), and let the user
-            // manually re-authenticate via Settings → Account if
-            // they notice "Last synced" not updating. The pending-
-            // count surfaces the issue without destroying their
-            // session.
-            Log.w(TAG, "sync: result=FAILURE (Drive auth rejected — 401/403). " +
-                "User can manually sign out + back in via Settings if " +
-                "this persists. $e")
-            writeSyncProgress(
-                phase = SYNC_PROGRESS_PHASE_DONE,
-                label = "Backup stopped: Drive needs re-authentication.",
-                percent = 100,
-                logLine = "Backup stopped because Drive rejected the token.",
-            )
+            // rate/quota response). Try a background-safe silent
+            // refresh first — works for the common case where GMS
+            // still has the user's authorization cached and just
+            // needs us to ask for a fresh access token. If that
+            // succeeds, schedule a retry with the rotated session
+            // so the user never sees AUTH_REJECTED.
+            Log.w(TAG, "sync: 401/403 from Drive — attempting background silent refresh first. $e")
             // Definitive diagnostic — call Google's tokeninfo endpoint
             // and log the actual scopes attached to this access token.
-            // This tells us apart:
-            //   - "drive.file" missing       → user didn't grant Drive
-            //                                  consent OR Cloud project
-            //                                  doesn't authorize the
-            //                                  scope. Sign-out + fresh
-            //                                  consent fixes the first;
-            //                                  Cloud Console fixes the
-            //                                  second.
-            //   - "drive.file" present       → Drive API is disabled in
-            //                                  the Cloud project
-            //                                  (returns 403 for any call
-            //                                  with a properly-scoped
-            //                                  token). Enable at
-            //                                  console.cloud.google.com.
-            //   - tokeninfo itself 400s      → token is genuinely
-            //                                  invalid / expired beyond
-            //                                  the local TTL.
-            // Best-effort — silent failure here doesn't change the
-            // user-facing outcome.
+            // Run BEFORE the silent refresh attempt so the log line
+            // captures the failing token's properties (after refresh
+            // the access token is rotated and the diagnostic would
+            // describe the wrong token).
             runCatching {
                 logDriveTokenInfo(session.accessToken)
             }.onFailure { Log.w(TAG, "tokeninfo diagnostic failed: $it") }
-            recordPendingFromError(app)
-            writeSyncErrorCode(app, SyncErrorCodes.AUTH_REJECTED)
-            Result.failure()
+
+            val refreshed = app.attemptBackgroundSilentRefresh(session)
+            if (refreshed != null) {
+                Log.i(TAG, "sync: silent refresh succeeded — scheduling worker retry " +
+                    "with rotated session (newSecondsUntilExpiry=" +
+                    "${refreshed.expiresAt.epochSecond - Instant.now().epochSecond})")
+                // Clear any stale AUTH_REJECTED banner — the next
+                // worker pass will use the new token, no need to
+                // ask the user to re-auth.
+                writeSyncErrorCode(app, "")
+                writeSyncProgress(
+                    phase = SYNC_PROGRESS_PHASE_QUEUED,
+                    label = "Refreshed credentials — retrying backup…",
+                    percent = 0,
+                    logLine = "Drive 401 → silent token refresh succeeded → retrying.",
+                )
+                // Result.retry() lets WorkManager re-run the worker
+                // with the standard backoff. The pre-flight refresh
+                // gate at the top will be a no-op (token is fresh
+                // again), and the retry runs against the new token.
+                Result.retry()
+            } else {
+                // Silent refresh wasn't possible (consent revoked,
+                // cleared cache, no GMS authorization to rotate).
+                // DELIBERATELY do NOT sign the user out here — a
+                // single bad response should not bounce the user to
+                // the SignIn screen and risk another loop. The
+                // Settings banner gives them an explicit recovery
+                // path.
+                //
+                // Conservative posture: log loudly, mark the pass
+                // as permanently-failed (no retry — repeating won't
+                // help if the auth is actually dead), and let the
+                // user manually re-authenticate via Settings →
+                // Account if they notice "Last synced" not updating.
+                // The pending-count surfaces the issue without
+                // destroying their session.
+                Log.w(TAG, "sync: result=FAILURE (Drive auth rejected — 401/403, " +
+                    "silent refresh also failed). User can manually sign out + " +
+                    "back in via Settings if this persists.")
+                writeSyncProgress(
+                    phase = SYNC_PROGRESS_PHASE_DONE,
+                    label = "Backup stopped: Drive needs re-authentication.",
+                    percent = 100,
+                    logLine = "Backup stopped because Drive rejected the token.",
+                )
+                recordPendingFromError(app)
+                writeSyncErrorCode(app, SyncErrorCodes.AUTH_REJECTED)
+                Result.failure()
+            }
         } catch (e: DriveError) {
             // Transient (network, 5xx). Back off and retry.
             Log.w(TAG, "sync: result=RETRY (Drive transient error): $e")
