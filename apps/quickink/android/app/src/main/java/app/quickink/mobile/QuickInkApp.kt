@@ -82,6 +82,16 @@ internal const val QUICKINK_APP_VERSION = "0.1.0"
  */
 private const val REFRESH_THRESHOLD_SECONDS = 300L
 
+/**
+ * Tighter threshold used by the sync-worker pre-flight refresh
+ * (`ensureFreshSessionForSyncIfPossible`). The on-resume hook uses
+ * a 5-min window because it has the freedom to refresh
+ * speculatively; the pre-flight only fires when sync is about to
+ * happen, so we wait until the token is genuinely about to expire
+ * before paying the AuthorizationClient round-trip.
+ */
+private const val SYNC_PREFLIGHT_THRESHOLD_SECONDS = 60L
+
 class QuickInkApp : Application() {
 
     /**
@@ -265,6 +275,73 @@ class QuickInkApp : Application() {
      * the app process is otherwise quiet.
      */
     fun isInForeground(): Boolean = topActivityRef?.get() != null
+
+    /**
+     * Pre-flight access-token refresh used by `QuickInkSyncWorker`
+     * before it makes Drive calls. Closes the gap left by removing
+     * the 60s in-app refresh tick: a user who keeps the app open
+     * for 55+ minutes used to see a one-time 401 → AUTH_REJECTED
+     * banner the next time sync fired. With this hook the worker
+     * rotates the session itself before the impending Drive call,
+     * so the banner never appears for that flow.
+     *
+     * Conditions to attempt refresh:
+     *   - real Google client is wired (web client id configured),
+     *   - user is signed in,
+     *   - access token is within [SYNC_PREFLIGHT_THRESHOLD_SECONDS]
+     *     of expiry,
+     *   - a foreground Activity is available (so
+     *     `AuthorizationClient.authorize()` has the context it
+     *     needs and the GMS "Request cancelled by quickink" toast
+     *     can't fire on a missing-Activity cancellation).
+     *
+     * Background runs (no Activity) skip the refresh — the worker
+     * proceeds with the current token, the Drive call may still
+     * 401, and the existing AUTH_REJECTED banner path takes over.
+     * The user clears it with the in-place Reconnect on next open.
+     *
+     * Single-flight via the same `refreshInFlight` AtomicBoolean
+     * the on-resume hook uses, so a sync-worker pre-flight that
+     * collides with an in-flight on-resume refresh just returns.
+     */
+    suspend fun ensureFreshSessionForSyncIfPossible(): Boolean {
+        val webClientId = getString(R.string.google_web_client_id)
+        if (webClientId == "REPLACE_WITH_GOOGLE_WEB_CLIENT_ID") return false
+        val signedIn = authStore.state.value as? AuthState.SignedIn ?: return false
+        val session: GoogleAuthSession = signedIn.session
+
+        val now = Instant.now()
+        val refreshAt = session.expiresAt.minusSeconds(SYNC_PREFLIGHT_THRESHOLD_SECONDS)
+        if (now.isBefore(refreshAt)) {
+            return false                                    // still fresh
+        }
+        val activity = topActivityRef?.get() ?: return false  // background → skip
+        if (!refreshInFlight.compareAndSet(false, true)) {
+            Log.i("QuickInkAuth", "preflight-refresh: already in flight, skipping")
+            return false
+        }
+        return try {
+            Log.i(
+                "QuickInkAuth",
+                "preflight-refresh: starting (secondsUntilExpiry=" +
+                    "${session.expiresAt.epochSecond - now.epochSecond})"
+            )
+            val client = RealGoogleAuthClient(activity, webClientId)
+            val fresh = client.refresh(session)
+            authStore.adoptSession(fresh)
+            Log.i(
+                "QuickInkAuth",
+                "preflight-refresh: ok (newSecondsUntilExpiry=" +
+                    "${fresh.expiresAt.epochSecond - Instant.now().epochSecond})"
+            )
+            true
+        } catch (e: Exception) {
+            Log.w("QuickInkAuth", "preflight-refresh: failed: $e")
+            false
+        } finally {
+            refreshInFlight.set(false)
+        }
+    }
 
     /**
      * If the cached session's access token is near or past expiry,

@@ -143,13 +143,12 @@ class QuickInkSyncWorker(
         )
 
         // ---- Gate 1: signed-in? ----
-        val authState = app.authStore.state.value
-        if (authState !is AuthState.SignedIn) {
+        val initialAuthState = app.authStore.state.value
+        if (initialAuthState !is AuthState.SignedIn) {
             Log.i(TAG, "gate-1 (signed-in): user is signed out — skipping")
             return Result.success()
         }
-        val session = authState.session
-        Log.i(TAG, "gate-1 (signed-in): ok (user=${session.userId.take(8)}…)")
+        Log.i(TAG, "gate-1 (signed-in): ok (user=${initialAuthState.session.userId.take(8)}…)")
 
         // ---- Gate 2: drive backup toggle on? ----
         // Read fresh per pass — the user can flip it from Settings
@@ -161,6 +160,28 @@ class QuickInkSyncWorker(
             return Result.success()
         }
         Log.i(TAG, "gate-2 (drive-backup): on")
+
+        // ---- Pre-flight token refresh ----
+        // Closes the "user keeps app open past 55 min, sync 401s,
+        // AUTH_REJECTED banner shows" gap. Refresh fires only when
+        // the token is genuinely about to expire AND a foreground
+        // Activity is available — see
+        // [QuickInkApp.ensureFreshSessionForSyncIfPossible] for the
+        // full predicate. Background runs (no Activity) skip the
+        // refresh entirely so we don't surface the GMS "Request
+        // cancelled by quickink" toast; the existing 401 → AUTH_-
+        // REJECTED banner path takes over for them.
+        app.ensureFreshSessionForSyncIfPossible()
+
+        // Re-read auth state — the pre-flight may have rotated the
+        // session under us. Skip cleanly if the user signed out
+        // during the refresh attempt.
+        val authStateAfterRefresh = app.authStore.state.value
+        if (authStateAfterRefresh !is AuthState.SignedIn) {
+            Log.i(TAG, "post-refresh: signed out, skipping")
+            return Result.success()
+        }
+        val session = authStateAfterRefresh.session
 
         // (Previously: a `gate-3` here returned Result.retry when
         // `session.expiresAt` was past now. That was the source of
