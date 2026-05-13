@@ -81,8 +81,12 @@ import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capturetag.TagCount
 import app.quickink.mobile.data.tag.TagEntity
+import app.quickink.mobile.data.smartcollection.RuleClause
+import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
+import app.quickink.mobile.data.smartcollection.SmartCollectionRule
 import app.quickink.mobile.data.tag.TagRepository
 import app.releaf.mobile.data.common.IsoClock
+import app.releaf.mobile.data.common.Uuidv7
 import kotlinx.coroutines.launch
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
@@ -123,10 +127,13 @@ fun TagLibraryScreen(
     var picked    by remember { mutableStateOf<List<TagEntity>>(emptyList()) }
 
     // Tag CRUD modal state (Phase D.1 follow-up).
-    var actionsForTag    by remember { mutableStateOf<TagEntity?>(null) }
-    var renameTarget     by remember { mutableStateOf<TagEntity?>(null) }
-    var deleteTarget     by remember { mutableStateOf<TagEntity?>(null) }
-    var showCreateDialog by remember { mutableStateOf(false) }
+    var actionsForTag         by remember { mutableStateOf<TagEntity?>(null) }
+    var renameTarget          by remember { mutableStateOf<TagEntity?>(null) }
+    var deleteTarget          by remember { mutableStateOf<TagEntity?>(null) }
+    var showCreateDialog      by remember { mutableStateOf(false) }
+    // Save-as-collection prompt — non-empty list of tags becomes
+    // a SmartCollection with an AND-of-tag-is clauses.
+    var saveAsCollectionPicked by remember { mutableStateOf<List<TagEntity>>(emptyList()) }
 
     val scope = rememberCoroutineScope()
     val tagRepo = remember(app) {
@@ -193,6 +200,7 @@ fun TagLibraryScreen(
                 onRemove = { tag ->
                     picked = picked.filter { it.id != tag.id }
                 },
+                onSaveAsCollection = { saveAsCollectionPicked = picked },
                 onViewAll = {
                     // Single-tag drill uses the existing per-tag
                     // route; multi-tag intersect view is Phase D
@@ -290,6 +298,45 @@ fun TagLibraryScreen(
                         tagRepo.findOrCreate(userId, normalized)
                     }
                     showCreateDialog = false
+                }
+            },
+        )
+    }
+
+    if (saveAsCollectionPicked.isNotEmpty()) {
+        val tagNames = saveAsCollectionPicked.joinToString(" + ") { "#${it.name}" }
+        TagRenameDialog(
+            initialName = tagNames,
+            title       = "Save as smart collection",
+            onDismiss   = { saveAsCollectionPicked = emptyList() },
+            onSubmit    = { name ->
+                val tagsForRule = saveAsCollectionPicked
+                scope.launch {
+                    val now = IsoClock.nowIso()
+                    val clauses: List<RuleClause> = tagsForRule.map {
+                        RuleClause.TagIs(it.id)
+                    }
+                    val ruleJson = SmartCollectionRule.encode(clauses)
+                    val existing = app.database.smartCollectionDao().listActive(userId)
+                    val nextPos = (existing.maxOfOrNull { it.position } ?: -1) + 1
+                    app.database.smartCollectionDao().insert(
+                        SmartCollectionEntity(
+                            id        = Uuidv7.generate(),
+                            userId    = userId,
+                            name      = name.trim().ifEmpty { tagNames },
+                            icon      = null,
+                            color     = null,
+                            ruleJson  = ruleJson,
+                            position  = nextPos,
+                            isSeeded  = false,
+                            createdAt = now,
+                            updatedAt = now,
+                            dirty     = true,
+                            deletedAt = null,
+                        ),
+                    )
+                    saveAsCollectionPicked = emptyList()
+                    picked = emptyList()
                 }
             },
         )
@@ -419,6 +466,7 @@ private fun IntersectBuilderCard(
     onAdd: (TagEntity) -> Unit,
     onRemove: (TagEntity) -> Unit,
     onViewAll: () -> Unit,
+    onSaveAsCollection: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
@@ -496,12 +544,23 @@ private fun IntersectBuilderCard(
                 color = colors.ink,
             )
             if (picked.isNotEmpty() && intersectCount > 0) {
-                Text(
-                    text  = "VIEW",
-                    style = type.label.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp),
-                    color = colors.accent,
-                    modifier = Modifier.clickable(onClick = onViewAll),
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text  = "SAVE",
+                        style = type.label.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp),
+                        color = colors.accent,
+                        modifier = Modifier.clickable(onClick = onSaveAsCollection),
+                    )
+                    Text(
+                        text  = "VIEW",
+                        style = type.label.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp),
+                        color = colors.accent,
+                        modifier = Modifier.clickable(onClick = onViewAll),
+                    )
+                }
             }
         }
     }

@@ -37,6 +37,10 @@ public struct TagLibraryScreen: View {
     @State private var showCreate: Bool = false
     @State private var renameDraft: String = ""
     @State private var createDraft: String = ""
+    /// Phase D.2 — save the in-progress intersection as a new
+    /// smart collection. Non-nil → prompt is up.
+    @State private var saveAsCollectionPicked: [TagEntity] = []
+    @State private var saveAsCollectionDraft: String = ""
 
     public init(
         userId: String,
@@ -159,6 +163,55 @@ public struct TagLibraryScreen: View {
                 }
             }
         }
+        .alert(
+            "Save as smart collection",
+            isPresented: Binding(
+                get: { !saveAsCollectionPicked.isEmpty },
+                set: { if !$0 { saveAsCollectionPicked = [] } }
+            ),
+        ) {
+            TextField("Name", text: $saveAsCollectionDraft)
+            Button("Cancel", role: .cancel) { saveAsCollectionPicked = []; saveAsCollectionDraft = "" }
+            Button("Save") {
+                let tagsForRule = saveAsCollectionPicked
+                let draft = saveAsCollectionDraft
+                let fallback = tagsForRule.map { "#\($0.name)" }.joined(separator: " + ")
+                Task {
+                    let now = IsoClock.nowIso()
+                    let clauses: [RuleClause] = tagsForRule.map { .tagIs(tagId: $0.id) }
+                    let ruleJson = SmartCollectionRule.encode(clauses)
+                    let dbQueue = QuickInkDatabase.shared.dbQueue
+                    let nextPos = (try? await dbQueue.read { db in
+                        (try Int.fetchOne(db, sql: """
+                            SELECT COALESCE(MAX(position), -1) + 1
+                            FROM smart_collections
+                            WHERE user_id = ? AND deleted_at IS NULL
+                            """, arguments: [userId])) ?? 0
+                    }) ?? 0
+                    let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let name = trimmed.isEmpty ? fallback : trimmed
+                    let row = SmartCollectionEntity(
+                        id:        Uuidv7.generate(),
+                        userId:    userId,
+                        name:      name,
+                        icon:      nil,
+                        color:     nil,
+                        ruleJson:  ruleJson,
+                        position:  nextPos,
+                        isSeeded:  false,
+                        createdAt: now,
+                        updatedAt: now,
+                        dirty:     true,
+                    )
+                    try? await dbQueue.write { db in try row.insert(db) }
+                    saveAsCollectionPicked = []
+                    saveAsCollectionDraft = ""
+                    picked = []
+                }
+            }
+        } message: {
+            Text("Saves the current tag combination as a saved view.")
+        }
     }
 
     private var filteredTags: [TagEntity] {
@@ -244,15 +297,27 @@ public struct TagLibraryScreen: View {
                     .foregroundColor(QuickInkColors.ink)
                 Spacer()
                 if !picked.isEmpty, viewModel.intersectCount > 0 {
-                    Button(action: {
-                        if let first = picked.first { onOpenTag(first) }
-                    }) {
-                        Text("VIEW")
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .tracking(1.2)
-                            .foregroundColor(QuickInkColors.accent)
+                    HStack(spacing: 14) {
+                        Button(action: {
+                            saveAsCollectionDraft = picked.map { "#\($0.name)" }.joined(separator: " + ")
+                            saveAsCollectionPicked = picked
+                        }) {
+                            Text("SAVE")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .tracking(1.2)
+                                .foregroundColor(QuickInkColors.accent)
+                        }
+                        .buttonStyle(.plain)
+                        Button(action: {
+                            if let first = picked.first { onOpenTag(first) }
+                        }) {
+                            Text("VIEW")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .tracking(1.2)
+                                .foregroundColor(QuickInkColors.accent)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
