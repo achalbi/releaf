@@ -255,20 +255,17 @@ private struct MainShell: View {
         // Carries the canonical category name; the screen filters
         // entries case-insensitively against `entry.category`.
         case categoryEntries(name: String)
-        // Workspace v1 — gated by WorkspaceFeatureFlag. The Workspace
-        // tab routes here when the flag is on; falls back to .notesList
-        // otherwise.
+        // Workspace v1 — canonical destination of the bottom-nav
+        // Workspace tab post-GA. The legacy rollout flag was
+        // retired alongside the flip.
         case workspaceHome
         case folderDetail(folderId: String)
         case smartCollection(collectionId: String)
         case tagLibrary
     }
 
-    /// Resolved per-process: which route the Workspace bottom-nav tap
-    /// should land on. Reads the flag once on view init, so flipping it
-    /// at runtime requires an app restart to pick up.
-    private let workspaceTabRoute: Route =
-        WorkspaceFeatureFlag.isEnabled() ? .workspaceHome : .notesList
+    /// Canonical Workspace bottom-nav destination.
+    private let workspaceTabRoute: Route = .workspaceHome
 
     let userId: String
     @ObservedObject var authStore: AuthStore

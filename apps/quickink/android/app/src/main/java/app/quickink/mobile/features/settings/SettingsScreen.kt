@@ -65,7 +65,6 @@ import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.data.sync.QuickInkSyncWorker
 import app.quickink.mobile.features.auth.rememberQuickInkSignInAction
 import app.quickink.mobile.features.nav.NavTab
-import app.quickink.mobile.features.workspace.WorkspaceFeatureFlag
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
@@ -120,9 +119,6 @@ fun SettingsScreen(
     var driveBackupEnabled by remember { mutableStateOf(preferences.driveBackupEnabled) }
     var searchablePdfExportEnabled by remember { mutableStateOf(preferences.searchablePdfExportEnabled) }
     var locationForScansEnabled by remember { mutableStateOf(preferences.locationForScansEnabled) }
-    var workspaceEnabled by remember {
-        mutableStateOf(WorkspaceFeatureFlag.isEnabled(context))
-    }
     var customDisplayName by remember { mutableStateOf(preferences.customDisplayName) }
 
     // "Syncing now…" feedback combines two signals:
@@ -511,15 +507,6 @@ fun SettingsScreen(
                     onCheckedChange = { value ->
                         searchablePdfExportEnabled = value
                         preferences.searchablePdfExportEnabled = value
-                    },
-                )
-                ToggleRow(
-                    label   = "Workspace v1 (preview)",
-                    help    = "Replaces the Library tab with the new Workspace home — folders, smart collections, and the Continue card. Off by default during rollout. Restart the app after toggling to see the new bottom-nav label.",
-                    checked = workspaceEnabled,
-                    onCheckedChange = { value ->
-                        workspaceEnabled = value
-                        WorkspaceFeatureFlag.setEnabled(context, value)
                     },
                 )
             }

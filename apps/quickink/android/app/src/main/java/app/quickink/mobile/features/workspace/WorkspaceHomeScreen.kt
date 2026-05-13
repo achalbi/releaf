@@ -1,8 +1,9 @@
 /*
  * WorkspaceHomeScreen.kt
  *
- * Workspace v1 home (Screen 1 from the design brief). Replaces the
- * Library tab when [WorkspaceFeatureFlag.isEnabled] returns true.
+ * Workspace v1 home (Screen 1 from the design brief). The canonical
+ * landing surface for the bottom-nav Workspace tab — post-GA it is
+ * always the route (the legacy rollout flag has been retired).
  *
  * Composition (top → bottom):
  *   - Header row     — "Workspace" title + folder count subtitle +

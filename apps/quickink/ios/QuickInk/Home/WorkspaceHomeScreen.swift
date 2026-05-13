@@ -2,8 +2,9 @@
  * WorkspaceHomeScreen.swift
  *
  * QuickInk Workspace v1 home (Screen 1 from the design brief).
- * Replaces `NotesListScreen` when `WorkspaceFeatureFlag.isEnabled()`
- * returns true.
+ * The canonical landing surface for the bottom-nav Workspace tab
+ * — post-GA it is always the route (the legacy rollout flag has
+ * been retired).
  *
  * Composition (top → bottom):
  *   - Header   — "Workspace" title + folder count + bell + avatar.

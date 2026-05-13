@@ -73,12 +73,6 @@ struct SettingsScreen: View {
     /// state via the published `syncState` re-render.
     @State private var isSyncingFlash = false
 
-    /// Mirror of Android's `workspaceEnabled` toggle state. The
-    /// underlying flag lives in UserDefaults via
-    /// `WorkspaceFeatureFlag`; this @State is just for the toggle's
-    /// binding so the row re-renders the instant the user flips it.
-    @State private var workspaceEnabled: Bool = WorkspaceFeatureFlag.isEnabled()
-
     var body: some View {
         VStack(spacing: 0) {
             topBar
@@ -175,17 +169,6 @@ struct SettingsScreen: View {
                             label: "Searchable PDF export",
                             help:  "Adds an invisible OCR text layer to exported PDFs so PDF readers can search and copy the text. Off by default while we tune the layout.",
                             isOn:  $settings.searchablePdfExportEnabled
-                        )
-                        toggleRow(
-                            label: "Workspace v1 (preview)",
-                            help:  "Replaces the Library tab with the new Workspace home — folders, smart collections, and the Continue card. Off by default during rollout. Restart the app after toggling to see the new bottom-nav label.",
-                            isOn:  Binding(
-                                get: { workspaceEnabled },
-                                set: { value in
-                                    workspaceEnabled = value
-                                    WorkspaceFeatureFlag.setEnabled(value)
-                                }
-                            )
                         )
                     }
 

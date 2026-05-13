@@ -46,7 +46,6 @@ import app.quickink.mobile.data.smartcollection.SmartCollectionRepository
 import app.quickink.mobile.features.workspace.FolderDetailScreen
 import app.quickink.mobile.features.workspace.SmartCollectionScreen
 import app.quickink.mobile.features.workspace.TagLibraryScreen
-import app.quickink.mobile.features.workspace.WorkspaceFeatureFlag
 import app.quickink.mobile.features.workspace.WorkspaceHomeScreen
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import kotlinx.coroutines.launch
@@ -191,7 +190,7 @@ private object Routes {
     // round-trip cleanly through the nav arg.
     const val CATEGORY_ENTRIES  = "category_entries/{name}"
 
-    /** Workspace v1 home (Phase B). Gated by [WorkspaceFeatureFlag]. */
+    /** Workspace v1 home — canonical bottom-nav destination post-GA. */
     const val WORKSPACE_HOME    = "workspace_home"
 
     /** Workspace v1 folder detail (Phase C — Screen 2). */
@@ -502,14 +501,12 @@ private fun MainShell(
 
     // Workspace v1 (Phase B) — when the feature flag is on, the
     // bottom-nav "Workspace" tab routes to the new WorkspaceHomeScreen.
-    // When off, it routes to the legacy NotesListScreen so the rest of
-    // the UI keeps shipping unchanged. Read once per composition; flips
-    // require a process restart, which is acceptable for a dev-only
-    // toggle.
-    val workspaceTabRoute = remember(context) {
-        if (WorkspaceFeatureFlag.isEnabled(context)) Routes.WORKSPACE_HOME
-        else Routes.NOTES_LIST
-    }
+    // Workspace v1 is the canonical home for the Library / Workspace
+    // tab on every install — the rollout flag was retired alongside
+    // the GA flip. `NotesListScreen` stays reachable via deep links
+    // and the search timeline, but the bottom-nav tab always lands
+    // here now.
+    val workspaceTabRoute = Routes.WORKSPACE_HOME
 
     /// Variant of [navToTab] used by ScanDetailScreen's bottom nav.
     /// Skips `restoreState` so tapping Library / Search from the
