@@ -46,10 +46,21 @@ object DrivePath {
     const val KIND_PROJECT        = "project"
     const val KIND_REFERENCE_LINK = "reference_link"
     const val KIND_PAGE_TEMPLATE  = "page_template"
-    /** QuickInk-only — user-configurable category for [`captures.category`]. */
+    /** QuickInk-only — user-configurable category for [`captures.category`].
+     *  Semantically renamed to "tag" in Workspace v1 (Phase A.2); the
+     *  Drive wire kind keeps the legacy string to round-trip with
+     *  existing payloads on Drive until the prefix migration completes. */
     const val KIND_CATEGORY       = "category"
     /** QuickInk-only — per-user profile-settings row (display name, photo, etc.). */
     const val KIND_PROFILE_SETTINGS = "profile_settings"
+
+    // ─── Workspace v1 (Phase A.3b) ───────────────────────────────────
+    /** QuickInk-only — Workspace folder ("intent" axis; one per capture). */
+    const val KIND_FOLDER           = "folder"
+    /** QuickInk-only — capture↔tag many-to-many join row. */
+    const val KIND_CAPTURE_TAG      = "capture_tag"
+    /** QuickInk-only — rule-based saved view. */
+    const val KIND_SMART_COLLECTION = "smart_collection"
 
     // ---- folder names (no trailing slash; join with `/`) ----
     const val FOLDER_NOTEBOOKS       = "notebooks"
@@ -60,10 +71,26 @@ object DrivePath {
     const val FOLDER_CAPTURES        = "captures"
     /** QuickInk's OCR-result tree — `ocr/{captureId}/page-{N}.json`. */
     const val FOLDER_OCR             = "ocr"
-    /** QuickInk's category list — `categories/{id}.json`. */
+    /** QuickInk's category list — `categories/{id}.json`. Legacy prefix
+     *  for QuickInk's "tags" (renamed in Workspace v1 Phase A.2). New
+     *  writes go under [FOLDER_TAGS]; readers fall back to this prefix
+     *  during the rollout soak. */
     const val FOLDER_CATEGORIES      = "categories"
+    /** QuickInk's tag list — `tags/{id}.json`. Workspace v1 destination
+     *  for what used to live under `categories/`. The data source writes
+     *  here exclusively after Phase A.3b; the legacy `categories/`
+     *  prefix is read-back-compat for two weeks then cleaned up. */
+    const val FOLDER_TAGS            = "tags"
     /** QuickInk's profile-settings folder — `profile_settings/{userId}.json`. */
     const val FOLDER_PROFILE_SETTINGS = "profile_settings"
+
+    // ─── Workspace v1 (Phase A.3b) ───────────────────────────────────
+    /** QuickInk folders — `folders/{id}.json`. */
+    const val FOLDER_FOLDERS           = "folders"
+    /** QuickInk capture↔tag joins — `capture_tags/{id}.json`. */
+    const val FOLDER_CAPTURE_TAGS      = "capture_tags"
+    /** QuickInk smart collections — `smart_collections/{id}.json`. */
+    const val FOLDER_SMART_COLLECTIONS = "smart_collections"
     const val FOLDER_TASKS           = "tasks"
     const val FOLDER_TOMBSTONES      = "tombstones"
 
@@ -120,8 +147,22 @@ object DrivePath {
     fun quickInkOcrResult(createdAt: String, captureId: String, pageIndex: Int): String =
         "${quickInkDateBucket(createdAt)}/$captureId/page-$pageIndex.json"
 
-    /** QuickInk's per-category file — `categories/{id}.json`. */
+    /** QuickInk's per-category file — `categories/{id}.json`. Legacy
+     *  read path. New writes go through [tag] under `tags/{id}.json`. */
     fun category(id: String): String = "$FOLDER_CATEGORIES/$id.json"
+
+    /** QuickInk's per-tag file — `tags/{id}.json` (Workspace v1).
+     *  Renamed from [category] in Phase A.3b. */
+    fun tag(id: String): String = "$FOLDER_TAGS/$id.json"
+
+    /** QuickInk folder payload file — `folders/{id}.json`. */
+    fun folder(id: String): String = "$FOLDER_FOLDERS/$id.json"
+
+    /** QuickInk capture↔tag join payload — `capture_tags/{id}.json`. */
+    fun captureTag(id: String): String = "$FOLDER_CAPTURE_TAGS/$id.json"
+
+    /** QuickInk smart-collection payload — `smart_collections/{id}.json`. */
+    fun smartCollection(id: String): String = "$FOLDER_SMART_COLLECTIONS/$id.json"
 
     /**
      * QuickInk's per-user profile-settings file —

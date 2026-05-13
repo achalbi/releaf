@@ -189,8 +189,11 @@ class QuickInkSyncWorker(
             notepadDao         = app.database.notepadDao(),
             captureDao         = app.database.captureDao(),
             ocrResultDao       = app.database.ocrResultDao(),
-            tagDao        = app.database.tagDao(),
+            tagDao             = app.database.tagDao(),
             profileSettingsDao = app.database.profileSettingsDao(),
+            folderDao          = app.database.folderDao(),
+            captureTagDao      = app.database.captureTagDao(),
+            smartCollectionDao = app.database.smartCollectionDao(),
             userId             = session.userId,
         )
         val syncRepository = SyncRepository(

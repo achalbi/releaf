@@ -31,9 +31,12 @@
 package app.quickink.mobile.data.sync
 
 import app.quickink.mobile.data.capture.CaptureEntity
-import app.quickink.mobile.data.tag.TagEntity
+import app.quickink.mobile.data.capturetag.CaptureTagEntity
+import app.quickink.mobile.data.folder.FolderEntity
 import app.quickink.mobile.data.ocr.OcrResultEntity
 import app.quickink.mobile.data.profile.ProfileSettingsEntity
+import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
+import app.quickink.mobile.data.tag.TagEntity
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.sync.SyncJson
 import kotlinx.serialization.SerialName
@@ -399,3 +402,143 @@ private fun parseJsonArrayOrEmpty(raw: String?): JsonElement {
     return runCatching { SyncJson.parseToJsonElement(raw) }
         .getOrElse { JsonArray(emptyList()) }
 }
+
+// =====================================================================
+// folders — QuickInk-only. Workspace v1 "intent" axis. One row per
+// user-defined folder; captures FK into folders.id via
+// captures.folder_id. The is_default = true row is the seeded
+// "Unfiled" folder. is_shared is reserved for the post-v1 share
+// flow — currently always 0.
+// =====================================================================
+
+@Serializable
+data class FolderPayloadV1(
+    @SerialName("id")          val id: String,
+    @SerialName("user_id")     val userId: String,
+    @SerialName("name")        val name: String,
+    @SerialName("color")       val color: String,
+    @SerialName("position")    val position: Int,
+    @SerialName("cover_uri")   val coverUri: String? = null,
+    @SerialName("is_default")  val isDefault: Boolean = false,
+    @SerialName("is_shared")   val isShared: Boolean = false,
+    @SerialName("created_at")  val createdAt: String,
+    @SerialName("updated_at")  val updatedAt: String,
+)
+
+fun FolderEntity.toV1Payload(): FolderPayloadV1 = FolderPayloadV1(
+    id        = id,
+    userId    = userId,
+    name      = name,
+    color     = color,
+    position  = position,
+    coverUri  = coverUri,
+    isDefault = isDefault,
+    isShared  = isShared,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
+fun FolderPayloadV1.toEntity(driveFileId: String?): FolderEntity = FolderEntity(
+    id          = id,
+    userId      = userId,
+    name        = name,
+    color       = color,
+    position    = position,
+    coverUri    = coverUri,
+    isDefault   = isDefault,
+    isShared    = isShared,
+    driveFileId = driveFileId,
+    createdAt   = createdAt,
+    updatedAt   = updatedAt,
+    dirty       = false,
+    deletedAt   = null,
+)
+
+// =====================================================================
+// capture_tags — QuickInk-only. Workspace v1 many-to-many join. Each
+// row syncs independently so a tag added on phone A reaches phone B
+// without re-syncing the entire capture. `source` distinguishes
+// manual / ai-suggested / migration provenance.
+// =====================================================================
+
+@Serializable
+data class CaptureTagPayloadV1(
+    @SerialName("id")          val id: String,
+    @SerialName("capture_id")  val captureId: String,
+    @SerialName("tag_id")      val tagId: String,
+    @SerialName("source")      val source: String = "manual",
+    @SerialName("created_at")  val createdAt: String,
+    @SerialName("updated_at")  val updatedAt: String,
+)
+
+fun CaptureTagEntity.toV1Payload(): CaptureTagPayloadV1 = CaptureTagPayloadV1(
+    id        = id,
+    captureId = captureId,
+    tagId     = tagId,
+    source    = source,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
+fun CaptureTagPayloadV1.toEntity(driveFileId: String?): CaptureTagEntity = CaptureTagEntity(
+    id          = id,
+    captureId   = captureId,
+    tagId       = tagId,
+    source      = source,
+    driveFileId = driveFileId,
+    createdAt   = createdAt,
+    updatedAt   = updatedAt,
+    dirty       = false,
+    deletedAt   = null,
+)
+
+// =====================================================================
+// smart_collections — QuickInk-only. Workspace v1 rule-based saved
+// view. `rule_json` is an AND-of-clauses array on the wire (parsed
+// app-side, not the DB). `is_seeded` distinguishes shipped seeds
+// from user-created collections; the seeded flag is wire-stable so
+// every device agrees on which collections are managed by the app.
+// =====================================================================
+
+@Serializable
+data class SmartCollectionPayloadV1(
+    @SerialName("id")          val id: String,
+    @SerialName("user_id")     val userId: String,
+    @SerialName("name")        val name: String,
+    @SerialName("icon")        val icon: String? = null,
+    @SerialName("color")       val color: String? = null,
+    @SerialName("rule_json")   val ruleJson: String,
+    @SerialName("position")    val position: Int = 0,
+    @SerialName("is_seeded")   val isSeeded: Boolean = false,
+    @SerialName("created_at")  val createdAt: String,
+    @SerialName("updated_at")  val updatedAt: String,
+)
+
+fun SmartCollectionEntity.toV1Payload(): SmartCollectionPayloadV1 = SmartCollectionPayloadV1(
+    id        = id,
+    userId    = userId,
+    name      = name,
+    icon      = icon,
+    color     = color,
+    ruleJson  = ruleJson,
+    position  = position,
+    isSeeded  = isSeeded,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
+fun SmartCollectionPayloadV1.toEntity(driveFileId: String?): SmartCollectionEntity = SmartCollectionEntity(
+    id          = id,
+    userId      = userId,
+    name        = name,
+    icon        = icon,
+    color       = color,
+    ruleJson    = ruleJson,
+    position    = position,
+    isSeeded    = isSeeded,
+    driveFileId = driveFileId,
+    createdAt   = createdAt,
+    updatedAt   = updatedAt,
+    dirty       = false,
+    deletedAt   = null,
+)

@@ -30,8 +30,11 @@
 package app.quickink.mobile.data.sync
 
 import app.quickink.mobile.data.capture.CaptureDao
+import app.quickink.mobile.data.capturetag.CaptureTagDao
+import app.quickink.mobile.data.folder.FolderDao
 import app.quickink.mobile.data.tag.TagDao
 import app.quickink.mobile.data.ocr.OcrResultDao
+import app.quickink.mobile.data.smartcollection.SmartCollectionDao
 import app.releaf.mobile.data.notepad.NotepadDao
 import app.releaf.mobile.data.sync.CanonicalJson
 import app.releaf.mobile.data.sync.sha256Hex
@@ -57,6 +60,10 @@ class QuickInkSyncDataSource(
     private val ocrResultDao: OcrResultDao,
     private val tagDao: TagDao,
     private val profileSettingsDao: app.quickink.mobile.data.profile.ProfileSettingsDao,
+    // ─── Workspace v1 (Phase A.3b) ───────────────────────────────
+    private val folderDao: FolderDao,
+    private val captureTagDao: CaptureTagDao,
+    private val smartCollectionDao: SmartCollectionDao,
     private val userId: String,
     private val json: Json = SyncJson,
 ) : SyncDataSource {
@@ -121,7 +128,11 @@ class QuickInkSyncDataSource(
             )
         }
 
-        // ---- categories (user-scoped) ----
+        // ---- tags (user-scoped). Drive prefix still `categories/`
+        // until the rollout soak completes; kind string stays
+        // KIND_CATEGORY for back-compat with existing payloads on
+        // Drive. The prefix migration to `tags/` happens in a
+        // follow-up commit.
         for (row in tagDao.dirtyRows()
             .filter { it.deletedAt == null && it.userId == userId }) {
             val payload = row.toV1Payload()
@@ -131,6 +142,56 @@ class QuickInkSyncDataSource(
                 kind          = DrivePath.KIND_CATEGORY,
                 id            = row.id,
                 drivePath     = DrivePath.category(row.id),
+                payload       = bytes,
+                payloadSha256 = sha256Hex(bytes),
+                updatedAt     = row.updatedAt,
+            )
+        }
+
+        // ---- folders (user-scoped, Workspace v1) ----
+        for (row in folderDao.dirtyRows()
+            .filter { it.deletedAt == null && it.userId == userId }) {
+            val payload = row.toV1Payload()
+            val elem = json.encodeToJsonElement(FolderPayloadV1.serializer(), payload)
+            val bytes = CanonicalJson.encodeToBytes(elem)
+            entries += DirtyEntry(
+                kind          = DrivePath.KIND_FOLDER,
+                id            = row.id,
+                drivePath     = DrivePath.folder(row.id),
+                payload       = bytes,
+                payloadSha256 = sha256Hex(bytes),
+                updatedAt     = row.updatedAt,
+            )
+        }
+
+        // ---- capture_tags (no user_id column; FK to captures
+        //      handles ownership. Filter via the captures table). ----
+        val captureTagRows = captureTagDao.dirtyRows()
+            .filter { it.deletedAt == null }
+        for (row in captureTagRows) {
+            val payload = row.toV1Payload()
+            val elem = json.encodeToJsonElement(CaptureTagPayloadV1.serializer(), payload)
+            val bytes = CanonicalJson.encodeToBytes(elem)
+            entries += DirtyEntry(
+                kind          = DrivePath.KIND_CAPTURE_TAG,
+                id            = row.id,
+                drivePath     = DrivePath.captureTag(row.id),
+                payload       = bytes,
+                payloadSha256 = sha256Hex(bytes),
+                updatedAt     = row.updatedAt,
+            )
+        }
+
+        // ---- smart_collections (user-scoped, Workspace v1) ----
+        for (row in smartCollectionDao.dirtyRows()
+            .filter { it.deletedAt == null && it.userId == userId }) {
+            val payload = row.toV1Payload()
+            val elem = json.encodeToJsonElement(SmartCollectionPayloadV1.serializer(), payload)
+            val bytes = CanonicalJson.encodeToBytes(elem)
+            entries += DirtyEntry(
+                kind          = DrivePath.KIND_SMART_COLLECTION,
+                id            = row.id,
+                drivePath     = DrivePath.smartCollection(row.id),
                 payload       = bytes,
                 payloadSha256 = sha256Hex(bytes),
                 updatedAt     = row.updatedAt,
@@ -216,6 +277,27 @@ class QuickInkSyncDataSource(
         for (row in ocrResultDao.dirtyRows().filter { it.deletedAt != null }) {
             entries += PendingTombstone(
                 kind      = DrivePath.KIND_OCR_RESULT,
+                id        = row.id,
+                deletedAt = row.deletedAt ?: row.updatedAt,
+            )
+        }
+        for (row in folderDao.dirtyRows().filter { it.deletedAt != null && it.userId == userId }) {
+            entries += PendingTombstone(
+                kind      = DrivePath.KIND_FOLDER,
+                id        = row.id,
+                deletedAt = row.deletedAt ?: row.updatedAt,
+            )
+        }
+        for (row in captureTagDao.dirtyRows().filter { it.deletedAt != null }) {
+            entries += PendingTombstone(
+                kind      = DrivePath.KIND_CAPTURE_TAG,
+                id        = row.id,
+                deletedAt = row.deletedAt ?: row.updatedAt,
+            )
+        }
+        for (row in smartCollectionDao.dirtyRows().filter { it.deletedAt != null && it.userId == userId }) {
+            entries += PendingTombstone(
+                kind      = DrivePath.KIND_SMART_COLLECTION,
                 id        = row.id,
                 deletedAt = row.deletedAt ?: row.updatedAt,
             )
@@ -339,6 +421,18 @@ class QuickInkSyncDataSource(
                 // metadata is applied.
                 profileSettingsDao.upsertFromRemote(p.toEntity(driveFileId = driveFileId))
             }
+            DrivePath.KIND_FOLDER -> {
+                val p = json.decodeFromString(FolderPayloadV1.serializer(), text)
+                folderDao.upsertFromRemote(p.toEntity(driveFileId = driveFileId))
+            }
+            DrivePath.KIND_CAPTURE_TAG -> {
+                val p = json.decodeFromString(CaptureTagPayloadV1.serializer(), text)
+                captureTagDao.upsertFromRemote(p.toEntity(driveFileId = driveFileId))
+            }
+            DrivePath.KIND_SMART_COLLECTION -> {
+                val p = json.decodeFromString(SmartCollectionPayloadV1.serializer(), text)
+                smartCollectionDao.upsertFromRemote(p.toEntity(driveFileId = driveFileId))
+            }
             else -> {
                 // Forward-compat: kind we don't recognize, skip.
             }
@@ -388,6 +482,9 @@ class QuickInkSyncDataSource(
                     existing.copy(deletedAt = nowIso, updatedAt = nowIso, dirty = false)
                 )
             }
+            DrivePath.KIND_FOLDER -> folderDao.softDelete(tombstone.id, nowIso)
+            DrivePath.KIND_CAPTURE_TAG -> captureTagDao.softDeleteById(tombstone.id, nowIso)
+            DrivePath.KIND_SMART_COLLECTION -> smartCollectionDao.softDelete(tombstone.id, nowIso)
         }
     }
 
@@ -418,6 +515,18 @@ class QuickInkSyncDataSource(
                 DrivePath.KIND_PROFILE_SETTINGS -> {
                     profileSettingsDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
                     profileSettingsDao.markTombstoneSynced(ack.id)
+                }
+                DrivePath.KIND_FOLDER -> {
+                    folderDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
+                    folderDao.markTombstoneSynced(ack.id)
+                }
+                DrivePath.KIND_CAPTURE_TAG -> {
+                    captureTagDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
+                    captureTagDao.markTombstoneSynced(ack.id)
+                }
+                DrivePath.KIND_SMART_COLLECTION -> {
+                    smartCollectionDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
+                    smartCollectionDao.markTombstoneSynced(ack.id)
                 }
                 // else: forward-compat — unknown kind, skip silently.
             }
