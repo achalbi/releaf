@@ -369,7 +369,6 @@ private struct MainShell: View {
                         onOpenNotes:    { path.append(workspaceTabRoute) },
                         onOpenSettings: { path.append(.settings) },
                         onOpenSearch:   { path.append(.search) },
-                        onTapCategory:  { name in path.append(.categoryEntries(name: name)) },
                         onOpenEntry:    { entryId in path.append(.noteEditor(entryId: entryId)) },
                         onOpenScan:     { captureId in path.append(.scanDetail(captureId: captureId)) },
                         onOpenProfile:  { path.append(.profile) },

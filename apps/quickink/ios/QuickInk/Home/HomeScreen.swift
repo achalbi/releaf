@@ -40,7 +40,6 @@ struct HomeScreen: View {
     /// composition is correct, and the route wiring is a single
     /// edit on QuickInkRoot when those screens land.
     var onOpenSearch: (() -> Void)? = nil
-    var onTapCategory: ((String) -> Void)? = nil
     var onOpenEntry: ((String) -> Void)? = nil
     /// Tap-on-thumbnail handler for the Recent rail. Routes to the
     /// scan-detail viewer (preview image + on-demand OCR text).
@@ -78,7 +77,6 @@ struct HomeScreen: View {
     /// visually consistent across the two sibling apps.
     @State private var showProfileDrawer = false
     @StateObject private var capturesVM: CaptureListViewModel
-    @StateObject private var categoriesVM: TagListViewModel
     @ObservedObject private var syncState = SyncStateStore.shared
     /// Watches the scheduler's published `isRunning` so the pending-
     /// sync pill can flip into its "Backing up…" state mid-pass. Mirror
@@ -109,7 +107,6 @@ struct HomeScreen: View {
         onOpenNotes: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void,
         onOpenSearch: (() -> Void)? = nil,
-        onTapCategory: ((String) -> Void)? = nil,
         onOpenEntry: ((String) -> Void)? = nil,
         onOpenScan: ((String) -> Void)? = nil,
         onOpenProfile: (() -> Void)? = nil,
@@ -123,7 +120,6 @@ struct HomeScreen: View {
         self.onOpenNotes = onOpenNotes
         self.onOpenSettings = onOpenSettings
         self.onOpenSearch = onOpenSearch
-        self.onTapCategory = onTapCategory
         self.onOpenEntry = onOpenEntry
         self.onOpenScan = onOpenScan
         self.onOpenProfile = onOpenProfile
@@ -134,9 +130,6 @@ struct HomeScreen: View {
 
         _capturesVM = StateObject(
             wrappedValue: CaptureListViewModel(userId: userId)
-        )
-        _categoriesVM = StateObject(
-            wrappedValue: TagListViewModel(userId: userId)
         )
     }
 
@@ -241,11 +234,9 @@ struct HomeScreen: View {
                     pendingSyncPill
                 }
                 recentRail
-                categoryGrid
                 // Sync pill at the bottom of the scroll content —
                 // scrolls with the page, no floating over content,
-                // centered horizontally. Extra top padding so it
-                // doesn't sit too close to the category grid above.
+                // centered horizontally.
                 HStack {
                     Spacer()
                     syncStatusPill
@@ -272,10 +263,8 @@ struct HomeScreen: View {
             )
         }
         .task {
-            // Open the live captures observation backing the rail
-            // and the live categories observation backing the grid.
+            // Live captures observation backing the recent rail.
             capturesVM.start()
-            categoriesVM.start()
             // Per-capture primary-tag-name lookup — replaces the
             // pre-A.3c `captures.category` read used by the
             // categories grid + recent-rail title.
@@ -636,117 +625,11 @@ struct HomeScreen: View {
         )
     }
 
-    // MARK: - Category grid
-
-    /// Sort by the most recent capture in each category. ISO-8601
-    /// `createdAt` strings sort lexicographically by timeline, so no
-    /// parse step is needed. Categories with no captures in the
-    /// loaded window fall to the end (empty-string key sorts smallest
-    /// in descending order). Mirror of Android's `sorted` block.
-    private var sortedCategories: [TagEntity] {
-        let latestByName: [String: String] = Dictionary(
-            grouping: capturesVM.captures
-        ) { (primaryTagByCapture[$0.id] ?? "").lowercased() }
-        .mapValues { list in list.map(\.createdAt).max() ?? "" }
-
-        return categoriesVM.categories.sorted { a, b in
-            let aT = latestByName[a.name.lowercased()] ?? ""
-            let bT = latestByName[b.name.lowercased()] ?? ""
-            return aT > bT
-        }
-    }
-
-    /// Map a category name to its tile SF Symbol. Default-seed names
-    /// get purpose-specific glyphs; user-created categories fall
-    /// through to a generic tag. Matches the Android
-    /// `iconForCategory` switch.
-    private func iconFor(_ name: String) -> String {
-        switch name.lowercased() {
-        case "ideas":         return "lightbulb"
-        case "projects":      return "folder"
-        case "meetings":      return "person.3"
-        case "todo":          return "checkmark.circle"
-        case "business card": return "person.crop.rectangle"
-        case "journal":       return "book.closed"
-        case "brainstorm":    return "sparkles"
-        default:              return "tag"
-        }
-    }
-
-    @ViewBuilder
-    private var categoryGrid: some View {
-        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
-            Text("CATEGORIES")
-                .font(QuickInkText.eyebrow)
-                .tracking(QuickInkLetterSpacing.eyebrow)
-                .foregroundStyle(QuickInkColors.muted)
-
-            // 2-column grid sized to the live category count — every
-            // active row from the `categories` table, newest first.
-            // LazyVGrid scales to the long tail of user-added rows.
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: QuickInkSpacing.s3),
-                    GridItem(.flexible(), spacing: QuickInkSpacing.s3),
-                ],
-                spacing: QuickInkSpacing.s3
-            ) {
-                ForEach(sortedCategories, id: \.id) { cat in
-                    let stats = categoryStats(for: cat.name)
-                    CategoryTile(
-                        name:         cat.name,
-                        icon:         iconFor(cat.name),
-                        count:        stats.count,
-                        recencyBadge: stats.recencyBadge
-                    )
-                    .onTapGesture { onTapCategory?(cat.name) }
-                }
-            }
-        }
-    }
-
-    /// Per-category aggregate computed from the captures we already
-    /// have loaded (`capturesVM.captures`, capped at 30 by the VM).
-    /// Returns the match count plus an optional "Today" / "Yesterday"
-    /// recency hint for the tile's top-right badge.
-    ///
-    /// At 30 captures the count saturates — fine for the home tile
-    /// (UI still reads "30 scans"); a dedicated `SELECT COUNT(*)
-    /// GROUP BY category` query would lift that ceiling but isn't
-    /// worth the extra observation while the typical user library
-    /// stays well under 30.
-    private func categoryStats(for name: String) -> (count: Int, recencyBadge: String?) {
-        let needle = name.lowercased()
-        let matching = capturesVM.captures.filter {
-            (primaryTagByCapture[$0.id] ?? "").lowercased() == needle
-        }
-        let count = matching.count
-
-        // ISO8601 createdAt → calendar bucket. Two parsers because
-        // older rows may not carry fractional seconds.
-        let isoFractional = ISO8601DateFormatter()
-        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let isoBasic = ISO8601DateFormatter()
-        isoBasic.formatOptions = [.withInternetDateTime]
-        let calendar = Calendar.current
-
-        var hasToday = false
-        var hasYesterday = false
-        for capture in matching {
-            let date = isoFractional.date(from: capture.createdAt)
-                ?? isoBasic.date(from: capture.createdAt)
-            guard let date else { continue }
-            if calendar.isDateInToday(date) {
-                hasToday = true
-                break // Today wins; no point scanning further.
-            }
-            if calendar.isDateInYesterday(date) {
-                hasYesterday = true
-            }
-        }
-        let badge: String? = hasToday ? "Today" : (hasYesterday ? "Yesterday" : nil)
-        return (count, badge)
-    }
+    // The legacy "CATEGORIES" grid was removed from the Home scroll
+    // surface — tag browsing lives in the Workspace tab's tag cloud
+    // now. Helpers (categoryGrid / categoryStats / sortedCategories
+    // / iconFor / CategoryTile) and the `onTapCategory` callback on
+    // `HomeScreen` come along with it.
 
     // MARK: - Bottom nav with Zap FAB
 
@@ -890,69 +773,3 @@ struct RecentScanThumb: View {
     }
 }
 
-// MARK: - Component: CategoryTile
-
-struct CategoryTile: View {
-    let name: String
-    let icon: String
-    let count: Int
-    /// "Today" / "Yesterday" when the category has at least one
-    /// capture within that window; nil otherwise. Drawn as a small
-    /// accent chip in the tile's top-right.
-    let recencyBadge: String?
-
-    init(name: String, icon: String, count: Int, recencyBadge: String? = nil) {
-        self.name = name
-        self.icon = icon
-        self.count = count
-        self.recencyBadge = recencyBadge
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
-            HStack(alignment: .top) {
-                ZStack {
-                    Circle()
-                        .fill(QuickInkColors.accentSoft)
-                        .frame(width: 36, height: 36)
-                    Image(systemName: icon)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(QuickInkColors.accent)
-                }
-                Spacer()
-                if let badge = recencyBadge {
-                    Text(badge.uppercased())
-                        .font(QuickInkText.caption)
-                        .tracking(QuickInkLetterSpacing.eyebrow)
-                        .foregroundStyle(QuickInkColors.accent)
-                        .padding(.horizontal, QuickInkSpacing.s2)
-                        .padding(.vertical, 4)
-                        .background(QuickInkColors.accentSoft)
-                        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous))
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(QuickInkText.heading)
-                    .foregroundStyle(QuickInkColors.ink)
-                Text(countLabel)
-                    .font(QuickInkText.caption)
-                    .foregroundStyle(QuickInkColors.muted)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(QuickInkSpacing.s4)
-        .background(QuickInkColors.surface)
-        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                .stroke(QuickInkColors.border, lineWidth: 1)
-        )
-    }
-
-    private var countLabel: String {
-        if count == 0 { return "No scans yet" }
-        return "\(count) scan\(count == 1 ? "" : "s")"
-    }
-}

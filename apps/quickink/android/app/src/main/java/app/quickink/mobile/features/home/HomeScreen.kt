@@ -138,7 +138,6 @@ fun HomeScreen(
     onOpenNotes: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSearch: (() -> Unit)? = null,
-    onTapCategory: ((String) -> Unit)? = null,
     onOpenEntry: ((String) -> Unit)? = null,
     onOpenScan: ((String) -> Unit)? = null,
     /// Routes to the new Profile editor (photo / phone / punchline).
@@ -210,21 +209,12 @@ fun HomeScreen(
         captureDao.observeTotalPageCount(userId)
     }.collectAsState(initial = 0)
 
-    // Live category list — every active category, newest-first.
-    // Mirrors iOS's CategoryListViewModel observation. Sort happens
-    // in the grid composable (kept close to render so changes to
-    // `created_at` reorder without an extra remember layer).
-    val tagDao = remember(app) { app.database.tagDao() }
-    val categories by remember(userId, tagDao) {
-        tagDao.observeActive(userId)
-    }.collectAsState(initial = emptyList())
-
     // Per-capture primary-tag-name lookup. The pre-A.3c
     // `captures.category` field carried this on the row; post-drop
-    // we derive it from `capture_tags` joined to `tags` and pick the
-    // earliest-attached active tag per capture. Used both by the
-    // categories grid (count captures per tag) and the title cascade
-    // (`Capture.displayTitle(primaryTagName)`).
+    // we derive it from `capture_tags` joined to `tags` and pick
+    // the earliest-attached active tag per capture. Drives the
+    // recent-rail title cascade (`Capture.displayTitle(
+    // primaryTagName)`).
     val captureTagDao = remember(app) { app.database.captureTagDao() }
     val primaryTagRows by remember(userId, captureTagDao) {
         captureTagDao.observePrimaryTagNames(userId)
@@ -355,13 +345,6 @@ fun HomeScreen(
                 primaryTagByCapture = primaryTagByCapture,
                 onAllNotes          = onOpenNotes,
                 onOpenScan          = onOpenScan,
-            )
-            Spacer(Modifier.size(QuickInkSpacing.s5))
-            CategoryGrid(
-                categories          = categories,
-                captures            = recentCaptures,
-                primaryTagByCapture = primaryTagByCapture,
-                onTapCategory       = onTapCategory,
             )
             Spacer(Modifier.size(QuickInkSpacing.s4))
             RecentActivityPill(
@@ -1483,172 +1466,8 @@ private fun friendlyMonthDay(iso: String): String =
         iso.take(10)
     }
 
-// MARK: - Category grid
-
-/**
- * Map a category name to its tile icon. Default-seed names get
- * purpose-specific glyphs; user-created categories fall through to
- * a generic label icon. Matches the iOS `iconFor(_:)` switch.
- */
-private fun iconForCategory(name: String): ImageVector =
-    when (name.lowercase()) {
-        "ideas"         -> Icons.Filled.Lightbulb
-        "projects"      -> Icons.Filled.Folder
-        "meetings"      -> Icons.Filled.Group
-        "todo"          -> Icons.Filled.CheckCircle
-        "business card" -> Icons.Filled.Badge
-        "journal"       -> Icons.Filled.Book
-        "brainstorm"    -> Icons.Filled.Star
-        else            -> Icons.AutoMirrored.Filled.Label
-    }
-
-@Composable
-private fun CategoryGrid(
-    categories: List<TagEntity>,
-    captures: List<CaptureEntity>,
-    primaryTagByCapture: Map<String, String>,
-    onTapCategory: ((String) -> Unit)?,
-) {
-    val colors = LocalQuickInkColors.current
-    val type = LocalQuickInkTypography.current
-
-    // Sort by the most recent capture in each category. ISO-8601
-    // `created_at` strings sort lexicographically by timeline, so no
-    // parse step needed. Categories with no captures in the loaded
-    // window fall to the end (empty-string key sorts smallest in
-    // descending order); among those, the DAO's
-    // (position ASC, name ASC) ordering carries through because
-    // `sortedByDescending` is stable.
-    val sorted = remember(categories, captures, primaryTagByCapture) {
-        val latestByName: Map<String, String> = captures
-            .groupBy { (primaryTagByCapture[it.id] ?: "").lowercase() }
-            .mapValues { (_, list) -> list.maxOf { it.createdAt } }
-        categories.sortedByDescending { latestByName[it.name.lowercase()] ?: "" }
-    }
-
-    Column {
-        Text(
-            text  = "Quick categories",
-            style = type.heading,
-            color = colors.ink,
-        )
-        Spacer(Modifier.size(QuickInkSpacing.s3))
-        // 2-column grid sized to the live category count. Number of
-        // rows grows with the user's library; LazyVGrid still isn't
-        // worth it for the typical handful.
-        sorted.chunked(2).forEachIndexed { i, pair ->
-            if (i > 0) Spacer(Modifier.size(QuickInkSpacing.s2))
-            Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
-                pair.forEach { cat ->
-                    val stats = remember(cat.name, captures, primaryTagByCapture) {
-                        categoryStats(cat.name, captures, primaryTagByCapture)
-                    }
-                    CategoryTile(
-                        name     = cat.name,
-                        icon     = iconForCategory(cat.name),
-                        count    = stats.count,
-                        onTap    = { onTapCategory?.invoke(cat.name) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                // Pad the trailing row when the count is odd so the
-                // last tile keeps its half-width footprint instead of
-                // stretching across both columns.
-                if (pair.size == 1) {
-                    Spacer(Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
-/**
- * Per-category aggregate computed from the captures we already have
- * loaded (`recentCaptures`, capped at 30 by the DAO).
- *
- * At 30 captures the count saturates — fine for the home tile
- * (UI still reads "30 scans"); a dedicated GROUP BY query would lift
- * that ceiling but isn't worth the extra observation while the
- * typical user library stays well under 30.
- */
-private data class CategoryStats(val count: Int)
-
-private fun categoryStats(
-    name: String,
-    captures: List<CaptureEntity>,
-    primaryTagByCapture: Map<String, String>,
-): CategoryStats {
-    val needle = name.lowercase()
-    val matching = captures.filter { (primaryTagByCapture[it.id] ?: "").lowercase() == needle }
-    return CategoryStats(count = matching.size)
-}
-
-@Composable
-private fun CategoryTile(
-    name: String,
-    icon: ImageVector,
-    count: Int,
-    onTap: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalQuickInkColors.current
-    val type = LocalQuickInkTypography.current
-
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(QuickInkRadius.md))
-            .background(colors.surface)
-            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
-            .clickable(onClick = onTap)
-            .padding(QuickInkSpacing.s4),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(QuickInkRadius.sm))
-                .background(colors.accentSoft),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector        = icon,
-                contentDescription = null,
-                tint               = colors.accent,
-                modifier           = Modifier.size(14.dp),
-            )
-        }
-        Spacer(Modifier.size(QuickInkSpacing.s3))
-        Column(modifier = Modifier.weight(1f)) {
-            // Category tile name uses the Label token (Inter Medium
-            // 14sp) rather than CardTitle (Inter SemiBold 14sp).
-            // Category names are functional UI labels — Medium reads
-            // lighter and more chip-like than SemiBold, which would
-            // make the tiles fight the recent-rail thumbnails for
-            // visual emphasis. (Originally also a width fix when
-            // CardTitle was serif and "Meetings" truncated to
-            // "Meetin..." — that's resolved now that both tokens
-            // sit on Inter, but the weight distinction still earns
-            // its keep.)
-            Text(
-                text     = name,
-                style    = type.label,
-                color    = colors.ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text  = if (count == 0) "No scans yet" else "$count scan${if (count == 1) "" else "s"}",
-                style = type.caption,
-                color = colors.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Icon(
-            imageVector        = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint               = colors.muted,
-            modifier           = Modifier.size(16.dp),
-        )
-    }
-}
+// The legacy "Quick categories" grid was removed from the Home
+// scroll surface — tag browsing lives in the Workspace tab's tag
+// cloud now. Helpers (CategoryGrid / CategoryTile / categoryStats
+// / iconForCategory / CategoryStats) and the `onTapCategory`
+// callback on `HomeScreen` come along with it.

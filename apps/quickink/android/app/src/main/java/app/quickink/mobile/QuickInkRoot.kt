@@ -530,9 +530,6 @@ private fun MainShell(
                 onOpenNotes    = { navToTab(workspaceTabRoute) },
                 onOpenSettings = { navToTab(Routes.SETTINGS) },
                 onOpenSearch   = { navToTab(Routes.SEARCH) },
-                onTapCategory  = { name ->
-                    navController.navigate(Routes.categoryEntries(name))
-                },
                 onOpenEntry    = { entryId ->
                     navController.navigate(Routes.noteEditor(entryId))
                 },
