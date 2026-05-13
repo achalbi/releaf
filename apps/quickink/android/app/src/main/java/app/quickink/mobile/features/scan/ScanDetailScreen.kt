@@ -100,6 +100,7 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import androidx.core.content.FileProvider
 import app.releaf.mobile.auth.AuthState
+import app.quickink.mobile.features.workspace.FolderPickerSheet
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.sync.DeviceIdentity
 import coil.compose.AsyncImage
@@ -137,6 +138,15 @@ fun ScanDetailScreen(
     val captureDao = remember(app) { app.database.captureDao() }
     val ocrDao = remember(app) { app.database.ocrResultDao() }
     val tagDao = remember(app) { app.database.tagDao() }
+    val folderDao = remember(app) { app.database.folderDao() }
+
+    // Workspace v1 folder picker — opens when the Actions card's
+    // "Move to folder" row is tapped. Sheet observes the folder list
+    // and writes via [CaptureDao.setFolder] on pick.
+    var showFolderPicker by remember(captureId) { mutableStateOf(false) }
+    val folders by remember(userId, folderDao) {
+        folderDao.observeActive(userId)
+    }.collectAsState(initial = emptyList())
 
     var capture by remember(captureId) { mutableStateOf<CaptureEntity?>(null) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -484,7 +494,7 @@ fun ScanDetailScreen(
                         onExportPdf           = {
                             exportAsPdf(context, current.pdfUri)
                         },
-                        onMoveToFolder        = { showRetagSheet = true },
+                        onMoveToFolder        = { showFolderPicker = true },
                         onDelete              = { showDeleteConfirm = true },
                         // Business-card-only Add-to-contact row.
                         // Runs the full bbox-aware extraction
@@ -595,6 +605,31 @@ fun ScanDetailScreen(
                 }
             },
             containerColor   = colors.surface,
+        )
+    }
+
+    // Workspace v1 folder picker — opened by the "Move to folder"
+    // Actions row. Writes via [CaptureDao.setFolder] which dirties
+    // the row for the next sync push.
+    if (showFolderPicker) {
+        FolderPickerSheet(
+            folders         = folders,
+            currentFolderId = capture?.folderId,
+            onDismiss       = { showFolderPicker = false },
+            onPickFolder    = { folder ->
+                scope.launch {
+                    captureDao.setFolder(
+                        id        = captureId,
+                        folderId  = folder.id,
+                        timestamp = IsoClock.nowIso(),
+                    )
+                    // Refresh the in-screen capture so the
+                    // Details card reflects the new folder
+                    // assignment without a back-and-forth.
+                    capture = captureDao.findById(captureId)
+                    showFolderPicker = false
+                }
+            },
         )
     }
 

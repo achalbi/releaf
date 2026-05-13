@@ -293,6 +293,21 @@ interface CaptureDao {
     suspend fun moveCapturesToFolder(folderId: String, newFolderId: String, timestamp: String)
 
     /**
+     * Move a single capture into [folderId]. Used by the folder
+     * picker in ScanDetailScreen (Phase B.2 — move-capture-to-folder)
+     * and any future bulk-move flow. Bumps `updated_at` + `dirty` so
+     * the change propagates via sync.
+     */
+    @Query("""
+        UPDATE captures
+        SET folder_id  = :folderId,
+            updated_at = :timestamp,
+            dirty      = 1
+        WHERE id = :id
+    """)
+    suspend fun setFolder(id: String, folderId: String, timestamp: String)
+
+    /**
      * Assign every active capture with `folder_id IS NULL` to the
      * given folder (typically the seeded "Unfiled"). One-time
      * backfill called from [FolderRepository.backfillFolderIdsIfNeeded]
