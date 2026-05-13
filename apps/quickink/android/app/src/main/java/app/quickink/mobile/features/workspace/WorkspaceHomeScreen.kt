@@ -54,6 +54,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -91,6 +92,7 @@ import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capturetag.TagCount
 import app.quickink.mobile.data.folder.FolderEntity
 import app.quickink.mobile.data.folder.FolderRepository
+import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
 import app.quickink.mobile.data.tag.TagEntity
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
@@ -109,6 +111,7 @@ fun WorkspaceHomeScreen(
     onOpenContinue: (CaptureEntity) -> Unit,
     onOpenProfile: () -> Unit,
     onOpenTag: (TagEntity) -> Unit,
+    onOpenSmartCollection: (SmartCollectionEntity) -> Unit,
     onHome: () -> Unit,
     onScan: () -> Unit,
     onSettings: () -> Unit,
@@ -152,6 +155,15 @@ fun WorkspaceHomeScreen(
         key1         = userId,
     ) {
         app.database.tagDao()
+            .observeActive(userId)
+            .collect { value = it }
+    }
+
+    val smartCollections by produceState(
+        initialValue = emptyList<SmartCollectionEntity>(),
+        key1         = userId,
+    ) {
+        app.database.smartCollectionDao()
             .observeActive(userId)
             .collect { value = it }
     }
@@ -214,6 +226,14 @@ fun WorkspaceHomeScreen(
                 ContinueCard(
                     capture = capture,
                     onClick = { onOpenContinue(capture) },
+                )
+                Spacer(Modifier.height(QuickInkSpacing.s4))
+            }
+
+            if (smartCollections.isNotEmpty()) {
+                SmartCollectionsStrip(
+                    collections = smartCollections,
+                    onOpen      = onOpenSmartCollection,
                 )
                 Spacer(Modifier.height(QuickInkSpacing.s4))
             }
@@ -544,6 +564,97 @@ private fun ContinueCard(
                 modifier = Modifier.size(20.dp),
             )
         }
+    }
+}
+
+// ─── Smart collections strip ─────────────────────────────────
+
+@Composable
+private fun SmartCollectionsStrip(
+    collections: List<SmartCollectionEntity>,
+    onOpen: (SmartCollectionEntity) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text  = "Smart collections",
+            style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
+            color = colors.ink,
+        )
+    }
+
+    Spacer(Modifier.height(QuickInkSpacing.s2))
+
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = QuickInkSpacing.s4),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        items(collections, key = { it.id }) { collection ->
+            SmartCollectionCard(
+                collection = collection,
+                onClick    = { onOpen(collection) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SmartCollectionCard(
+    collection: SmartCollectionEntity,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val shape  = RoundedCornerShape(12.dp)
+    val tint   = collection.color?.let {
+        runCatching { Color(android.graphics.Color.parseColor(it)) }
+            .getOrDefault(colors.accent)
+    } ?: colors.accent
+
+    Column(
+        modifier = Modifier
+            .width(142.dp)
+            .clip(shape)
+            .background(colors.surface, shape)
+            .border(1.dp, colors.border, shape)
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(tint.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text  = "·",  // placeholder glyph
+                color = tint,
+                style = type.label.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp),
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text  = collection.name,
+            style = type.body.copy(fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold),
+            color = colors.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text  = "Smart",
+            style = type.meta.copy(fontSize = 11.sp),
+            color = colors.muted,
+        )
     }
 }
 

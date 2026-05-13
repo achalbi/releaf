@@ -42,7 +42,9 @@ import app.quickink.mobile.data.analytics.AnalyticsRepository
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.folder.FolderRepository
 import app.quickink.mobile.data.tag.TagRepository
+import app.quickink.mobile.data.smartcollection.SmartCollectionRepository
 import app.quickink.mobile.features.workspace.FolderDetailScreen
+import app.quickink.mobile.features.workspace.SmartCollectionScreen
 import app.quickink.mobile.features.workspace.WorkspaceFeatureFlag
 import app.quickink.mobile.features.workspace.WorkspaceHomeScreen
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
@@ -194,6 +196,10 @@ private object Routes {
     /** Workspace v1 folder detail (Phase C — Screen 2). */
     const val FOLDER_DETAIL     = "folder_detail/{folderId}"
     fun folderDetail(folderId: String): String = "folder_detail/${Uri.encode(folderId)}"
+
+    /** Workspace v1 smart-collection view (Phase C — Screen 3). */
+    const val SMART_COLLECTION  = "smart_collection/{collectionId}"
+    fun smartCollection(id: String): String = "smart_collection/${Uri.encode(id)}"
 
     fun noteEditor(entryId: String): String =
         "note_editor/${Uri.encode(entryId)}"
@@ -347,6 +353,18 @@ private fun MainShell(
                 tagDao        = app.database.tagDao(),
                 captureTagDao = app.database.captureTagDao(),
             ).runFirstLaunchMigrationIfNeeded(context, userId)
+
+            // Workspace v1 Phase C.3 — seed the "Needs review"
+            // smart collection. Other design-brief seeds depend on
+            // OCR-derived signals (Phase E) or a folder that we
+            // don't auto-create, so only this one ships out of
+            // the box. Idempotent via is_seeded uniqueness.
+            SmartCollectionRepository(
+                smartCollectionDao = app.database.smartCollectionDao(),
+                captureDao         = app.database.captureDao(),
+                captureTagDao      = app.database.captureTagDao(),
+                tagDao             = app.database.tagDao(),
+            ).seedDefaultsIfNeeded(userId)
         } catch (_: Exception) { /* best-effort */ }
     }
 
@@ -565,6 +583,9 @@ private fun MainShell(
                     // now; will move to a tag-id-based filter in Phase D.
                     navController.navigate(Routes.categoryEntries(tag.name))
                 },
+                onOpenSmartCollection = { collection ->
+                    navController.navigate(Routes.smartCollection(collection.id))
+                },
                 onHome     = { navToTab(Routes.HOME) },
                 onScan     = { showQuickCapture = true },
                 onSettings = { navToTab(Routes.SETTINGS) },
@@ -577,6 +598,25 @@ private fun MainShell(
             val folderId = backStackEntry.arguments?.getString("folderId").orEmpty()
             FolderDetailScreen(
                 folderId      = folderId,
+                userId        = userId,
+                onBack        = { navController.popBackStack() },
+                onOpenCapture = { capture ->
+                    navController.navigate(Routes.scanDetail(capture.id))
+                },
+                onOpenSearch  = { navToTab(Routes.SEARCH) },
+                onHome        = { navToTab(Routes.HOME) },
+                onWorkspace   = { navToTab(workspaceTabRoute) },
+                onScan        = { showQuickCapture = true },
+                onSettings    = { navToTab(Routes.SETTINGS) },
+            )
+        }
+        composable(
+            route     = Routes.SMART_COLLECTION,
+            arguments = listOf(navArgument("collectionId") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val collectionId = backStackEntry.arguments?.getString("collectionId").orEmpty()
+            SmartCollectionScreen(
+                collectionId  = collectionId,
                 userId        = userId,
                 onBack        = { navController.popBackStack() },
                 onOpenCapture = { capture ->
