@@ -256,6 +256,17 @@ class QuickInkApp : Application() {
     private val refreshInFlight = AtomicBoolean(false)
 
     /**
+     * True when an Activity is currently resumed (the user has the
+     * app open, not just installed). Background callers — primarily
+     * the analytics flush worker — gate any operation that would
+     * route through `CredentialManager` / `AuthorizationClient` on
+     * this. Without an Activity the silent identity flow surfaces
+     * the system "Request cancelled by quickink" toast even when
+     * the app process is otherwise quiet.
+     */
+    fun isInForeground(): Boolean = topActivityRef?.get() != null
+
+    /**
      * If the cached session's access token is near or past expiry,
      * silently rotate it via `RealGoogleAuthClient.refresh` against
      * the just-resumed Activity. On success, persist the fresh
@@ -441,16 +452,19 @@ class QuickInkApp : Application() {
         val prefs = SettingsPreferences(this)
         if (!prefs.driveBackupEnabled) return
 
-        // Piggyback the foreground refresh on every pending-push
-        // tick. The on-resume hook only fires once per Activity
-        // lifecycle event, so a session that expires while the
-        // user is sitting in the app continuously (no resume
-        // events) never gets refreshed and the next sync 401s.
-        // Doing it here covers that gap: every 60s while
-        // foreground we re-check the token's expiry. The hook's
-        // own threshold + single-flight guards keep this cheap
-        // when the token is fresh.
-        topActivityRef?.get()?.let { maybeRefreshTokenInForeground(it) }
+        // Token-refresh is intentionally NOT piggybacked on this
+        // tick. Earlier we re-checked the access token here every
+        // 60s so a long foreground session (>55 min) wouldn't 401
+        // on the next sync, but each call routes through
+        // `AuthorizationClient.authorize()` — and if the user
+        // happens to background the app while that call is in
+        // flight, Android emits a system "Request cancelled by
+        // quickink" toast. Refresh now runs only on
+        // `onActivityResumed` (one shot per resume) and on the
+        // explicit Settings → Sync now / banner-Reconnect taps;
+        // sessions that expire mid-use surface as a one-time 401
+        // → AUTH_REJECTED banner, which the user clears with the
+        // existing in-place Reconnect affordance.
 
         val dirty = countLocalDirty(authState.session.userId)
         // Always write — including 0 — so the Home pill clears

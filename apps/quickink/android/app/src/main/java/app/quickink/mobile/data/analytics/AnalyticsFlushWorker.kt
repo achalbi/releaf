@@ -57,6 +57,24 @@ class AnalyticsFlushWorker(
         }
 
         val app = applicationContext as QuickInkApp
+
+        // Foreground gate. The flush eventually calls
+        // `AuthStore.idToken()` → `RealGoogleAuthClient.fetch-
+        // FreshIdToken()` → `CredentialManager.getCredential(silent)`.
+        // Without an Activity context the silent path can't always
+        // satisfy the request without surfacing a brief UI, and
+        // when the system dismisses that UI (no foreground app to
+        // attach to) it emits a "Request cancelled by quickink"
+        // toast — a recurring annoyance once the periodic worker
+        // started firing every 30 min while the app was closed.
+        // Defer the flush to a foreground run instead. Returning
+        // `success` lets WorkManager move on to the next periodic
+        // tick; outbox rows stay queued, no data loss.
+        if (!app.isInForeground()) {
+            Log.i(TAG, "[analytics] flush deferred — app not in foreground")
+            return Result.success()
+        }
+
         val repo = AnalyticsRepository(
             app.database.analyticsOutboxDao(),
         )
