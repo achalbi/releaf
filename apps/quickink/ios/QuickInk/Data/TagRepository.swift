@@ -19,6 +19,14 @@ import Combine
 import GRDB
 import ReleafCoreData
 
+/// Shared repository-side error type for QuickInk's data layer.
+public enum QuickInkRepositoryError: Error {
+    /// A find-or-create lost the race to a concurrent writer and
+    /// the post-insert re-read still missed. Defensive — should
+    /// never fire in practice.
+    case raceLost(String)
+}
+
 public final class TagRepository: @unchecked Sendable {
 
     /// Default seed names rendered as the user's starting set. The
@@ -27,8 +35,12 @@ public final class TagRepository: @unchecked Sendable {
     /// to the writer that consumes it. Names in this list are
     /// treated as system-managed: the Settings → Categories screen
     /// hides delete + rename affordances for them.
+    /// `needs-review` joins the seed list in Workspace v1 so the
+    /// seeded "Needs review" smart collection has a tag to
+    /// reference.
     public static let defaultSeed: [String] = [
         "Ideas", "Projects", "Meetings", "Todo", "Business Card", "Journal",
+        "needs-review",
     ]
 
     /// True for the 6 seed names users get on first launch — system
@@ -72,6 +84,53 @@ public final class TagRepository: @unchecked Sendable {
                 .order(Column("position").asc, Column("name").asc)
                 .fetchAll(db)
         }
+    }
+
+    /// Look up a single active tag by name within a user's namespace.
+    /// Used by the tag picker (dedupe) and the auto-tagging
+    /// heuristic (Phase E).
+    public func findByName(userId: String, name: String) async throws -> TagEntity? {
+        try await dbQueue.read { db in
+            try TagEntity
+                .filter(Column("user_id") == userId)
+                .filter(Column("name") == name)
+                .filter(Column("deleted_at") == nil)
+                .fetchOne(db)
+        }
+    }
+
+    /// Find-or-create. Materialize and tag-picker callsites both
+    /// pass through here. Race-safe: on UNIQUE collision we re-read
+    /// and return the existing row.
+    public func findOrCreate(userId: String, name: String) async throws -> TagEntity {
+        if let hit = try await findByName(userId: userId, name: name) {
+            return hit
+        }
+        let id  = Uuidv7.generate()
+        let now = IsoClock.nowIso()
+        let inserted = try await insert(
+            id:       id,
+            userId:   userId,
+            name:     name,
+            position: Int.max,
+        )
+        if inserted {
+            return TagEntity(
+                id:        id,
+                userId:    userId,
+                name:      name,
+                position:  Int.max,
+                color:     nil,
+                createdAt: now,
+                updatedAt: now,
+                dirty:     true,
+            )
+        }
+        // Race lost — another caller created it. Re-fetch.
+        guard let raced = try await findByName(userId: userId, name: name) else {
+            throw QuickInkRepositoryError.raceLost("findOrCreate(\(name))")
+        }
+        return raced
     }
 
     // MARK: - Writes

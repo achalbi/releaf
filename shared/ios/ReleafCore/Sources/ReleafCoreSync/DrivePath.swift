@@ -31,7 +31,18 @@ public enum DrivePath {
     public static let kindReferenceLink  = "reference_link"
     public static let kindPageTemplate   = "page_template"
     /// QuickInk-only — user-configurable category for `captures.category`.
+    /// Semantically renamed to "tag" in Workspace v1; the wire kind
+    /// keeps the legacy string for back-compat with payloads on
+    /// Drive written by older clients during the rollout window.
     public static let kindCategory       = "category"
+
+    // ─── Workspace v1 ──────────────────────────────────────────
+    /// QuickInk Workspace folder ("intent" axis; one per capture).
+    public static let kindFolder           = "folder"
+    /// QuickInk capture↔tag many-to-many join row.
+    public static let kindCaptureTag       = "capture_tag"
+    /// QuickInk rule-based saved view.
+    public static let kindSmartCollection  = "smart_collection"
 
     // ---- folder names ----
     public static let folderNotebooks       = "notebooks"
@@ -42,8 +53,21 @@ public enum DrivePath {
     public static let folderCaptures        = "captures"
     /// QuickInk's OCR-result tree — `ocr/{captureId}/page-{N}.json`.
     public static let folderOcr             = "ocr"
-    /// QuickInk's category list — `categories/{id}.json`.
+    /// QuickInk's category list — `categories/{id}.json`. Legacy
+    /// prefix; Workspace v1 writes go under [folderTags] instead.
+    /// Kept for back-compat reads of payloads on Drive from older
+    /// clients.
     public static let folderCategories      = "categories"
+    /// QuickInk's tag list — `tags/{id}.json`. Workspace v1
+    /// destination; readers fall back to `categories/` during the
+    /// rollout soak.
+    public static let folderTags            = "tags"
+    /// QuickInk Workspace folders — `folders/{id}.json`.
+    public static let folderFolders         = "folders"
+    /// QuickInk capture↔tag joins — `capture_tags/{id}.json`.
+    public static let folderCaptureTags     = "capture_tags"
+    /// QuickInk smart collections — `smart_collections/{id}.json`.
+    public static let folderSmartCollections = "smart_collections"
     public static let folderTasks           = "tasks"
     public static let folderTombstones      = "tombstones"
 
@@ -113,7 +137,20 @@ public enum DrivePath {
     }
 
     /// QuickInk's per-category file — `categories/{id}.json`.
+    /// Legacy reader path; Workspace v1 writes go through [tag].
     public static func category(id: String) -> String { "\(folderCategories)/\(id).json" }
+
+    /// QuickInk's per-tag file — `tags/{id}.json` (Workspace v1).
+    public static func tag(id: String) -> String { "\(folderTags)/\(id).json" }
+
+    /// QuickInk Workspace folder payload — `folders/{id}.json`.
+    public static func folder(id: String) -> String { "\(folderFolders)/\(id).json" }
+
+    /// QuickInk capture↔tag join payload — `capture_tags/{id}.json`.
+    public static func captureTag(id: String) -> String { "\(folderCaptureTags)/\(id).json" }
+
+    /// QuickInk smart-collection payload — `smart_collections/{id}.json`.
+    public static func smartCollection(id: String) -> String { "\(folderSmartCollections)/\(id).json" }
 
     public static func tombstone(id: String) -> String { "\(folderTombstones)/\(id).json" }
 

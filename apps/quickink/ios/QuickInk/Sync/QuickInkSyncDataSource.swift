@@ -128,25 +128,112 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 ) { out.append(entry) }
             }
 
-            // ---- categories (typed record) ----
-            let categoryRows = try TagEntity
+            // ---- tags (typed record). Wire kind stays kindCategory
+            // for back-compat with older clients on Drive; new
+            // payloads land under `tags/` (DrivePath.tag) — readers
+            // resolve via the manifest's per-row path. Cleanup of
+            // orphaned `categories/` files is a follow-up after the
+            // brief's two-week soak.
+            let tagRows = try TagEntity
                 .filter(Column("user_id") == userId)
                 .filter(Column("dirty") == true)
                 .filter(Column("deleted_at") == nil)
                 .fetchAll(db)
-            for row in categoryRows {
+            for row in tagRows {
                 let payload = TagPayloadV1(
                     id:        row.id,
                     userId:    row.userId,
                     name:      row.name,
                     position:  row.position,
+                    color:     row.color,
                     createdAt: row.createdAt,
                     updatedAt: row.updatedAt
                 )
                 if let entry = try Self.makeEntry(
                     id: row.id,
                     kind: DrivePath.kindCategory,
-                    drivePath: DrivePath.category(id: row.id),
+                    drivePath: DrivePath.tag(id: row.id),
+                    updatedAt: row.updatedAt,
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
+            // ---- folders (Workspace v1) ----
+            let folderRows = try FolderEntity
+                .filter(Column("user_id") == userId)
+                .filter(Column("dirty") == true)
+                .filter(Column("deleted_at") == nil)
+                .fetchAll(db)
+            for row in folderRows {
+                let payload = FolderPayloadV1(
+                    id:        row.id,
+                    userId:    row.userId,
+                    name:      row.name,
+                    color:     row.color,
+                    position:  row.position,
+                    coverUri:  row.coverUri,
+                    isDefault: row.isDefault,
+                    isShared:  row.isShared,
+                    createdAt: row.createdAt,
+                    updatedAt: row.updatedAt
+                )
+                if let entry = try Self.makeEntry(
+                    id: row.id,
+                    kind: DrivePath.kindFolder,
+                    drivePath: DrivePath.folder(id: row.id),
+                    updatedAt: row.updatedAt,
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
+            // ---- capture_tags. FK to captures handles ownership;
+            // no user_id column on the join row itself, so the dirty
+            // filter alone is enough. ----
+            let captureTagRows = try CaptureTagEntity
+                .filter(Column("dirty") == true)
+                .filter(Column("deleted_at") == nil)
+                .fetchAll(db)
+            for row in captureTagRows {
+                let payload = CaptureTagPayloadV1(
+                    id:        row.id,
+                    captureId: row.captureId,
+                    tagId:     row.tagId,
+                    source:    row.source,
+                    createdAt: row.createdAt,
+                    updatedAt: row.updatedAt
+                )
+                if let entry = try Self.makeEntry(
+                    id: row.id,
+                    kind: DrivePath.kindCaptureTag,
+                    drivePath: DrivePath.captureTag(id: row.id),
+                    updatedAt: row.updatedAt,
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
+            // ---- smart_collections (Workspace v1) ----
+            let smartCollectionRows = try SmartCollectionEntity
+                .filter(Column("user_id") == userId)
+                .filter(Column("dirty") == true)
+                .filter(Column("deleted_at") == nil)
+                .fetchAll(db)
+            for row in smartCollectionRows {
+                let payload = SmartCollectionPayloadV1(
+                    id:        row.id,
+                    userId:    row.userId,
+                    name:      row.name,
+                    icon:      row.icon,
+                    color:     row.color,
+                    ruleJson:  row.ruleJson,
+                    position:  row.position,
+                    isSeeded:  row.isSeeded,
+                    createdAt: row.createdAt,
+                    updatedAt: row.updatedAt
+                )
+                if let entry = try Self.makeEntry(
+                    id: row.id,
+                    kind: DrivePath.kindSmartCollection,
+                    drivePath: DrivePath.smartCollection(id: row.id),
                     updatedAt: row.updatedAt,
                     encodable: payload
                 ) { out.append(entry) }
@@ -238,6 +325,42 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 ))
             }
 
+            // folders / capture_tags / smart_collections — Workspace v1
+            // tombstones.
+            let folderTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM folders
+                WHERE user_id = ? AND deleted_at IS NOT NULL AND dirty = 1
+                """, arguments: [userId])
+            for row in folderTombstones {
+                out.append(PendingTombstone(
+                    kind: DrivePath.kindFolder,
+                    id: row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+            let captureTagTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM capture_tags
+                WHERE deleted_at IS NOT NULL AND dirty = 1
+                """)
+            for row in captureTagTombstones {
+                out.append(PendingTombstone(
+                    kind: DrivePath.kindCaptureTag,
+                    id: row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+            let smartCollectionTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM smart_collections
+                WHERE user_id = ? AND deleted_at IS NOT NULL AND dirty = 1
+                """, arguments: [userId])
+            for row in smartCollectionTombstones {
+                out.append(PendingTombstone(
+                    kind: DrivePath.kindSmartCollection,
+                    id: row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+
             // ocr_results — not user-scoped at the row level.
             let ocrRows = try Row.fetchAll(db, sql: """
                 SELECT id, deleted_at, updated_at FROM ocr_results
@@ -282,6 +405,18 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             case DrivePath.kindCategory:
                 let p = try decoder.decode(TagPayloadV1.self, from: change.payload)
                 try Self.upsertCategoryRow(db, payload: p, driveFileId: driveFileId)
+
+            case DrivePath.kindFolder:
+                let p = try decoder.decode(FolderPayloadV1.self, from: change.payload)
+                try Self.upsertFolderRow(db, payload: p, driveFileId: driveFileId)
+
+            case DrivePath.kindCaptureTag:
+                let p = try decoder.decode(CaptureTagPayloadV1.self, from: change.payload)
+                try Self.upsertCaptureTagRow(db, payload: p, driveFileId: driveFileId)
+
+            case DrivePath.kindSmartCollection:
+                let p = try decoder.decode(SmartCollectionPayloadV1.self, from: change.payload)
+                try Self.upsertSmartCollectionRow(db, payload: p, driveFileId: driveFileId)
 
             default:
                 // Forward-compat: unknown kind, skip.
@@ -383,10 +518,13 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
 
     private static func tableFor(kind: String) -> String {
         switch kind {
-        case DrivePath.kindNotepadEntry: return "notepad_entries"
-        case DrivePath.kindCapture:      return "captures"
-        case DrivePath.kindOcrResult:    return "ocr_results"
-        case DrivePath.kindCategory:     return "categories"
+        case DrivePath.kindNotepadEntry:    return "notepad_entries"
+        case DrivePath.kindCapture:         return "captures"
+        case DrivePath.kindOcrResult:       return "ocr_results"
+        case DrivePath.kindCategory:        return "tags"
+        case DrivePath.kindFolder:          return "folders"
+        case DrivePath.kindCaptureTag:      return "capture_tags"
+        case DrivePath.kindSmartCollection: return "smart_collections"
         default: return ""
         }
     }
@@ -409,24 +547,99 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
         )
     }
 
-    /// Upsert a categories row from a remote payload. Last-write-wins
-    /// on `updated_at`. Mirror of `upsertCaptureRow` shape.
+    /// Upsert a tags row from a remote payload. Last-write-wins
+    /// on `updated_at`. The wire kind stays `kindCategory` (back-
+    /// compat) but the table is `tags` post-v8.
     private static func upsertCategoryRow(_ db: Database, payload: TagPayloadV1, driveFileId: String?) throws {
         try db.execute(sql: """
             INSERT INTO tags (
-                id, user_id, name, position,
+                id, user_id, name, position, color,
                 drive_file_id, created_at, updated_at, dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
             ON CONFLICT(id) DO UPDATE SET
                 user_id       = excluded.user_id,
                 name          = excluded.name,
                 position      = excluded.position,
+                color         = excluded.color,
                 drive_file_id = excluded.drive_file_id,
                 updated_at    = excluded.updated_at,
                 dirty         = 0
-            WHERE categories.updated_at < excluded.updated_at
+            WHERE tags.updated_at < excluded.updated_at
             """, arguments: [
                 payload.id, payload.userId, payload.name, payload.position,
+                payload.color,
+                driveFileId, payload.createdAt, payload.updatedAt,
+            ])
+    }
+
+    private static func upsertFolderRow(_ db: Database, payload: FolderPayloadV1, driveFileId: String?) throws {
+        try db.execute(sql: """
+            INSERT INTO folders (
+                id, user_id, name, color, position,
+                cover_uri, is_default, is_shared,
+                drive_file_id, created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                user_id       = excluded.user_id,
+                name          = excluded.name,
+                color         = excluded.color,
+                position      = excluded.position,
+                cover_uri     = excluded.cover_uri,
+                is_default    = excluded.is_default,
+                is_shared     = excluded.is_shared,
+                drive_file_id = excluded.drive_file_id,
+                updated_at    = excluded.updated_at,
+                dirty         = 0
+            WHERE folders.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.userId, payload.name, payload.color,
+                payload.position, payload.coverUri,
+                payload.isDefault, payload.isShared,
+                driveFileId, payload.createdAt, payload.updatedAt,
+            ])
+    }
+
+    private static func upsertCaptureTagRow(_ db: Database, payload: CaptureTagPayloadV1, driveFileId: String?) throws {
+        try db.execute(sql: """
+            INSERT INTO capture_tags (
+                id, capture_id, tag_id, source,
+                drive_file_id, created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                capture_id    = excluded.capture_id,
+                tag_id        = excluded.tag_id,
+                source        = excluded.source,
+                drive_file_id = excluded.drive_file_id,
+                updated_at    = excluded.updated_at,
+                dirty         = 0
+            WHERE capture_tags.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.captureId, payload.tagId, payload.source,
+                driveFileId, payload.createdAt, payload.updatedAt,
+            ])
+    }
+
+    private static func upsertSmartCollectionRow(_ db: Database, payload: SmartCollectionPayloadV1, driveFileId: String?) throws {
+        try db.execute(sql: """
+            INSERT INTO smart_collections (
+                id, user_id, name, icon, color, rule_json, position, is_seeded,
+                drive_file_id, created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                user_id       = excluded.user_id,
+                name          = excluded.name,
+                icon          = excluded.icon,
+                color         = excluded.color,
+                rule_json     = excluded.rule_json,
+                position      = excluded.position,
+                is_seeded     = excluded.is_seeded,
+                drive_file_id = excluded.drive_file_id,
+                updated_at    = excluded.updated_at,
+                dirty         = 0
+            WHERE smart_collections.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.userId, payload.name, payload.icon,
+                payload.color, payload.ruleJson, payload.position, payload.isSeeded,
                 driveFileId, payload.createdAt, payload.updatedAt,
             ])
     }

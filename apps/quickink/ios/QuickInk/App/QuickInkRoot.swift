@@ -385,6 +385,15 @@ private struct MainShell: View {
             // that included "Study". Idempotent + flag-guarded;
             // safe to call on every launch.
             try? await categoryRepo.migrateLegacyStudyToBusinessCardIfNeeded(userId: userId)
+
+            // Workspace v1 first-launch migration — seed Unfiled
+            // folder, backfill every capture's folder_id, and
+            // materialize the legacy `captures.category` value into
+            // `capture_tags`. Each step is idempotent via
+            // UserDefaults guards so on-every-launch invocation is
+            // safe.
+            let folderRepo = FolderRepository()
+            try? await folderRepo.runFirstLaunchMigrationIfNeeded(userId: userId)
             // One-shot post-onboarding location-permission ask.
             // Existing users who completed onboarding before the
             // Location step shipped (Phase 7) would otherwise never

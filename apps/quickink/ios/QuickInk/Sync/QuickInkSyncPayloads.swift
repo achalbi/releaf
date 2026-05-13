@@ -391,6 +391,65 @@ public struct TagPayloadV1: Codable, Equatable, Sendable {
     public let userId: String
     public let name: String
     public let position: Int
+    /// Workspace v1 — optional chip color. Defaults to nil on the
+    /// wire for back-compat with payloads from pre-v8 clients.
+    public let color: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    public init(
+        id: String,
+        userId: String,
+        name: String,
+        position: Int,
+        color: String? = nil,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id        = id
+        self.userId    = userId
+        self.name      = name
+        self.position  = position
+        self.color     = color
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id        = try c.decode(String.self, forKey: .id)
+        self.userId    = try c.decode(String.self, forKey: .userId)
+        self.name      = try c.decode(String.self, forKey: .name)
+        self.position  = try c.decode(Int.self,    forKey: .position)
+        self.color     = try c.decodeIfPresent(String.self, forKey: .color)
+        self.createdAt = try c.decode(String.self, forKey: .createdAt)
+        self.updatedAt = try c.decode(String.self, forKey: .updatedAt)
+    }
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case userId    = "user_id"
+        case name
+        case position
+        case color
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+// =====================================================================
+// folders — QuickInk-only. Workspace v1 "intent" axis.
+// =====================================================================
+
+public struct FolderPayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let userId: String
+    public let name: String
+    public let color: String
+    public let position: Int
+    public let coverUri: String?
+    public let isDefault: Bool
+    public let isShared: Bool
     public let createdAt: String
     public let updatedAt: String
 
@@ -398,7 +457,81 @@ public struct TagPayloadV1: Codable, Equatable, Sendable {
         case id
         case userId    = "user_id"
         case name
+        case color
         case position
+        case coverUri  = "cover_uri"
+        case isDefault = "is_default"
+        case isShared  = "is_shared"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+// =====================================================================
+// capture_tags — QuickInk-only. Workspace v1 many-to-many join.
+// Each row syncs independently of the parent capture.
+// =====================================================================
+
+public struct CaptureTagPayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let captureId: String
+    public let tagId: String
+    public let source: String
+    public let createdAt: String
+    public let updatedAt: String
+
+    public init(
+        id: String,
+        captureId: String,
+        tagId: String,
+        source: String = "manual",
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id        = id
+        self.captureId = captureId
+        self.tagId     = tagId
+        self.source    = source
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case captureId = "capture_id"
+        case tagId     = "tag_id"
+        case source
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+// =====================================================================
+// smart_collections — QuickInk-only. Rule-based saved views.
+// rule_json carries the AND-of-clauses grammar (see brief §3).
+// =====================================================================
+
+public struct SmartCollectionPayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let userId: String
+    public let name: String
+    public let icon: String?
+    public let color: String?
+    public let ruleJson: String
+    public let position: Int
+    public let isSeeded: Bool
+    public let createdAt: String
+    public let updatedAt: String
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case userId    = "user_id"
+        case name
+        case icon
+        case color
+        case ruleJson  = "rule_json"
+        case position
+        case isSeeded  = "is_seeded"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
