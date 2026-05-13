@@ -62,6 +62,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tune
@@ -784,10 +785,11 @@ private fun SmartCollectionCard(
                 .background(tint.copy(alpha = 0.18f)),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text  = "·",  // placeholder glyph
-                color = tint,
-                style = type.label.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp),
+            Icon(
+                imageVector        = Icons.Outlined.AutoAwesome,
+                contentDescription = null,
+                tint               = tint,
+                modifier           = Modifier.size(15.dp),
             )
         }
         Spacer(Modifier.height(6.dp))

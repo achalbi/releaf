@@ -423,9 +423,14 @@ public struct WorkspaceHomeScreen: View {
         let tint = colorFromHex(sc.color) ?? QuickInkColors.accent
         return Button(action: { onOpenSmartCollection(sc) }) {
             VStack(alignment: .leading, spacing: 4) {
-                Circle()
-                    .fill(tint.opacity(0.18))
-                    .frame(width: 28, height: 28)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(tint.opacity(0.18))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(tint)
+                }
                 Spacer().frame(height: 2)
                 Text(sc.name)
                     .font(.system(size: 12.5, weight: .semibold))
