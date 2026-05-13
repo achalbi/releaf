@@ -220,7 +220,11 @@ private fun RegularTab(
                 .clip(RoundedCornerShape(QuickInkRadius.md))
                 .background(bg)
                 .padding(
-                    horizontal = QuickInkSpacing.s2,
+                    // Tighter horizontal padding so the longest
+                    // label ("Workspace") clears the chip without
+                    // clipping the trailing "e" on narrow stock
+                    // devices.
+                    horizontal = QuickInkSpacing.s1,
                     vertical   = QuickInkSpacing.s2,
                 ),
         ) {
@@ -232,12 +236,13 @@ private fun RegularTab(
             )
             Text(
                 text     = label,
-                // Slightly tighter than the global caption token so
-                // the longest label ("Workspace", 9 chars) clears
-                // the `weight(1f)` slot on stock devices without
-                // wrapping to two lines. The other four labels (4–8
-                // chars) read identically at this size.
-                style    = type.caption.copy(fontSize = 10.5.sp),
+                // Tighter than the global caption token so the
+                // longest label ("Workspace", 9 chars) clears the
+                // `weight(1f)` slot on stock-width devices without
+                // wrapping to two lines OR clipping the trailing
+                // "e". The other four labels (4–8 chars) read
+                // identically at this size.
+                style    = type.caption.copy(fontSize = 10.sp),
                 color    = tint,
                 maxLines = 1,
                 softWrap = false,
@@ -279,7 +284,11 @@ private fun RegularTabAsset(
                 .clip(RoundedCornerShape(QuickInkRadius.md))
                 .background(bg)
                 .padding(
-                    horizontal = QuickInkSpacing.s2,
+                    // Tighter horizontal padding so the longest
+                    // label ("Workspace") clears the chip without
+                    // clipping the trailing "e" on narrow stock
+                    // devices.
+                    horizontal = QuickInkSpacing.s1,
                     vertical   = QuickInkSpacing.s2,
                 ),
         ) {
@@ -291,12 +300,13 @@ private fun RegularTabAsset(
             )
             Text(
                 text     = label,
-                // Slightly tighter than the global caption token so
-                // the longest label ("Workspace", 9 chars) clears
-                // the `weight(1f)` slot on stock devices without
-                // wrapping to two lines. The other four labels (4–8
-                // chars) read identically at this size.
-                style    = type.caption.copy(fontSize = 10.5.sp),
+                // Tighter than the global caption token so the
+                // longest label ("Workspace", 9 chars) clears the
+                // `weight(1f)` slot on stock-width devices without
+                // wrapping to two lines OR clipping the trailing
+                // "e". The other four labels (4–8 chars) read
+                // identically at this size.
+                style    = type.caption.copy(fontSize = 10.sp),
                 color    = tint,
                 maxLines = 1,
                 softWrap = false,

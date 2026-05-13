@@ -143,15 +143,19 @@ public struct QuickInkBottomNavBar: View {
                     .font(.system(size: 20))
                     .foregroundStyle(tint)
                 Text(label)
-                    // Slightly tighter than the global caption
-                    // token so the longest label ("Workspace") fits
-                    // its `frame(maxWidth: .infinity)` slot on stock
-                    // devices without wrapping to two lines.
-                    .font(.system(size: 10.5, weight: .medium))
+                    // Tighter than the global caption token so the
+                    // longest label ("Workspace") fits its
+                    // `frame(maxWidth: .infinity)` slot on stock-
+                    // width devices without wrapping OR clipping
+                    // the trailing "e".
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(tint)
                     .lineLimit(1)
             }
-            .padding(.horizontal, QuickInkSpacing.s2)
+            // Tighter horizontal pad so the longest label
+            // ("Workspace") clears the chip without clipping the
+            // trailing "e" on narrow stock devices.
+            .padding(.horizontal, QuickInkSpacing.s1)
             .padding(.vertical, QuickInkSpacing.s2)
             // The fill carries its own shadow so it only renders when
             // the pill is active (Color.clear casts no shadow). This
@@ -193,15 +197,19 @@ public struct QuickInkBottomNavBar: View {
                     .frame(width: 20, height: 20)
                     .foregroundStyle(tint)
                 Text(label)
-                    // Slightly tighter than the global caption
-                    // token so the longest label ("Workspace") fits
-                    // its `frame(maxWidth: .infinity)` slot on stock
-                    // devices without wrapping to two lines.
-                    .font(.system(size: 10.5, weight: .medium))
+                    // Tighter than the global caption token so the
+                    // longest label ("Workspace") fits its
+                    // `frame(maxWidth: .infinity)` slot on stock-
+                    // width devices without wrapping OR clipping
+                    // the trailing "e".
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(tint)
                     .lineLimit(1)
             }
-            .padding(.horizontal, QuickInkSpacing.s2)
+            // Tighter horizontal pad so the longest label
+            // ("Workspace") clears the chip without clipping the
+            // trailing "e" on narrow stock devices.
+            .padding(.horizontal, QuickInkSpacing.s1)
             .padding(.vertical, QuickInkSpacing.s2)
             .background(
                 RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
