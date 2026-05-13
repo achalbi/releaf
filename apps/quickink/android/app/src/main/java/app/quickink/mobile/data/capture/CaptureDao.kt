@@ -403,6 +403,35 @@ interface CaptureDao {
     suspend fun countByFolder(userId: String): List<FolderCaptureCount>
 
     /**
+     * Live, newest-first captures inside a folder. Powers the
+     * Workspace folder-detail screen (Phase C — Screen 2).
+     */
+    @Query("""
+        SELECT * FROM captures
+        WHERE folder_id = :folderId
+          AND deleted_at IS NULL
+        ORDER BY created_at DESC
+    """)
+    fun observeByFolder(folderId: String): Flow<List<CaptureEntity>>
+
+    /**
+     * Captures in a folder that ALSO carry the given tag. Used
+     * by the folder-detail screen's tag-strip filter — picking a
+     * chip narrows the list to captures with that tag. Excludes
+     * tombstoned captures and tombstoned join rows.
+     */
+    @Query("""
+        SELECT captures.* FROM captures
+        JOIN capture_tags ON capture_tags.capture_id = captures.id
+        WHERE captures.folder_id = :folderId
+          AND captures.deleted_at IS NULL
+          AND capture_tags.tag_id = :tagId
+          AND capture_tags.deleted_at IS NULL
+        ORDER BY captures.created_at DESC
+    """)
+    fun observeByFolderAndTag(folderId: String, tagId: String): Flow<List<CaptureEntity>>
+
+    /**
      * Captures whose category contains the substring (case-
      * insensitive, space-insensitive). Used as the "fast" pass of
      * search. Spaces are stripped from both sides of the comparison

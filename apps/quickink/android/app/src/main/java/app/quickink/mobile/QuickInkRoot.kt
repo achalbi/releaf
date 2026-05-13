@@ -42,6 +42,7 @@ import app.quickink.mobile.data.analytics.AnalyticsRepository
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.folder.FolderRepository
 import app.quickink.mobile.data.tag.TagRepository
+import app.quickink.mobile.features.workspace.FolderDetailScreen
 import app.quickink.mobile.features.workspace.WorkspaceFeatureFlag
 import app.quickink.mobile.features.workspace.WorkspaceHomeScreen
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
@@ -189,6 +190,10 @@ private object Routes {
 
     /** Workspace v1 home (Phase B). Gated by [WorkspaceFeatureFlag]. */
     const val WORKSPACE_HOME    = "workspace_home"
+
+    /** Workspace v1 folder detail (Phase C — Screen 2). */
+    const val FOLDER_DETAIL     = "folder_detail/{folderId}"
+    fun folderDetail(folderId: String): String = "folder_detail/${Uri.encode(folderId)}"
 
     fun noteEditor(entryId: String): String =
         "note_editor/${Uri.encode(entryId)}"
@@ -547,10 +552,8 @@ private fun MainShell(
             WorkspaceHomeScreen(
                 userId         = userId,
                 onOpenSearch   = { navToTab(Routes.SEARCH) },
-                onOpenFolder   = { _ ->
-                    // Folder detail (Screen 2) lands in Phase C — tap is a
-                    // no-op for B.0. Wire to a "FolderDetailScreen" route
-                    // when that screen exists.
+                onOpenFolder   = { folder ->
+                    navController.navigate(Routes.folderDetail(folder.id))
                 },
                 onOpenContinue = { capture ->
                     navController.navigate(Routes.scanDetail(capture.id))
@@ -565,6 +568,25 @@ private fun MainShell(
                 onHome     = { navToTab(Routes.HOME) },
                 onScan     = { showQuickCapture = true },
                 onSettings = { navToTab(Routes.SETTINGS) },
+            )
+        }
+        composable(
+            route     = Routes.FOLDER_DETAIL,
+            arguments = listOf(navArgument("folderId") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val folderId = backStackEntry.arguments?.getString("folderId").orEmpty()
+            FolderDetailScreen(
+                folderId      = folderId,
+                userId        = userId,
+                onBack        = { navController.popBackStack() },
+                onOpenCapture = { capture ->
+                    navController.navigate(Routes.scanDetail(capture.id))
+                },
+                onOpenSearch  = { navToTab(Routes.SEARCH) },
+                onHome        = { navToTab(Routes.HOME) },
+                onWorkspace   = { navToTab(workspaceTabRoute) },
+                onScan        = { showQuickCapture = true },
+                onSettings    = { navToTab(Routes.SETTINGS) },
             )
         }
         composable(

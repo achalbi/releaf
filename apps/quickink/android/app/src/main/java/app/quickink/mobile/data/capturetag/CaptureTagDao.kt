@@ -106,6 +106,21 @@ interface CaptureTagDao {
     fun observeTagCounts(userId: String): Flow<List<TagCount>>
 
     /**
+     * Distinct tag ids that appear on at least one active capture
+     * in the given folder. Drives the tag-strip filter on the
+     * folder-detail screen — the strip only shows tags that
+     * would actually narrow the result set.
+     */
+    @Query("""
+        SELECT DISTINCT capture_tags.tag_id FROM capture_tags
+        JOIN captures ON captures.id = capture_tags.capture_id
+        WHERE captures.folder_id = :folderId
+          AND captures.deleted_at IS NULL
+          AND capture_tags.deleted_at IS NULL
+    """)
+    fun observeTagIdsInFolder(folderId: String): Flow<List<String>>
+
+    /**
      * Soft-delete a single join row by id. Used by [detach] —
      * external callers should prefer that.
      */
