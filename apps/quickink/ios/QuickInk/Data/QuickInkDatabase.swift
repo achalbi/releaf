@@ -397,6 +397,141 @@ public final class QuickInkDatabase: @unchecked Sendable {
             try db.execute(sql: "ALTER TABLE captures ADD COLUMN address TEXT")
         }
 
+        // ─── v8_workspace ──────────────────────────────────────
+        //
+        // Workspace v1 (Phase A) — the two-axis IA from
+        // shared/design-system/migrations/quickink/v4_workspace.sql.
+        // Same SQL as Android's destructive rebuild; iOS lands it
+        // as a real migration so the DB survives the version bump
+        // once `eraseDatabaseOnSchemaChange` is removed.
+        //
+        // Adds:
+        //   1. `tags` (renamed from `categories`) + a `color` column.
+        //   2. `folders` — intent axis. is_default=1 row is the
+        //      seeded "Unfiled" folder; is_shared reserved for the
+        //      post-v1 share flow.
+        //   3. `capture_tags` many-to-many join — each row syncs
+        //      independently so cross-device tag attachments don't
+        //      require re-uploading the parent capture.
+        //   4. `smart_collections` — rule-based saved views;
+        //      rule_json holds the AND-of-clauses grammar.
+        //   5. `captures.folder_id`, `captures.last_opened_at`,
+        //      `captures.last_opened_page`, `captures.last_opened_
+        //      device`.
+        //
+        // captures.category column drop is deferred to a follow-up
+        // (iOS A.3c) — same staging as Android. The materialize
+        // step (categories → capture_tags rows) runs in app code on
+        // first launch after upgrade; FolderRepository owns it.
+        //
+        // Mirror of Android's Room v10 + the canonical
+        // v4_workspace.sql.
+        migrator.registerMigration("v8_workspace") { db in
+            // ─── Rename categories → tags ─────────────────────
+            try db.execute(sql: "ALTER TABLE categories RENAME TO tags")
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_categories_user_position")
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_categories_dirty")
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_categories_tombstone")
+            try db.execute(sql: "CREATE INDEX idx_tags_user_position ON tags (user_id, position)")
+            try db.execute(sql: "CREATE INDEX idx_tags_dirty         ON tags (dirty)      WHERE dirty = 1")
+            try db.execute(sql: "CREATE INDEX idx_tags_tombstone     ON tags (deleted_at) WHERE deleted_at IS NOT NULL")
+
+            // Nullable hex color; UI falls back to accent tint.
+            try db.execute(sql: "ALTER TABLE tags ADD COLUMN color TEXT")
+
+            // ─── folders ──────────────────────────────────────
+            try db.execute(sql: """
+                CREATE TABLE folders (
+                    id              TEXT PRIMARY KEY NOT NULL,
+                    user_id         TEXT NOT NULL,
+                    name            TEXT NOT NULL,
+                    color           TEXT NOT NULL,
+                    position        INTEGER NOT NULL DEFAULT 0,
+                    cover_uri       TEXT,
+                    is_default      INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1)),
+                    is_shared       INTEGER NOT NULL DEFAULT 0 CHECK (is_shared IN (0, 1)),
+                    drive_file_id   TEXT,
+                    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty           INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at      TEXT
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_folders_user_position ON folders (user_id, position)")
+            try db.execute(sql: "CREATE INDEX idx_folders_dirty         ON folders (dirty)      WHERE dirty = 1")
+            try db.execute(sql: "CREATE INDEX idx_folders_tombstone     ON folders (deleted_at) WHERE deleted_at IS NOT NULL")
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX idx_folders_user_name_active
+                    ON folders (user_id, name)
+                    WHERE deleted_at IS NULL
+                """)
+
+            // ─── capture_tags ─────────────────────────────────
+            try db.execute(sql: """
+                CREATE TABLE capture_tags (
+                    id              TEXT PRIMARY KEY NOT NULL,
+                    capture_id      TEXT NOT NULL,
+                    tag_id          TEXT NOT NULL,
+                    source          TEXT NOT NULL DEFAULT 'manual',
+                    drive_file_id   TEXT,
+                    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty           INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at      TEXT,
+                    FOREIGN KEY (capture_id) REFERENCES captures (id),
+                    FOREIGN KEY (tag_id)     REFERENCES tags     (id)
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_capture_tags_capture   ON capture_tags (capture_id)")
+            try db.execute(sql: "CREATE INDEX idx_capture_tags_tag       ON capture_tags (tag_id)")
+            try db.execute(sql: "CREATE INDEX idx_capture_tags_dirty     ON capture_tags (dirty)      WHERE dirty = 1")
+            try db.execute(sql: "CREATE INDEX idx_capture_tags_tombstone ON capture_tags (deleted_at) WHERE deleted_at IS NOT NULL")
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX idx_capture_tags_unique_active
+                    ON capture_tags (capture_id, tag_id)
+                    WHERE deleted_at IS NULL
+                """)
+
+            // ─── smart_collections ────────────────────────────
+            try db.execute(sql: """
+                CREATE TABLE smart_collections (
+                    id              TEXT PRIMARY KEY NOT NULL,
+                    user_id         TEXT NOT NULL,
+                    name            TEXT NOT NULL,
+                    icon            TEXT,
+                    color           TEXT,
+                    rule_json       TEXT NOT NULL,
+                    position        INTEGER NOT NULL DEFAULT 0,
+                    is_seeded       INTEGER NOT NULL DEFAULT 0 CHECK (is_seeded IN (0, 1)),
+                    drive_file_id   TEXT,
+                    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty           INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at      TEXT
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_smart_collections_user_position ON smart_collections (user_id, position)")
+            try db.execute(sql: "CREATE INDEX idx_smart_collections_dirty         ON smart_collections (dirty)      WHERE dirty = 1")
+            try db.execute(sql: "CREATE INDEX idx_smart_collections_tombstone     ON smart_collections (deleted_at) WHERE deleted_at IS NOT NULL")
+
+            // ─── captures additions ───────────────────────────
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN folder_id TEXT")
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN last_opened_at TEXT")
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN last_opened_page INTEGER")
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN last_opened_device TEXT")
+
+            try db.execute(sql: """
+                CREATE INDEX idx_captures_folder_created
+                    ON captures (folder_id, created_at)
+                    WHERE deleted_at IS NULL
+                """)
+            try db.execute(sql: """
+                CREATE INDEX idx_captures_last_opened
+                    ON captures (user_id, last_opened_at)
+                    WHERE last_opened_at IS NOT NULL AND deleted_at IS NULL
+                """)
+        }
+
         return migrator
     }
 }

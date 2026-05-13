@@ -53,6 +53,20 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
     /// "Address" row on the Details card. Nil when the geocode
     /// failed or the location toggle was off.
     public let address: String?
+    /// Workspace v1 — folder this capture lives in. Nullable
+    /// at the column level so v8_workspace can backfill in a
+    /// second pass; after the first-launch migration runs every
+    /// capture is in Unfiled (or a user-created folder).
+    public let folderId: String?
+    /// Workspace v1 — ISO timestamp of the last time the user
+    /// opened this capture. Powers the Continue card.
+    public let lastOpenedAt: String?
+    /// Workspace v1 — 1-indexed page the user last viewed.
+    /// Paired with `lastOpenedAt`.
+    public let lastOpenedPage: Int?
+    /// Workspace v1 — install id of the producing device; reserved
+    /// for future cross-device "continue on iPhone" UX.
+    public let lastOpenedDevice: String?
 
     public init(
         id: String,
@@ -67,7 +81,11 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         longitude: Double? = nil,
         locality: String? = nil,
         subLocality: String? = nil,
-        address: String? = nil
+        address: String? = nil,
+        folderId: String? = nil,
+        lastOpenedAt: String? = nil,
+        lastOpenedPage: Int? = nil,
+        lastOpenedDevice: String? = nil
     ) {
         self.id          = id
         self.title       = title
@@ -82,6 +100,10 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         self.locality    = locality
         self.subLocality = subLocality
         self.address     = address
+        self.folderId         = folderId
+        self.lastOpenedAt     = lastOpenedAt
+        self.lastOpenedPage   = lastOpenedPage
+        self.lastOpenedDevice = lastOpenedDevice
     }
 
     public init(from decoder: Decoder) throws {
@@ -107,6 +129,13 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         self.locality    = try c.decodeIfPresent(String.self, forKey: .locality)
         self.subLocality = try c.decodeIfPresent(String.self, forKey: .subLocality)
         self.address     = try c.decodeIfPresent(String.self, forKey: .address)
+        // Workspace v1 columns landed in v8; older SELECTs that
+        // don't request them — or rows synced from a pre-v8 client
+        // — read back as nil here.
+        self.folderId         = try c.decodeIfPresent(String.self, forKey: .folderId)
+        self.lastOpenedAt     = try c.decodeIfPresent(String.self, forKey: .lastOpenedAt)
+        self.lastOpenedPage   = try c.decodeIfPresent(Int.self,    forKey: .lastOpenedPage)
+        self.lastOpenedDevice = try c.decodeIfPresent(String.self, forKey: .lastOpenedDevice)
     }
 
     public enum CodingKeys: String, CodingKey {
@@ -123,6 +152,10 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         case locality
         case subLocality = "sub_locality"
         case address
+        case folderId         = "folder_id"
+        case lastOpenedAt     = "last_opened_at"
+        case lastOpenedPage   = "last_opened_page"
+        case lastOpenedDevice = "last_opened_device"
     }
 }
 

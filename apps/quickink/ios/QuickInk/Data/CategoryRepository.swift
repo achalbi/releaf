@@ -91,7 +91,7 @@ public final class CategoryRepository: @unchecked Sendable {
         return try await dbQueue.write { db in
             do {
                 try db.execute(sql: """
-                    INSERT INTO categories (
+                    INSERT INTO tags (
                         id, user_id, name, position,
                         created_at, updated_at, dirty
                     ) VALUES (?, ?, ?, ?, ?, ?, 1)
@@ -107,7 +107,7 @@ public final class CategoryRepository: @unchecked Sendable {
         let now = IsoClock.nowIso()
         try await dbQueue.write { db in
             try db.execute(sql: """
-                UPDATE categories
+                UPDATE tags
                 SET name = ?, updated_at = ?, dirty = 1
                 WHERE id = ?
                 """, arguments: [newName, now, id])
@@ -129,7 +129,7 @@ public final class CategoryRepository: @unchecked Sendable {
         let now = IsoClock.nowIso()
         try await dbQueue.write { db in
             try db.execute(sql: """
-                UPDATE categories
+                UPDATE tags
                 SET name = ?, updated_at = ?, dirty = 1
                 WHERE id = ?
                 """, arguments: [newName, now, id])
@@ -150,7 +150,7 @@ public final class CategoryRepository: @unchecked Sendable {
         let now = IsoClock.nowIso()
         try await dbQueue.write { db in
             try db.execute(sql: """
-                UPDATE categories
+                UPDATE tags
                 SET deleted_at = ?, updated_at = ?, dirty = 1
                 WHERE id = ?
                 """, arguments: [now, now, id])
@@ -162,7 +162,7 @@ public final class CategoryRepository: @unchecked Sendable {
         try await dbQueue.write { db in
             for (index, id) in ids.enumerated() {
                 try db.execute(sql: """
-                    UPDATE categories
+                    UPDATE tags
                     SET position = ?, updated_at = ?, dirty = 1
                     WHERE id = ?
                     """, arguments: [index, now, id])
@@ -201,23 +201,23 @@ public final class CategoryRepository: @unchecked Sendable {
         let now = IsoClock.nowIso()
         try await dbQueue.write { db in
             let studyExists = (try Int.fetchOne(db, sql: """
-                SELECT COUNT(*) FROM categories
+                SELECT COUNT(*) FROM tags
                 WHERE user_id = ? AND name = 'Study' AND deleted_at IS NULL
                 """, arguments: [userId]) ?? 0) > 0
             let businessCardExists = (try Int.fetchOne(db, sql: """
-                SELECT COUNT(*) FROM categories
+                SELECT COUNT(*) FROM tags
                 WHERE user_id = ? AND name = 'Business Card' AND deleted_at IS NULL
                 """, arguments: [userId]) ?? 0) > 0
 
             if studyExists && !businessCardExists {
                 try db.execute(sql: """
-                    UPDATE categories
+                    UPDATE tags
                     SET name = 'Business Card', updated_at = ?, dirty = 1
                     WHERE user_id = ? AND name = 'Study' AND deleted_at IS NULL
                     """, arguments: [now, userId])
             } else if studyExists && businessCardExists {
                 try db.execute(sql: """
-                    UPDATE categories
+                    UPDATE tags
                     SET deleted_at = ?, updated_at = ?, dirty = 1
                     WHERE user_id = ? AND name = 'Study' AND deleted_at IS NULL
                     """, arguments: [now, now, userId])

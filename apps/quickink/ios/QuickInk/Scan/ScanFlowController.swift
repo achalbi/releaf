@@ -541,7 +541,7 @@ public final class ScanFlowController: ObservableObject {
             // SQL, and the typical user has a single-digit number
             // of categories so the in-memory pass is cheap.
             let rows = try Row.fetchAll(db, sql: """
-                SELECT name FROM categories
+                SELECT name FROM tags
                 WHERE user_id = ? AND deleted_at IS NULL
                 """, arguments: [userId])
             // Try the widest window first (two-word phrase), then

@@ -227,7 +227,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
 
             // categories — user-scoped.
             let categoryTombstones = try Row.fetchAll(db, sql: """
-                SELECT id, deleted_at, updated_at FROM categories
+                SELECT id, deleted_at, updated_at FROM tags
                 WHERE user_id = ? AND deleted_at IS NOT NULL AND dirty = 1
                 """, arguments: [userId])
             for row in categoryTombstones {
@@ -372,7 +372,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 WHERE dirty = 1
                 """)) ?? 0
             let categories: Int = (try? Int.fetchOne(db, sql: """
-                SELECT COUNT(*) FROM categories
+                SELECT COUNT(*) FROM tags
                 WHERE user_id = ? AND dirty = 1
                 """, arguments: [userId])) ?? 0
             return notepad + captures + ocr + categories
@@ -413,7 +413,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
     /// on `updated_at`. Mirror of `upsertCaptureRow` shape.
     private static func upsertCategoryRow(_ db: Database, payload: CategoryPayloadV1, driveFileId: String?) throws {
         try db.execute(sql: """
-            INSERT INTO categories (
+            INSERT INTO tags (
                 id, user_id, name, position,
                 drive_file_id, created_at, updated_at, dirty
             ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
