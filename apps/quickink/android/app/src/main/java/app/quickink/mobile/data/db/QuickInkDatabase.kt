@@ -37,8 +37,6 @@ import app.quickink.mobile.data.capture.CaptureDao
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capturetag.CaptureTagDao
 import app.quickink.mobile.data.capturetag.CaptureTagEntity
-import app.quickink.mobile.data.category.CategoryDao
-import app.quickink.mobile.data.category.CategoryEntity
 import app.quickink.mobile.data.folder.FolderDao
 import app.quickink.mobile.data.folder.FolderEntity
 import app.quickink.mobile.data.ocr.OcrResultDao
@@ -47,6 +45,8 @@ import app.quickink.mobile.data.profile.ProfileSettingsDao
 import app.quickink.mobile.data.profile.ProfileSettingsEntity
 import app.quickink.mobile.data.smartcollection.SmartCollectionDao
 import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
+import app.quickink.mobile.data.tag.TagDao
+import app.quickink.mobile.data.tag.TagEntity
 import app.releaf.mobile.data.notepad.NotepadDao
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.sync.SyncStateDao
@@ -58,23 +58,33 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         SyncStateEntity::class,
         CaptureEntity::class,
         OcrResultEntity::class,
-        CategoryEntity::class,
+        // ─── Workspace v1 (Phase A) ────────────────────────
+        // TagEntity replaces CategoryEntity in A.2 — table renamed
+        // from `categories` to `tags`. Package data.category →
+        // data.tag. Same semantics; promoted to many-to-many.
+        TagEntity::class,
         ProfileSettingsEntity::class,
         AnalyticsOutboxEntity::class,
-        // ─── Workspace v1 (Phase A) ────────────────────────
         FolderEntity::class,
         CaptureTagEntity::class,
         SmartCollectionEntity::class,
     ],
-    // v9 — Workspace v1 Phase A. Adds three new tables (folders,
+    // v10 — Workspace v1 Phase A.2. Renames `categories` table to
+    // `tags`; CategoryEntity → TagEntity (package data.tag).
+    // Tagging is now a many-to-many relationship via the
+    // capture_tags join landed in v9. Drive payload prefix moves
+    // from `categories/` to `tags/` (handled in sync code, Phase
+    // A.3). UI files / string keys rename in a follow-up commit.
+    //
+    // v9 — Workspace v1 Phase A.1. Adds three new tables (folders,
     // capture_tags, smart_collections) for the two-axis IA + smart
     // collections (see WORKSPACE_SPEC.md + plan doc). Adds four
     // columns to `captures`: folder_id, last_opened_at,
     // last_opened_page, last_opened_device. Adds `color` to
-    // `categories` (will be renamed to `tags` in Phase A.2). The
-    // SQL canonical record is shared/design-system/migrations/
-    // quickink/v4_workspace.sql; Room rebuilds destructively here
-    // until real users have data.
+    // `categories` (renamed to `tags` in A.2). The SQL canonical
+    // record is shared/design-system/migrations/quickink/
+    // v4_workspace.sql; Room rebuilds destructively here until
+    // real users have data.
     //
     // v8 — adds `captures.address`, the formatted full street
     // address built from `Geocoder.getFromLocation` results
@@ -97,7 +107,7 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // captures.category column. `fallbackToDestructiveMigration`
     // below handles the rebuild; when real users have data we'll
     // register real Migration objects.
-    version       = 9,
+    version       = 10,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {
@@ -106,7 +116,7 @@ abstract class QuickInkDatabase : RoomDatabase() {
     abstract fun syncStateDao():         SyncStateDao
     abstract fun captureDao():           CaptureDao
     abstract fun ocrResultDao():         OcrResultDao
-    abstract fun categoryDao():          CategoryDao
+    abstract fun tagDao():               TagDao
     abstract fun profileSettingsDao():   ProfileSettingsDao
     abstract fun analyticsOutboxDao():   AnalyticsOutboxDao
 

@@ -262,7 +262,7 @@ interface CaptureDao {
 
     /**
      * Bulk-update [oldName] → [newName] across every capture for
-     * the given user. Used by [CategoryRepository.renameAndPropagate]
+     * the given user. Used by [TagRepository.renameAndPropagate]
      * so a category rename in Settings doesn't orphan historical
      * tags. Bumps `updated_at` + `dirty` on each touched row.
      */

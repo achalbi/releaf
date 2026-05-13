@@ -2,7 +2,7 @@
  * ProfileSettingsDao.kt
  *
  * Room DAO for `profile_settings`. Mirrors the surface shape of
- * `CategoryDao` (observe / dirtyRows / markSynced / markTombstoneSynced)
+ * `TagDao` (observe / dirtyRows / markSynced / markTombstoneSynced)
  * so the entity drops into QuickInkSyncDataSource without bespoke
  * handling.
  *
@@ -49,7 +49,7 @@ interface ProfileSettingsDao {
 
     /**
      * Upsert from a remote payload, last-write-wins on `updated_at`.
-     * Same shape as `CategoryDao.upsertFromRemote` — see comment
+     * Same shape as `TagDao.upsertFromRemote` — see comment
      * there for the rationale (insert-IGNORE silently drops cross-
      * device updates, hence the explicit branch).
      */
@@ -142,7 +142,7 @@ interface ProfileSettingsDao {
     """)
     suspend fun markPhotoBinarySynced(id: String, driveFileId: String?)
 
-    // ─── Sync surface (Phase 4 parity with CategoryDao) ───────────
+    // ─── Sync surface (Phase 4 parity with TagDao) ───────────
 
     @Query("SELECT * FROM profile_settings WHERE dirty = 1")
     suspend fun dirtyRows(): List<ProfileSettingsEntity>

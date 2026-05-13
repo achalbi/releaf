@@ -18,7 +18,7 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import app.quickink.mobile.data.capture.CaptureEntity
-import app.quickink.mobile.data.category.CategoryEntity
+import app.quickink.mobile.data.tag.TagEntity
 
 @Entity(
     tableName = "capture_tags",
@@ -34,12 +34,8 @@ import app.quickink.mobile.data.category.CategoryEntity
             // even after the parent is gone locally.
             onDelete = ForeignKey.NO_ACTION,
         ),
-        // FK targets CategoryEntity for now — entity renames to
-        // TagEntity in Phase A.2. SQL table is renamed to `tags`
-        // by v4_workspace.sql; Room reads the @Entity tableName,
-        // which currently still says `categories` until A.2.
         ForeignKey(
-            entity = CategoryEntity::class,
+            entity = TagEntity::class,
             parentColumns = ["id"],
             childColumns = ["tag_id"],
             onDelete = ForeignKey.NO_ACTION,

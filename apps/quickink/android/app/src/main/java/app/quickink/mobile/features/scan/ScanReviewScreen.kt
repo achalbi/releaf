@@ -61,7 +61,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.quickink.mobile.QuickInkApp
-import app.quickink.mobile.data.category.CategoryRepository
+import app.quickink.mobile.data.tag.TagRepository
 import app.quickink.mobile.features.onboarding.OnboardingPrimaryButton
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
@@ -85,7 +85,7 @@ fun ScanReviewScreen(
 
     val context = LocalContext.current
     val app = context.applicationContext as QuickInkApp
-    val categoryRepo = remember(app) { CategoryRepository(app.database.categoryDao()) }
+    val categoryRepo = remember(app) { TagRepository(app.database.tagDao()) }
     val categories by remember(userId, categoryRepo) {
         categoryRepo.observe(userId)
     }.collectAsState(initial = emptyList())

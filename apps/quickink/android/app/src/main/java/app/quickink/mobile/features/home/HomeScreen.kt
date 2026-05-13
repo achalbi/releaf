@@ -104,7 +104,7 @@ import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.R
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capture.displayTitle
-import app.quickink.mobile.data.category.CategoryEntity
+import app.quickink.mobile.data.tag.TagEntity
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
@@ -214,9 +214,9 @@ fun HomeScreen(
     // Mirrors iOS's CategoryListViewModel observation. Sort happens
     // in the grid composable (kept close to render so changes to
     // `created_at` reorder without an extra remember layer).
-    val categoryDao = remember(app) { app.database.categoryDao() }
-    val categories by remember(userId, categoryDao) {
-        categoryDao.observeActive(userId)
+    val tagDao = remember(app) { app.database.tagDao() }
+    val categories by remember(userId, tagDao) {
+        tagDao.observeActive(userId)
     }.collectAsState(initial = emptyList())
 
     // System status-bar inset — without this, the greeting crowds the
@@ -1482,7 +1482,7 @@ private fun iconForCategory(name: String): ImageVector =
 
 @Composable
 private fun CategoryGrid(
-    categories: List<CategoryEntity>,
+    categories: List<TagEntity>,
     captures: List<CaptureEntity>,
     onTapCategory: ((String) -> Unit)?,
 ) {

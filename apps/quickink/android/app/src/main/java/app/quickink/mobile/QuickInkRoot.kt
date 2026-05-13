@@ -40,7 +40,7 @@ import androidx.navigation.navArgument
 import app.quickink.mobile.data.analytics.AnalyticsFlushWorker
 import app.quickink.mobile.data.analytics.AnalyticsRepository
 import app.quickink.mobile.data.capture.CaptureRepository
-import app.quickink.mobile.data.category.CategoryRepository
+import app.quickink.mobile.data.tag.TagRepository
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import kotlinx.coroutines.launch
 import app.quickink.mobile.features.home.CategoryEntriesScreen
@@ -306,7 +306,7 @@ private fun MainShell(
             // Powers the OCR-first-word → category auto-pick at
             // the end of each pass. Read-only; controller calls
             // `listActive(userId)` once per pass.
-            categoryDao    = app.database.categoryDao(),
+            tagDao    = app.database.tagDao(),
         )
     }
 
@@ -315,8 +315,8 @@ private fun MainShell(
     // user; the repository skips work when rows already exist.
     LaunchedEffect(userId) {
         try {
-            val repo = CategoryRepository(
-                categoryDao = app.database.categoryDao(),
+            val repo = TagRepository(
+                tagDao = app.database.tagDao(),
                 captureDao  = app.database.captureDao(),
             )
             repo.seedDefaultsIfEmpty(userId)

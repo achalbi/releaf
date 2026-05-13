@@ -12,7 +12,7 @@
  * `user_id`. Profile settings follow the same pattern, with
  * `id == user_id` (one row per user).
  *
- * Sync columns mirror CategoryEntity's shape (drive_file_id,
+ * Sync columns mirror TagEntity's shape (drive_file_id,
  * created_at, updated_at, dirty, deleted_at) so the entity slots
  * into QuickInkSyncDataSource via the same dirty-batch / tombstone
  * machinery without bespoke handling. The `deleted_at` column is

@@ -120,7 +120,7 @@ class QuickInkRestoreWorker(
             notepadDao         = app.database.notepadDao(),
             captureDao         = app.database.captureDao(),
             ocrResultDao       = app.database.ocrResultDao(),
-            categoryDao        = app.database.categoryDao(),
+            tagDao        = app.database.tagDao(),
             profileSettingsDao = app.database.profileSettingsDao(),
             userId             = session.userId,
         )

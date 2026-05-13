@@ -31,7 +31,7 @@
 package app.quickink.mobile.data.sync
 
 import app.quickink.mobile.data.capture.CaptureEntity
-import app.quickink.mobile.data.category.CategoryEntity
+import app.quickink.mobile.data.tag.TagEntity
 import app.quickink.mobile.data.ocr.OcrResultEntity
 import app.quickink.mobile.data.profile.ProfileSettingsEntity
 import app.releaf.mobile.data.notepad.NotepadEntry
@@ -223,34 +223,42 @@ fun CapturePayloadV2.toEntity(driveFileId: String?): CaptureEntity = CaptureEnti
 )
 
 // =====================================================================
-// categories — QuickInk-only. User-configurable list, synced so
-// the same chip set follows the user across devices.
+// tags — QuickInk-only. User-configurable list (renamed from
+// `categories` in v4_workspace.sql), synced so the same chip set
+// follows the user across devices. Wire format keeps the same
+// JSON field shape — only the Kotlin class name changed; older
+// payloads still on Drive under the `categories/` prefix
+// deserialize identically until the Phase A.3 path migration
+// rewrites them under `tags/`.
 // =====================================================================
 
 @Serializable
-data class CategoryPayloadV1(
+data class TagPayloadV1(
     @SerialName("id")           val id: String,
     @SerialName("user_id")      val userId: String,
     @SerialName("name")         val name: String,
     @SerialName("position")     val position: Int,
+    @SerialName("color")        val color: String? = null,
     @SerialName("created_at")   val createdAt: String,
     @SerialName("updated_at")   val updatedAt: String,
 )
 
-fun CategoryEntity.toV1Payload(): CategoryPayloadV1 = CategoryPayloadV1(
+fun TagEntity.toV1Payload(): TagPayloadV1 = TagPayloadV1(
     id        = id,
     userId    = userId,
     name      = name,
     position  = position,
+    color     = color,
     createdAt = createdAt,
     updatedAt = updatedAt,
 )
 
-fun CategoryPayloadV1.toEntity(driveFileId: String?): CategoryEntity = CategoryEntity(
+fun TagPayloadV1.toEntity(driveFileId: String?): TagEntity = TagEntity(
     id           = id,
     userId       = userId,
     name         = name,
     position     = position,
+    color        = color,
     driveFileId  = driveFileId,
     createdAt    = createdAt,
     updatedAt    = updatedAt,

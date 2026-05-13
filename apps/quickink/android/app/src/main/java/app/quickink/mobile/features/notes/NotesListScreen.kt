@@ -174,15 +174,15 @@ fun NotesListScreen(
     val context = LocalContext.current
     val app = context.applicationContext as QuickInkApp
     val captureDao = remember(app) { app.database.captureDao() }
-    val categoryDao = remember(app) { app.database.categoryDao() }
+    val tagDao = remember(app) { app.database.tagDao() }
     val ocrResultDao = remember(app) { app.database.ocrResultDao() }
 
     val captures by remember(userId, captureDao) {
         captureDao.observeActive(userId)
     }.collectAsState(initial = emptyList())
 
-    val categories by remember(userId, categoryDao) {
-        categoryDao.observeActive(userId)
+    val categories by remember(userId, tagDao) {
+        tagDao.observeActive(userId)
     }.collectAsState(initial = emptyList())
 
     // Preload first-page OCR snippets in one Flow so cards render in

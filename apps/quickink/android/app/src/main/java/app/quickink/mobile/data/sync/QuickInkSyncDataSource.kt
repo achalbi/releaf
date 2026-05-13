@@ -30,7 +30,7 @@
 package app.quickink.mobile.data.sync
 
 import app.quickink.mobile.data.capture.CaptureDao
-import app.quickink.mobile.data.category.CategoryDao
+import app.quickink.mobile.data.tag.TagDao
 import app.quickink.mobile.data.ocr.OcrResultDao
 import app.releaf.mobile.data.notepad.NotepadDao
 import app.releaf.mobile.data.sync.CanonicalJson
@@ -55,7 +55,7 @@ class QuickInkSyncDataSource(
     private val notepadDao: NotepadDao,
     private val captureDao: CaptureDao,
     private val ocrResultDao: OcrResultDao,
-    private val categoryDao: CategoryDao,
+    private val tagDao: TagDao,
     private val profileSettingsDao: app.quickink.mobile.data.profile.ProfileSettingsDao,
     private val userId: String,
     private val json: Json = SyncJson,
@@ -122,10 +122,10 @@ class QuickInkSyncDataSource(
         }
 
         // ---- categories (user-scoped) ----
-        for (row in categoryDao.dirtyRows()
+        for (row in tagDao.dirtyRows()
             .filter { it.deletedAt == null && it.userId == userId }) {
             val payload = row.toV1Payload()
-            val elem = json.encodeToJsonElement(CategoryPayloadV1.serializer(), payload)
+            val elem = json.encodeToJsonElement(TagPayloadV1.serializer(), payload)
             val bytes = CanonicalJson.encodeToBytes(elem)
             entries += DirtyEntry(
                 kind          = DrivePath.KIND_CATEGORY,
@@ -199,7 +199,7 @@ class QuickInkSyncDataSource(
                 deletedAt = row.deletedAt ?: row.updatedAt,
             )
         }
-        for (row in categoryDao.dirtyRows().filter { it.deletedAt != null && it.userId == userId }) {
+        for (row in tagDao.dirtyRows().filter { it.deletedAt != null && it.userId == userId }) {
             entries += PendingTombstone(
                 kind      = DrivePath.KIND_CATEGORY,
                 id        = row.id,
@@ -320,7 +320,7 @@ class QuickInkSyncDataSource(
                 ocrResultDao.upsertFromRemote(p.toEntity(driveFileId = driveFileId))
             }
             DrivePath.KIND_CATEGORY -> {
-                val p = json.decodeFromString(CategoryPayloadV1.serializer(), text)
+                val p = json.decodeFromString(TagPayloadV1.serializer(), text)
                 // upsertFromRemote (not insert): the existing `insert`
                 // uses OnConflictStrategy.IGNORE — meant for the
                 // user-facing "rename collision = no-op" path, not for
@@ -328,7 +328,7 @@ class QuickInkSyncDataSource(
                 // could not update existing categories from remote;
                 // a name change on another device would silently fail
                 // to land here.
-                categoryDao.upsertFromRemote(p.toEntity(driveFileId = driveFileId))
+                tagDao.upsertFromRemote(p.toEntity(driveFileId = driveFileId))
             }
             DrivePath.KIND_PROFILE_SETTINGS -> {
                 val p = json.decodeFromString(ProfileSettingsPayloadV1.serializer(), text)
@@ -376,7 +376,7 @@ class QuickInkSyncDataSource(
             // handling complete for the search-from-trash / undo
             // flows that may surface single-page tombstones later.
             DrivePath.KIND_OCR_RESULT    -> ocrResultDao.softDelete(tombstone.id, nowIso)
-            DrivePath.KIND_CATEGORY      -> categoryDao.softDelete(tombstone.id, nowIso)
+            DrivePath.KIND_CATEGORY      -> tagDao.softDelete(tombstone.id, nowIso)
             DrivePath.KIND_PROFILE_SETTINGS -> {
                 // Profile-settings tombstones are exotic — a user
                 // would only see one if their account was wiped on
@@ -412,8 +412,8 @@ class QuickInkSyncDataSource(
                     ocrResultDao.markTombstoneSynced(ack.id)
                 }
                 DrivePath.KIND_CATEGORY -> {
-                    categoryDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
-                    categoryDao.markTombstoneSynced(ack.id)
+                    tagDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
+                    tagDao.markTombstoneSynced(ack.id)
                 }
                 DrivePath.KIND_PROFILE_SETTINGS -> {
                     profileSettingsDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)

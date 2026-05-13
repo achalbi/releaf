@@ -23,7 +23,7 @@ package app.quickink.mobile.features.scan
 
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.capture.CapturedLocation
-import app.quickink.mobile.data.category.CategoryDao
+import app.quickink.mobile.data.tag.TagDao
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import app.releaf.mobile.data.notepad.NotepadDao
@@ -60,7 +60,7 @@ class ScanFlowController(
      * existing call sites (tests / previews) compiling — auto-match
      * silently no-ops when the DAO isn't supplied.
      */
-    private val categoryDao: CategoryDao? = null,
+    private val tagDao: TagDao? = null,
     /**
      * Slice 4.2c — fired when a scan pass finishes and at least
      * one row has been written. Wired by `QuickInkRoot.MainShell`
@@ -450,7 +450,7 @@ class ScanFlowController(
      * concatenate into the same row's `notes` column. The row's
      * `category` is overwritten with the latest capture's pick —
      * derived data, cheap to refresh, matches the design note in
-     * `CategoryRepository`'s header.
+     * `TagRepository`'s header.
      */
     private suspend fun appendOcrToTodayEntry(
         pageTexts: Map<Int, String>,
@@ -574,10 +574,10 @@ class ScanFlowController(
      * stemmed via [depluralize] so "Idea" still matches "Ideas",
      * "Story" still matches "Stories", and so on. Returns the
      * canonical (database-cased) name on a hit, `null` otherwise.
-     * No-ops when [categoryDao] wasn't injected (tests / previews).
+     * No-ops when [tagDao] wasn't injected (tests / previews).
      */
     private suspend fun matchCategoryName(tokens: List<String>): String? {
-        val dao = categoryDao ?: return null
+        val dao = tagDao ?: return null
         if (tokens.isEmpty()) return null
         return try {
             val cats = dao.listActive(userId)

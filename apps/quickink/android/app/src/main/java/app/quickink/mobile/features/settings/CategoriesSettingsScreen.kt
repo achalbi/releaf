@@ -2,7 +2,7 @@
  * CategoriesSettingsScreen.kt
  *
  * Settings → Categories. CRUD list of the user's categories.
- * Backed by `CategoryRepository` — same data source the scan-
+ * Backed by `TagRepository` — same data source the scan-
  * review chip picker reads, so an add/remove here flows back into
  * the picker on the next scan with no extra wiring.
  *
@@ -64,8 +64,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import app.quickink.mobile.QuickInkApp
-import app.quickink.mobile.data.category.CategoryEntity
-import app.quickink.mobile.data.category.CategoryRepository
+import app.quickink.mobile.data.tag.TagEntity
+import app.quickink.mobile.data.tag.TagRepository
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
@@ -81,8 +81,8 @@ fun CategoriesSettingsScreen(
     val context = LocalContext.current
     val app = context.applicationContext as QuickInkApp
     val repository = remember(app) {
-        CategoryRepository(
-            categoryDao = app.database.categoryDao(),
+        TagRepository(
+            tagDao = app.database.tagDao(),
             captureDao  = app.database.captureDao(),
         )
     }
@@ -96,7 +96,7 @@ fun CategoriesSettingsScreen(
 
     var newName by remember { mutableStateOf("") }
     var addError by remember { mutableStateOf<String?>(null) }
-    var renameTarget by remember { mutableStateOf<CategoryEntity?>(null) }
+    var renameTarget by remember { mutableStateOf<TagEntity?>(null) }
     var renameDraft by remember { mutableStateOf("") }
 
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -275,13 +275,13 @@ fun CategoriesSettingsScreen(
 
 @Composable
 private fun CategoryRow(
-    entity: CategoryEntity,
+    entity: TagEntity,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
-    val isPredefined = CategoryRepository.isPredefined(entity.name)
+    val isPredefined = TagRepository.isPredefined(entity.name)
 
     Row(
         modifier = Modifier

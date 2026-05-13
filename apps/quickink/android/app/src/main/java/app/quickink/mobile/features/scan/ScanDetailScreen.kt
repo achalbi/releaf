@@ -135,7 +135,7 @@ fun ScanDetailScreen(
 
     val captureDao = remember(app) { app.database.captureDao() }
     val ocrDao = remember(app) { app.database.ocrResultDao() }
-    val categoryDao = remember(app) { app.database.categoryDao() }
+    val tagDao = remember(app) { app.database.tagDao() }
 
     var capture by remember(captureId) { mutableStateOf<CaptureEntity?>(null) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -176,8 +176,8 @@ fun ScanDetailScreen(
     // Live category list — populated from the same DAO the home
     // grid + review screen read, scoped to the current user. The
     // sheet uses this for its picker rows.
-    val categories by remember(userId, categoryDao) {
-        categoryDao.observeActive(userId)
+    val categories by remember(userId, tagDao) {
+        tagDao.observeActive(userId)
     }.collectAsState(initial = emptyList())
 
     LaunchedEffect(captureId) {

@@ -219,15 +219,15 @@ fun ProfileScreen(
     // return empty lists and the stats render their empty state,
     // which is the right behaviour.
     val captureDao = remember(app) { app.database.captureDao() }
-    val categoryDao = remember(app) { app.database.categoryDao() }
+    val tagDao = remember(app) { app.database.tagDao() }
     val syncStateDao = remember(app) { app.database.syncStateDao() }
 
     val notesCount by remember(userId, captureDao) {
         captureDao.observeActive(userId).map { it.size }
     }.collectAsState(initial = 0)
 
-    val tagsCount by remember(userId, categoryDao) {
-        categoryDao.observeActive(userId).map { it.size }
+    val tagsCount by remember(userId, tagDao) {
+        tagDao.observeActive(userId).map { it.size }
     }.collectAsState(initial = 0)
 
     /// Most recent capture's `created_at` — proxy for "last scan" in
