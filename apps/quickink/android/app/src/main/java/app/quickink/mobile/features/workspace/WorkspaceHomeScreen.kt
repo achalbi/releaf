@@ -147,14 +147,9 @@ fun WorkspaceHomeScreen(
         initialValue = null,
         key1         = userId,
     ) {
-        // Polling the most-recent capture isn't ideal — Phase B.2 swaps
-        // this for a Flow-based query (`observeContinueCandidate`).
-        // For now the home re-queries once on first composition; the
-        // PDF reader explicitly invalidates by calling
-        // `setLastOpened` which dirties the row but does NOT push a
-        // change event here. Refresh on resume covers the common
-        // re-open-after-reading case.
-        value = app.database.captureDao().findContinueCandidate(userId)
+        app.database.captureDao()
+            .observeContinueCandidate(userId)
+            .collect { value = it }
     }
 
     val folderCaptureCounts by produceState(

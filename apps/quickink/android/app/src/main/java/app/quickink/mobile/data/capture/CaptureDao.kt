@@ -345,8 +345,22 @@ interface CaptureDao {
     /**
      * Most-recently-opened capture for this user, if any. Powers
      * the Workspace home Continue card. Returns NULL when the user
-     * has never opened a capture (or after a fresh install).
+     * has never opened a capture (or after a fresh install). Flow-
+     * based so the home refreshes the moment the PDF reader writes
+     * a new last_opened_at — no on-resume manual fetch needed.
      */
+    @Query("""
+        SELECT * FROM captures
+        WHERE user_id = :userId
+          AND last_opened_at IS NOT NULL
+          AND deleted_at IS NULL
+        ORDER BY last_opened_at DESC
+        LIMIT 1
+    """)
+    fun observeContinueCandidate(userId: String): Flow<CaptureEntity?>
+
+    /** One-shot variant of [observeContinueCandidate]; useful in
+     *  workers / non-Composable callsites. */
     @Query("""
         SELECT * FROM captures
         WHERE user_id = :userId

@@ -101,6 +101,7 @@ import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import androidx.core.content.FileProvider
 import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.data.common.IsoClock
+import app.releaf.mobile.data.sync.DeviceIdentity
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
@@ -182,6 +183,22 @@ fun ScanDetailScreen(
 
     LaunchedEffect(captureId) {
         capture = captureDao.findById(captureId)
+    }
+
+    // Workspace v1 — Continue card signal. Writes `last_opened_*`
+    // after the user lingers on a page for 500ms so a quick skim
+    // through pages doesn't churn the row. Page is 1-indexed in the
+    // DB; selectedPageIndex is 0-based. Device install id comes from
+    // the shared DeviceIdentity so a future cross-device "continue
+    // on iPhone" can attribute the row to the producing device.
+    LaunchedEffect(captureId, selectedPageIndex) {
+        kotlinx.coroutines.delay(500L)
+        captureDao.setLastOpened(
+            id       = captureId,
+            openedAt = IsoClock.nowIso(),
+            page     = selectedPageIndex + 1,
+            deviceId = DeviceIdentity.get(context),
+        )
     }
 
     // Backfill the reverse-geocoded place name on captures whose
