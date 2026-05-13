@@ -34,6 +34,7 @@
  */
 
 import SwiftUI
+import Combine
 
 struct SearchScreen: View {
 
@@ -54,6 +55,12 @@ struct SearchScreen: View {
     @State private var liveQuery: String = ""
     @State private var hits: [SearchHit] = []
     @State private var isSearching = false
+
+    /// Per-capture primary-tag-name lookup — replaces the pre-A.3c
+    /// `captures.category` reads used by the result-card badges +
+    /// the title cascade.
+    @State private var primaryTagByCapture: [String: String] = [:]
+    @State private var primaryTagCancellable: AnyCancellable? = nil
 
     private let repository = CaptureRepository()
 
@@ -110,7 +117,18 @@ struct SearchScreen: View {
                 onSettings: onSettings
             )
         }
-        .task { capturesVM.start() }
+        .task {
+            capturesVM.start()
+            if primaryTagCancellable == nil {
+                primaryTagCancellable = CaptureTagRepository()
+                    .observePrimaryTagNames(userId: userId)
+                    .receive(on: DispatchQueue.main)
+                    .sink(
+                        receiveCompletion: { _ in },
+                        receiveValue: { map in primaryTagByCapture = map }
+                    )
+            }
+        }
         .onChange(of: queryDraft) { newValue in
             // Debounce queryDraft → liveQuery → search. 250ms feels
             // responsive while still saving the FTS engine from a
@@ -247,7 +265,7 @@ struct SearchScreen: View {
                         ForEach(capturesVM.captures.prefix(8)) { capture in
                             Button(action: { open(captureId: capture.id) }) {
                                 CompactRow(
-                                    title: searchHitTitle(capture),
+                                    title: searchHitTitle(capture, primaryTagName: primaryTagByCapture[capture.id]),
                                     subtitle: relativeDate(capture.createdAt) +
                                         (capture.pageCount > 1 ? " · \(capture.pageCount) pages" : "")
                                 )
@@ -305,7 +323,11 @@ struct SearchScreen: View {
                     VStack(spacing: QuickInkSpacing.s3) {
                         ForEach(pageHits, id: \.capture.id) { hit in
                             Button(action: { open(captureId: hit.capture.id) }) {
-                                PageContentResultCard(hit: hit, query: liveQuery)
+                                PageContentResultCard(
+                                    hit:            hit,
+                                    query:          liveQuery,
+                                    primaryTagName: primaryTagByCapture[hit.capture.id]
+                                )
                             }
                             .buttonStyle(.plain)
                         }
@@ -317,7 +339,10 @@ struct SearchScreen: View {
                     VStack(spacing: QuickInkSpacing.s2) {
                         ForEach(titleHits, id: \.capture.id) { hit in
                             Button(action: { open(captureId: hit.capture.id) }) {
-                                TitleResultRow(hit: hit)
+                                TitleResultRow(
+                                    hit:            hit,
+                                    primaryTagName: primaryTagByCapture[hit.capture.id]
+                                )
                             }
                             .buttonStyle(.plain)
                         }
@@ -444,6 +469,9 @@ struct SearchScreen: View {
 private struct PageContentResultCard: View {
     let hit: SearchHit
     let query: String
+    /// Primary-tag-name shown at the bottom of the card (replaces
+    /// the pre-A.3c `captures.category` chip).
+    let primaryTagName: String?
 
     var body: some View {
         let capture = hit.capture
@@ -460,7 +488,7 @@ private struct PageContentResultCard: View {
 
             VStack(alignment: .leading, spacing: QuickInkSpacing.s1) {
                 HStack {
-                    Text(searchHitTitle(capture))
+                    Text(searchHitTitle(capture, primaryTagName: primaryTagName))
                         .font(QuickInkText.label)
                         .foregroundStyle(QuickInkColors.ink)
                         .lineLimit(1)
@@ -477,8 +505,8 @@ private struct PageContentResultCard: View {
                         .lineLimit(3)
                 }
 
-                if let cat = capture.category, !cat.isEmpty {
-                    Text(cat)
+                if let tag = primaryTagName, !tag.isEmpty {
+                    Text(tag)
                         .font(QuickInkText.caption)
                         .foregroundStyle(QuickInkColors.accent)
                         .padding(.horizontal, QuickInkSpacing.s2)
@@ -551,6 +579,10 @@ private struct PageContentResultCard: View {
 /// line, trailing chevron. Used for category-name matches.
 private struct TitleResultRow: View {
     let hit: SearchHit
+    /// Primary-tag-name fed into the title cascade + the secondary
+    /// metadata line (the post-A.3c replacement for the legacy
+    /// `captures.category` field).
+    let primaryTagName: String?
 
     var body: some View {
         let capture = hit.capture
@@ -567,7 +599,7 @@ private struct TitleResultRow: View {
                 // Title Case — keeps search results consistent with
                 // library grid + list rows. `.capitalized` is per-
                 // word, splits on whitespace.
-                Text(searchHitTitle(capture).capitalized)
+                Text(searchHitTitle(capture, primaryTagName: primaryTagName).capitalized)
                     .font(QuickInkText.label)
                     .foregroundStyle(QuickInkColors.ink)
                     .lineLimit(1)
@@ -590,7 +622,7 @@ private struct TitleResultRow: View {
     }
 
     private var secondaryLine: String {
-        let parts = [hit.capture.category, relativeDate(hit.capture.createdAt)]
+        let parts = [primaryTagName, relativeDate(hit.capture.createdAt)]
             .compactMap { $0 }
             .filter { !$0.isEmpty }
         return parts.joined(separator: " · ")
@@ -633,15 +665,16 @@ private struct CompactRow: View {
 /// relative-date treatment so all three surfaces speak the same
 /// dialect.
 /// Display title for a capture in search rows: prefer the user-set
-/// `title`, fall back to `category`, then to "Untitled scan". Keeps
-/// the three search row variants in sync without re-deriving the
-/// chain at each call site.
-fileprivate func searchHitTitle(_ capture: CaptureSummary) -> String {
+/// `title`, fall back to `primaryTagName` (the post-A.3c
+/// replacement for the legacy `captures.category` slot), then to
+/// "Untitled scan". Keeps the three search row variants in sync
+/// without re-deriving the chain at each call site.
+fileprivate func searchHitTitle(_ capture: CaptureSummary, primaryTagName: String? = nil) -> String {
     if let raw = capture.title?.trimmingCharacters(in: .whitespaces),
        !raw.isEmpty {
         return raw
     }
-    return capture.category ?? "Untitled scan"
+    return primaryTagName ?? "Untitled scan"
 }
 
 fileprivate func relativeDate(_ iso: String) -> String {

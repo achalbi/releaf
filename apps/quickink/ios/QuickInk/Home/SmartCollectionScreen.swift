@@ -213,8 +213,7 @@ public struct SmartCollectionScreen: View {
     }
 
     private func docRow(_ cap: CaptureSummary) -> some View {
-        let title = cap.title?.isEmpty == false ? cap.title! :
-            (cap.category?.isEmpty == false ? cap.category! : "Untitled scan")
+        let title = cap.title?.isEmpty == false ? cap.title! : "Untitled scan"
         return Button(action: { onOpenCapture(cap) }) {
             HStack(alignment: .top, spacing: QuickInkSpacing.s3) {
                 WorkspaceDocThumbnail(previewUri: cap.previewUri)

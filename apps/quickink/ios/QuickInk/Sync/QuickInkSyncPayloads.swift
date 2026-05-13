@@ -240,11 +240,13 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
     public let pdfUri: String
     public let previewUri: String?
     public let pageCount: Int
-    /// Pre-tagged category name (Phase 5 — Categories). `nil` for
-    /// captures created before v2 / by clients that haven't picked
-    /// a category. Round-trips through Drive verbatim — captures
-    /// don't FK into categories, so a deleted category name still
-    /// reads back unchanged.
+    /// Legacy pre-A.3c label slot. Post-A.3c the
+    /// `captures.category` column is gone; the field is kept on
+    /// the wire so older clients can still emit it (and so a
+    /// fresh client deserializes older payloads without throwing),
+    /// but the new send-path always writes `nil` and the
+    /// receive-path ignores it — the canonical per-capture label
+    /// now lives in `capture_tags`.
     public let category: String?
     /// Drive file id of the per-row PDF binary upload (Phase 6 —
     /// Drive backup). Restore-on-fresh-device fetches the binary

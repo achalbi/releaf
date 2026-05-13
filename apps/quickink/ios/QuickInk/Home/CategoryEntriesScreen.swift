@@ -15,6 +15,7 @@
  */
 
 import SwiftUI
+import Combine
 
 struct CategoryEntriesScreen: View {
 
@@ -24,6 +25,10 @@ struct CategoryEntriesScreen: View {
     let onOpenScan: (_ captureId: String) -> Void
 
     @StateObject private var vm: CaptureListViewModel
+    /// Per-capture primary-tag-name lookup — replaces the pre-A.3c
+    /// `captures.category` read used to filter this screen.
+    @State private var primaryTagByCapture: [String: String] = [:]
+    @State private var primaryTagCancellable: AnyCancellable? = nil
 
     init(
         userId: String,
@@ -43,7 +48,9 @@ struct CategoryEntriesScreen: View {
     /// while user-typed customs may not.
     private var capturesInCategory: [CaptureSummary] {
         let needle = categoryName.lowercased()
-        return vm.captures.filter { ($0.category ?? "").lowercased() == needle }
+        return vm.captures.filter {
+            (primaryTagByCapture[$0.id] ?? "").lowercased() == needle
+        }
     }
 
     var body: some View {
@@ -59,7 +66,18 @@ struct CategoryEntriesScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(QuickInkColors.bg.ignoresSafeArea())
-        .task { vm.start() }
+        .task {
+            vm.start()
+            if primaryTagCancellable == nil {
+                primaryTagCancellable = CaptureTagRepository()
+                    .observePrimaryTagNames(userId: userId)
+                    .receive(on: DispatchQueue.main)
+                    .sink(
+                        receiveCompletion: { _ in },
+                        receiveValue: { map in primaryTagByCapture = map }
+                    )
+            }
+        }
     }
 
     @ViewBuilder
@@ -103,7 +121,10 @@ struct CategoryEntriesScreen: View {
                         VStack(spacing: QuickInkSpacing.s2) {
                             ForEach(grouped[date] ?? []) { capture in
                                 Button(action: { onOpenScan(capture.id) }) {
-                                    LibraryScanListRow(capture: capture)
+                                    LibraryScanListRow(
+                                        capture:        capture,
+                                        primaryTagName: primaryTagByCapture[capture.id]
+                                    )
                                 }
                                 .buttonStyle(.plain)
                             }

@@ -211,8 +211,7 @@ public struct FolderDetailScreen: View {
     }
 
     private func docRow(_ cap: CaptureSummary) -> some View {
-        let title = cap.title?.isEmpty == false ? cap.title! :
-            (cap.category?.isEmpty == false ? cap.category! : "Untitled scan")
+        let title = cap.title?.isEmpty == false ? cap.title! : "Untitled scan"
         let tags = (viewModel.captureTagsById[cap.id] ?? []).prefix(3)
         let overflow = max(0, (viewModel.captureTagsById[cap.id]?.count ?? 0) - 3)
         return Button(action: { onOpenCapture(cap) }) {

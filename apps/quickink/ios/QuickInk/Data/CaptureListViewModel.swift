@@ -24,7 +24,6 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
     public let title: String?
     public let previewUri: String?
     public let pdfUri: String
-    public let category: String?
     public let pageCount: Int
     public let createdAt: String
     /// `"scan"` (default) — went through VisionKit. `"import"` —
@@ -73,7 +72,6 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         title: String? = nil,
         previewUri: String?,
         pdfUri: String,
-        category: String?,
         pageCount: Int,
         createdAt: String,
         source: String = "scan",
@@ -91,7 +89,6 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         self.title       = title
         self.previewUri  = previewUri
         self.pdfUri      = pdfUri
-        self.category    = category
         self.pageCount   = pageCount
         self.createdAt   = createdAt
         self.source      = source
@@ -112,7 +109,6 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         self.title       = try c.decodeIfPresent(String.self, forKey: .title)
         self.previewUri  = try c.decodeIfPresent(String.self, forKey: .previewUri)
         self.pdfUri      = try c.decode(String.self, forKey: .pdfUri)
-        self.category    = try c.decodeIfPresent(String.self, forKey: .category)
         self.pageCount   = try c.decode(Int.self, forKey: .pageCount)
         self.createdAt   = try c.decode(String.self, forKey: .createdAt)
         // Tolerate rows where SELECT didn't pull `source` (e.g. an
@@ -143,7 +139,6 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         case title
         case previewUri  = "preview_uri"
         case pdfUri      = "pdf_uri"
-        case category
         case pageCount   = "page_count"
         case createdAt   = "created_at"
         case source
@@ -184,7 +179,7 @@ public final class CaptureListViewModel: ObservableObject {
     public func start() {
         cancellable = ValueObservation.tracking { [userId] db in
             try CaptureSummary.fetchAll(db, sql: """
-                SELECT id, title, preview_uri, pdf_uri, category, page_count, created_at, source
+                SELECT id, title, preview_uri, pdf_uri, page_count, created_at, source
                 FROM captures
                 WHERE user_id = ? AND deleted_at IS NULL
                 ORDER BY created_at DESC

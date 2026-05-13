@@ -10,6 +10,7 @@
  */
 
 import SwiftUI
+import Combine
 import GRDB
 import PDFKit
 import CoreLocation
@@ -88,6 +89,11 @@ struct ScanDetailScreen: View {
     /// Workspace v1 — tag picker presentation. Tapping "Manage
     /// tags" opens the bottom sheet.
     @State private var showTagPicker = false
+    /// Tag ids attached to this capture, oldest-first. Replaces the
+    /// pre-A.3c `captures.category` read for the primary-label
+    /// badge + the Business Card behavior switch.
+    @State private var attachedTagIds: [String] = []
+    @State private var tagIdsCancellable: AnyCancellable? = nil
     /// Workspace v1 — debouncer for the Continue card signal. The
     /// PDF reader writes last_opened_* 500ms after the user lands
     /// on a page so a quick flip-through doesn't pollute Home.
@@ -177,6 +183,19 @@ struct ScanDetailScreen: View {
             // otherwise a fast double-tap (open detail → tap pill)
             // can flash an empty picker for a frame.
             categoriesVM.start()
+            // Subscribe to the live tag-id list for this capture so
+            // the primary-tag badge + the Business Card mode switch
+            // refresh the moment the user retags. Replaces the
+            // pre-A.3c `captures.category` read.
+            if tagIdsCancellable == nil {
+                tagIdsCancellable = CaptureTagRepository()
+                    .observeTagIds(captureId: captureId)
+                    .receive(on: DispatchQueue.main)
+                    .sink(
+                        receiveCompletion: { _ in },
+                        receiveValue: { ids in attachedTagIds = ids }
+                    )
+            }
             await loadCapture()
             // File size depends on the resolved capture (we need
             // pdf_uri before we can stat the file) so it runs after
@@ -252,7 +271,7 @@ struct ScanDetailScreen: View {
                     Task { await applyRetag(cat.name) }
                 }
             }
-            if let current = capture?.category, !current.isEmpty {
+            if let current = primaryTagName, !current.isEmpty {
                 Button("Remove tag", role: .destructive) {
                     Task { await applyRetag(nil) }
                 }
@@ -601,29 +620,23 @@ struct ScanDetailScreen: View {
             }
             .foregroundStyle(QuickInkColors.inkSoft)
 
-            if let category = capture.category, !category.isEmpty {
-                Text("•").foregroundStyle(QuickInkColors.muted).font(QuickInkText.meta)
-                HStack(spacing: QuickInkSpacing.s1) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 14, weight: .medium))
-                    Text(category)
-                        .font(QuickInkText.meta)
-                }
-                .foregroundStyle(QuickInkColors.inkSoft)
-            }
+            // Pre-A.3c this row carried a "folder" breadcrumb tied
+            // to the legacy `captures.category` slot. Post-drop the
+            // primary label lives on the dedicated pill / Details
+            // row so this breadcrumb no longer duplicates the signal.
         }
     }
 
     @ViewBuilder
     private func tagPill(for capture: CaptureSummary) -> some View {
-        let hasTag = !(capture.category ?? "").isEmpty
+        let hasTag = !(primaryTagName ?? "").isEmpty
         Button {
             showRetagSheet = true
         } label: {
             HStack(spacing: QuickInkSpacing.s1) {
                 Image(systemName: "tag")
                     .font(.system(size: 11, weight: .medium))
-                Text(hasTag ? (capture.category ?? "") : "Tag scan")
+                Text(hasTag ? (primaryTagName ?? "") : "Tag scan")
                     .font(QuickInkText.caption)
             }
             .foregroundStyle(hasTag ? QuickInkColors.accent : QuickInkColors.inkSoft)
@@ -633,7 +646,7 @@ struct ScanDetailScreen: View {
             .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(hasTag ? "Category: \(capture.category ?? "")" : "Add category")
+        .accessibilityLabel(hasTag ? "Category: \(primaryTagName ?? "")" : "Add category")
         .accessibilityHint("Tap to change the category")
     }
 
@@ -732,8 +745,8 @@ struct ScanDetailScreen: View {
                 detailRow(label: "Size", value: pdfFileSize.map(formatBytes) ?? "—")
                 detailRow(
                     label: "Folder",
-                    value: capture.category ?? "Unsorted",
-                    valueColor: capture.category != nil ? QuickInkColors.accent : QuickInkColors.inkSoft
+                    value: primaryTagName ?? "Unsorted",
+                    valueColor: primaryTagName != nil ? QuickInkColors.accent : QuickInkColors.inkSoft
                 )
                 // Geographic Area / City / Address rows — hidden
                 // when the capture has no reverse-geocoded place
@@ -803,11 +816,11 @@ struct ScanDetailScreen: View {
                 .foregroundStyle(QuickInkColors.inkSoft)
             Spacer()
             HStack(spacing: QuickInkSpacing.s1) {
-                if let category = capture.category, !category.isEmpty {
+                if let tag = primaryTagName, !tag.isEmpty {
                     Button {
                         showRetagSheet = true
                     } label: {
-                        Text(category)
+                        Text(tag)
                             .font(QuickInkText.caption)
                             .foregroundStyle(QuickInkColors.accent)
                             .padding(.horizontal, QuickInkSpacing.s2)
@@ -971,6 +984,19 @@ struct ScanDetailScreen: View {
         .redacted(reason: .placeholder)
     }
 
+    // MARK: - Tag display
+
+    /// Earliest-attached active tag name on this capture, looked up
+    /// against `categoriesVM.categories` for the display label. The
+    /// pre-A.3c `captures.category` field's role lives here now; it
+    /// drives the primary-label badge, the Details "Folder" row, the
+    /// retag-sheet `current` selection, and the Business Card mode
+    /// switch.
+    private var primaryTagName: String? {
+        let byId = Dictionary(uniqueKeysWithValues: categoriesVM.categories.map { ($0.id, $0.name) })
+        return attachedTagIds.compactMap { byId[$0] }.first
+    }
+
     // MARK: - File metadata helpers
 
     /// Resolve the file-type label for the Details row. Captures with
@@ -990,12 +1016,13 @@ struct ScanDetailScreen: View {
         return formatter.string(fromByteCount: bytes)
     }
 
-    /// True for scans tagged with the Business Card category. Drives
+    /// True for scans whose primary tag is "Business Card". Drives
     /// the conditional "Add to contact" action row. Case-insensitive
     /// so "business card" / "Business Card" / "BUSINESS CARD" all
-    /// trip the gate.
+    /// trip the gate. Reads through `primaryTagName` (the post-A.3c
+    /// replacement for `captures.category`).
     private func isBusinessCard(_ capture: CaptureSummary) -> Bool {
-        (capture.category ?? "").lowercased() == "business card"
+        (primaryTagName ?? "").lowercased() == "business card"
     }
 
     /// Run the bbox-aware [BusinessCardExtractor] over the capture's
@@ -1141,19 +1168,22 @@ struct ScanDetailScreen: View {
         }
     }
 
-    /// Persist a category change for this capture and refresh the
-    /// in-screen state so the pill flips immediately. `nil` clears
-    /// the tag. Best-effort — a transient SQL failure leaves the
-    /// pill where it was; the user can re-tap to retry.
+    /// Persist a primary-tag change for this capture and refresh
+    /// the in-screen state. Pass `nil` / blank to clear all
+    /// attached tags. Best-effort — a transient SQL failure leaves
+    /// the pill where it was; the user can re-tap to retry.
     private func applyRetag(_ category: String?) async {
         do {
-            try await CaptureRepository().setCategory(
+            try await CaptureRepository().attachOrEnsurePrimaryTag(
                 captureId: captureId,
-                category:  category
+                userId:    userId,
+                name:      category
             )
             // Refresh the loaded `capture` so the pill flips —
             // simpler than mutating the optional struct in place,
-            // and the SELECT is cheap.
+            // and the SELECT is cheap. The tag observation
+            // pipeline (`tagIdsCancellable`) updates the badge
+            // independently.
             await loadCapture()
         } catch {
             print("ScanDetailScreen.applyRetag failed: \(error)")

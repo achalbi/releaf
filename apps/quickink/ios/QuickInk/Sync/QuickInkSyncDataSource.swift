@@ -99,7 +99,9 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                     pdfUri:             row["pdf_uri"],
                     previewUri:         row["preview_uri"] as String?,
                     pageCount:          row["page_count"],
-                    category:           row["category"] as String?,
+                    // Legacy slot — always nil post-A.3c (column
+                    // dropped). See `CapturePayloadV2.category`.
+                    category:           nil,
                     pdfDriveFileId:     row["pdf_drive_file_id"] as String?,
                     previewDriveFileId: row["preview_drive_file_id"] as String?,
                     // Older rows pre-v4 had no source column; the
@@ -691,17 +693,16 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
         try db.execute(sql: """
             INSERT INTO captures (
                 id, user_id, title, pdf_uri, preview_uri, page_count,
-                category, source, drive_file_id, pdf_drive_file_id, preview_drive_file_id,
+                source, drive_file_id, pdf_drive_file_id, preview_drive_file_id,
                 latitude, longitude, locality, sub_locality, address,
                 created_at, updated_at, dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ON CONFLICT(id) DO UPDATE SET
                 user_id               = excluded.user_id,
                 title                 = excluded.title,
                 pdf_uri               = excluded.pdf_uri,
                 preview_uri           = excluded.preview_uri,
                 page_count            = excluded.page_count,
-                category              = excluded.category,
                 source                = excluded.source,
                 drive_file_id         = excluded.drive_file_id,
                 pdf_drive_file_id     = excluded.pdf_drive_file_id,
@@ -717,7 +718,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             """, arguments: [
                 payload.id, payload.userId, payload.title,
                 resolvedPdfUri, resolvedPreviewUri, payload.pageCount,
-                payload.category, payload.source, driveFileId,
+                payload.source, driveFileId,
                 payload.pdfDriveFileId, payload.previewDriveFileId,
                 payload.latitude, payload.longitude,
                 payload.locality, payload.subLocality, payload.address,

@@ -40,7 +40,14 @@ public final class ScanFlowController: ObservableObject {
         public let captureId:  String
         public let source:     String
         public let pageCount:  Int
-        public let category:   String?
+        /// Primary tag name attached to the capture by the end of
+        /// the pass (user pick or auto-match). Pre-A.3c this was
+        /// `captures.category`; post-drop it's just whichever tag
+        /// the controller attached via
+        /// `CaptureRepository.attachOrEnsurePrimaryTag`. Kept on
+        /// the summary so the analytics enqueue picks the same
+        /// label the user sees.
+        public let primaryTagName: String?
         public let hasOcr:     Bool
         public let ocrChars:   Int
         /// ISO-8601 timestamp the user finished the scan pass.
@@ -49,11 +56,15 @@ public final class ScanFlowController: ObservableObject {
 
     @Published public private(set) var state: State = .idle
 
-    /// User-selected category for the in-flight capture. Bound to
-    /// the chip picker in `ScanReviewScreen`. Persisted to
-    /// `captures.category` via `setCategory(_:)` whenever the user
-    /// taps a chip; held here too so the chip's selected state
-    /// survives state-machine transitions (recognizing → complete).
+    /// User-selected primary tag for the in-flight capture. Bound
+    /// to the chip picker in `ScanReviewScreen`. Persisted via
+    /// `setCategory(_:)` → `CaptureRepository
+    /// .attachOrEnsurePrimaryTag` (which writes into the
+    /// `capture_tags` join); held here too so the chip's selected
+    /// state survives state-machine transitions. The publisher
+    /// name is kept for back-compat with `ScanReviewScreen` even
+    /// though "category" is now just a single-label view onto the
+    /// tag join.
     @Published public var selectedCategory: String? = nil
 
     /// First-page preview JPEG of the in-flight capture. Surfaced
@@ -163,10 +174,20 @@ public final class ScanFlowController: ObservableObject {
                     pdfURL:     pdfURL,
                     previewURL: previewURL,
                     pageCount:  totalPages,
-                    category:   category,
                     source:     source,
                     location:   location
                 )
+                // Pre-attach the seeded `category` (post-A.3c: a
+                // tag attach into `capture_tags`) when the caller
+                // already knows the label — typically the
+                // BusinessCardPostProcessor path. Best-effort.
+                if let raw = category, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    try? await repository.attachOrEnsurePrimaryTag(
+                        captureId: captureId,
+                        userId:    userId,
+                        name:      raw
+                    )
+                }
             } catch {
                 self?.state = .failed(message: "Couldn't save scan: \(error.localizedDescription)")
                 return
@@ -214,7 +235,11 @@ public final class ScanFlowController: ObservableObject {
                             let tokens = Self.extractLeadingTokens(pageTexts: pageTexts)
                             if let match = await strongSelf.matchCategoryName(tokens: tokens) {
                                 strongSelf.selectedCategory = match
-                                try? await repository.setCategory(captureId: captureId, category: match)
+                                try? await repository.attachOrEnsurePrimaryTag(
+                                    captureId: captureId,
+                                    userId:    userId,
+                                    name:      match
+                                )
                             }
                         }
                     } catch {
@@ -252,7 +277,11 @@ public final class ScanFlowController: ObservableObject {
                     strongSelf.selectedCategory = match
                     // Persist on the in-flight capture row so a later
                     // restart restores the auto-pick. Best-effort.
-                    try? await repository.setCategory(captureId: captureId, category: match)
+                    try? await repository.attachOrEnsurePrimaryTag(
+                        captureId: captureId,
+                        userId:    userId,
+                        name:      match
+                    )
                 }
             }
 
@@ -302,13 +331,13 @@ public final class ScanFlowController: ObservableObject {
             // "Sync now".
             let totalChars = pageTexts.values.reduce(0) { $0 + $1.count }
             let summary = PassSummary(
-                captureId:  captureId,
-                source:     source,
-                pageCount:  totalPages,
-                category:   self?.selectedCategory,
-                hasOcr:     successCount > 0,
-                ocrChars:   totalChars,
-                capturedAt: capturedAt
+                captureId:      captureId,
+                source:         source,
+                pageCount:      totalPages,
+                primaryTagName: self?.selectedCategory,
+                hasOcr:         successCount > 0,
+                ocrChars:       totalChars,
+                capturedAt:     capturedAt
             )
             self?.onPassComplete(summary)
         }
@@ -470,16 +499,22 @@ public final class ScanFlowController: ObservableObject {
         previewImageURL  = nil
     }
 
-    /// Picked-category persistence hook for the review screen's
-    /// chip row. Updates `selectedCategory` so the UI redraws, then
-    /// fires-and-forgets the SQL update against the in-flight
-    /// capture's row. No-ops when there's no active capture
-    /// (`.idle` / `.failed`).
+    /// Picked-tag persistence hook for the review screen's chip
+    /// row. Updates `selectedCategory` so the UI redraws, then
+    /// fires-and-forgets a tag attach against the in-flight
+    /// capture's row through `capture_tags`. No-ops when there's
+    /// no active capture (`.idle` / `.failed`). Pass `nil` / blank
+    /// to clear the current attached tags.
     public func setCategory(_ name: String?) {
         selectedCategory = name
         guard let captureId = currentCaptureId else { return }
+        let userId = self.userId
         Task {
-            try? await repository.setCategory(captureId: captureId, category: name)
+            try? await repository.attachOrEnsurePrimaryTag(
+                captureId: captureId,
+                userId:    userId,
+                name:      name
+            )
         }
     }
 

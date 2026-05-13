@@ -29,6 +29,7 @@
  */
 
 import SwiftUI
+import Combine
 import GRDB
 
 struct NotesListScreen: View {
@@ -48,6 +49,12 @@ struct NotesListScreen: View {
 
     @StateObject private var capturesVM:   CaptureListViewModel
     @StateObject private var categoriesVM: TagListViewModel
+
+    /// Per-capture primary-tag-name lookup. Replaces the pre-A.3c
+    /// `captures.category` reads used by the category-strip filter
+    /// + the Library card / list-row badges.
+    @State private var primaryTagByCapture: [String: String] = [:]
+    @State private var primaryTagCancellable: AnyCancellable? = nil
 
     @State private var viewMode: ViewMode = .grid
     @State private var activeCategory: String = "All"
@@ -132,6 +139,15 @@ struct NotesListScreen: View {
         .task {
             capturesVM.start()
             categoriesVM.start()
+            if primaryTagCancellable == nil {
+                primaryTagCancellable = CaptureTagRepository()
+                    .observePrimaryTagNames(userId: userId)
+                    .receive(on: DispatchQueue.main)
+                    .sink(
+                        receiveCompletion: { _ in },
+                        receiveValue: { map in primaryTagByCapture = map }
+                    )
+            }
         }
     }
 
@@ -298,7 +314,9 @@ struct NotesListScreen: View {
         let byCategory: [CaptureSummary] = {
             if activeCategory == "All" { return capturesVM.captures }
             let needle = activeCategory.lowercased()
-            return capturesVM.captures.filter { ($0.category ?? "").lowercased() == needle }
+            return capturesVM.captures.filter {
+                (primaryTagByCapture[$0.id] ?? "").lowercased() == needle
+            }
         }()
         let rangeActive = dateRangeStart != nil || dateRangeEnd != nil
         guard rangeActive else {
@@ -396,7 +414,10 @@ struct NotesListScreen: View {
                 ) {
                     ForEach(items) { capture in
                         Button(action: { onOpenScan(capture.id) }) {
-                            LibraryNoteCard(capture: capture)
+                            LibraryNoteCard(
+                                capture:        capture,
+                                primaryTagName: primaryTagByCapture[capture.id]
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -405,7 +426,10 @@ struct NotesListScreen: View {
                 VStack(spacing: QuickInkSpacing.s3) {
                     ForEach(items) { capture in
                         Button(action: { onOpenScan(capture.id) }) {
-                            LibraryScanListRow(capture: capture)
+                            LibraryScanListRow(
+                                capture:        capture,
+                                primaryTagName: primaryTagByCapture[capture.id]
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -450,6 +474,11 @@ struct NotesListScreen: View {
 /// category tag + relative date.
 struct LibraryNoteCard: View {
     let capture: CaptureSummary
+    /// Primary-tag-name shown in the card footer + used as the
+    /// title-cascade fallback. Replaces the pre-A.3c
+    /// `captures.category` field. Nil → card omits the badge and
+    /// the cascade stops at "Untitled scan".
+    let primaryTagName: String?
 
     @State private var ocrSnippet: String? = nil
 
@@ -531,8 +560,8 @@ struct LibraryNoteCard: View {
                     .lineLimit(1)
 
                 HStack {
-                    if let cat = capture.category, !cat.isEmpty {
-                        Text(cat)
+                    if let tag = primaryTagName, !tag.isEmpty {
+                        Text(tag)
                             .font(QuickInkText.caption)
                             .foregroundStyle(QuickInkColors.accent)
                             .padding(.horizontal, QuickInkSpacing.s2)
@@ -591,8 +620,8 @@ struct LibraryNoteCard: View {
            !firstLine.isEmpty {
             return String(firstLine.prefix(40))
         }
-        if let cat = capture.category, !cat.isEmpty {
-            return cat
+        if let tag = primaryTagName, !tag.isEmpty {
+            return tag
         }
         return "Untitled scan"
     }
@@ -629,6 +658,10 @@ struct LibraryNoteCard: View {
 /// stacked horizontally so users see more entries per scroll.
 struct LibraryScanListRow: View {
     let capture: CaptureSummary
+    /// Primary-tag-name title-cascade fallback. Replaces the
+    /// pre-A.3c `captures.category` field. Nil → cascade stops at
+    /// "Untitled scan".
+    var primaryTagName: String? = nil
 
     var body: some View {
         HStack(alignment: .center, spacing: QuickInkSpacing.s3) {
@@ -706,15 +739,15 @@ struct LibraryScanListRow: View {
         return UIImage(contentsOfFile: path)
     }
 
-    /// List-mode row title cascade: user-set title → category → "Scan".
-    /// OCR snippet isn't fetched in list mode (rows are dense — no
-    /// per-row Flow), so we don't include it here.
+    /// List-mode row title cascade: user-set title → primary tag →
+    /// "Scan". OCR snippet isn't fetched in list mode (rows are
+    /// dense — no per-row Flow), so we don't include it here.
     private var rowDisplayTitle: String {
         if let raw = capture.title?.trimmingCharacters(in: .whitespaces),
            !raw.isEmpty {
             return raw
         }
-        return capture.category ?? "Scan"
+        return primaryTagName ?? "Scan"
     }
 }
 

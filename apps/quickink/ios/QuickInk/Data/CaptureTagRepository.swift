@@ -160,4 +160,70 @@ public final class CaptureTagRepository: @unchecked Sendable {
                 """, arguments: [now, now, captureId, tagId])
         }
     }
+
+    /// Soft-delete every active join row for a capture in a single
+    /// pass. Used by `CaptureRepository.attachOrEnsurePrimaryTag`
+    /// when the user clears their pick (nil / blank name), and by
+    /// any future "remove all tags" affordance.
+    public func softDeleteByCaptureId(captureId: String) async throws {
+        let now = IsoClock.nowIso()
+        try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE capture_tags
+                SET deleted_at = ?,
+                    updated_at = ?,
+                    dirty      = 1
+                WHERE capture_id = ?
+                  AND deleted_at IS NULL
+                """, arguments: [now, now, captureId])
+        }
+    }
+
+    /// For every active capture with at least one active tag, emit
+    /// (capture_id, tag_name) for the *earliest-attached* tag — the
+    /// closest analogue to the legacy `captures.category` "primary
+    /// label". Drives the legacy Library / Search / category-grid
+    /// surfaces post-A.3c column drop. Window function picks one
+    /// row per capture deterministically; SQLite 3.25+ is bundled
+    /// with iOS so this is always safe.
+    ///
+    /// Mirror of Android's `CaptureTagDao.observePrimaryTagNames`.
+    public func observePrimaryTagNames(
+        userId: String
+    ) -> AnyPublisher<[String: String], Error> {
+        ValueObservation.tracking { [userId] db -> [String: String] in
+            struct Pair: Decodable, FetchableRecord {
+                let captureId: String
+                let tagName: String
+                enum CodingKeys: String, CodingKey {
+                    case captureId = "capture_id"
+                    case tagName   = "tag_name"
+                }
+            }
+            let rows = try Pair.fetchAll(db, sql: """
+                WITH ranked AS (
+                    SELECT
+                        capture_tags.capture_id AS capture_id,
+                        tags.name               AS tag_name,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY capture_tags.capture_id
+                            ORDER BY capture_tags.created_at ASC, capture_tags.id ASC
+                        ) AS rn
+                    FROM capture_tags
+                    JOIN tags     ON tags.id     = capture_tags.tag_id
+                    JOIN captures ON captures.id = capture_tags.capture_id
+                    WHERE captures.user_id    = ?
+                      AND captures.deleted_at IS NULL
+                      AND capture_tags.deleted_at IS NULL
+                      AND tags.deleted_at     IS NULL
+                )
+                SELECT capture_id, tag_name FROM ranked WHERE rn = 1
+                """, arguments: [userId])
+            var map: [String: String] = [:]
+            for r in rows { map[r.captureId] = r.tagName }
+            return map
+        }
+        .publisher(in: dbQueue)
+        .eraseToAnyPublisher()
+    }
 }

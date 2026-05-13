@@ -28,6 +28,7 @@
 
 import Foundation
 import GRDB
+import ReleafCoreData
 
 public final class QuickInkDatabase: @unchecked Sendable {
 
@@ -530,6 +531,97 @@ public final class QuickInkDatabase: @unchecked Sendable {
                     ON captures (user_id, last_opened_at)
                     WHERE last_opened_at IS NOT NULL AND deleted_at IS NULL
                 """)
+        }
+
+        // v9 — Workspace v1 Phase A.3c. Drops the legacy
+        // `captures.category` TEXT column. Materializes every
+        // non-null `category` value into a `capture_tags` row first
+        // (find-or-create the tag by name in the user's namespace,
+        // attach as source = "migration"), so users upgrading
+        // straight from a pre-v8 schema or from v8 → v9 in a
+        // single launch don't lose their data. Idempotent — the
+        // partial-unique-index on (capture_id, tag_id) WHERE
+        // deleted_at IS NULL keeps duplicate inserts from racing.
+        //
+        // SQLite's `ALTER TABLE DROP COLUMN` landed in 3.35 (2021)
+        // and is available on every iOS we ship for, so a direct
+        // DROP is fine — no table-rebuild dance needed. Whole
+        // migration runs in GRDB's outer transaction so a failure
+        // mid-materialize leaves the column intact for retry.
+        //
+        // Mirror of Android's Room v11; canonical SQL lives in
+        // v4_workspace.sql §7.
+        migrator.registerMigration("v9_capture_category_drop") { db in
+            // 1. Find-or-create a tag per distinct (user_id,
+            //    category) pair, then attach via capture_tags.
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT id AS capture_id, user_id, category
+                FROM captures
+                WHERE category IS NOT NULL
+                  AND deleted_at IS NULL
+                """)
+            for row in rows {
+                let captureId: String = row["capture_id"]
+                let userId:    String = row["user_id"]
+                let name:      String = row["category"]
+                let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty { continue }
+
+                // Tag find-or-create. The (user_id, name) UNIQUE
+                // partial index excluding tombstones keeps this
+                // race-safe — we read, write-if-missing, and
+                // re-read on the rare collision.
+                var tagId: String? = try String.fetchOne(db, sql: """
+                    SELECT id FROM tags
+                    WHERE user_id = ? AND name = ? AND deleted_at IS NULL
+                    """, arguments: [userId, trimmed])
+                if tagId == nil {
+                    let newId = Uuidv7.generate()
+                    let now = IsoClock.nowIso()
+                    do {
+                        try db.execute(sql: """
+                            INSERT INTO tags
+                                (id, user_id, name, position, color,
+                                 drive_file_id, created_at, updated_at,
+                                 dirty, deleted_at)
+                            VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 1, NULL)
+                            """, arguments: [newId, userId, trimmed, Int.max, now, now])
+                        tagId = newId
+                    } catch let e as DatabaseError where e.resultCode == .SQLITE_CONSTRAINT {
+                        tagId = try String.fetchOne(db, sql: """
+                            SELECT id FROM tags
+                            WHERE user_id = ? AND name = ? AND deleted_at IS NULL
+                            """, arguments: [userId, trimmed])
+                    }
+                }
+                guard let resolvedTagId = tagId else { continue }
+
+                // Skip if an active or tombstoned join row already
+                // exists for this pair — the unique-active index
+                // would refuse the insert anyway.
+                let already: Int = try Int.fetchOne(db, sql: """
+                    SELECT COUNT(*) FROM capture_tags
+                    WHERE capture_id = ? AND tag_id = ?
+                    """, arguments: [captureId, resolvedTagId]) ?? 0
+                if already > 0 { continue }
+
+                let now = IsoClock.nowIso()
+                do {
+                    try db.execute(sql: """
+                        INSERT INTO capture_tags
+                            (id, capture_id, tag_id, source,
+                             drive_file_id, created_at, updated_at,
+                             dirty, deleted_at)
+                        VALUES (?, ?, ?, 'migration', NULL, ?, ?, 1, NULL)
+                        """, arguments: [Uuidv7.generate(), captureId, resolvedTagId, now, now])
+                } catch let e as DatabaseError where e.resultCode == .SQLITE_CONSTRAINT {
+                    // Race lost — another writer landed the same pair.
+                }
+            }
+
+            // 2. Drop the column. Direct DROP on SQLite 3.35+
+            //    (every iOS we support ships ≥ 3.36).
+            try db.execute(sql: "ALTER TABLE captures DROP COLUMN category")
         }
 
         return migrator

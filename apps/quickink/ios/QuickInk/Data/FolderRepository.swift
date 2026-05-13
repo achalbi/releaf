@@ -7,8 +7,11 @@
  *   - list active folders (live observation)
  *   - create / rename / recolor / reorder / soft-delete
  *   - first-launch seed of "Unfiled"
- *   - one-time materialize of legacy `captures.category` rows
- *     into `capture_tags`
+ *
+ * The legacy `captures.category` → `capture_tags` materialize step
+ * shipped in v8's first-launch pass; post-A.3c the column itself
+ * is gone (the v9 schema migration carries the materialize +
+ * drop atomically), so the helper is gone from this file.
  *
  * Mirror of `FolderRepository.kt` in QuickInk's Android target.
  *
@@ -32,18 +35,10 @@ public final class FolderRepository: @unchecked Sendable {
     /// brighter accents from the palette.
     public static let defaultFolderColor = "#A8A29E"
 
-    /// Source tag for capture_tags rows written by the v8 backfill
-    /// pass (legacy `captures.category` → `capture_tags`). Distinct
-    /// from "manual" / "ai-suggested" so analytics can ignore
-    /// migration noise.
-    public static let migrationSource = "migration"
-
     private let dbQueue: DatabaseQueue
-    private let tagRepository: TagRepository
 
     public init(database: QuickInkDatabase = .shared) {
         self.dbQueue = database.dbQueue
-        self.tagRepository = TagRepository(database: database)
     }
 
     // MARK: - Reads
@@ -226,81 +221,17 @@ public final class FolderRepository: @unchecked Sendable {
         defaults.set(true, forKey: key)
     }
 
-    /// Materialize legacy `captures.category` values into
-    /// `capture_tags` rows. Runs once per user via UserDefaults
-    /// guard. After this completes the column is safe to drop
-    /// (deferred to iOS A.3c).
-    public func materializeCategoryToTagsIfNeeded(userId: String) async throws {
-        let key = Self.materializeCategoryFlag(for: userId)
-        let defaults = UserDefaults.standard
-        guard !defaults.bool(forKey: key) else { return }
-
-        struct Pair { let captureId: String; let categoryName: String }
-        let pairs: [Pair] = try await dbQueue.read { db in
-            try Row.fetchAll(db, sql: """
-                SELECT id AS capture_id, category AS category_name
-                FROM captures
-                WHERE user_id = ?
-                  AND category IS NOT NULL
-                  AND deleted_at IS NULL
-                """, arguments: [userId])
-                .compactMap { row in
-                    guard let cap: String = row["capture_id"],
-                          let cat: String = row["category_name"]
-                    else { return nil }
-                    return Pair(captureId: cap, categoryName: cat)
-                }
-        }
-
-        for pair in pairs {
-            let tag = try await tagRepository.findOrCreate(
-                userId: userId, name: pair.categoryName,
-            )
-            // Skip if a join row already exists for this pair —
-            // the unique-active partial index would refuse another
-            // anyway. Read once, write conditionally.
-            let alreadyAttached: Bool = try await dbQueue.read { db in
-                (try Int.fetchOne(db, sql: """
-                    SELECT COUNT(*) FROM capture_tags
-                    WHERE capture_id = ? AND tag_id = ?
-                    """, arguments: [pair.captureId, tag.id]) ?? 0) > 0
-            }
-            if alreadyAttached { continue }
-
-            let now = IsoClock.nowIso()
-            let row = CaptureTagEntity(
-                id:        Uuidv7.generate(),
-                captureId: pair.captureId,
-                tagId:     tag.id,
-                source:    Self.migrationSource,
-                createdAt: now,
-                updatedAt: now,
-                dirty:     true,
-            )
-            try await dbQueue.write { db in
-                do { try row.insert(db) }
-                catch let error as DatabaseError where error.resultCode == .SQLITE_CONSTRAINT {
-                    // unique-active index — race with another writer.
-                }
-            }
-        }
-
-        defaults.set(true, forKey: key)
-    }
-
-    /// Convenience — calls seed + materialize + backfill in
-    /// order. Safe to invoke on every launch; each step
-    /// short-circuits when its work is done.
+    /// Convenience — calls seed + backfill in order. Safe to invoke
+    /// on every launch; each step short-circuits when its work is
+    /// done. The legacy materialize step is gone post-A.3c — the
+    /// v9 schema migration carries the materialize + column drop
+    /// atomically before any app code runs.
     public func runFirstLaunchMigrationIfNeeded(userId: String) async throws {
         _ = try await seedDefaultsIfNeeded(userId: userId)
-        try await materializeCategoryToTagsIfNeeded(userId: userId)
         try await backfillFolderIdsIfNeeded(userId: userId)
     }
 
     private static func backfillFolderIdsFlag(for userId: String) -> String {
         "quickink.workspace.folder-backfill-v1.\(userId)"
-    }
-    private static func materializeCategoryFlag(for userId: String) -> String {
-        "quickink.workspace.category-materialize-v1.\(userId)"
     }
 }

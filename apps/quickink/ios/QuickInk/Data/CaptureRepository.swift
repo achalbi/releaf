@@ -57,7 +57,6 @@ public final class CaptureRepository: @unchecked Sendable {
         pdfURL: URL?,
         previewURL: URL?,
         pageCount: Int,
-        category: String? = nil,
         /// Capture origin. `"scan"` (default) — went through
         /// VisionKit's document scanner. `"import"` — picked from
         /// the system photo picker. Drives the "Import" pill in
@@ -76,10 +75,10 @@ public final class CaptureRepository: @unchecked Sendable {
             try db.execute(sql: """
                 INSERT INTO captures (
                     id, user_id, title, pdf_uri, preview_uri,
-                    page_count, category, source,
+                    page_count, source,
                     latitude, longitude, locality, sub_locality, address,
                     created_at, updated_at, dirty
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """, arguments: [
                     id,
                     userId,
@@ -87,7 +86,6 @@ public final class CaptureRepository: @unchecked Sendable {
                     pdfURL?.absoluteString ?? "",  // captures.pdf_uri NOT NULL
                     previewURL?.absoluteString,
                     pageCount,
-                    category,
                     source,
                     location?.latitude,
                     location?.longitude,
@@ -100,18 +98,36 @@ public final class CaptureRepository: @unchecked Sendable {
         }
     }
 
-    /// Update an existing capture's `category` to the user's pick
-    /// from the scan-review screen. Bumps `updated_at` + `dirty`
-    /// so the next sync pass uploads the change.
-    public func setCategory(captureId: String, category: String?) async throws {
-        let now = IsoClock.nowIso()
-        try await dbQueue.write { db in
-            try db.execute(sql: """
-                UPDATE captures
-                SET category = ?, updated_at = ?, dirty = 1
-                WHERE id = ?
-                """, arguments: [category, now, captureId])
+    /// Attach a tag by name as the capture's primary label, the
+    /// post-A.3c replacement for the legacy `setCategory`. Find-or-
+    /// creates the tag in the user's namespace (so a fresh
+    /// scan-review pick lazily materializes the row) then attaches
+    /// via the join — idempotent if the same tag is already
+    /// attached. Pass `nil` / blank to clear ALL active tag
+    /// attachments on the capture.
+    ///
+    /// Best-effort: the caller's `try?` covers SQL failure modes
+    /// the same way the legacy `setCategory` did.
+    public func attachOrEnsurePrimaryTag(
+        captureId: String,
+        userId: String,
+        name: String?,
+        source: String = "manual"
+    ) async throws {
+        let trimmed = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let tagRepo = TagRepository(database: QuickInkDatabase.shared)
+        let captureTagRepo = CaptureTagRepository(database: QuickInkDatabase.shared)
+
+        if trimmed.isEmpty {
+            try await captureTagRepo.softDeleteByCaptureId(captureId: captureId)
+            return
         }
+        let tag = try await tagRepo.findOrCreate(userId: userId, name: trimmed)
+        try await captureTagRepo.attachTag(
+            captureId: captureId,
+            tagId:     tag.id,
+            source:    source
+        )
     }
 
     /// Workspace v1 — assign a capture to a folder. Mirror of
@@ -207,16 +223,19 @@ public final class CaptureRepository: @unchecked Sendable {
 
     // MARK: - Search
 
-    /// Search captures across category name + OCR text. Returns each
-    /// matching capture once with the strongest OCR snippet. The
-    /// search runs in two passes:
-    ///   1. Captures whose `category` contains `query` (substring,
-    ///      case-insensitive). No OCR snippet for these.
-    ///   2. OCR-text matches via `fts_ocr_text` MATCH joined back to
-    ///      captures; we keep the highest-ranked snippet per capture.
-    /// Results are unioned by `capture.id`, with category hits first
-    /// (cheapest to compute, lowest false-positive rate) and OCR
-    /// hits second.
+    /// Search captures across tag name + OCR text. Returns each
+    /// matching capture once with the strongest OCR snippet. Mirror
+    /// of Android's `CaptureRepository.search`.
+    ///
+    /// Passes:
+    ///   1. Captures with any attached tag whose `name` contains
+    ///      `query` (substring, case-insensitive). Replaces the
+    ///      pre-A.3c `captures.category` substring pass. No OCR
+    ///      snippet for these.
+    ///   2. OCR-text matches via `fts_ocr_text` MATCH joined back
+    ///      to captures.
+    ///   3. (Fallback) LIKE-based substring over `ocr_results.text`
+    ///      when the FTS pass came back empty.
     public func search(userId: String, query: String) async throws -> [SearchHit] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return [] }
@@ -227,18 +246,24 @@ public final class CaptureRepository: @unchecked Sendable {
             var seen = Set<String>()
             var hits: [SearchHit] = []
 
-            // Pass 1 — category substring match.
-            let catRows = try CaptureSummary.fetchAll(db, sql: """
-                SELECT id, title, preview_uri, pdf_uri, category, page_count, created_at, source
+            // Pass 1 — tag-name substring match (post-A.3c
+            // replacement for the legacy `captures.category` pass).
+            let tagRows = try CaptureSummary.fetchAll(db, sql: """
+                SELECT DISTINCT captures.id, captures.title, captures.preview_uri,
+                       captures.pdf_uri, captures.page_count, captures.created_at,
+                       captures.source
                 FROM captures
-                WHERE user_id = ?
-                  AND deleted_at IS NULL
-                  AND category IS NOT NULL
-                  AND lower(category) LIKE lower(?)
-                ORDER BY created_at DESC
+                JOIN capture_tags ON capture_tags.capture_id = captures.id
+                JOIN tags         ON tags.id         = capture_tags.tag_id
+                WHERE captures.user_id    = ?
+                  AND captures.deleted_at IS NULL
+                  AND capture_tags.deleted_at IS NULL
+                  AND tags.deleted_at     IS NULL
+                  AND lower(tags.name)    LIKE lower(?)
+                ORDER BY captures.created_at DESC
                 LIMIT 50
                 """, arguments: [userId, likePattern])
-            for c in catRows where !seen.contains(c.id) {
+            for c in tagRows where !seen.contains(c.id) {
                 seen.insert(c.id)
                 hits.append(SearchHit(capture: c, ocrSnippet: nil))
             }
@@ -255,7 +280,6 @@ public final class CaptureRepository: @unchecked Sendable {
                 SELECT c.id            AS id,
                        c.preview_uri   AS preview_uri,
                        c.pdf_uri       AS pdf_uri,
-                       c.category      AS category,
                        c.page_count    AS page_count,
                        c.created_at    AS created_at,
                        snippet(fts_ocr_text, 1, '\u{2039}', '\u{203A}', '…', 24) AS ocr_snippet
@@ -278,7 +302,6 @@ public final class CaptureRepository: @unchecked Sendable {
                     id:         id,
                     previewUri: row["preview_uri"] as String?,
                     pdfUri:     row["pdf_uri"],
-                    category:   row["category"] as String?,
                     pageCount:  row["page_count"],
                     createdAt:  row["created_at"]
                 )
@@ -300,7 +323,6 @@ public final class CaptureRepository: @unchecked Sendable {
                     SELECT c.id            AS id,
                            c.preview_uri   AS preview_uri,
                            c.pdf_uri       AS pdf_uri,
-                           c.category      AS category,
                            c.page_count    AS page_count,
                            c.created_at    AS created_at,
                            substr(r.text, max(1, instr(lower(r.text), lower(?)) - 30), 120) AS ocr_snippet
@@ -322,7 +344,6 @@ public final class CaptureRepository: @unchecked Sendable {
                         id:         id,
                         previewUri: row["preview_uri"] as String?,
                         pdfUri:     row["pdf_uri"],
-                        category:   row["category"] as String?,
                         pageCount:  row["page_count"],
                         createdAt:  row["created_at"]
                     )

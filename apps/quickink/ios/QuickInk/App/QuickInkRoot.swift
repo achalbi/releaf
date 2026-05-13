@@ -332,7 +332,14 @@ private struct MainShell: View {
                             captureId:  summary.captureId,
                             source:     summary.source,
                             pageCount:  summary.pageCount,
-                            category:   summary.category,
+                            // Post-A.3c the `captures.category`
+                            // column is gone; the analytics
+                            // server-side `category` slot stays
+                            // for back-compat but new captures
+                            // emit nil. Once the server schema
+                            // drops the field this column folds
+                            // out of the outbox row too.
+                            category:   nil,
                             hasOcr:     summary.hasOcr,
                             ocrChars:   summary.ocrChars,
                             capturedAt: summary.capturedAt
@@ -400,11 +407,13 @@ private struct MainShell: View {
             try? await categoryRepo.migrateLegacyStudyToBusinessCardIfNeeded(userId: userId)
 
             // Workspace v1 first-launch migration — seed Unfiled
-            // folder, backfill every capture's folder_id, and
-            // materialize the legacy `captures.category` value into
-            // `capture_tags`. Each step is idempotent via
-            // UserDefaults guards so on-every-launch invocation is
-            // safe.
+            // folder + backfill every capture's folder_id. The
+            // legacy `captures.category` → `capture_tags`
+            // materialize step shipped in v8 and the column drop
+            // shipped in v9; both now run inside the GRDB
+            // migration script. Each app-side step is idempotent
+            // via UserDefaults guards so on-every-launch invocation
+            // is safe.
             let folderRepo = FolderRepository()
             try? await folderRepo.runFirstLaunchMigrationIfNeeded(userId: userId)
 

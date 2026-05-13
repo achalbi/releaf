@@ -439,8 +439,7 @@ public struct WorkspaceHomeScreen: View {
     // MARK: - Continue card
 
     private func continueCard(_ capture: CaptureSummary) -> some View {
-        let title = capture.title?.isEmpty == false ? capture.title! :
-            (capture.category?.isEmpty == false ? capture.category! : "Untitled scan")
+        let title = capture.title?.isEmpty == false ? capture.title! : "Untitled scan"
         let page = capture.lastOpenedPage ?? 1
         let total = max(capture.pageCount, 1)
         let frac = min(max(Double(page) / Double(total), 0), 1)

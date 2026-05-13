@@ -23,6 +23,7 @@
  */
 
 import SwiftUI
+import Combine
 import ReleafCoreNotes
 import ReleafCoreScan
 import ReleafCoreSync
@@ -95,6 +96,12 @@ struct HomeScreen: View {
     /// 250ms timer while active so the pill flips back to its
     /// at-rest state without waiting for the next render.
     @State private var nowForTapAck: Date = Date()
+
+    /// Per-capture primary-tag-name lookup. Replaces the pre-A.3c
+    /// `captures.category` read for the category grid + recent-rail
+    /// title cascade.
+    @State private var primaryTagByCapture: [String: String] = [:]
+    @State private var primaryTagCancellable: AnyCancellable? = nil
 
     init(
         controller: ScanFlowController,
@@ -269,6 +276,18 @@ struct HomeScreen: View {
             // and the live categories observation backing the grid.
             capturesVM.start()
             categoriesVM.start()
+            // Per-capture primary-tag-name lookup — replaces the
+            // pre-A.3c `captures.category` read used by the
+            // categories grid + recent-rail title.
+            if primaryTagCancellable == nil {
+                primaryTagCancellable = CaptureTagRepository()
+                    .observePrimaryTagNames(userId: userId)
+                    .receive(on: DispatchQueue.main)
+                    .sink(
+                        receiveCompletion: { _ in },
+                        receiveValue: { map in primaryTagByCapture = map }
+                    )
+            }
         }
         .fullScreenCover(isPresented: $showQuickCapture) {
             // Mode-picker surface (the dark, branded scan UI).
@@ -581,8 +600,11 @@ struct HomeScreen: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: QuickInkSpacing.s3) {
                         ForEach(capturesVM.captures.prefix(6)) { capture in
-                            RecentScanThumb(capture: capture)
-                                .onTapGesture { onOpenScan?(capture.id) }
+                            RecentScanThumb(
+                                capture:        capture,
+                                primaryTagName: primaryTagByCapture[capture.id]
+                            )
+                            .onTapGesture { onOpenScan?(capture.id) }
                         }
                     }
                     .padding(.vertical, 2) // Avoid shadow clipping at top.
@@ -624,7 +646,7 @@ struct HomeScreen: View {
     private var sortedCategories: [TagEntity] {
         let latestByName: [String: String] = Dictionary(
             grouping: capturesVM.captures
-        ) { ($0.category ?? "").lowercased() }
+        ) { (primaryTagByCapture[$0.id] ?? "").lowercased() }
         .mapValues { list in list.map(\.createdAt).max() ?? "" }
 
         return categoriesVM.categories.sorted { a, b in
@@ -696,7 +718,7 @@ struct HomeScreen: View {
     private func categoryStats(for name: String) -> (count: Int, recencyBadge: String?) {
         let needle = name.lowercased()
         let matching = capturesVM.captures.filter {
-            ($0.category ?? "").lowercased() == needle
+            (primaryTagByCapture[$0.id] ?? "").lowercased() == needle
         }
         let count = matching.count
 
@@ -739,6 +761,10 @@ struct HomeScreen: View {
 /// Tapping opens `ScanDetailScreen` (full preview + OCR-on-demand).
 struct RecentScanThumb: View {
     let capture: CaptureSummary
+    /// Primary-tag-name fallback for the title cascade — replaces
+    /// the pre-A.3c `captures.category` field. Nil → cascade
+    /// stops at "Scan".
+    let primaryTagName: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -847,7 +873,7 @@ struct RecentScanThumb: View {
            !t.isEmpty {
             return t
         }
-        return capture.category ?? "Scan"
+        return primaryTagName ?? "Scan"
     }
 
     /// Friendly date — `2026-05-02T14:30:00.000Z` → `May 2`. Falls
