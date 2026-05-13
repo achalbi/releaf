@@ -261,6 +261,7 @@ private struct MainShell: View {
         case workspaceHome
         case folderDetail(folderId: String)
         case smartCollection(collectionId: String)
+        case tagLibrary
     }
 
     /// Resolved per-process: which route the Workspace bottom-nav tap
@@ -657,7 +658,7 @@ private struct MainShell: View {
                 onOpenSmartCollection: { sc in
                     path.append(.smartCollection(collectionId: sc.id))
                 },
-                onBrowseTags:          { /* Tag library lands in iOS D */ },
+                onBrowseTags:          { path.append(.tagLibrary) },
                 onHome:                { path.removeAll() },
                 onScan:                { showQuickCapture = true },
                 onSettings:            { navToTab(.settings) }
@@ -689,6 +690,22 @@ private struct MainShell: View {
                 onBack:       { path.removeLast() },
                 onOpenCapture: { capture in
                     path.append(.scanDetail(captureId: capture.id))
+                },
+                onOpenSearch: { navToTab(.search) },
+                onHome:       { path.removeAll() },
+                onWorkspace:  { navToTab(workspaceTabRoute) },
+                onScan:       { showQuickCapture = true },
+                onSettings:   { navToTab(.settings) }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .tagLibrary:
+            TagLibraryScreen(
+                userId:      userId,
+                onBack:      { path.removeLast() },
+                onOpenTag:   { tag in
+                    path.append(.categoryEntries(name: tag.name))
                 },
                 onOpenSearch: { navToTab(.search) },
                 onHome:       { path.removeAll() },

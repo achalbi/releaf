@@ -92,6 +92,59 @@ public final class CaptureTagRepository: @unchecked Sendable {
         }
     }
 
+    /// Live count of active captures that carry EVERY tag id in
+    /// `tagIds`. Drives the tag-library intersect builder. Returns
+    /// 0 when the input is empty.
+    public func observeIntersectCount(
+        userId: String,
+        tagIds: [String]
+    ) -> AnyPublisher<Int, Error> {
+        guard !tagIds.isEmpty else {
+            return Just(0).setFailureType(to: Error.self).eraseToAnyPublisher()
+        }
+        let placeholders = tagIds.map { _ in "?" }.joined(separator: ",")
+        let tagCount = tagIds.count
+        var args: [DatabaseValueConvertible] = tagIds
+        args.append(userId)
+        args.append(tagCount)
+        return ValueObservation.tracking { db in
+            try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM (
+                    SELECT capture_tags.capture_id
+                    FROM capture_tags
+                    JOIN captures ON captures.id = capture_tags.capture_id
+                    WHERE capture_tags.tag_id IN (\(placeholders))
+                      AND capture_tags.deleted_at IS NULL
+                      AND captures.user_id = ?
+                      AND captures.deleted_at IS NULL
+                    GROUP BY capture_tags.capture_id
+                    HAVING COUNT(DISTINCT capture_tags.tag_id) = ?
+                )
+                """, arguments: StatementArguments(args)) ?? 0
+        }
+        .publisher(in: dbQueue)
+        .eraseToAnyPublisher()
+    }
+
+    /// Live tag counts (id → doc count) for the current user — same
+    /// query the home tag cloud reads. Surfaced here so the tag
+    /// library can show "31 documents" per card.
+    public func observeTagCounts(userId: String) -> AnyPublisher<[TagCount], Error> {
+        ValueObservation.tracking { [userId] db in
+            try TagCount.fetchAll(db, sql: """
+                SELECT capture_tags.tag_id AS tag_id, COUNT(*) AS doc_count
+                FROM capture_tags
+                JOIN captures ON captures.id = capture_tags.capture_id
+                WHERE capture_tags.deleted_at IS NULL
+                  AND captures.deleted_at IS NULL
+                  AND captures.user_id = ?
+                GROUP BY capture_tags.tag_id
+                """, arguments: [userId])
+        }
+        .publisher(in: dbQueue)
+        .eraseToAnyPublisher()
+    }
+
     /// Soft-detach. No-op if no active row exists.
     public func detachTag(captureId: String, tagId: String) async throws {
         let now = IsoClock.nowIso()
