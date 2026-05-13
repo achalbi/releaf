@@ -316,6 +316,28 @@ class QuickInkSyncWorker(
                     // wait up to 60 seconds for the foreground
                     // pending-push tick to refresh it.
                     writeLocalDirtyCount(app, 0)
+                    // Workspace v1 — one-shot Drive `categories/`
+                    // prefix cleanup. Runs once per signed-in
+                    // install (SharedPreferences-guarded) after a
+                    // successful metadata push so the legacy tag
+                    // payloads land in Drive's trash. No-op on
+                    // subsequent passes.
+                    try {
+                        LegacyCategoriesPrefixCleanup.runIfNeeded(
+                            context     = applicationContext,
+                            driveClient = app.driveClient,
+                            accessToken = session.accessToken,
+                            userId      = session.userId,
+                        )
+                    } catch (e: DriveError.Unauthenticated) {
+                        // Bubble up — same retry path as the rest of
+                        // the worker. The next pass picks it back up.
+                        throw e
+                    } catch (e: DriveError.RateLimited) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "categories cleanup failed: $e — will retry next sync")
+                    }
                     writeSyncProgress(
                         phase = SYNC_PROGRESS_PHASE_DONE,
                         label = "Backup complete.",

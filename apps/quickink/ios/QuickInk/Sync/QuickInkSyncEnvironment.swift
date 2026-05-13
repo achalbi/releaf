@@ -216,6 +216,22 @@ public final class QuickInkSyncEnvironment {
             } catch {
                 print("[QuickInkSync] binary upload phase failed: \(error)")
             }
+
+            // Workspace v1 — one-shot Drive `categories/` prefix
+            // cleanup. Runs once per signed-in install
+            // (UserDefaults-guarded) after a successful sync pass so
+            // the legacy tag payloads land in Drive's trash. No-op
+            // on subsequent passes. Best-effort; auth / rate-limit
+            // errors propagate naturally back to the next retry.
+            do {
+                _ = try await LegacyCategoriesPrefixCleanup.runIfNeeded(
+                    driveClient: self.driveClient,
+                    accessToken: activeSession.accessToken,
+                    userId:      activeSession.userId
+                )
+            } catch {
+                print("[QuickInkSync] categories cleanup failed: \(error) — retrying next sync")
+            }
         }
 
         // Sync is USER-INITIATED ONLY now. We don't register a
