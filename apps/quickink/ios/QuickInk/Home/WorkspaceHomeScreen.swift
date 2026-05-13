@@ -180,14 +180,18 @@ public struct WorkspaceHomeScreen: View {
                 tags:         viewModel.tags,
                 initialName:  collection.name,
                 initialInput: initialInput,
+                initialIcon:  collection.icon,
+                initialColor: collection.color,
                 isEdit:       true,
-                onSubmit: { name, ruleInput in
+                onSubmit: { name, ruleInput, icon, color in
                     let target = collection
                     Task {
                         await updateSmartCollection(
                             target: target,
                             name:   name,
-                            input:  ruleInput
+                            input:  ruleInput,
+                            icon:   icon,
+                            color:  color
                         )
                         editCollection = nil
                     }
@@ -227,9 +231,14 @@ public struct WorkspaceHomeScreen: View {
             SmartCollectionEditorView(
                 folders: viewModel.folders,
                 tags:    viewModel.tags,
-                onSubmit: { name, ruleInput in
+                onSubmit: { name, ruleInput, icon, color in
                     Task {
-                        await saveSmartCollection(name: name, input: ruleInput)
+                        await saveSmartCollection(
+                            name:  name,
+                            input: ruleInput,
+                            icon:  icon,
+                            color: color
+                        )
                         showSmartEditor = false
                     }
                 },
@@ -309,7 +318,9 @@ public struct WorkspaceHomeScreen: View {
     private func updateSmartCollection(
         target: SmartCollectionEntity,
         name: String,
-        input: SmartCollectionRuleInput
+        input: SmartCollectionRuleInput,
+        icon: String?,
+        color: String?
     ) async {
         let clauses = input.toClauses()
         guard !clauses.isEmpty else { return }
@@ -321,15 +332,18 @@ public struct WorkspaceHomeScreen: View {
         try? await dbQueue.write { db in
             try db.execute(sql: """
                 UPDATE smart_collections
-                SET name = ?, rule_json = ?, updated_at = ?, dirty = 1
+                SET name = ?, rule_json = ?, icon = ?, color = ?,
+                    updated_at = ?, dirty = 1
                 WHERE id = ?
-                """, arguments: [newName, ruleJson, now, target.id])
+                """, arguments: [newName, ruleJson, icon, color, now, target.id])
         }
     }
 
     private func saveSmartCollection(
         name: String,
-        input: SmartCollectionRuleInput
+        input: SmartCollectionRuleInput,
+        icon: String?,
+        color: String?
     ) async {
         let clauses = input.toClauses()
         guard !clauses.isEmpty else { return }
@@ -346,8 +360,8 @@ public struct WorkspaceHomeScreen: View {
             id:        Uuidv7.generate(),
             userId:    userId,
             name:      name.isEmpty ? "Untitled collection" : name,
-            icon:      nil,
-            color:     nil,
+            icon:      icon,
+            color:     color,
             ruleJson:  SmartCollectionRule.encode(clauses),
             position:  nextPos,
             isSeeded:  false,
@@ -517,7 +531,7 @@ public struct WorkspaceHomeScreen: View {
                     RoundedRectangle(cornerRadius: 8)
                         .fill(tint.opacity(0.18))
                         .frame(width: 28, height: 28)
-                    Image(systemName: "sparkles")
+                    Image(systemName: iconSymbolForSlug(sc.icon))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(tint)
                 }

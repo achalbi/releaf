@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -64,15 +65,20 @@ internal fun SmartCollectionEditorDialog(
     tags: List<TagEntity> = emptyList(),
     initialName: String = "",
     initialInput: SmartCollectionRuleInput = SmartCollectionRuleInput(),
+    initialIcon: String? = null,
+    initialColor: String? = null,
     isEdit: Boolean = false,
     onDismiss: () -> Unit,
-    onSubmit: (name: String, input: SmartCollectionRuleInput) -> Unit,
+    onSubmit: (name: String, input: SmartCollectionRuleInput,
+               icon: String?, color: String?) -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
 
-    var name        by remember(initialName) { mutableStateOf(initialName) }
+    var name        by remember(initialName)  { mutableStateOf(initialName) }
     var input       by remember(initialInput) { mutableStateOf(initialInput) }
+    var iconSlug    by remember(initialIcon)  { mutableStateOf(initialIcon) }
+    var colorHex    by remember(initialColor) { mutableStateOf(initialColor) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -190,11 +196,23 @@ internal fun SmartCollectionEditorDialog(
                     state   = input.hasOcrText,
                     onCycle = { input = input.copy(hasOcrText = it) },
                 )
+
+                SectionLabel("ICON")
+                IconPaletteRow(
+                    selected   = iconSlug,
+                    onSelect   = { iconSlug = it },
+                )
+
+                SectionLabel("COLOR")
+                ColorPaletteRow(
+                    selected   = colorHex,
+                    onSelect   = { colorHex = it },
+                )
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onSubmit(name.trim(), input) },
+                onClick = { onSubmit(name.trim(), input, iconSlug, colorHex) },
                 enabled = !input.isEmpty,
             ) {
                 Text("Save", color = colors.accent)
@@ -333,5 +351,86 @@ private fun ChipBox(label: String, active: Boolean, onTap: () -> Unit) {
             color = if (active) androidx.compose.ui.graphics.Color.White
                     else colors.inkSoft,
         )
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun IconPaletteRow(
+    selected: String?,
+    onSelect: (String?) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement   = Arrangement.spacedBy(6.dp),
+    ) {
+        SmartCollectionIconPalette.forEach { option ->
+            val isActive = option.slug == selected
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (isActive) colors.ink else colors.surface,
+                    )
+                    .border(
+                        1.dp,
+                        if (isActive) colors.ink else colors.border,
+                        RoundedCornerShape(8.dp),
+                    )
+                    .clickable {
+                        // Tap a selected icon again to clear back to
+                        // "no slug" — the card falls through to the
+                        // palette's default sparkle.
+                        onSelect(if (isActive) null else option.slug)
+                    },
+                contentAlignment = androidx.compose.ui.Alignment.Center,
+            ) {
+                androidx.compose.material3.Icon(
+                    imageVector        = option.icon,
+                    contentDescription = option.slug,
+                    tint               = if (isActive) androidx.compose.ui.graphics.Color.White
+                                         else colors.inkSoft,
+                    modifier           = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ColorPaletteRow(
+    selected: String?,
+    onSelect: (String?) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement   = Arrangement.spacedBy(6.dp),
+    ) {
+        WorkspaceFolderPalette.forEach { hex ->
+            val isActive = hex == selected
+            val swatchColor = runCatching {
+                androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(hex))
+            }.getOrDefault(colors.accent)
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(swatchColor)
+                    .border(
+                        if (isActive) 2.dp else 1.dp,
+                        if (isActive) colors.ink else colors.border,
+                        androidx.compose.foundation.shape.CircleShape,
+                    )
+                    .clickable {
+                        // Tap a selected swatch again to clear — the
+                        // card's tint falls back to the accent.
+                        onSelect(if (isActive) null else hex)
+                    },
+            )
+        }
     }
 }

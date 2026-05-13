@@ -91,6 +91,24 @@ interface SmartCollectionDao {
     """)
     suspend fun setRule(id: String, ruleJson: String, timestamp: String)
 
+    /**
+     * Persist a user's icon + color pick from the editor's
+     * appearance pickers. Either argument can be `NULL` to clear
+     * back to the card's defaults. Bumps `updated_at` + `dirty`
+     * so the change rides the next sync.
+     */
+    @Query("""
+        UPDATE smart_collections
+        SET icon = :icon, color = :color, updated_at = :timestamp, dirty = 1
+        WHERE id = :id
+    """)
+    suspend fun setAppearance(
+        id: String,
+        icon: String?,
+        color: String?,
+        timestamp: String,
+    )
+
     @Query("""
         UPDATE smart_collections
         SET position = :position, updated_at = :timestamp, dirty = 1

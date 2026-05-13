@@ -453,9 +453,11 @@ fun WorkspaceHomeScreen(
             tags         = tags,
             initialName  = collection.name,
             initialInput = initialInput,
+            initialIcon  = collection.icon,
+            initialColor = collection.color,
             isEdit       = true,
             onDismiss    = { editCollection = null },
-            onSubmit     = { name, ruleInput ->
+            onSubmit     = { name, ruleInput, icon, color ->
                 val target = collection
                 scope.launch {
                     val now = IsoClock.nowIso()
@@ -470,6 +472,9 @@ fun WorkspaceHomeScreen(
                         dao.rename(target.id, name, now)
                     }
                     dao.setRule(target.id, ruleJson, now)
+                    if (icon != target.icon || color != target.color) {
+                        dao.setAppearance(target.id, icon, color, now)
+                    }
                     editCollection = null
                 }
             },
@@ -524,7 +529,7 @@ fun WorkspaceHomeScreen(
             folders   = folders,
             tags      = tags,
             onDismiss = { showSmartEditor = false },
-            onSubmit  = { name, ruleInput ->
+            onSubmit  = { name, ruleInput, icon, color ->
                 scope.launch {
                     val now = IsoClock.nowIso()
                     val clauses = ruleInput.toClauses()
@@ -540,8 +545,8 @@ fun WorkspaceHomeScreen(
                             id        = Uuidv7.generate(),
                             userId    = userId,
                             name      = name.ifEmpty { "Untitled collection" },
-                            icon      = null,
-                            color     = null,
+                            icon      = icon,
+                            color     = color,
                             ruleJson  = ruleJson,
                             position  = nextPos,
                             isSeeded  = false,
@@ -878,7 +883,7 @@ private fun SmartCollectionCard(
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector        = Icons.Outlined.AutoAwesome,
+                imageVector        = iconVectorForSlug(collection.icon),
                 contentDescription = null,
                 tint               = tint,
                 modifier           = Modifier.size(15.dp),

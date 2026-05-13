@@ -28,31 +28,42 @@ struct SmartCollectionEditorView: View {
     let tags: [TagEntity]
     let initialName: String
     let initialInput: SmartCollectionRuleInput
+    let initialIcon: String?
+    let initialColor: String?
     let isEdit: Bool
-    let onSubmit: (_ name: String, _ input: SmartCollectionRuleInput) -> Void
+    let onSubmit: (_ name: String, _ input: SmartCollectionRuleInput,
+                   _ icon: String?, _ color: String?) -> Void
     let onCancel: () -> Void
 
     @State private var name: String
     @State private var input: SmartCollectionRuleInput
+    @State private var iconSlug: String?
+    @State private var colorHex: String?
 
     init(
         folders: [FolderEntity],
         tags: [TagEntity] = [],
         initialName: String = "",
         initialInput: SmartCollectionRuleInput = SmartCollectionRuleInput(),
+        initialIcon: String? = nil,
+        initialColor: String? = nil,
         isEdit: Bool = false,
-        onSubmit: @escaping (String, SmartCollectionRuleInput) -> Void,
+        onSubmit: @escaping (String, SmartCollectionRuleInput, String?, String?) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.folders = folders
         self.tags = tags
         self.initialName = initialName
         self.initialInput = initialInput
+        self.initialIcon = initialIcon
+        self.initialColor = initialColor
         self.isEdit = isEdit
         self.onSubmit = onSubmit
         self.onCancel = onCancel
-        _name  = State(initialValue: initialName)
-        _input = State(initialValue: initialInput)
+        _name     = State(initialValue: initialName)
+        _input    = State(initialValue: initialInput)
+        _iconSlug = State(initialValue: initialIcon)
+        _colorHex = State(initialValue: initialColor)
     }
 
     private struct Option<T: Hashable>: Hashable {
@@ -136,6 +147,12 @@ struct SmartCollectionEditorView: View {
                     ocrChip(label: "OCR text", state: input.hasOcrText) {
                         input.hasOcrText = cycle(input.hasOcrText)
                     }
+
+                    sectionLabel("ICON")
+                    iconPaletteRow
+
+                    sectionLabel("COLOR")
+                    colorPaletteRow
                 }
                 .padding(QuickInkSpacing.s4)
             }
@@ -148,10 +165,58 @@ struct SmartCollectionEditorView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                        onSubmit(trimmed, input)
+                        onSubmit(trimmed, input, iconSlug, colorHex)
                     }
                     .disabled(input.isEmpty)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var iconPaletteRow: some View {
+        FlowChipsRow {
+            ForEach(SmartCollectionIconPalette, id: \.slug) { option in
+                let isActive = option.slug == iconSlug
+                Button(action: {
+                    iconSlug = isActive ? nil : option.slug
+                }) {
+                    Image(systemName: option.symbol)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(isActive ? .white : QuickInkColors.inkSoft)
+                        .frame(width: 32, height: 32)
+                        .background(isActive ? QuickInkColors.ink : QuickInkColors.surface,
+                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(isActive ? QuickInkColors.ink : QuickInkColors.border,
+                                        lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var colorPaletteRow: some View {
+        FlowChipsRow {
+            ForEach(workspaceFolderPalette, id: \.self) { hex in
+                let isActive = hex == colorHex
+                Button(action: {
+                    colorHex = isActive ? nil : hex
+                }) {
+                    Circle()
+                        .fill(colorFromHex(hex) ?? QuickInkColors.accent)
+                        .frame(width: 28, height: 28)
+                        .overlay(
+                            Circle().stroke(
+                                isActive ? QuickInkColors.ink : QuickInkColors.border,
+                                lineWidth: isActive ? 2 : 1
+                            )
+                        )
+                }
+                .buttonStyle(.plain)
             }
         }
     }
