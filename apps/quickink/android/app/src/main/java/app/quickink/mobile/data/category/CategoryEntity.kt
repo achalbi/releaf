@@ -39,6 +39,18 @@ data class CategoryEntity(
     @ColumnInfo(name = "position", defaultValue = "0")
     val position: Int,
 
+    /**
+     * Workspace v1: optional hex color for the tag chip (e.g. "#E66943").
+     * Stored as text so the palette can grow without a schema migration.
+     * NULL → UI falls back to the accent tint. Added in v4_workspace.sql.
+     *
+     * Note: this entity is being semantically renamed from
+     * "category" to "tag" in Phase A.2 — table will rename to
+     * `tags`, package to `data.tag`, class to `TagEntity`.
+     */
+    @ColumnInfo(name = "color")
+    val color: String? = null,
+
     @ColumnInfo(name = "drive_file_id")
     val driveFileId: String?,
 

@@ -24,6 +24,12 @@ import androidx.room.PrimaryKey
         Index(value = ["user_id", "created_at"], name = "idx_captures_user_created"),
         Index(value = ["dirty"], name = "idx_captures_dirty"),
         Index(value = ["deleted_at"], name = "idx_captures_tombstone"),
+        // Workspace v1: folder-detail screen lists captures in a
+        // folder, newest first. See v4_workspace.sql.
+        Index(value = ["folder_id", "created_at"], name = "idx_captures_folder_created"),
+        // Workspace v1: Continue card lookup — most-recently-opened
+        // capture per user.
+        Index(value = ["user_id", "last_opened_at"], name = "idx_captures_last_opened"),
     ],
 )
 data class CaptureEntity(
@@ -114,6 +120,47 @@ data class CaptureEntity(
      */
     @ColumnInfo(name = "address")
     val address: String? = null,
+
+    /**
+     * Workspace v1: the folder this capture lives in. Nullable at the
+     * column level so the v4 migration can backfill in a second pass
+     * (every existing capture is moved into the seeded "Unfiled"
+     * folder on first launch after upgrade — see
+     * `FolderRepository.seedDefaultsIfNeeded` + `CaptureRepository
+     * .backfillFolderId`). After backfill, app code asserts non-null
+     * on read. A capture cannot live nowhere and cannot live in two
+     * folders — one row, one folder.
+     */
+    @ColumnInfo(name = "folder_id")
+    val folderId: String? = null,
+
+    /**
+     * Workspace v1: ISO timestamp of the last time the user opened
+     * this capture in the PDF reader. Written on a debounced
+     * page-scroll signal (~500ms) so a quick skim doesn't pollute
+     * the Continue card. NULL = never opened. Most-recent across the
+     * user's captures powers the Workspace home Continue card.
+     */
+    @ColumnInfo(name = "last_opened_at")
+    val lastOpenedAt: String? = null,
+
+    /**
+     * Workspace v1: 1-indexed page the user was on when they last
+     * closed the reader. Paired with [lastOpenedAt] — either both
+     * set or both null. NULL after migration; populated on first
+     * reopen.
+     */
+    @ColumnInfo(name = "last_opened_page")
+    val lastOpenedPage: Int? = null,
+
+    /**
+     * Workspace v1: install id of the device that last touched the
+     * capture. Reserved for the future cross-device Continue UX
+     * ("you on iPhone, 2h ago"). Not surfaced in the v1 home
+     * screen — column reservation only.
+     */
+    @ColumnInfo(name = "last_opened_device")
+    val lastOpenedDevice: String? = null,
 
     @ColumnInfo(name = "conflict_stub")
     val conflictStub: String?,

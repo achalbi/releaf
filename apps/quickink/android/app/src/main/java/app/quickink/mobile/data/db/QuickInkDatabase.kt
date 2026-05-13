@@ -35,12 +35,18 @@ import app.quickink.mobile.data.analytics.AnalyticsOutboxDao
 import app.quickink.mobile.data.analytics.AnalyticsOutboxEntity
 import app.quickink.mobile.data.capture.CaptureDao
 import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.capturetag.CaptureTagDao
+import app.quickink.mobile.data.capturetag.CaptureTagEntity
 import app.quickink.mobile.data.category.CategoryDao
 import app.quickink.mobile.data.category.CategoryEntity
+import app.quickink.mobile.data.folder.FolderDao
+import app.quickink.mobile.data.folder.FolderEntity
 import app.quickink.mobile.data.ocr.OcrResultDao
 import app.quickink.mobile.data.ocr.OcrResultEntity
 import app.quickink.mobile.data.profile.ProfileSettingsDao
 import app.quickink.mobile.data.profile.ProfileSettingsEntity
+import app.quickink.mobile.data.smartcollection.SmartCollectionDao
+import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
 import app.releaf.mobile.data.notepad.NotepadDao
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.sync.SyncStateDao
@@ -55,7 +61,21 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         CategoryEntity::class,
         ProfileSettingsEntity::class,
         AnalyticsOutboxEntity::class,
+        // ─── Workspace v1 (Phase A) ────────────────────────
+        FolderEntity::class,
+        CaptureTagEntity::class,
+        SmartCollectionEntity::class,
     ],
+    // v9 — Workspace v1 Phase A. Adds three new tables (folders,
+    // capture_tags, smart_collections) for the two-axis IA + smart
+    // collections (see WORKSPACE_SPEC.md + plan doc). Adds four
+    // columns to `captures`: folder_id, last_opened_at,
+    // last_opened_page, last_opened_device. Adds `color` to
+    // `categories` (will be renamed to `tags` in Phase A.2). The
+    // SQL canonical record is shared/design-system/migrations/
+    // quickink/v4_workspace.sql; Room rebuilds destructively here
+    // until real users have data.
+    //
     // v8 — adds `captures.address`, the formatted full street
     // address built from `Geocoder.getFromLocation` results
     // (Phase 7.1 — Address). Mirror of iOS GRDB
@@ -77,7 +97,7 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // captures.category column. `fallbackToDestructiveMigration`
     // below handles the rebuild; when real users have data we'll
     // register real Migration objects.
-    version       = 8,
+    version       = 9,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {
@@ -89,6 +109,11 @@ abstract class QuickInkDatabase : RoomDatabase() {
     abstract fun categoryDao():          CategoryDao
     abstract fun profileSettingsDao():   ProfileSettingsDao
     abstract fun analyticsOutboxDao():   AnalyticsOutboxDao
+
+    // ─── Workspace v1 (Phase A) ──────────────────────────────────
+    abstract fun folderDao():            FolderDao
+    abstract fun captureTagDao():        CaptureTagDao
+    abstract fun smartCollectionDao():   SmartCollectionDao
 
     companion object {
         @Volatile

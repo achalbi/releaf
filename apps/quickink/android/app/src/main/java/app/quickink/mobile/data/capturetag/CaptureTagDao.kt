@@ -1,0 +1,168 @@
+/*
+ * CaptureTagDao.kt
+ *
+ * Room DAO for `capture_tags`. CRUD + lookup queries for the
+ * Workspace tag-picker bottom sheet (Screen 6), the folder+tag
+ * filter strip (Screen 2), and the tag library (Screen 4).
+ *
+ * Tag attach/detach goes through [attach] / [detach] rather than
+ * direct INSERT/DELETE so the unique-active soft-delete dance
+ * (re-tag after untag) stays in one place.
+ */
+
+package app.quickink.mobile.data.capturetag
+
+import androidx.room.ColumnInfo
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import androidx.room.Transaction
+import androidx.room.Update
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface CaptureTagDao {
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insert(entity: CaptureTagEntity): Long
+
+    @Update
+    suspend fun update(entity: CaptureTagEntity)
+
+    @Query("SELECT * FROM capture_tags WHERE id = :id LIMIT 1")
+    suspend fun findById(id: String): CaptureTagEntity?
+
+    @Transaction
+    suspend fun upsertFromRemote(entity: CaptureTagEntity) {
+        val rowId = insert(entity)
+        if (rowId != -1L) return
+        val existing = findById(entity.id) ?: return
+        if (existing.updatedAt < entity.updatedAt) {
+            update(entity)
+        }
+    }
+
+    /**
+     * Active join row for a (capture, tag) pair, if any. Used by
+     * [attach] to revive a tombstoned row instead of inserting a
+     * duplicate — preserves the original `id` so the Drive payload
+     * filename doesn't churn.
+     */
+    @Query("""
+        SELECT * FROM capture_tags
+        WHERE capture_id = :captureId
+          AND tag_id = :tagId
+        ORDER BY deleted_at IS NULL DESC, updated_at DESC
+        LIMIT 1
+    """)
+    suspend fun findPair(captureId: String, tagId: String): CaptureTagEntity?
+
+    /**
+     * Live list of tag ids on a single capture. Bound to the
+     * docrow tag chips in the folder-detail screen (Screen 2)
+     * and the tag picker's "currently attached" state (Screen 6).
+     */
+    @Query("""
+        SELECT tag_id FROM capture_tags
+        WHERE capture_id = :captureId AND deleted_at IS NULL
+        ORDER BY created_at ASC
+    """)
+    fun observeTagIdsForCapture(captureId: String): Flow<List<String>>
+
+    @Query("""
+        SELECT tag_id FROM capture_tags
+        WHERE capture_id = :captureId AND deleted_at IS NULL
+        ORDER BY created_at ASC
+    """)
+    suspend fun listTagIdsForCapture(captureId: String): List<String>
+
+    /**
+     * Live list of capture ids tagged with a given tag. Drives the
+     * "browse all docs with #aws" view from the tag library.
+     */
+    @Query("""
+        SELECT capture_id FROM capture_tags
+        WHERE tag_id = :tagId AND deleted_at IS NULL
+        ORDER BY created_at DESC
+    """)
+    fun observeCaptureIdsForTag(tagId: String): Flow<List<String>>
+
+    /**
+     * Active-tag count per tag for the user. Used by the tag
+     * cloud on Workspace home and the tag library's "31 documents"
+     * subtitle. Excludes tombstoned join rows and tombstoned
+     * captures — counts only active assignments (per brief §10 #5).
+     */
+    @Query("""
+        SELECT capture_tags.tag_id AS tag_id, COUNT(*) AS doc_count
+        FROM capture_tags
+        JOIN captures ON captures.id = capture_tags.capture_id
+        WHERE capture_tags.deleted_at IS NULL
+          AND captures.deleted_at IS NULL
+          AND captures.user_id = :userId
+        GROUP BY capture_tags.tag_id
+    """)
+    fun observeTagCounts(userId: String): Flow<List<TagCount>>
+
+    /**
+     * Soft-delete a single join row by id. Used by [detach] —
+     * external callers should prefer that.
+     */
+    @Query("""
+        UPDATE capture_tags
+        SET deleted_at = :timestamp, updated_at = :timestamp, dirty = 1
+        WHERE id = :id
+    """)
+    suspend fun softDeleteById(id: String, timestamp: String)
+
+    /**
+     * Soft-delete every join row pointing at a tag (used when a
+     * tag itself is deleted in the tag library — analogous to
+     * cascading the tombstone). Each row stays sync-able
+     * independently so other devices learn about the removal.
+     */
+    @Query("""
+        UPDATE capture_tags
+        SET deleted_at = :timestamp, updated_at = :timestamp, dirty = 1
+        WHERE tag_id = :tagId AND deleted_at IS NULL
+    """)
+    suspend fun softDeleteByTagId(tagId: String, timestamp: String)
+
+    @Query("""
+        UPDATE capture_tags
+        SET deleted_at = :timestamp, updated_at = :timestamp, dirty = 1
+        WHERE capture_id = :captureId AND deleted_at IS NULL
+    """)
+    suspend fun softDeleteByCaptureId(captureId: String, timestamp: String)
+
+    // ─── Sync surface ─────────────────────────────────────────────
+
+    @Query("SELECT * FROM capture_tags WHERE dirty = 1")
+    suspend fun dirtyRows(): List<CaptureTagEntity>
+
+    @Query("""
+        UPDATE capture_tags
+        SET dirty = 0, drive_file_id = :driveFileId
+        WHERE id = :id
+          AND dirty = 1
+          AND updated_at = :updatedAtSnapshot
+    """)
+    suspend fun markSynced(id: String, driveFileId: String, updatedAtSnapshot: String): Int
+
+    @Query("""
+        UPDATE capture_tags
+        SET dirty = 0
+        WHERE id = :id AND deleted_at IS NOT NULL
+    """)
+    suspend fun markTombstoneSynced(id: String): Int
+}
+
+/**
+ * Projection for the per-tag document-count query. One row per
+ * tag with active captures attached.
+ */
+data class TagCount(
+    @ColumnInfo(name = "tag_id")    val tagId: String,
+    @ColumnInfo(name = "doc_count") val docCount: Int,
+)
