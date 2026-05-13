@@ -44,6 +44,61 @@ interface CaptureTagDao {
     }
 
     /**
+     * Idempotent attach. If an active join row already exists for
+     * the pair, no-op. If a tombstoned row exists, revive it
+     * (clear deleted_at + bump timestamps). Otherwise insert a
+     * fresh row. Preserves the existing row's id so the Drive
+     * payload filename doesn't churn across attach/detach cycles.
+     */
+    @Transaction
+    suspend fun attachTag(
+        joinId: String,
+        captureId: String,
+        tagId: String,
+        source: String,
+        timestamp: String,
+    ) {
+        val existing = findPair(captureId, tagId)
+        if (existing == null) {
+            insert(
+                CaptureTagEntity(
+                    id          = joinId,
+                    captureId   = captureId,
+                    tagId       = tagId,
+                    source      = source,
+                    driveFileId = null,
+                    createdAt   = timestamp,
+                    updatedAt   = timestamp,
+                    dirty       = true,
+                    deletedAt   = null,
+                ),
+            )
+            return
+        }
+        if (existing.deletedAt != null) {
+            // Reviving a tombstoned row preserves its id (and any
+            // Drive backing). Bump timestamps + clear the tombstone.
+            update(
+                existing.copy(
+                    deletedAt = null,
+                    updatedAt = timestamp,
+                    source    = source,
+                    dirty     = true,
+                ),
+            )
+        }
+        // active row already present — no-op.
+    }
+
+    /** Soft-detach a tag from a capture. No-op if no active row. */
+    @Transaction
+    suspend fun detachTag(captureId: String, tagId: String, timestamp: String) {
+        val existing = findPair(captureId, tagId) ?: return
+        if (existing.deletedAt != null) return
+        softDeleteById(existing.id, timestamp)
+    }
+
+    /**
      * Active join row for a (capture, tag) pair, if any. Used by
      * [attach] to revive a tombstoned row instead of inserting a
      * duplicate — preserves the original `id` so the Drive payload

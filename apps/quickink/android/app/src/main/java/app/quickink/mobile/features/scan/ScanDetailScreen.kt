@@ -101,6 +101,7 @@ import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import androidx.core.content.FileProvider
 import app.releaf.mobile.auth.AuthState
 import app.quickink.mobile.features.workspace.FolderPickerSheet
+import app.quickink.mobile.features.workspace.TagPickerSheet
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.sync.DeviceIdentity
 import coil.compose.AsyncImage
@@ -144,6 +145,10 @@ fun ScanDetailScreen(
     // "Move to folder" row is tapped. Sheet observes the folder list
     // and writes via [CaptureDao.setFolder] on pick.
     var showFolderPicker by remember(captureId) { mutableStateOf(false) }
+
+    // Workspace v1 tag picker — Manage tags row opens it. Manual
+    // entry only in Phase C.2; AI-suggested chips ship in Phase E.
+    var showTagPicker by remember(captureId) { mutableStateOf(false) }
     val folders by remember(userId, folderDao) {
         folderDao.observeActive(userId)
     }.collectAsState(initial = emptyList())
@@ -495,6 +500,7 @@ fun ScanDetailScreen(
                             exportAsPdf(context, current.pdfUri)
                         },
                         onMoveToFolder        = { showFolderPicker = true },
+                        onManageTags          = { showTagPicker = true },
                         onDelete              = { showDeleteConfirm = true },
                         // Business-card-only Add-to-contact row.
                         // Runs the full bbox-aware extraction
@@ -605,6 +611,17 @@ fun ScanDetailScreen(
                 }
             },
             containerColor   = colors.surface,
+        )
+    }
+
+    // Workspace v1 tag picker — opened by the Actions card's
+    // "Manage tags" row. The sheet writes diffs to capture_tags on
+    // Save; no work happens on Cancel.
+    if (showTagPicker) {
+        TagPickerSheet(
+            captureId = captureId,
+            userId    = userId,
+            onDismiss = { showTagPicker = false },
         )
     }
 
@@ -1437,6 +1454,7 @@ private fun ActionsCard(
     onShareAsImage: () -> Unit,
     onExportPdf: () -> Unit,
     onMoveToFolder: () -> Unit,
+    onManageTags: () -> Unit,
     onDelete: () -> Unit,
     /**
      * True while the parent is rasterising the capture's pages for
@@ -1523,6 +1541,12 @@ private fun ActionsCard(
                 icon    = Icons.Outlined.Folder,
                 label   = "Move to folder",
                 onClick = onMoveToFolder,
+            )
+            ActionDivider()
+            ActionRow(
+                icon    = Icons.Outlined.LocalOffer,
+                label   = "Manage tags",
+                onClick = onManageTags,
             )
             ActionDivider()
             ActionRow(
