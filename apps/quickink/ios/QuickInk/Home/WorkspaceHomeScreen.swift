@@ -29,6 +29,7 @@
 import SwiftUI
 import Combine
 import GRDB
+import ReleafCoreData
 import ReleafCoreDesignSystem
 
 @MainActor
@@ -50,6 +51,7 @@ public struct WorkspaceHomeScreen: View {
     @State private var folderEditorMode: FolderEditorMode? = nil
     @State private var folderActionsTarget: FolderEntity? = nil
     @State private var folderDeleteTarget: FolderEntity? = nil
+    @State private var showSmartEditor: Bool = false
 
     public init(
         userId: String,
@@ -92,9 +94,7 @@ public struct WorkspaceHomeScreen: View {
                         .padding(.horizontal, AppSpacing.s4)
                 }
 
-                if !viewModel.smartCollections.isEmpty {
-                    smartCollectionsStrip
-                }
+                smartCollectionsStrip
 
                 foldersSection
                     .padding(.horizontal, AppSpacing.s4)
@@ -163,6 +163,23 @@ public struct WorkspaceHomeScreen: View {
             )
             .presentationDetents([.medium])
         }
+        .sheet(isPresented: $showSmartEditor) {
+            SmartCollectionEditorView(
+                folders: viewModel.folders,
+                onSubmit: { name, folderId, datePreset in
+                    Task {
+                        await saveSmartCollection(
+                            name: name,
+                            folderId: folderId,
+                            datePreset: datePreset
+                        )
+                        showSmartEditor = false
+                    }
+                },
+                onCancel: { showSmartEditor = false }
+            )
+            .presentationDetents([.large])
+        }
         .alert(
             "Delete \"\(folderDeleteTarget?.name ?? "")\"?",
             isPresented: Binding(
@@ -184,6 +201,42 @@ public struct WorkspaceHomeScreen: View {
                     : "\(count) capture\(count == 1 ? "" : "s") will move to Unfiled."
             )
         }
+    }
+
+    private func saveSmartCollection(
+        name: String,
+        folderId: String?,
+        datePreset: String?
+    ) async {
+        var clauses: [RuleClause] = []
+        if let folderId { clauses.append(.folderIs(folderId: folderId)) }
+        if let datePreset {
+            clauses.append(.dateRange(field: "created_at", preset: datePreset))
+        }
+        guard !clauses.isEmpty else { return }
+        let now = IsoClock.nowIso()
+        let dbQueue = QuickInkDatabase.shared.dbQueue
+        let nextPos = (try? await dbQueue.read { db in
+            (try Int.fetchOne(db, sql: """
+                SELECT COALESCE(MAX(position), -1) + 1
+                FROM smart_collections
+                WHERE user_id = ? AND deleted_at IS NULL
+                """, arguments: [userId])) ?? 0
+        }) ?? 0
+        let row = SmartCollectionEntity(
+            id:        Uuidv7.generate(),
+            userId:    userId,
+            name:      name.isEmpty ? "Untitled collection" : name,
+            icon:      nil,
+            color:     nil,
+            ruleJson:  SmartCollectionRule.encode(clauses),
+            position:  nextPos,
+            isSeeded:  false,
+            createdAt: now,
+            updatedAt: now,
+            dirty:     true,
+        )
+        try? await dbQueue.write { db in try row.insert(db) }
     }
 
     // MARK: - Header
@@ -303,17 +356,36 @@ public struct WorkspaceHomeScreen: View {
 
     private var smartCollectionsStrip: some View {
         VStack(alignment: .leading, spacing: AppSpacing.s2) {
-            Text("Smart collections")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(QuickInkColors.ink)
-                .padding(.horizontal, AppSpacing.s4)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(viewModel.smartCollections) { sc in
-                        smartCollectionCard(sc)
-                    }
+            HStack {
+                Text("Smart collections")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(QuickInkColors.ink)
+                Spacer()
+                Button(action: { showSmartEditor = true }) {
+                    Text("+ NEW")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundColor(QuickInkColors.accent)
                 }
-                .padding(.horizontal, AppSpacing.s4)
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, AppSpacing.s4)
+
+            if viewModel.smartCollections.isEmpty {
+                Text("Save tag combinations or create a rule-based view.")
+                    .font(.system(size: 11.5))
+                    .italic()
+                    .foregroundColor(QuickInkColors.muted)
+                    .padding(.horizontal, AppSpacing.s4)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(viewModel.smartCollections) { sc in
+                            smartCollectionCard(sc)
+                        }
+                    }
+                    .padding(.horizontal, AppSpacing.s4)
+                }
             }
         }
     }

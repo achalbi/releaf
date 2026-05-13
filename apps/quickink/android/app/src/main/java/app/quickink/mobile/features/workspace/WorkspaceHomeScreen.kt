@@ -92,7 +92,11 @@ import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capturetag.TagCount
 import app.quickink.mobile.data.folder.FolderEntity
 import app.quickink.mobile.data.folder.FolderRepository
+import app.quickink.mobile.data.smartcollection.RuleClause
 import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
+import app.quickink.mobile.data.smartcollection.SmartCollectionRule
+import app.releaf.mobile.data.common.IsoClock
+import app.releaf.mobile.data.common.Uuidv7
 import app.quickink.mobile.data.tag.TagEntity
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
@@ -139,6 +143,7 @@ fun WorkspaceHomeScreen(
     var editorTarget       by remember { mutableStateOf<FolderEditorTarget?>(null) }
     var actionsForFolder   by remember { mutableStateOf<FolderEntity?>(null) }
     var confirmDeleteFolder by remember { mutableStateOf<FolderEntity?>(null) }
+    var showSmartEditor    by remember { mutableStateOf(false) }
 
     // Per-tab observers. `userId` keys the flow rebuild so a sign-out
     // / sign-in doesn't leak state across users.
@@ -250,13 +255,12 @@ fun WorkspaceHomeScreen(
                 Spacer(Modifier.height(QuickInkSpacing.s4))
             }
 
-            if (smartCollections.isNotEmpty()) {
-                SmartCollectionsStrip(
-                    collections = smartCollections,
-                    onOpen      = onOpenSmartCollection,
-                )
-                Spacer(Modifier.height(QuickInkSpacing.s4))
-            }
+            SmartCollectionsStrip(
+                collections     = smartCollections,
+                onOpen          = onOpenSmartCollection,
+                onNewCollection = { showSmartEditor = true },
+            )
+            Spacer(Modifier.height(QuickInkSpacing.s4))
 
             FoldersSection(
                 folders             = folders,
@@ -363,6 +367,50 @@ fun WorkspaceHomeScreen(
                 scope.launch {
                     folderRepo.softDelete(userId, folder.id)
                     confirmDeleteFolder = null
+                }
+            },
+        )
+    }
+
+    if (showSmartEditor) {
+        SmartCollectionEditorDialog(
+            folders   = folders,
+            onDismiss = { showSmartEditor = false },
+            onSubmit  = { name, folderId, datePreset ->
+                scope.launch {
+                    val now = IsoClock.nowIso()
+                    val clauses: List<RuleClause> = buildList {
+                        if (folderId != null) {
+                            add(RuleClause.FolderIs(folderId))
+                        }
+                        if (datePreset != null) {
+                            add(RuleClause.DateRange(field = "created_at", preset = datePreset))
+                        }
+                    }
+                    if (clauses.isEmpty()) {
+                        showSmartEditor = false
+                        return@launch
+                    }
+                    val ruleJson = SmartCollectionRule.encode(clauses)
+                    val existing = app.database.smartCollectionDao().listActive(userId)
+                    val nextPos = (existing.maxOfOrNull { it.position } ?: -1) + 1
+                    app.database.smartCollectionDao().insert(
+                        SmartCollectionEntity(
+                            id        = Uuidv7.generate(),
+                            userId    = userId,
+                            name      = name.ifEmpty { "Untitled collection" },
+                            icon      = null,
+                            color     = null,
+                            ruleJson  = ruleJson,
+                            position  = nextPos,
+                            isSeeded  = false,
+                            createdAt = now,
+                            updatedAt = now,
+                            dirty     = true,
+                            deletedAt = null,
+                        ),
+                    )
+                    showSmartEditor = false
                 }
             },
         )
@@ -612,6 +660,7 @@ private fun ContinueCard(
 private fun SmartCollectionsStrip(
     collections: List<SmartCollectionEntity>,
     onOpen: (SmartCollectionEntity) -> Unit,
+    onNewCollection: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
@@ -627,6 +676,13 @@ private fun SmartCollectionsStrip(
             text  = "Smart collections",
             style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
             color = colors.ink,
+        )
+        Text(
+            text  = "+ NEW",
+            style = type.label.copy(letterSpacing = 1.2.sp, fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold),
+            color = colors.accent,
+            modifier = Modifier.clickable(onClick = onNewCollection),
         )
     }
 
