@@ -40,6 +40,7 @@ import androidx.navigation.navArgument
 import app.quickink.mobile.data.analytics.AnalyticsFlushWorker
 import app.quickink.mobile.data.analytics.AnalyticsRepository
 import app.quickink.mobile.data.capture.CaptureRepository
+import app.quickink.mobile.data.folder.FolderRepository
 import app.quickink.mobile.data.tag.TagRepository
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import kotlinx.coroutines.launch
@@ -310,20 +311,32 @@ private fun MainShell(
         )
     }
 
-    // Idempotent first-launch / first-sign-in seed of the default 6
-    // categories. `LaunchedEffect(userId)` fires once per signed-in
-    // user; the repository skips work when rows already exist.
+    // Idempotent first-launch / first-sign-in seed of the default
+    // tags + the Workspace v1 folder/tag migration.
+    // `LaunchedEffect(userId)` fires once per signed-in user; every
+    // step short-circuits when its work is already done.
     LaunchedEffect(userId) {
         try {
-            val repo = TagRepository(
-                tagDao = app.database.tagDao(),
-                captureDao  = app.database.captureDao(),
+            val tagRepo = TagRepository(
+                tagDao     = app.database.tagDao(),
+                captureDao = app.database.captureDao(),
             )
-            repo.seedDefaultsIfEmpty(userId)
+            tagRepo.seedDefaultsIfEmpty(userId)
             // One-shot migration for users on the previous seed
             // that included "Study". Idempotent + flag-guarded;
             // safe to call on every launch.
-            repo.migrateLegacyStudyToBusinessCardIfNeeded(context, userId)
+            tagRepo.migrateLegacyStudyToBusinessCardIfNeeded(context, userId)
+
+            // Workspace v1 Phase A.3 — seed Unfiled folder, backfill
+            // every capture's folder_id, materialize the legacy
+            // `captures.category` value into `capture_tags`.
+            // Idempotent via SharedPreferences guards.
+            FolderRepository(
+                folderDao     = app.database.folderDao(),
+                captureDao    = app.database.captureDao(),
+                tagDao        = app.database.tagDao(),
+                captureTagDao = app.database.captureTagDao(),
+            ).runFirstLaunchMigrationIfNeeded(context, userId)
         } catch (_: Exception) { /* best-effort */ }
     }
 

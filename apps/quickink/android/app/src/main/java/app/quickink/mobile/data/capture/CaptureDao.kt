@@ -273,6 +273,90 @@ interface CaptureDao {
     """)
     suspend fun renameCategory(userId: String, oldName: String, newName: String, timestamp: String)
 
+    // ─── Workspace v1 (Phase A.3) ────────────────────────────────
+
+    /**
+     * Move every active capture currently in [folderId] to
+     * [newFolderId]. Used by [FolderRepository.softDelete] to
+     * relocate the folder's contents to Unfiled before tombstoning
+     * the folder row. Bumps `updated_at` + `dirty` on each touched
+     * row so the move propagates via sync.
+     */
+    @Query("""
+        UPDATE captures
+        SET folder_id  = :newFolderId,
+            updated_at = :timestamp,
+            dirty      = 1
+        WHERE folder_id = :folderId
+          AND deleted_at IS NULL
+    """)
+    suspend fun moveCapturesToFolder(folderId: String, newFolderId: String, timestamp: String)
+
+    /**
+     * Assign every active capture with `folder_id IS NULL` to the
+     * given folder (typically the seeded "Unfiled"). One-time
+     * backfill called from [FolderRepository.backfillFolderIdsIfNeeded]
+     * on first launch after the v9 upgrade. Bumps `updated_at` +
+     * `dirty` so the backfill propagates to other devices.
+     */
+    @Query("""
+        UPDATE captures
+        SET folder_id  = :folderId,
+            updated_at = :timestamp,
+            dirty      = 1
+        WHERE user_id = :userId
+          AND folder_id IS NULL
+          AND deleted_at IS NULL
+    """)
+    suspend fun assignOrphanCapturesToFolder(userId: String, folderId: String, timestamp: String)
+
+    /**
+     * Active captures with a non-null `category` value, for the
+     * one-time materialize-into-capture_tags pass. Used by
+     * [FolderRepository.materializeCategoryToTagsIfNeeded]. Caller
+     * iterates the result and writes a `capture_tags` row per
+     * (capture_id, tag_id) pair.
+     */
+    @Query("""
+        SELECT * FROM captures
+        WHERE user_id = :userId
+          AND category IS NOT NULL
+          AND deleted_at IS NULL
+    """)
+    suspend fun listWithCategory(userId: String): List<CaptureEntity>
+
+    /**
+     * Mark the user's last-opened position on a capture, debounced
+     * by the PDF reader (~500ms after the user lands on a page).
+     * Single row update; the Workspace home Continue card reads the
+     * most-recent across the user via [findContinueCandidate].
+     */
+    @Query("""
+        UPDATE captures
+        SET last_opened_at     = :openedAt,
+            last_opened_page   = :page,
+            last_opened_device = :deviceId,
+            updated_at         = :openedAt,
+            dirty              = 1
+        WHERE id = :id
+    """)
+    suspend fun setLastOpened(id: String, openedAt: String, page: Int, deviceId: String?)
+
+    /**
+     * Most-recently-opened capture for this user, if any. Powers
+     * the Workspace home Continue card. Returns NULL when the user
+     * has never opened a capture (or after a fresh install).
+     */
+    @Query("""
+        SELECT * FROM captures
+        WHERE user_id = :userId
+          AND last_opened_at IS NOT NULL
+          AND deleted_at IS NULL
+        ORDER BY last_opened_at DESC
+        LIMIT 1
+    """)
+    suspend fun findContinueCandidate(userId: String): CaptureEntity?
+
     /**
      * Captures whose category contains the substring (case-
      * insensitive, space-insensitive). Used as the "fast" pass of
