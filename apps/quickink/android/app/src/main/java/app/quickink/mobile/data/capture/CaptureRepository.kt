@@ -152,6 +152,16 @@ class CaptureRepository(
     }
 
     /**
+     * Move a single capture into a folder. Bumps `updated_at` +
+     * `dirty` so the change rides the next sync push. Used by the
+     * scan-review folder picker (`ScanFlowController.setFolder`)
+     * and the scan-detail "Move to folder" affordance.
+     */
+    suspend fun setFolder(captureId: String, folderId: String) {
+        captureDao.setFolder(captureId, folderId, IsoClock.nowIso())
+    }
+
+    /**
      * Persist a successful page recognition into `ocr_results`.
      * `OcrResult.blocks` is encoded to JSON via the
      * `@Serializable` annotations on the value types.

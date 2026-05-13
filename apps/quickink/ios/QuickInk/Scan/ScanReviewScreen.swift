@@ -19,6 +19,7 @@
  */
 
 import SwiftUI
+import Combine
 import GRDB
 import ReleafCoreDesignSystem
 
@@ -27,6 +28,8 @@ struct ScanReviewScreen: View {
     let userId: String
 
     @StateObject private var categoriesVM: TagListViewModel
+    @State private var folders: [FolderEntity] = []
+    @State private var foldersCancellable: AnyCancellable? = nil
     @State private var suggestedNames: [String] = []
     @State private var acceptedNames: Set<String> = []
 
@@ -56,9 +59,8 @@ struct ScanReviewScreen: View {
                        let cid = inflightCaptureId {
                         suggestionsStrip(captureId: cid)
                     }
-                    if !categoriesVM.categories.isEmpty,
-                       !isFailed {
-                        categoryButtonsGrid
+                    if !folders.isEmpty, !isFailed {
+                        folderButtonsGrid
                     }
                     if !isFailed {
                         savedImagePreview
@@ -86,7 +88,18 @@ struct ScanReviewScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.canvas.ignoresSafeArea())
-        .task { categoriesVM.start() }
+        .task {
+            categoriesVM.start()
+            if foldersCancellable == nil {
+                foldersCancellable = FolderRepository()
+                    .observe(userId: userId)
+                    .receive(on: DispatchQueue.main)
+                    .sink(
+                        receiveCompletion: { _ in },
+                        receiveValue: { rows in folders = rows }
+                    )
+            }
+        }
         .onChange(of: inflightCaptureId) { _ in Task { await refreshSuggestions() } }
         .onChange(of: categoriesVM.categories.count) { _ in Task { await refreshSuggestions() } }
     }
@@ -182,16 +195,17 @@ struct ScanReviewScreen: View {
         return false
     }
 
-    // MARK: - Category buttons
+    // MARK: - Folder buttons
 
-    /// Two-column grid of bigger category buttons. Replaces the
-    /// previous compact chip row — the picker is now the primary
-    /// affordance on this screen, so it gets full-width buttons
-    /// with serif headings instead of small pills.
+    /// Two-column grid of folder buttons. Each button writes the
+    /// capture's `folder_id` through `ScanFlowController
+    /// .setFolder`. The selected button paints with the folder's
+    /// stored color so the picker reads the same as the
+    /// corresponding folder tile on the Workspace home.
     @ViewBuilder
-    private var categoryButtonsGrid: some View {
+    private var folderButtonsGrid: some View {
         VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
-            Text("CATEGORY")
+            Text("FOLDER")
                 .font(QuickInkText.eyebrow)
                 .tracking(QuickInkLetterSpacing.eyebrow)
                 .foregroundStyle(QuickInkColors.muted)
@@ -203,10 +217,10 @@ struct ScanReviewScreen: View {
                 ],
                 spacing: QuickInkSpacing.s3
             ) {
-                ForEach(categoriesVM.categories, id: \.id) { cat in
-                    categoryButton(
-                        name: cat.name,
-                        selected: cat.name == controller.selectedCategory
+                ForEach(folders, id: \.id) { folder in
+                    folderButton(
+                        folder:   folder,
+                        selected: folder.id == controller.selectedFolderId
                     )
                 }
             }
@@ -214,37 +228,44 @@ struct ScanReviewScreen: View {
     }
 
     @ViewBuilder
-    private func categoryButton(name: String, selected: Bool) -> some View {
+    private func folderButton(folder: FolderEntity, selected: Bool) -> some View {
+        // Folder color drives the active fill so the button reads
+        // the same as the corresponding folder tile on Workspace
+        // home. Falls back to the accent if the stored hex doesn't
+        // parse.
+        let folderColor = colorFromHex(folder.color) ?? QuickInkColors.accent
         Button(action: {
-            // Tap-to-toggle: tapping the active button clears the
-            // selection so the user can leave the capture
-            // un-categorised. Tapping a different one switches.
-            controller.setCategory(selected ? nil : name)
+            controller.setFolder(folder.id)
         }) {
-            // Compact button — was minHeight 64 / padding s3 /
-            // QuickInkText.heading, which made the picker feel like a
-            // hero grid. Shrunk to 44pt with cardTitle so the page
-            // reads as a scan review with categories beneath, not a
-            // category-picker hero. Mirrors Android.
-            Text(name)
-                .font(QuickInkText.cardTitle)
-                .foregroundStyle(selected ? QuickInkColors.textOnAccent : QuickInkColors.ink)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .padding(.horizontal, QuickInkSpacing.s2)
-                .padding(.vertical, QuickInkSpacing.s2)
-                .background(
-                    RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                        .fill(selected ? QuickInkColors.accent : QuickInkColors.surface)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                        .strokeBorder(selected ? QuickInkColors.accent : QuickInkColors.border, lineWidth: 1)
-                )
+            HStack(spacing: QuickInkSpacing.s2) {
+                if !selected {
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(folderColor)
+                        .frame(width: 10, height: 10)
+                }
+                Text(folder.name)
+                    .font(QuickInkText.cardTitle)
+                    .foregroundStyle(selected ? QuickInkColors.textOnAccent : QuickInkColors.ink)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .padding(.horizontal, QuickInkSpacing.s2)
+            .padding(.vertical, QuickInkSpacing.s2)
+            .background(
+                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                    .fill(selected ? folderColor : QuickInkColors.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                    .strokeBorder(
+                        selected ? folderColor : QuickInkColors.border,
+                        lineWidth: 1
+                    )
+            )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(name)
+        .accessibilityLabel(folder.name)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 

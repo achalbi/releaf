@@ -67,6 +67,13 @@ public final class ScanFlowController: ObservableObject {
     /// tag join.
     @Published public var selectedCategory: String? = nil
 
+    /// User-selected folder for the in-flight capture. Bound to
+    /// the folder picker on `ScanReviewScreen`. Persisted via
+    /// `setFolder(_:)` → `CaptureRepository.setFolder` (which
+    /// writes `captures.folder_id`). Defaults to nil; the first-
+    /// launch backfill catches anything still unassigned.
+    @Published public var selectedFolderId: String? = nil
+
     /// First-page preview JPEG of the in-flight capture. Surfaced
     /// to `ScanReviewScreen` so it can render the saved image below
     /// the category picker. `nil` outside of an active scan pass.
@@ -496,7 +503,25 @@ public final class ScanFlowController: ObservableObject {
         activeTask = nil
         state = .idle
         selectedCategory = nil
+        selectedFolderId = nil
         previewImageURL  = nil
+    }
+
+    /// Picked-folder persistence hook for the review screen's
+    /// folder buttons. Updates `selectedFolderId` so the UI
+    /// redraws, then fires-and-forgets a `captures.folder_id`
+    /// write against the in-flight capture. No-ops when there's
+    /// no active capture or when called with nil (the controller
+    /// doesn't expose a "clear folder" affordance today).
+    public func setFolder(_ folderId: String?) {
+        selectedFolderId = folderId
+        guard let folderId, let captureId = currentCaptureId else { return }
+        Task {
+            try? await repository.setFolder(
+                captureId: captureId,
+                folderId:  folderId
+            )
+        }
     }
 
     /// Picked-tag persistence hook for the review screen's chip

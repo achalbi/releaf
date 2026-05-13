@@ -67,6 +67,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
+import app.quickink.mobile.data.folder.FolderEntity
+import app.quickink.mobile.data.folder.FolderRepository
 import app.quickink.mobile.data.tag.TagRepository
 import app.quickink.mobile.features.workspace.AutoTagSuggester
 import app.releaf.mobile.data.common.IsoClock
@@ -89,7 +91,7 @@ fun ScanReviewScreen(
     userId: String,
 ) {
     val state by controller.state.collectAsState()
-    val selectedCategory by controller.selectedCategory.collectAsState()
+    val selectedFolderId by controller.selectedFolderId.collectAsState()
     val previewImageUri by controller.previewImageUri.collectAsState()
     val colors = LocalQuickInkColors.current
 
@@ -98,6 +100,15 @@ fun ScanReviewScreen(
     val categoryRepo = remember(app) { TagRepository(app.database.tagDao()) }
     val categories by remember(userId, categoryRepo) {
         categoryRepo.observe(userId)
+    }.collectAsState(initial = emptyList())
+    // Folder picker — the scan-review primary picker is folders
+    // now (the previous "category" grid attached a tag; that
+    // surface moved to the post-save tag picker + AI-suggested
+    // chips above). Folder writes the capture's `folder_id`
+    // through `ScanFlowController.setFolder`.
+    val folderRepo = remember(app) { FolderRepository(folderDao = app.database.folderDao()) }
+    val folders by remember(userId, folderRepo) {
+        folderRepo.observe(userId)
     }.collectAsState(initial = emptyList())
 
     val isFailed = state is ScanFlowController.State.Failed
@@ -188,11 +199,11 @@ fun ScanReviewScreen(
                 )
             }
 
-            if (categories.isNotEmpty() && !isFailed) {
-                CategoryButtonsGrid(
-                    categories       = categories.map { it.name },
-                    selectedCategory = selectedCategory,
-                    onSelect         = { controller.setCategory(it) },
+            if (folders.isNotEmpty() && !isFailed) {
+                FolderButtonsGrid(
+                    folders          = folders,
+                    selectedFolderId = selectedFolderId,
+                    onSelect         = { controller.setFolder(it) },
                 )
             }
 
@@ -214,43 +225,39 @@ fun ScanReviewScreen(
 }
 
 /**
- * Two-column grid of bigger category buttons. Replaces the previous
- * compact chip row — the picker is now the primary affordance on
- * this screen, so it gets full-width buttons with serif headings
- * instead of small pills.
+ * Two-column grid of folder buttons. Each button writes the
+ * capture's `folder_id` through `ScanFlowController.setFolder`.
+ * The selected button paints with the folder's stored color so
+ * the picker reads the same as the Workspace home folder list.
  */
 @Composable
-private fun CategoryButtonsGrid(
-    categories: List<String>,
-    selectedCategory: String?,
-    onSelect: (String?) -> Unit,
+private fun FolderButtonsGrid(
+    folders: List<FolderEntity>,
+    selectedFolderId: String?,
+    onSelect: (String) -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
-    val type = LocalQuickInkTypography.current
+    val type   = LocalQuickInkTypography.current
 
     Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
         Text(
-            text  = "CATEGORY",
+            text  = "FOLDER",
             style = type.eyebrow,
             color = colors.muted,
         )
 
-        // Manual two-column rows because we sit inside a verticalScroll
-        // (LazyVerticalGrid + verticalScroll don't compose). Pairs the
-        // categories into rows of 2.
-        categories.chunked(2).forEach { pair ->
+        // Manual two-column rows because the surrounding column is
+        // a verticalScroll (LazyVerticalGrid + verticalScroll don't
+        // compose). Pairs the folder list into rows of 2.
+        folders.chunked(2).forEach { pair ->
             Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
-                pair.forEach { name ->
-                    val selected = name == selectedCategory
+                pair.forEach { folder ->
+                    val selected = folder.id == selectedFolderId
                     Box(modifier = Modifier.weight(1f)) {
-                        CategoryButton(
-                            name     = name,
+                        FolderButton(
+                            folder   = folder,
                             selected = selected,
-                            onClick  = {
-                                // Tap-to-toggle: tapping the active
-                                // button clears the selection.
-                                onSelect(if (selected) null else name)
-                            },
+                            onClick  = { onSelect(folder.id) },
                         )
                     }
                 }
@@ -263,16 +270,19 @@ private fun CategoryButtonsGrid(
 }
 
 @Composable
-private fun CategoryButton(name: String, selected: Boolean, onClick: () -> Unit) {
+private fun FolderButton(folder: FolderEntity, selected: Boolean, onClick: () -> Unit) {
     val colors = LocalQuickInkColors.current
-    val type = LocalQuickInkTypography.current
-    val bg = if (selected) colors.accent else colors.surface
-    val fg = if (selected) colors.textOnAccent else colors.ink
-    val borderColor = if (selected) colors.accent else colors.border
-    // Compact button — was minHeight 64dp / padding s3 / type.heading,
-    // which made the picker feel like a hero grid. Shrunk to a tap-
-    // friendly 44dp tall with cardTitle so the page reads as a scan
-    // review with categories beneath, not a category-picker hero.
+    val type   = LocalQuickInkTypography.current
+    // Folder color drives the active fill so the button reads the
+    // same as the corresponding folder tile on the Workspace home.
+    // Falls back to the accent if the stored hex doesn't parse.
+    val folderColor = remember(folder.color) {
+        runCatching { Color(android.graphics.Color.parseColor(folder.color)) }
+            .getOrDefault(colors.accent)
+    }
+    val bg          = if (selected) folderColor else colors.surface
+    val fg          = if (selected) colors.textOnAccent else colors.ink
+    val borderColor = if (selected) folderColor else colors.border
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -284,13 +294,29 @@ private fun CategoryButton(name: String, selected: Boolean, onClick: () -> Unit)
             .padding(horizontal = QuickInkSpacing.s2, vertical = QuickInkSpacing.s2),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text     = name,
-            style    = type.cardTitle,
-            color    = fg,
-            textAlign = TextAlign.Center,
-            maxLines  = 2,
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+            // Small filled swatch so unselected rows still telegraph
+            // their folder color. Hidden on the active row because
+            // the button itself is already painted the same hue.
+            if (!selected) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(folderColor),
+                )
+            }
+            Text(
+                text      = folder.name,
+                style     = type.cardTitle,
+                color     = fg,
+                textAlign = TextAlign.Center,
+                maxLines  = 2,
+            )
+        }
     }
 }
 

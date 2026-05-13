@@ -142,6 +142,18 @@ class ScanFlowController(
     val selectedCategory: StateFlow<String?> = _selectedCategory.asStateFlow()
 
     /**
+     * User-selected folder for the in-flight capture. Bound to the
+     * folder picker on `ScanReviewScreen`. Persisted via
+     * [setFolder] → `CaptureRepository.setFolder` (which writes
+     * `captures.folder_id`). Defaults to `null`; the first-launch
+     * backfill assigns every unassigned capture to the seeded
+     * "Unfiled" folder, so a capture without an explicit pick still
+     * ends up filed correctly.
+     */
+    private val _selectedFolderId = MutableStateFlow<String?>(null)
+    val selectedFolderId: StateFlow<String?> = _selectedFolderId.asStateFlow()
+
+    /**
      * First-page preview JPEG of the in-flight capture (a
      * `content://` or `file://` URI string). Surfaced to
      * `ScanReviewScreen` so it can render the saved image below
@@ -410,7 +422,33 @@ class ScanFlowController(
         activeJob = null
         _state.value = State.Idle
         _selectedCategory.value = null
+        _selectedFolderId.value = null
         _previewImageUri.value  = null
+    }
+
+    /**
+     * Picked-folder persistence hook for the review screen's
+     * folder buttons. Updates [selectedFolderId] so the UI
+     * redraws, then fires-and-forgets a `captures.folder_id`
+     * write against the in-flight capture. No-ops when there's
+     * no active capture. Pass `null` to clear back to the seeded
+     * Unfiled folder (the backfill catches the next launch); the
+     * UI doesn't expose that path today but the API is shaped
+     * the same as [setCategory] for symmetry.
+     */
+    fun setFolder(folderId: String?) {
+        _selectedFolderId.value = folderId
+        val captureId = currentCaptureId() ?: return
+        val pickedId  = folderId ?: return
+        scope.launch {
+            try {
+                repository.setFolder(captureId = captureId, folderId = pickedId)
+            } catch (_: Exception) {
+                // Best-effort: a transient SQL failure shouldn't
+                // crash the review flow. The user can retap the
+                // folder button to re-issue the write.
+            }
+        }
     }
 
     /**
