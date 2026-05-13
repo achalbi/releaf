@@ -53,6 +53,8 @@ public struct WorkspaceHomeScreen: View {
     @State private var folderDeleteTarget: FolderEntity? = nil
     @State private var showSmartEditor: Bool = false
     @State private var confirmDeleteCollection: SmartCollectionEntity? = nil
+    @State private var actionsForCollection: SmartCollectionEntity? = nil
+    @State private var editCollection: SmartCollectionEntity? = nil
 
     public init(
         userId: String,
@@ -164,6 +166,40 @@ public struct WorkspaceHomeScreen: View {
             )
             .presentationDetents([.medium])
         }
+        .sheet(item: $actionsForCollection) { collection in
+            smartCollectionActionSheet(collection)
+                .presentationDetents([.height(200)])
+        }
+        .sheet(item: $editCollection) { collection in
+            let clauses = SmartCollectionRule.decode(collection.ruleJson)
+            let initialFolder: String? = clauses.compactMap { c -> String? in
+                if case .folderIs(let id) = c { return id } else { return nil }
+            }.first
+            let initialDate: String? = clauses.compactMap { c -> String? in
+                if case .dateRange(_, let p) = c { return p } else { return nil }
+            }.first
+            SmartCollectionEditorView(
+                folders:           viewModel.folders,
+                initialName:       collection.name,
+                initialFolderId:   initialFolder,
+                initialDatePreset: initialDate,
+                isEdit:            true,
+                onSubmit: { name, folderId, datePreset in
+                    let target = collection
+                    Task {
+                        await updateSmartCollection(
+                            target:     target,
+                            name:       name,
+                            folderId:   folderId,
+                            datePreset: datePreset
+                        )
+                        editCollection = nil
+                    }
+                },
+                onCancel: { editCollection = nil }
+            )
+            .presentationDetents([.large])
+        }
         .alert(
             "Delete \"\(confirmDeleteCollection?.name ?? "")\"?",
             isPresented: Binding(
@@ -228,6 +264,78 @@ public struct WorkspaceHomeScreen: View {
                     ? "The folder is empty. Deleting it can't be undone."
                     : "\(count) capture\(count == 1 ? "" : "s") will move to Unfiled."
             )
+        }
+    }
+
+    @ViewBuilder
+    private func smartCollectionActionSheet(_ collection: SmartCollectionEntity) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(QuickInkColors.accent)
+                Text(collection.name)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(QuickInkColors.ink)
+                Spacer()
+            }
+            .padding(.horizontal, AppSpacing.s4)
+            .padding(.vertical, AppSpacing.s3)
+            Divider().background(QuickInkColors.borderSoft)
+            Button(action: {
+                editCollection = collection
+                actionsForCollection = nil
+            }) {
+                HStack {
+                    Text("Edit").foregroundColor(QuickInkColors.ink).font(.system(size: 15))
+                    Spacer()
+                }
+                .padding(.horizontal, AppSpacing.s4)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Button(action: {
+                confirmDeleteCollection = collection
+                actionsForCollection = nil
+            }) {
+                HStack {
+                    Text("Delete").foregroundColor(QuickInkColors.danger).font(.system(size: 15))
+                    Spacer()
+                }
+                .padding(.horizontal, AppSpacing.s4)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Spacer(minLength: 12)
+        }
+        .background(QuickInkColors.surface)
+    }
+
+    private func updateSmartCollection(
+        target: SmartCollectionEntity,
+        name: String,
+        folderId: String?,
+        datePreset: String?
+    ) async {
+        var clauses: [RuleClause] = []
+        if let folderId { clauses.append(.folderIs(folderId: folderId)) }
+        if let datePreset {
+            clauses.append(.dateRange(field: "created_at", preset: datePreset))
+        }
+        guard !clauses.isEmpty else { return }
+        let now = IsoClock.nowIso()
+        let dbQueue = QuickInkDatabase.shared.dbQueue
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newName = trimmed.isEmpty ? target.name : trimmed
+        let ruleJson = SmartCollectionRule.encode(clauses)
+        try? await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE smart_collections
+                SET name = ?, rule_json = ?, updated_at = ?, dirty = 1
+                WHERE id = ?
+                """, arguments: [newName, ruleJson, now, target.id])
         }
     }
 
@@ -410,7 +518,7 @@ public struct WorkspaceHomeScreen: View {
                     HStack(spacing: 10) {
                         ForEach(viewModel.smartCollections) { sc in
                             smartCollectionCard(sc)
-                                .onLongPressGesture { confirmDeleteCollection = sc }
+                                .onLongPressGesture { actionsForCollection = sc }
                         }
                     }
                     .padding(.horizontal, AppSpacing.s4)

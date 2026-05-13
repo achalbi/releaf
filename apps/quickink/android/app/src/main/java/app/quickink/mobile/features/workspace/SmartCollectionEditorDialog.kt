@@ -61,21 +61,26 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
 @Composable
 internal fun SmartCollectionEditorDialog(
     folders: List<FolderEntity>,
+    initialName: String = "",
+    initialFolderId: String? = null,
+    initialDatePreset: String? = null,
+    isEdit: Boolean = false,
     onDismiss: () -> Unit,
     onSubmit: (name: String, folderId: String?, datePreset: String?) -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
 
-    var name        by remember { mutableStateOf("") }
-    var folderId    by remember { mutableStateOf<String?>(null) }
-    var datePreset  by remember { mutableStateOf<String?>(null) }
+    var name        by remember(initialName)       { mutableStateOf(initialName) }
+    var folderId    by remember(initialFolderId)   { mutableStateOf(initialFolderId) }
+    var datePreset  by remember(initialDatePreset) { mutableStateOf(initialDatePreset) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text  = "New smart collection",
+                text  = if (isEdit) "Edit smart collection"
+                        else        "New smart collection",
                 style = type.body.copy(fontWeight = FontWeight.SemiBold, fontSize = 17.sp),
                 color = colors.ink,
             )

@@ -29,6 +29,7 @@
 @file:OptIn(
     androidx.compose.foundation.ExperimentalFoundationApi::class,
     androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
 )
 
 package app.quickink.mobile.features.workspace
@@ -148,6 +149,12 @@ fun WorkspaceHomeScreen(
     var confirmDeleteCollection by remember {
         mutableStateOf<SmartCollectionEntity?>(null)
     }
+    var actionsForCollection by remember {
+        mutableStateOf<SmartCollectionEntity?>(null)
+    }
+    var editCollection by remember {
+        mutableStateOf<SmartCollectionEntity?>(null)
+    }
 
     // Per-tab observers. `userId` keys the flow rebuild so a sign-out
     // / sign-in doesn't leak state across users.
@@ -262,7 +269,7 @@ fun WorkspaceHomeScreen(
             SmartCollectionsStrip(
                 collections        = smartCollections,
                 onOpen             = onOpenSmartCollection,
-                onLongPress        = { sc -> confirmDeleteCollection = sc },
+                onLongPress        = { sc -> actionsForCollection = sc },
                 onNewCollection    = { showSmartEditor = true },
             )
             Spacer(Modifier.height(QuickInkSpacing.s4))
@@ -372,6 +379,109 @@ fun WorkspaceHomeScreen(
                 scope.launch {
                     folderRepo.softDelete(userId, folder.id)
                     confirmDeleteFolder = null
+                }
+            },
+        )
+    }
+
+    actionsForCollection?.let { collection ->
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { actionsForCollection = null },
+            containerColor = colors.surface,
+        ) {
+            Column(modifier = Modifier.padding(
+                horizontal = QuickInkSpacing.s4,
+                vertical = QuickInkSpacing.s2,
+            )) {
+                Row(
+                    modifier = Modifier.padding(vertical = QuickInkSpacing.s2),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    androidx.compose.material3.Icon(
+                        imageVector = Icons.Outlined.AutoAwesome,
+                        contentDescription = null,
+                        tint = colors.accent,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(QuickInkSpacing.s2))
+                    Text(
+                        text  = collection.name,
+                        style = LocalQuickInkTypography.current.body.copy(
+                            fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                        ),
+                        color = colors.ink,
+                    )
+                }
+                androidx.compose.material3.HorizontalDivider(color = colors.borderSoft)
+                Text(
+                    text  = "Edit",
+                    style = LocalQuickInkTypography.current.body.copy(fontSize = 15.sp),
+                    color = colors.ink,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            editCollection = collection
+                            actionsForCollection = null
+                        }
+                        .padding(vertical = 14.dp),
+                )
+                Text(
+                    text  = "Delete",
+                    style = LocalQuickInkTypography.current.body.copy(fontSize = 15.sp),
+                    color = colors.danger,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            confirmDeleteCollection = collection
+                            actionsForCollection = null
+                        }
+                        .padding(vertical = 14.dp),
+                )
+                Spacer(Modifier.height(QuickInkSpacing.s2))
+            }
+        }
+    }
+
+    editCollection?.let { collection ->
+        val clauses = remember(collection.id) {
+            SmartCollectionRule.decode(collection.ruleJson)
+        }
+        val initialFolder = clauses
+            .filterIsInstance<RuleClause.FolderIs>()
+            .firstOrNull()
+            ?.folderId
+        val initialDate = clauses
+            .filterIsInstance<RuleClause.DateRange>()
+            .firstOrNull()
+            ?.preset
+        SmartCollectionEditorDialog(
+            folders           = folders,
+            initialName       = collection.name,
+            initialFolderId   = initialFolder,
+            initialDatePreset = initialDate,
+            isEdit            = true,
+            onDismiss         = { editCollection = null },
+            onSubmit          = { name, folderId, datePreset ->
+                val target = collection
+                scope.launch {
+                    val now = IsoClock.nowIso()
+                    val newClauses: List<RuleClause> = buildList {
+                        if (folderId != null) add(RuleClause.FolderIs(folderId))
+                        if (datePreset != null) {
+                            add(RuleClause.DateRange("created_at", datePreset))
+                        }
+                    }
+                    if (newClauses.isEmpty()) {
+                        editCollection = null
+                        return@launch
+                    }
+                    val ruleJson = SmartCollectionRule.encode(newClauses)
+                    val dao = app.database.smartCollectionDao()
+                    if (name.isNotEmpty() && name != target.name) {
+                        dao.rename(target.id, name, now)
+                    }
+                    dao.setRule(target.id, ruleJson, now)
+                    editCollection = null
                 }
             },
         )

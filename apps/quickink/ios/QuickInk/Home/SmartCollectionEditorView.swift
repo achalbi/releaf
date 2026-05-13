@@ -18,12 +18,37 @@ import ReleafCoreDesignSystem
 @MainActor
 struct SmartCollectionEditorView: View {
     let folders: [FolderEntity]
+    let initialName: String
+    let initialFolderId: String?
+    let initialDatePreset: String?
+    let isEdit: Bool
     let onSubmit: (_ name: String, _ folderId: String?, _ datePreset: String?) -> Void
     let onCancel: () -> Void
 
-    @State private var name: String = ""
-    @State private var folderId: String? = nil
-    @State private var datePreset: String? = nil
+    @State private var name: String
+    @State private var folderId: String?
+    @State private var datePreset: String?
+
+    init(
+        folders: [FolderEntity],
+        initialName: String = "",
+        initialFolderId: String? = nil,
+        initialDatePreset: String? = nil,
+        isEdit: Bool = false,
+        onSubmit: @escaping (String, String?, String?) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.folders = folders
+        self.initialName = initialName
+        self.initialFolderId = initialFolderId
+        self.initialDatePreset = initialDatePreset
+        self.isEdit = isEdit
+        self.onSubmit = onSubmit
+        self.onCancel = onCancel
+        _name       = State(initialValue: initialName)
+        _folderId   = State(initialValue: initialFolderId)
+        _datePreset = State(initialValue: initialDatePreset)
+    }
 
     private struct Option<T: Hashable>: Hashable {
         let id: T?
@@ -64,7 +89,7 @@ struct SmartCollectionEditorView: View {
                 }
                 .padding(QuickInkSpacing.s4)
             }
-            .navigationTitle("New smart collection")
+            .navigationTitle(isEdit ? "Edit smart collection" : "New smart collection")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
