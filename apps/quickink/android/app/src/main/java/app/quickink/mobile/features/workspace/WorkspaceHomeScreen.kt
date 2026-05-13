@@ -112,6 +112,7 @@ fun WorkspaceHomeScreen(
     onOpenProfile: () -> Unit,
     onOpenTag: (TagEntity) -> Unit,
     onOpenSmartCollection: (SmartCollectionEntity) -> Unit,
+    onBrowseTags: () -> Unit,
     onHome: () -> Unit,
     onScan: () -> Unit,
     onSettings: () -> Unit,
@@ -252,6 +253,7 @@ fun WorkspaceHomeScreen(
                 tags = tags,
                 tagCounts = tagCounts,
                 onOpenTag = onOpenTag,
+                onBrowseAll = onBrowseTags,
             )
 
             Spacer(Modifier.height(QuickInkSpacing.s6))
@@ -780,6 +782,7 @@ private fun TagsSection(
     tags: List<TagEntity>,
     tagCounts: List<TagCount>,
     onOpenTag: (TagEntity) -> Unit,
+    onBrowseAll: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
@@ -805,7 +808,13 @@ private fun TagsSection(
             style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
             color = colors.ink,
         )
-        // "Browse all" → Tag library (Screen 4, Phase D). Out of B.0.
+        Text(
+            text     = "BROWSE ALL",
+            style    = type.label.copy(letterSpacing = 1.2.sp, fontSize = 10.5.sp,
+                                       fontWeight = FontWeight.SemiBold),
+            color    = colors.accent,
+            modifier = Modifier.clickable(onClick = onBrowseAll),
+        )
     }
 
     Spacer(Modifier.height(QuickInkSpacing.s2))

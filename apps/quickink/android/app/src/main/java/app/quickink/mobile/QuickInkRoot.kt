@@ -45,6 +45,7 @@ import app.quickink.mobile.data.tag.TagRepository
 import app.quickink.mobile.data.smartcollection.SmartCollectionRepository
 import app.quickink.mobile.features.workspace.FolderDetailScreen
 import app.quickink.mobile.features.workspace.SmartCollectionScreen
+import app.quickink.mobile.features.workspace.TagLibraryScreen
 import app.quickink.mobile.features.workspace.WorkspaceFeatureFlag
 import app.quickink.mobile.features.workspace.WorkspaceHomeScreen
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
@@ -200,6 +201,9 @@ private object Routes {
     /** Workspace v1 smart-collection view (Phase C — Screen 3). */
     const val SMART_COLLECTION  = "smart_collection/{collectionId}"
     fun smartCollection(id: String): String = "smart_collection/${Uri.encode(id)}"
+
+    /** Workspace v1 tag library (Phase D — Screen 4). */
+    const val TAG_LIBRARY       = "tag_library"
 
     fun noteEditor(entryId: String): String =
         "note_editor/${Uri.encode(entryId)}"
@@ -586,6 +590,7 @@ private fun MainShell(
                 onOpenSmartCollection = { collection ->
                     navController.navigate(Routes.smartCollection(collection.id))
                 },
+                onBrowseTags = { navController.navigate(Routes.TAG_LIBRARY) },
                 onHome     = { navToTab(Routes.HOME) },
                 onScan     = { showQuickCapture = true },
                 onSettings = { navToTab(Routes.SETTINGS) },
@@ -627,6 +632,20 @@ private fun MainShell(
                 onWorkspace   = { navToTab(workspaceTabRoute) },
                 onScan        = { showQuickCapture = true },
                 onSettings    = { navToTab(Routes.SETTINGS) },
+            )
+        }
+        composable(Routes.TAG_LIBRARY) {
+            TagLibraryScreen(
+                userId       = userId,
+                onBack       = { navController.popBackStack() },
+                onOpenTag    = { tag ->
+                    navController.navigate(Routes.categoryEntries(tag.name))
+                },
+                onOpenSearch = { navToTab(Routes.SEARCH) },
+                onHome       = { navToTab(Routes.HOME) },
+                onWorkspace  = { navToTab(workspaceTabRoute) },
+                onScan       = { showQuickCapture = true },
+                onSettings   = { navToTab(Routes.SETTINGS) },
             )
         }
         composable(

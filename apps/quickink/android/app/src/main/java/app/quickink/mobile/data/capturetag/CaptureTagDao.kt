@@ -176,6 +176,31 @@ interface CaptureTagDao {
     fun observeTagIdsInFolder(folderId: String): Flow<List<String>>
 
     /**
+     * Count of active captures that carry *every* tag id in
+     * [tagIds]. Drives the tag-library intersect builder
+     * ("4 matching documents"). Caller passes the list of
+     * selected tags; result is the AND intersection.
+     *
+     * Implementation: GROUP BY capture_id HAVING COUNT(DISTINCT) =
+     * |tagIds|. Excludes tombstoned captures and tombstoned join
+     * rows.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM (
+            SELECT capture_tags.capture_id
+            FROM capture_tags
+            JOIN captures ON captures.id = capture_tags.capture_id
+            WHERE capture_tags.tag_id IN (:tagIds)
+              AND capture_tags.deleted_at IS NULL
+              AND captures.user_id = :userId
+              AND captures.deleted_at IS NULL
+            GROUP BY capture_tags.capture_id
+            HAVING COUNT(DISTINCT capture_tags.tag_id) = :tagCount
+        )
+    """)
+    fun observeIntersectCount(userId: String, tagIds: List<String>, tagCount: Int): Flow<Int>
+
+    /**
      * Soft-delete a single join row by id. Used by [detach] —
      * external callers should prefer that.
      */
