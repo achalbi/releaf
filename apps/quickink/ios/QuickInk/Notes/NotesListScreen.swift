@@ -41,7 +41,7 @@ struct NotesListScreen: View {
     /// (we're already here). The other callbacks switch tabs at the
     /// route level — see QuickInkRoot's tab wiring.
     let onHome: () -> Void
-    let onLibrary: () -> Void
+    let onWorkspace: () -> Void
     let onScan: () -> Void
     let onSearch: () -> Void
     let onSettings: () -> Void
@@ -69,7 +69,7 @@ struct NotesListScreen: View {
         onBack: @escaping () -> Void,
         onOpenScan: @escaping (_ captureId: String) -> Void,
         onHome: @escaping () -> Void = {},
-        onLibrary: @escaping () -> Void = {},
+        onWorkspace: @escaping () -> Void = {},
         onScan: @escaping () -> Void = {},
         onSearch: @escaping () -> Void = {},
         onSettings: @escaping () -> Void = {}
@@ -78,7 +78,7 @@ struct NotesListScreen: View {
         self.onBack = onBack
         self.onOpenScan = onOpenScan
         self.onHome = onHome
-        self.onLibrary = onLibrary
+        self.onWorkspace = onWorkspace
         self.onScan = onScan
         self.onSearch = onSearch
         self.onSettings = onSettings
@@ -121,9 +121,9 @@ struct NotesListScreen: View {
         // automatically so scroll content never sits behind the bar.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             QuickInkBottomNavBar(
-                activeTab:  .library,
+                activeTab:  .workspace,
                 onHome:     onHome,
-                onLibrary:  { /* current tab */ },
+                onWorkspace:  { /* current tab */ },
                 onScan:     onScan,
                 onSearch:   onSearch,
                 onSettings: onSettings

@@ -44,7 +44,7 @@ struct SearchScreen: View {
     /// Tab navigation callbacks for the floating bottom nav. Search
     /// paints itself active; tapping it is a no-op.
     let onHome: () -> Void
-    let onLibrary: () -> Void
+    let onWorkspace: () -> Void
     let onScan: () -> Void
     let onSearch: () -> Void
     let onSettings: () -> Void
@@ -63,7 +63,7 @@ struct SearchScreen: View {
         onOpenScan: @escaping (_ captureId: String) -> Void,
         settings: SettingsState,
         onHome: @escaping () -> Void = {},
-        onLibrary: @escaping () -> Void = {},
+        onWorkspace: @escaping () -> Void = {},
         onScan: @escaping () -> Void = {},
         onSearch: @escaping () -> Void = {},
         onSettings: @escaping () -> Void = {}
@@ -73,7 +73,7 @@ struct SearchScreen: View {
         self.onOpenScan = onOpenScan
         self.settings = settings
         self.onHome = onHome
-        self.onLibrary = onLibrary
+        self.onWorkspace = onWorkspace
         self.onScan = onScan
         self.onSearch = onSearch
         self.onSettings = onSettings
@@ -104,7 +104,7 @@ struct SearchScreen: View {
             QuickInkBottomNavBar(
                 activeTab:  .search,
                 onHome:     onHome,
-                onLibrary:  onLibrary,
+                onWorkspace:  onWorkspace,
                 onScan:     onScan,
                 onSearch:   { /* current tab */ },
                 onSettings: onSettings

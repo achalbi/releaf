@@ -26,7 +26,7 @@ struct ScanDetailScreen: View {
     /// points). When all five are supplied, the floating bottom nav
     /// renders below the content; otherwise it stays hidden.
     let onHome: (() -> Void)?
-    let onLibrary: (() -> Void)?
+    let onWorkspace: (() -> Void)?
     let onScan: (() -> Void)?
     let onSearch: (() -> Void)?
     let onSettings: (() -> Void)?
@@ -86,7 +86,7 @@ struct ScanDetailScreen: View {
         userId: String,
         onBack: @escaping () -> Void,
         onHome: (() -> Void)? = nil,
-        onLibrary: (() -> Void)? = nil,
+        onWorkspace: (() -> Void)? = nil,
         onScan: (() -> Void)? = nil,
         onSearch: (() -> Void)? = nil,
         onSettings: (() -> Void)? = nil
@@ -95,7 +95,7 @@ struct ScanDetailScreen: View {
         self.userId = userId
         self.onBack = onBack
         self.onHome = onHome
-        self.onLibrary = onLibrary
+        self.onWorkspace = onWorkspace
         self.onScan = onScan
         self.onSearch = onSearch
         self.onSettings = onSettings
@@ -147,11 +147,11 @@ struct ScanDetailScreen: View {
         .background(QuickInkColors.bg.ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if hasBottomNav,
-               let onHome, let onLibrary, let onScan, let onSearch, let onSettings {
+               let onHome, let onWorkspace, let onScan, let onSearch, let onSettings {
                 QuickInkBottomNavBar(
                     activeTab:  .none,
                     onHome:     onHome,
-                    onLibrary:  onLibrary,
+                    onWorkspace:  onWorkspace,
                     onScan:     onScan,
                     onSearch:   onSearch,
                     onSettings: onSettings
@@ -301,7 +301,7 @@ struct ScanDetailScreen: View {
     /// support both nav-aware (open from Library/Home) and minimal
     /// (open from a share extension) hosts without a separate flag.
     private var hasBottomNav: Bool {
-        onHome != nil && onLibrary != nil && onScan != nil &&
+        onHome != nil && onWorkspace != nil && onScan != nil &&
         onSearch != nil && onSettings != nil
     }
 

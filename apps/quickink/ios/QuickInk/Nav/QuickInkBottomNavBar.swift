@@ -42,7 +42,7 @@ import SwiftUI
 /// sentinel for sub-screens (e.g. ScanDetail) that host the bar but
 /// aren't themselves a destination — passing `.none` paints no
 /// active cell.
-public enum NavTab { case home, library, search, settings, none }
+public enum NavTab { case home, workspace, search, settings, none }
 
 /// The reserved space the bottom nav occupies on screens that own a
 /// scroll surface. Padding callers should add at the bottom of their
@@ -55,7 +55,7 @@ public struct QuickInkBottomNavBar: View {
 
     public let activeTab: NavTab
     public let onHome: () -> Void
-    public let onLibrary: () -> Void
+    public let onWorkspace: () -> Void
     public let onScan: () -> Void
     public let onSearch: () -> Void
     public let onSettings: () -> Void
@@ -63,14 +63,14 @@ public struct QuickInkBottomNavBar: View {
     public init(
         activeTab: NavTab,
         onHome: @escaping () -> Void,
-        onLibrary: @escaping () -> Void,
+        onWorkspace: @escaping () -> Void,
         onScan: @escaping () -> Void,
         onSearch: @escaping () -> Void,
         onSettings: @escaping () -> Void
     ) {
         self.activeTab = activeTab
         self.onHome = onHome
-        self.onLibrary = onLibrary
+        self.onWorkspace = onWorkspace
         self.onScan = onScan
         self.onSearch = onSearch
         self.onSettings = onSettings
@@ -108,7 +108,7 @@ public struct QuickInkBottomNavBar: View {
             HStack(spacing: 0) {
                 navIcon(systemName: "house", label: "Home", active: activeTab == .home, action: onHome)
                     .frame(maxWidth: .infinity)
-                navIconAsset(assetName: "IconNote", label: "Library", active: activeTab == .library, action: onLibrary)
+                navIconAsset(assetName: "IconNote", label: "Workspace", active: activeTab == .workspace, action: onWorkspace)
                     .frame(maxWidth: .infinity)
                 // Placeholder for the FAB column — keeps the HStack at
                 // 5 equal cells so the flanking cells stay symmetric.

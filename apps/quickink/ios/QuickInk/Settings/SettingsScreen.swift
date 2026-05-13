@@ -30,7 +30,7 @@ struct SettingsScreen: View {
     /// Tab navigation callbacks for the floating bottom nav. Settings
     /// paints itself active; tapping it is a no-op.
     let onHome: () -> Void
-    let onLibrary: () -> Void
+    let onWorkspace: () -> Void
     let onScan: () -> Void
     let onSearch: () -> Void
     let onSettings: () -> Void
@@ -41,7 +41,7 @@ struct SettingsScreen: View {
         settings: SettingsState,
         onManageCategories: (() -> Void)? = nil,
         onHome: @escaping () -> Void = {},
-        onLibrary: @escaping () -> Void = {},
+        onWorkspace: @escaping () -> Void = {},
         onScan: @escaping () -> Void = {},
         onSearch: @escaping () -> Void = {},
         onSettings: @escaping () -> Void = {}
@@ -51,7 +51,7 @@ struct SettingsScreen: View {
         self.settings = settings
         self.onManageCategories = onManageCategories
         self.onHome = onHome
-        self.onLibrary = onLibrary
+        self.onWorkspace = onWorkspace
         self.onScan = onScan
         self.onSearch = onSearch
         self.onSettings = onSettings
@@ -187,7 +187,7 @@ struct SettingsScreen: View {
             QuickInkBottomNavBar(
                 activeTab:  .settings,
                 onHome:     onHome,
-                onLibrary:  onLibrary,
+                onWorkspace:  onWorkspace,
                 onScan:     onScan,
                 onSearch:   onSearch,
                 onSettings: { /* current tab */ }

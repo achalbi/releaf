@@ -258,7 +258,7 @@ struct HomeScreen: View {
             QuickInkBottomNavBar(
                 activeTab:  .home,
                 onHome:     { /* current screen */ },
-                onLibrary:  onOpenNotes,
+                onWorkspace:  onOpenNotes,
                 onScan:     { showQuickCapture = true },
                 onSearch:   { onOpenSearch?() },
                 onSettings: onOpenSettings

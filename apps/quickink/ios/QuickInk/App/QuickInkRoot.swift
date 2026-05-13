@@ -255,7 +255,17 @@ private struct MainShell: View {
         // Carries the canonical category name; the screen filters
         // entries case-insensitively against `entry.category`.
         case categoryEntries(name: String)
+        // Workspace v1 — gated by WorkspaceFeatureFlag. The Workspace
+        // tab routes here when the flag is on; falls back to .notesList
+        // otherwise.
+        case workspaceHome
     }
+
+    /// Resolved per-process: which route the Workspace bottom-nav tap
+    /// should land on. Reads the flag once on view init, so flipping it
+    /// at runtime requires an app restart to pick up.
+    private let workspaceTabRoute: Route =
+        WorkspaceFeatureFlag.isEnabled() ? .workspaceHome : .notesList
 
     let userId: String
     @ObservedObject var authStore: AuthStore
@@ -349,7 +359,7 @@ private struct MainShell: View {
                     HomeScreen(
                         controller:     controller,
                         userId:         userId,
-                        onOpenNotes:    { path.append(.notesList) },
+                        onOpenNotes:    { path.append(workspaceTabRoute) },
                         onOpenSettings: { path.append(.settings) },
                         onOpenSearch:   { path.append(.search) },
                         onTapCategory:  { name in path.append(.categoryEntries(name: name)) },
@@ -523,7 +533,7 @@ private struct MainShell: View {
                 onBack:     { path.removeLast() },
                 onOpenScan: { captureId in path.append(.scanDetail(captureId: captureId)) },
                 onHome:     { path.removeAll() },
-                onLibrary:  { /* current tab — no-op */ },
+                onWorkspace:  { /* current tab — no-op */ },
                 onScan:     { showQuickCapture = true },
                 onSearch:   { navToTab(.search) },
                 onSettings: { navToTab(.settings) }
@@ -547,7 +557,7 @@ private struct MainShell: View {
                 settings:  settings,
                 onManageCategories: { path.append(.manageCategories) },
                 onHome:     { path.removeAll() },
-                onLibrary:  { navToTab(.notesList) },
+                onWorkspace:  { navToTab(workspaceTabRoute) },
                 onScan:     { showQuickCapture = true },
                 onSearch:   { navToTab(.search) },
                 onSettings: { /* current tab — no-op */ }
@@ -578,7 +588,7 @@ private struct MainShell: View {
                 userId:     userId,
                 onBack:     { path.removeLast() },
                 onHome:     { path.removeAll() },
-                onLibrary:  { navToTab(.notesList) },
+                onWorkspace:  { navToTab(workspaceTabRoute) },
                 onScan:     { showQuickCapture = true },
                 onSearch:   { navToTab(.search) },
                 onSettings: { navToTab(.settings) }
@@ -600,7 +610,7 @@ private struct MainShell: View {
                 },
                 settings: settings,
                 onHome:     { path.removeAll() },
-                onLibrary:  { navToTab(.notesList) },
+                onWorkspace:  { navToTab(workspaceTabRoute) },
                 onScan:     { showQuickCapture = true },
                 onSearch:   { /* current tab — no-op */ },
                 onSettings: { navToTab(.settings) }
@@ -614,6 +624,35 @@ private struct MainShell: View {
                 categoryName: name,
                 onBack:       { path.removeLast() },
                 onOpenScan:   { captureId in path.append(.scanDetail(captureId: captureId)) }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .workspaceHome:
+            WorkspaceHomeScreen(
+                userId:                userId,
+                onOpenSearch:          { navToTab(.search) },
+                onOpenFolder:          { _ in
+                    // Folder detail (Screen 2) lands in iOS C — tap
+                    // is a no-op until that route exists.
+                },
+                onOpenContinue:        { capture in
+                    path.append(.scanDetail(captureId: capture.id))
+                },
+                onOpenProfile:         { path.append(.profile) },
+                onOpenTag:             { tag in
+                    // Per-tag drill re-uses the legacy categoryEntries
+                    // route (filter-by-name) until tag-id filtering
+                    // ships in iOS D.
+                    path.append(.categoryEntries(name: tag.name))
+                },
+                onOpenSmartCollection: { _ in
+                    // Smart-collection view lands in iOS C — no-op.
+                },
+                onBrowseTags:          { /* Tag library lands in iOS D */ },
+                onHome:                { path.removeAll() },
+                onScan:                { showQuickCapture = true },
+                onSettings:            { navToTab(.settings) }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
