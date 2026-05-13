@@ -128,11 +128,15 @@ class QuickInkSyncDataSource(
             )
         }
 
-        // ---- tags (user-scoped). Drive prefix still `categories/`
-        // until the rollout soak completes; kind string stays
-        // KIND_CATEGORY for back-compat with existing payloads on
-        // Drive. The prefix migration to `tags/` happens in a
-        // follow-up commit.
+        // ---- tags (user-scoped). New writes live under `tags/`
+        // (DrivePath.tag); legacy reads from `categories/` keep
+        // working because the manifest stores the per-row path —
+        // pulled rows go through the same KIND_CATEGORY apply
+        // branch regardless of folder. Wire kind string stays
+        // "category" for interop with clients on older builds
+        // during the rollout window. A cleanup pass that deletes
+        // the orphaned legacy files lands in a follow-up commit
+        // after the brief's two-week soak window.
         for (row in tagDao.dirtyRows()
             .filter { it.deletedAt == null && it.userId == userId }) {
             val payload = row.toV1Payload()
@@ -141,7 +145,7 @@ class QuickInkSyncDataSource(
             entries += DirtyEntry(
                 kind          = DrivePath.KIND_CATEGORY,
                 id            = row.id,
-                drivePath     = DrivePath.category(row.id),
+                drivePath     = DrivePath.tag(row.id),
                 payload       = bytes,
                 payloadSha256 = sha256Hex(bytes),
                 updatedAt     = row.updatedAt,
