@@ -378,6 +378,7 @@ public struct WorkspaceHomeScreen: View {
 
     private func folderRow(_ folder: FolderEntity) -> some View {
         let count = viewModel.folderCaptureCounts[folder.id] ?? 0
+        let newCount = viewModel.folderNewCounts[folder.id] ?? 0
         return Button(action: { onOpenFolder(folder) }) {
             HStack(spacing: AppSpacing.s3) {
                 RoundedRectangle(cornerRadius: 6)
@@ -387,9 +388,25 @@ public struct WorkspaceHomeScreen: View {
                     Text(folder.name)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(QuickInkColors.ink)
-                    Text("\(count) \(count == 1 ? "item" : "items")")
-                        .font(.system(size: 11.5))
-                        .foregroundColor(QuickInkColors.muted)
+                    HStack(spacing: 6) {
+                        Text("\(count) \(count == 1 ? "item" : "items")")
+                            .font(.system(size: 11.5))
+                            .foregroundColor(QuickInkColors.muted)
+                        if newCount > 0 {
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(QuickInkColors.accent)
+                                    .frame(width: 5, height: 5)
+                                Text("\(newCount) new")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(QuickInkColors.accentDeep)
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(QuickInkColors.accentSoft,
+                                        in: RoundedRectangle(cornerRadius: 4))
+                        }
+                    }
                 }
                 Spacer()
                 Image(systemName: "chevron.right")

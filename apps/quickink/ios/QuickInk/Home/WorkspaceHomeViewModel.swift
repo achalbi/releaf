@@ -24,6 +24,9 @@ public final class WorkspaceHomeViewModel: ObservableObject {
     @Published public private(set) var smartCollections: [SmartCollectionEntity] = []
     @Published public private(set) var continueCandidate: CaptureSummary? = nil
     @Published public private(set) var folderCaptureCounts: [String: Int] = [:]
+    /// Per-folder count of captures created in the last 7 days.
+    /// Drives the Workspace home folder list's "N new" badge.
+    @Published public private(set) var folderNewCounts: [String: Int] = [:]
 
     private let dbQueue: DatabaseQueue
     private let userId: String
@@ -34,6 +37,7 @@ public final class WorkspaceHomeViewModel: ObservableObject {
     private var smartCancellable: AnyCancellable?
     private var continueCancellable: AnyCancellable?
     private var folderCountCancellable: AnyCancellable?
+    private var folderNewCountCancellable: AnyCancellable?
 
     public init(userId: String, database: QuickInkDatabase = .shared) {
         self.userId = userId
@@ -117,6 +121,43 @@ public final class WorkspaceHomeViewModel: ObservableObject {
         .receive(on: DispatchQueue.main)
         .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] in
             self?.continueCandidate = $0
+        })
+
+        // "N new" — captures created in the last 7 days, grouped
+        // by folder. ISO-8601 string compare on created_at is
+        // chronologically correct.
+        let sinceIso: String = {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+            return formatter.string(from: cutoff)
+        }()
+        folderNewCountCancellable = ValueObservation.tracking { [userId] db -> [String: Int] in
+            struct Pair: Codable, FetchableRecord {
+                let folderId: String
+                let count: Int
+                enum CodingKeys: String, CodingKey {
+                    case folderId = "folder_id"
+                    case count
+                }
+            }
+            let rows = try Pair.fetchAll(db, sql: """
+                SELECT folder_id, COUNT(*) AS count
+                FROM captures
+                WHERE user_id = ?
+                  AND folder_id IS NOT NULL
+                  AND deleted_at IS NULL
+                  AND created_at >= ?
+                GROUP BY folder_id
+                """, arguments: [userId, sinceIso])
+            var out: [String: Int] = [:]
+            for r in rows { out[r.folderId] = r.count }
+            return out
+        }
+        .publisher(in: dbQueue)
+        .receive(on: DispatchQueue.main)
+        .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] in
+            self?.folderNewCounts = $0
         })
 
         folderCountCancellable = ValueObservation.tracking { [userId] db -> [String: Int] in

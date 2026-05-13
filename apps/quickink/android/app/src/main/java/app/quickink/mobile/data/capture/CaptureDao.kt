@@ -403,6 +403,24 @@ interface CaptureDao {
     suspend fun countByFolder(userId: String): List<FolderCaptureCount>
 
     /**
+     * Per-folder count of captures created since [sinceIso].
+     * Drives the Workspace home folder list's "N new" badge.
+     * `sinceIso` is an ISO-8601 timestamp (caller computes "N days
+     * ago"); `created_at` is stored in the same format so the
+     * string compare is correct chronologically.
+     */
+    @Query("""
+        SELECT folder_id AS folder_id, COUNT(*) AS count
+        FROM captures
+        WHERE user_id = :userId
+          AND folder_id IS NOT NULL
+          AND deleted_at IS NULL
+          AND created_at >= :sinceIso
+        GROUP BY folder_id
+    """)
+    fun observeNewCountByFolder(userId: String, sinceIso: String): Flow<List<FolderCaptureCount>>
+
+    /**
      * Live, newest-first captures inside a folder. Powers the
      * Workspace folder-detail screen (Phase C — Screen 2).
      */

@@ -197,6 +197,25 @@ fun WorkspaceHomeScreen(
         value = counts.associate { it.folderId to it.count }
     }
 
+    // "N new" badge — captures created in the last 7 days. ISO
+    // string compare on `created_at` is chronologically correct
+    // because the timestamp is always stored in the same format.
+    val newSinceIso = remember(userId) {
+        val instant = java.time.Instant.now().minus(7, java.time.temporal.ChronoUnit.DAYS)
+        instant.toString()
+    }
+    val folderNewCounts by produceState(
+        initialValue = emptyMap<String, Int>(),
+        key1         = userId,
+        key2         = newSinceIso,
+    ) {
+        app.database.captureDao()
+            .observeNewCountByFolder(userId, newSinceIso)
+            .collect { rows ->
+                value = rows.associate { it.folderId to it.count }
+            }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -240,11 +259,12 @@ fun WorkspaceHomeScreen(
             }
 
             FoldersSection(
-                folders = folders,
+                folders             = folders,
                 folderCaptureCounts = folderCaptureCounts,
-                onOpenFolder = onOpenFolder,
-                onLongPressFolder = { folder -> actionsForFolder = folder },
-                onNewFolder = { editorTarget = FolderEditorTarget.Create },
+                folderNewCounts     = folderNewCounts,
+                onOpenFolder        = onOpenFolder,
+                onLongPressFolder   = { folder -> actionsForFolder = folder },
+                onNewFolder         = { editorTarget = FolderEditorTarget.Create },
             )
 
             Spacer(Modifier.height(QuickInkSpacing.s4))
@@ -683,6 +703,7 @@ private fun SmartCollectionCard(
 private fun FoldersSection(
     folders: List<FolderEntity>,
     folderCaptureCounts: Map<String, Int>,
+    folderNewCounts: Map<String, Int>,
     onOpenFolder: (FolderEntity) -> Unit,
     onLongPressFolder: (FolderEntity) -> Unit,
     onNewFolder: () -> Unit,
@@ -722,6 +743,7 @@ private fun FoldersSection(
             FolderRow(
                 folder       = folder,
                 captureCount = folderCaptureCounts[folder.id] ?: 0,
+                newCount     = folderNewCounts[folder.id] ?: 0,
                 onClick      = { onOpenFolder(folder) },
                 onLongPress  = { onLongPressFolder(folder) },
             )
@@ -741,6 +763,7 @@ private fun FoldersSection(
 private fun FolderRow(
     folder: FolderEntity,
     captureCount: Int,
+    newCount: Int,
     onClick: () -> Unit,
     onLongPress: () -> Unit,
 ) {
@@ -776,11 +799,38 @@ private fun FolderRow(
                 color = colors.ink,
             )
             Spacer(Modifier.height(2.dp))
-            Text(
-                text  = "$captureCount ${if (captureCount == 1) "item" else "items"}",
-                style = type.meta.copy(fontSize = 11.5.sp),
-                color = colors.muted,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text  = "$captureCount ${if (captureCount == 1) "item" else "items"}",
+                    style = type.meta.copy(fontSize = 11.5.sp),
+                    color = colors.muted,
+                )
+                if (newCount > 0) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(colors.accentSoft, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(5.dp)
+                                .clip(CircleShape)
+                                .background(colors.accent),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text  = "$newCount new",
+                            style = type.label.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+                            color = colors.accentDeep,
+                        )
+                    }
+                }
+            }
         }
 
         Icon(
