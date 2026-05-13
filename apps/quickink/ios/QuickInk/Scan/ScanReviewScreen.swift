@@ -19,6 +19,7 @@
  */
 
 import SwiftUI
+import GRDB
 import ReleafCoreDesignSystem
 
 struct ScanReviewScreen: View {
@@ -26,6 +27,8 @@ struct ScanReviewScreen: View {
     let userId: String
 
     @StateObject private var categoriesVM: TagListViewModel
+    @State private var suggestedNames: [String] = []
+    @State private var acceptedNames: Set<String> = []
 
     init(controller: ScanFlowController, userId: String) {
         self.controller = controller
@@ -35,10 +38,24 @@ struct ScanReviewScreen: View {
         )
     }
 
+    /// Workspace v1 Phase E.2 — captureId in flight, if any. Set
+    /// by the controller's State.recognizing / .complete cases.
+    private var inflightCaptureId: String? {
+        switch controller.state {
+        case .recognizing(let captureId, _, _): return captureId
+        case .complete(let captureId, _, _):    return captureId
+        default:                                return nil
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(spacing: QuickInkSpacing.s5) {
+                    if !suggestedNames.isEmpty, !isFailed,
+                       let cid = inflightCaptureId {
+                        suggestionsStrip(captureId: cid)
+                    }
                     if !categoriesVM.categories.isEmpty,
                        !isFailed {
                         categoryButtonsGrid
@@ -70,6 +87,89 @@ struct ScanReviewScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.canvas.ignoresSafeArea())
         .task { categoriesVM.start() }
+        .onChange(of: inflightCaptureId) { _ in Task { await refreshSuggestions() } }
+        .onChange(of: categoriesVM.categories.count) { _ in Task { await refreshSuggestions() } }
+    }
+
+    /// Workspace v1 Phase E.2 — read OCR text for the in-flight
+    /// capture, run the suggester, surface chips above the
+    /// category grid.
+    @ViewBuilder
+    private func suggestionsStrip(captureId: String) -> some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+            Text("SUGGESTED FROM THIS SCAN")
+                .font(.system(size: 10, weight: .bold))
+                .tracking(1.2)
+                .foregroundStyle(QuickInkColors.accentDeep)
+            HStack(spacing: 6) {
+                ForEach(suggestedNames, id: \.self) { name in
+                    Button(action: { Task { await accept(name: name, captureId: captureId) } }) {
+                        HStack(spacing: 3) {
+                            Text("+")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(QuickInkColors.accentDeep)
+                            Text("#")
+                                .font(.system(size: 11.5, weight: .bold))
+                                .foregroundColor(QuickInkColors.accent.opacity(0.7))
+                            Text(name)
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundColor(QuickInkColors.accentDeep)
+                        }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.85), in: Capsule())
+                        .overlay(Capsule().stroke(QuickInkColors.accent.opacity(0.25), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(QuickInkSpacing.s3)
+        .background(QuickInkColors.accentSoft.opacity(0.4), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func refreshSuggestions() async {
+        guard let captureId = inflightCaptureId else {
+            suggestedNames = []
+            return
+        }
+        let names: [String] = await Task.detached(priority: .userInitiated) {
+            let dbQueue = QuickInkDatabase.shared.dbQueue
+            let ocrText: String? = (try? await dbQueue.read { db -> String? in
+                try String.fetchOne(db, sql: """
+                    SELECT text FROM ocr_results
+                    WHERE capture_id = ? AND deleted_at IS NULL
+                    ORDER BY page_index ASC
+                    LIMIT 1
+                    """, arguments: [captureId])
+            })
+            let createdAt: String? = (try? await dbQueue.read { db -> String? in
+                try String.fetchOne(db, sql: """
+                    SELECT created_at FROM captures WHERE id = ? LIMIT 1
+                    """, arguments: [captureId])
+            })
+            let allNames = await MainActor.run { Set(self.categoriesVM.categories.map(\.name)) }
+            let attached = await MainActor.run { self.acceptedNames }
+            return AutoTagSuggester.suggest(
+                ocrText:           ocrText,
+                existingTagNames:  allNames,
+                currentlyAttached: attached,
+                captureDateIso:    createdAt,
+            )
+        }.value
+        suggestedNames = names
+    }
+
+    private func accept(name: String, captureId: String) async {
+        let tag = try? await TagRepository().findOrCreate(userId: userId, name: name)
+        guard let tag else { return }
+        try? await CaptureTagRepository().attachTag(
+            captureId: captureId,
+            tagId:     tag.id,
+            source:    "ai-suggested",
+        )
+        acceptedNames.insert(name)
+        suggestedNames.removeAll { $0 == name }
     }
 
     private var isRecognizing: Bool {
