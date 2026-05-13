@@ -17,6 +17,7 @@
  */
 
 @file:OptIn(
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
     androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
     androidx.compose.material3.ExperimentalMaterial3Api::class,
 )
@@ -26,6 +27,7 @@ package app.quickink.mobile.features.workspace
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,6 +66,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,6 +81,9 @@ import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capturetag.TagCount
 import app.quickink.mobile.data.tag.TagEntity
+import app.quickink.mobile.data.tag.TagRepository
+import app.releaf.mobile.data.common.IsoClock
+import kotlinx.coroutines.launch
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
@@ -116,6 +122,21 @@ fun TagLibraryScreen(
     var query     by remember { mutableStateOf("") }
     var picked    by remember { mutableStateOf<List<TagEntity>>(emptyList()) }
 
+    // Tag CRUD modal state (Phase D.1 follow-up).
+    var actionsForTag    by remember { mutableStateOf<TagEntity?>(null) }
+    var renameTarget     by remember { mutableStateOf<TagEntity?>(null) }
+    var deleteTarget     by remember { mutableStateOf<TagEntity?>(null) }
+    var showCreateDialog by remember { mutableStateOf(false) }
+
+    val scope = rememberCoroutineScope()
+    val tagRepo = remember(app) {
+        TagRepository(
+            tagDao     = app.database.tagDao(),
+            captureDao = app.database.captureDao(),
+        )
+    }
+    val captureTagDao = remember(app) { app.database.captureTagDao() }
+
     val filtered = remember(tags, query) {
         val q = query.trim().lowercase()
         if (q.isEmpty()) tags
@@ -148,6 +169,7 @@ fun TagLibraryScreen(
                 tagCount     = tags.size,
                 captureCount = totalActiveCaptureCount,
                 onBack       = onBack,
+                onNewTag     = { showCreateDialog = true },
             )
 
             Spacer(Modifier.height(QuickInkSpacing.s2))
@@ -184,9 +206,10 @@ fun TagLibraryScreen(
             MostUsedHeader()
 
             TagGrid(
-                tags        = filtered,
-                countById   = countById,
-                onOpenTag   = onOpenTag,
+                tags           = filtered,
+                countById      = countById,
+                onOpenTag      = onOpenTag,
+                onLongPressTag = { tag -> actionsForTag = tag },
             )
 
             Spacer(Modifier.height(QuickInkSpacing.s6))
@@ -202,6 +225,75 @@ fun TagLibraryScreen(
             modifier    = Modifier.align(Alignment.BottomCenter),
         )
     }
+
+    // ─── Tag CRUD modals ────────────────────────────────────────
+
+    actionsForTag?.let { tag ->
+        TagActionSheet(
+            tag         = tag,
+            onDismiss   = { actionsForTag = null },
+            onRename    = {
+                actionsForTag = null
+                renameTarget = tag
+            },
+            onDelete    = {
+                actionsForTag = null
+                deleteTarget = tag
+            },
+        )
+    }
+
+    renameTarget?.let { tag ->
+        TagRenameDialog(
+            initialName = tag.name,
+            onDismiss   = { renameTarget = null },
+            onSubmit    = { newName ->
+                scope.launch {
+                    tagRepo.renameAndPropagate(
+                        id      = tag.id,
+                        oldName = tag.name,
+                        newName = newName,
+                        userId  = userId,
+                    )
+                    renameTarget = null
+                }
+            },
+        )
+    }
+
+    deleteTarget?.let { tag ->
+        val attachedCount = countById[tag.id] ?: 0
+        TagDeleteConfirmDialog(
+            tag          = tag,
+            captureCount = attachedCount,
+            onDismiss    = { deleteTarget = null },
+            onConfirm    = {
+                scope.launch {
+                    val now = IsoClock.nowIso()
+                    captureTagDao.softDeleteByTagId(tag.id, now)
+                    tagRepo.softDelete(tag.id)
+                    deleteTarget = null
+                }
+            },
+        )
+    }
+
+    if (showCreateDialog) {
+        TagRenameDialog(
+            initialName = "",
+            title       = "New tag",
+            onDismiss   = { showCreateDialog = false },
+            onSubmit    = { newName ->
+                scope.launch {
+                    val normalized = normalizeTagName(newName)
+                    if (normalized.isNotEmpty()) {
+                        tagRepo.findOrCreate(userId, normalized)
+                    }
+                    showCreateDialog = false
+                }
+            },
+        )
+    }
 }
 
 // ─── Header ──────────────────────────────────────────────────
@@ -211,6 +303,7 @@ private fun TagLibraryHeader(
     tagCount: Int,
     captureCount: Int,
     onBack: () -> Unit,
+    onNewTag: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
@@ -246,6 +339,20 @@ private fun TagLibraryHeader(
                 text  = "$tagCount tags · $captureCount attachments",
                 style = type.meta.copy(fontSize = 11.sp),
                 color = colors.muted,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onNewTag),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = Icons.Outlined.Add,
+                contentDescription = "New tag",
+                tint               = colors.ink,
+                modifier           = Modifier.size(20.dp),
             )
         }
     }
@@ -567,6 +674,7 @@ private fun TagGrid(
     tags: List<TagEntity>,
     countById: Map<String, Int>,
     onOpenTag: (TagEntity) -> Unit,
+    onLongPressTag: (TagEntity) -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
@@ -597,10 +705,11 @@ private fun TagGrid(
         }
         ranked.forEach { tag ->
             TagCard(
-                tag       = tag,
-                count     = countById[tag.id] ?: 0,
-                onClick   = { onOpenTag(tag) },
-                modifier  = Modifier.weight(1f),
+                tag         = tag,
+                count       = countById[tag.id] ?: 0,
+                onClick     = { onOpenTag(tag) },
+                onLongPress = { onLongPressTag(tag) },
+                modifier    = Modifier.weight(1f),
             )
         }
     }
@@ -611,6 +720,7 @@ private fun TagCard(
     tag: TagEntity,
     count: Int,
     onClick: () -> Unit,
+    onLongPress: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalQuickInkColors.current
@@ -621,7 +731,10 @@ private fun TagCard(
             .clip(shape)
             .background(colors.surface, shape)
             .border(1.dp, colors.border, shape)
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick     = onClick,
+                onLongClick = onLongPress,
+            )
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -644,4 +757,171 @@ private fun TagCard(
             color = colors.muted,
         )
     }
+}
+
+// ─── Tag CRUD modals ─────────────────────────────────────────
+
+@Composable
+private fun TagActionSheet(
+    tag: TagEntity,
+    onDismiss: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState()
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = colors.surface,
+    ) {
+        Column(
+            modifier = Modifier.padding(
+                horizontal = QuickInkSpacing.s4,
+                vertical   = QuickInkSpacing.s2,
+            ),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = QuickInkSpacing.s2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text  = "#",
+                    style = type.body.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold),
+                    color = colors.accent,
+                )
+                Text(
+                    text  = tag.name,
+                    style = type.body.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
+                    color = colors.ink,
+                    modifier = Modifier.padding(start = 2.dp),
+                )
+            }
+            androidx.compose.material3.HorizontalDivider(color = colors.borderSoft)
+
+            Text(
+                text  = "Rename",
+                style = type.body.copy(fontSize = 15.sp),
+                color = colors.ink,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onRename)
+                    .padding(vertical = 14.dp),
+            )
+            Text(
+                text  = "Delete tag",
+                style = type.body.copy(fontSize = 15.sp),
+                color = colors.danger,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onDelete)
+                    .padding(vertical = 14.dp),
+            )
+            Spacer(Modifier.height(QuickInkSpacing.s2))
+        }
+    }
+}
+
+@Composable
+private fun TagRenameDialog(
+    initialName: String,
+    title: String = "Rename tag",
+    onDismiss: () -> Unit,
+    onSubmit: (String) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    var draft by remember(initialName) { mutableStateOf(initialName) }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text  = title,
+                style = type.body.copy(fontWeight = FontWeight.SemiBold, fontSize = 17.sp),
+                color = colors.ink,
+            )
+        },
+        text = {
+            androidx.compose.material3.OutlinedTextField(
+                value         = draft,
+                onValueChange = { draft = it },
+                singleLine    = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.None,
+                    imeAction      = androidx.compose.ui.text.input.ImeAction.Done,
+                ),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = colors.border,
+                    unfocusedBorderColor = colors.border,
+                ),
+                shape = RoundedCornerShape(QuickInkRadius.md),
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                onClick = {
+                    val trimmed = draft.trim()
+                    if (trimmed.isEmpty()) return@TextButton
+                    onSubmit(trimmed)
+                },
+            ) {
+                Text("Save", color = colors.accent)
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Cancel", color = colors.ink)
+            }
+        },
+        containerColor = colors.surface,
+    )
+}
+
+@Composable
+private fun TagDeleteConfirmDialog(
+    tag: TagEntity,
+    captureCount: Int,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text  = "Delete #${tag.name}?",
+                style = type.body.copy(fontWeight = FontWeight.SemiBold, fontSize = 17.sp),
+                color = colors.ink,
+            )
+        },
+        text = {
+            Text(
+                text = when (captureCount) {
+                    0    -> "The tag isn't attached to any captures. Deleting it can't be undone."
+                    1    -> "1 capture will be untagged. The tag is removed from this and other devices."
+                    else -> "$captureCount captures will be untagged. The tag is removed from this and other devices."
+                },
+                style = type.meta,
+                color = colors.inkSoft,
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onConfirm) {
+                Text("Delete", color = colors.danger)
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Cancel", color = colors.ink)
+            }
+        },
+        containerColor = colors.surface,
+    )
 }

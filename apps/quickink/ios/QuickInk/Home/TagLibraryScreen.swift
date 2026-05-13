@@ -10,6 +10,7 @@
 import SwiftUI
 import Combine
 import GRDB
+import ReleafCoreData
 import ReleafCoreDesignSystem
 
 @MainActor
@@ -28,6 +29,14 @@ public struct TagLibraryScreen: View {
     @State private var query: String = ""
     @State private var picked: [TagEntity] = []
     @State private var showAddSheet: Bool = false
+
+    // Phase D.1 — tag CRUD modal state.
+    @State private var actionsForTag: TagEntity? = nil
+    @State private var renameTarget: TagEntity? = nil
+    @State private var deleteTarget: TagEntity? = nil
+    @State private var showCreate: Bool = false
+    @State private var renameDraft: String = ""
+    @State private var createDraft: String = ""
 
     public init(
         userId: String,
@@ -81,6 +90,75 @@ public struct TagLibraryScreen: View {
             tagAddSheet
                 .presentationDetents([.medium])
         }
+        .sheet(item: $actionsForTag) { tag in
+            tagActionSheet(tag)
+                .presentationDetents([.height(220)])
+        }
+        .alert("Rename tag", isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } }
+        ), presenting: renameTarget) { tag in
+            TextField("Name", text: $renameDraft)
+            Button("Cancel", role: .cancel) { renameTarget = nil }
+            Button("Save") {
+                let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { renameTarget = nil; return }
+                Task {
+                    try? await TagRepository().renameAndPropagate(
+                        id:      tag.id,
+                        oldName: tag.name,
+                        newName: trimmed,
+                        userId:  userId,
+                    )
+                    renameTarget = nil
+                }
+            }
+        } message: { _ in
+            Text("Existing scans tagged with this name will be updated.")
+        }
+        .alert("Delete #\(deleteTarget?.name ?? "")?", isPresented: Binding(
+            get: { deleteTarget != nil },
+            set: { if !$0 { deleteTarget = nil } }
+        ), presenting: deleteTarget) { tag in
+            Button("Delete", role: .destructive) {
+                Task {
+                    let now = IsoClock.nowIso()
+                    let dbQueue = QuickInkDatabase.shared.dbQueue
+                    try? await dbQueue.write { db in
+                        try db.execute(sql: """
+                            UPDATE capture_tags
+                            SET deleted_at = ?, updated_at = ?, dirty = 1
+                            WHERE tag_id = ? AND deleted_at IS NULL
+                            """, arguments: [now, now, tag.id])
+                    }
+                    try? await TagRepository().softDelete(id: tag.id)
+                    deleteTarget = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { deleteTarget = nil }
+        } message: { tag in
+            let count = viewModel.countByTagId[tag.id] ?? 0
+            Text(count == 0
+                 ? "The tag isn't attached to any captures. Deleting it can't be undone."
+                 : "\(count) capture\(count == 1 ? "" : "s") will be untagged.")
+        }
+        .alert("New tag", isPresented: $showCreate) {
+            TextField("Name", text: $createDraft)
+            Button("Cancel", role: .cancel) { showCreate = false; createDraft = "" }
+            Button("Add") {
+                let normalized = normalizeTagName(createDraft)
+                guard !normalized.isEmpty else {
+                    showCreate = false; createDraft = ""; return
+                }
+                Task {
+                    _ = try? await TagRepository().findOrCreate(
+                        userId: userId, name: normalized,
+                    )
+                    showCreate = false
+                    createDraft = ""
+                }
+            }
+        }
     }
 
     private var filteredTags: [TagEntity] {
@@ -108,6 +186,13 @@ public struct TagLibraryScreen: View {
                     .foregroundColor(QuickInkColors.muted)
             }
             Spacer()
+            Button(action: { createDraft = ""; showCreate = true }) {
+                Image(systemName: "plus")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(QuickInkColors.ink)
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, QuickInkSpacing.s2)
     }
@@ -208,6 +293,49 @@ public struct TagLibraryScreen: View {
         .buttonStyle(.plain)
     }
 
+    /// Phase D.1 — long-press action sheet for Rename / Delete.
+    private func tagActionSheet(_ tag: TagEntity) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Text("#").font(.system(size: 16, weight: .bold)).foregroundColor(QuickInkColors.accent)
+                Text(tag.name).font(.system(size: 16, weight: .semibold)).foregroundColor(QuickInkColors.ink)
+                Spacer()
+            }
+            .padding(.horizontal, QuickInkSpacing.s4)
+            .padding(.vertical, QuickInkSpacing.s3)
+            Divider().background(QuickInkColors.borderSoft)
+            Button(action: {
+                renameDraft = tag.name
+                renameTarget = tag
+                actionsForTag = nil
+            }) {
+                HStack {
+                    Text("Rename").foregroundColor(QuickInkColors.ink).font(.system(size: 15))
+                    Spacer()
+                }
+                .padding(.horizontal, QuickInkSpacing.s4)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Button(action: {
+                deleteTarget = tag
+                actionsForTag = nil
+            }) {
+                HStack {
+                    Text("Delete tag").foregroundColor(QuickInkColors.danger).font(.system(size: 15))
+                    Spacer()
+                }
+                .padding(.horizontal, QuickInkSpacing.s4)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Spacer(minLength: 12)
+        }
+        .background(QuickInkColors.surface)
+    }
+
     private var tagAddSheet: some View {
         let candidates = viewModel.tags.filter { tag in
             !picked.contains(where: { $0.id == tag.id })
@@ -277,6 +405,7 @@ public struct TagLibraryScreen: View {
             }) { tag in
                 tagCard(tag)
                     .onTapGesture { onOpenTag(tag) }
+                    .onLongPressGesture { actionsForTag = tag }
             }
         }
         .padding(.horizontal, QuickInkSpacing.s4)
