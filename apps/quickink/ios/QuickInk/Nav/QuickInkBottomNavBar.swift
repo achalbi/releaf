@@ -108,7 +108,16 @@ public struct QuickInkBottomNavBar: View {
             HStack(spacing: 0) {
                 navIcon(systemName: "house", label: "Home", active: activeTab == .home, action: onHome)
                     .frame(maxWidth: .infinity)
-                navIconAsset(assetName: "IconNote", label: "Workspace", active: activeTab == .workspace, action: onWorkspace)
+                // 6pt instead of the default 8pt so the 9-char
+                // "Workspace" label clears its slot. The other
+                // tabs (4–8 chars) keep the s2 default.
+                navIconAsset(
+                    assetName: "IconNote",
+                    label: "Workspace",
+                    active: activeTab == .workspace,
+                    horizontalPadding: 6,
+                    action: onWorkspace
+                )
                     .frame(maxWidth: .infinity)
                 // Placeholder for the FAB column — keeps the HStack at
                 // 5 equal cells so the flanking cells stay symmetric.
@@ -134,7 +143,18 @@ public struct QuickInkBottomNavBar: View {
     }
 
     @ViewBuilder
-    private func navIcon(systemName: String, label: String, active: Bool, action: @escaping () -> Void) -> some View {
+    private func navIcon(
+        systemName: String,
+        label: String,
+        active: Bool,
+        /// Horizontal padding inside the chip's coral-soft pill.
+        /// Defaults to `s2` (8pt); the Workspace tab passes a
+        /// tighter value so the 9-char label clears its
+        /// `frame(maxWidth: .infinity)` slot without clipping the
+        /// trailing "e" on stock-width devices.
+        horizontalPadding: CGFloat = QuickInkSpacing.s2,
+        action: @escaping () -> Void
+    ) -> some View {
         let tint = active ? QuickInkColors.accent : QuickInkColors.ink
         let bg   = active ? QuickInkColors.accentSoft : Color.clear
         Button(action: action) {
@@ -152,10 +172,7 @@ public struct QuickInkBottomNavBar: View {
                     .foregroundStyle(tint)
                     .lineLimit(1)
             }
-            // Tighter horizontal pad so the longest label
-            // ("Workspace") clears the chip without clipping the
-            // trailing "e" on narrow stock devices.
-            .padding(.horizontal, QuickInkSpacing.s1)
+            .padding(.horizontal, horizontalPadding)
             .padding(.vertical, QuickInkSpacing.s2)
             // The fill carries its own shadow so it only renders when
             // the pill is active (Color.clear casts no shadow). This
@@ -185,7 +202,14 @@ public struct QuickInkBottomNavBar: View {
     /// foregroundStyle). Used for the Library / Search tabs which
     /// have brand-specific icons in `Assets.xcassets`.
     @ViewBuilder
-    private func navIconAsset(assetName: String, label: String, active: Bool, action: @escaping () -> Void) -> some View {
+    private func navIconAsset(
+        assetName: String,
+        label: String,
+        active: Bool,
+        /// See `navIcon(horizontalPadding:)`.
+        horizontalPadding: CGFloat = QuickInkSpacing.s2,
+        action: @escaping () -> Void
+    ) -> some View {
         let tint = active ? QuickInkColors.accent : QuickInkColors.ink
         let bg   = active ? QuickInkColors.accentSoft : Color.clear
         Button(action: action) {
@@ -206,10 +230,7 @@ public struct QuickInkBottomNavBar: View {
                     .foregroundStyle(tint)
                     .lineLimit(1)
             }
-            // Tighter horizontal pad so the longest label
-            // ("Workspace") clears the chip without clipping the
-            // trailing "e" on narrow stock devices.
-            .padding(.horizontal, QuickInkSpacing.s1)
+            .padding(.horizontal, horizontalPadding)
             .padding(.vertical, QuickInkSpacing.s2)
             .background(
                 RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)

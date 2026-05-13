@@ -160,11 +160,15 @@ fun QuickInkBottomNavBar(
                 onClick    = onHome,
             )
             RegularTabAsset(
-                drawableId = R.drawable.ic_note,
-                label      = "Workspace",
-                isSelected = activeTab == NavTab.Workspace,
-                modifier   = Modifier.weight(1f),
-                onClick    = onWorkspace,
+                drawableId        = R.drawable.ic_note,
+                label             = "Workspace",
+                isSelected        = activeTab == NavTab.Workspace,
+                modifier          = Modifier.weight(1f),
+                // 6dp instead of the default 8dp so the 9-char
+                // "Workspace" label clears its slot. The other
+                // tabs (4–8 chars) keep the s2 default.
+                horizontalPadding = 6.dp,
+                onClick           = onWorkspace,
             )
             BrandTab(
                 modifier = Modifier.weight(1f),
@@ -196,6 +200,13 @@ private fun RegularTab(
     label: String,
     isSelected: Boolean,
     modifier: Modifier = Modifier,
+    /**
+     * Horizontal padding inside the chip's coral-soft pill.
+     * Defaults to `s2` (8dp); the Workspace tab passes a tighter
+     * value so the 9-char label clears its `weight(1f)` slot
+     * without clipping the trailing "e" on stock-width devices.
+     */
+    horizontalPadding: androidx.compose.ui.unit.Dp = QuickInkSpacing.s2,
     onClick: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
@@ -220,11 +231,7 @@ private fun RegularTab(
                 .clip(RoundedCornerShape(QuickInkRadius.md))
                 .background(bg)
                 .padding(
-                    // Tighter horizontal padding so the longest
-                    // label ("Workspace") clears the chip without
-                    // clipping the trailing "e" on narrow stock
-                    // devices.
-                    horizontal = QuickInkSpacing.s1,
+                    horizontal = horizontalPadding,
                     vertical   = QuickInkSpacing.s2,
                 ),
         ) {
@@ -262,6 +269,8 @@ private fun RegularTabAsset(
     label: String,
     isSelected: Boolean,
     modifier: Modifier = Modifier,
+    /** See [RegularTab.horizontalPadding]. */
+    horizontalPadding: androidx.compose.ui.unit.Dp = QuickInkSpacing.s2,
     onClick: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
@@ -284,11 +293,7 @@ private fun RegularTabAsset(
                 .clip(RoundedCornerShape(QuickInkRadius.md))
                 .background(bg)
                 .padding(
-                    // Tighter horizontal padding so the longest
-                    // label ("Workspace") clears the chip without
-                    // clipping the trailing "e" on narrow stock
-                    // devices.
-                    horizontal = QuickInkSpacing.s1,
+                    horizontal = horizontalPadding,
                     vertical   = QuickInkSpacing.s2,
                 ),
         ) {
