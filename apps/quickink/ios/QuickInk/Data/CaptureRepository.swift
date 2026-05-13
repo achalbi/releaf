@@ -236,9 +236,30 @@ public final class CaptureRepository: @unchecked Sendable {
     ///      to captures.
     ///   3. (Fallback) LIKE-based substring over `ocr_results.text`
     ///      when the FTS pass came back empty.
-    public func search(userId: String, query: String) async throws -> [SearchHit] {
+    ///
+    /// `requiredTagIds` post-filters the union so only captures
+    /// tagged with EVERY id survive. Used by the search-bar
+    /// `#tag` autocomplete: a user typing `#invoice paid` keeps
+    /// Invoice as a hard filter and runs "paid" through the OCR
+    /// pass.
+    public func search(
+        userId: String,
+        query: String,
+        requiredTagIds: [String] = []
+    ) async throws -> [SearchHit] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return [] }
+        if trimmed.isEmpty && requiredTagIds.isEmpty { return [] }
+
+        // Tag-only path — no residual text. Return every capture
+        // that carries the full set of required tags, newest-first.
+        if trimmed.isEmpty && !requiredTagIds.isEmpty {
+            return try await dbQueue.read { db in
+                let summaries = try capturesWithAllTags(
+                    db: db, userId: userId, requiredTagIds: requiredTagIds,
+                )
+                return summaries.map { SearchHit(capture: $0, ocrSnippet: nil) }
+            }
+        }
         let likePattern = "%\(trimmed)%"
         let ftsQuery = Self.buildFtsQuery(trimmed)
 
@@ -352,8 +373,65 @@ public final class CaptureRepository: @unchecked Sendable {
                 }
             }
 
+            // Tag-id post-filter — keep only captures that carry
+            // every required tag.
+            if !requiredTagIds.isEmpty {
+                let survivors = try captureIdsWithAllTags(
+                    db: db, userId: userId, requiredTagIds: requiredTagIds,
+                )
+                hits = hits.filter { survivors.contains($0.capture.id) }
+            }
+
             return hits
         }
+    }
+
+    /// Capture summaries (newest-first) that carry every tag id in
+    /// `requiredTagIds`. Used by the `#tag`-only search path.
+    private func capturesWithAllTags(
+        db: Database,
+        userId: String,
+        requiredTagIds: [String]
+    ) throws -> [CaptureSummary] {
+        let ids = try captureIdsWithAllTags(
+            db: db, userId: userId, requiredTagIds: requiredTagIds,
+        )
+        if ids.isEmpty { return [] }
+        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+        var args: [DatabaseValueConvertible] = ids.map { $0 as DatabaseValueConvertible }
+        args.append(userId)
+        return try CaptureSummary.fetchAll(db, sql: """
+            SELECT id, title, preview_uri, pdf_uri, page_count, created_at, source
+            FROM captures
+            WHERE id IN (\(placeholders))
+              AND user_id = ?
+              AND deleted_at IS NULL
+            ORDER BY created_at DESC
+            """, arguments: StatementArguments(args))
+    }
+
+    private func captureIdsWithAllTags(
+        db: Database,
+        userId: String,
+        requiredTagIds: [String]
+    ) throws -> Set<String> {
+        if requiredTagIds.isEmpty { return [] }
+        let placeholders = requiredTagIds.map { _ in "?" }.joined(separator: ",")
+        var args: [DatabaseValueConvertible] = requiredTagIds.map { $0 as DatabaseValueConvertible }
+        args.append(userId)
+        args.append(requiredTagIds.count)
+        let rows = try String.fetchAll(db, sql: """
+            SELECT capture_tags.capture_id
+            FROM capture_tags
+            JOIN captures ON captures.id = capture_tags.capture_id
+            WHERE capture_tags.tag_id IN (\(placeholders))
+              AND capture_tags.deleted_at IS NULL
+              AND captures.user_id = ?
+              AND captures.deleted_at IS NULL
+            GROUP BY capture_tags.capture_id
+            HAVING COUNT(DISTINCT capture_tags.tag_id) = ?
+            """, arguments: StatementArguments(args))
+        return Set(rows)
     }
 
     /// Build a tokenised FTS5 MATCH expression from a free-form user

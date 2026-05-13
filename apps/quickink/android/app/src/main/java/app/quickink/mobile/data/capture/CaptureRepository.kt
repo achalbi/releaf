@@ -196,10 +196,27 @@ class CaptureRepository(
      *      to captures.
      *
      * Dedupes by `capture.id` with tag hits ordered first.
+     *
+     * [requiredTagIds] post-filters the union so only captures
+     * tagged with EVERY id survive. Used by the search-bar
+     * `#tag` autocomplete: a user typing `#invoice paid` keeps
+     * Invoice as a hard filter and runs "paid" through the OCR
+     * pass.
      */
-    suspend fun search(userId: String, query: String): List<SearchHit> {
+    suspend fun search(
+        userId: String,
+        query: String,
+        requiredTagIds: List<String> = emptyList(),
+    ): List<SearchHit> {
         val trimmed = query.trim()
-        if (trimmed.isEmpty()) return emptyList()
+        if (trimmed.isEmpty() && requiredTagIds.isEmpty()) return emptyList()
+
+        // Tag-only search (no residual text) — every capture that
+        // carries the full set of required tags, newest-first.
+        if (trimmed.isEmpty() && requiredTagIds.isNotEmpty()) {
+            return capturesWithAllTags(userId, requiredTagIds)
+                .map { SearchHit(capture = it, ocrSnippet = null) }
+        }
         val likePattern = "%$trimmed%"
         val ftsQuery = buildFtsQuery(trimmed)
 
@@ -330,7 +347,55 @@ class CaptureRepository(
             }
         }
 
+        // Tag-id post-filter — keep only captures that carry every
+        // required tag. Runs in Kotlin against the join row maps
+        // because `hits` is already a small list.
+        if (requiredTagIds.isNotEmpty()) {
+            val survivors = captureIdsWithAllTags(userId, requiredTagIds)
+            return hits.filter { it.capture.id in survivors }
+        }
+
         return hits
+    }
+
+    /**
+     * Captures (full rows, newest-first) that carry every tag id
+     * in [requiredTagIds]. Used by the `#tag`-only search path
+     * (no residual text). Returns an empty list when the input is
+     * empty or no capture matches.
+     */
+    private suspend fun capturesWithAllTags(
+        userId: String,
+        requiredTagIds: List<String>,
+    ): List<CaptureEntity> {
+        val ids = captureIdsWithAllTags(userId, requiredTagIds)
+        if (ids.isEmpty()) return emptyList()
+        // Re-fetch full rows by id; we don't have a "fetch by ids"
+        // DAO query, but the active-list filter is tight enough.
+        val active = captureDao.activeRows(userId)
+        val byId = active.associateBy { it.id }
+        return ids.mapNotNull { byId[it] }.sortedByDescending { it.createdAt }
+    }
+
+    private suspend fun captureIdsWithAllTags(
+        userId: String,
+        requiredTagIds: List<String>,
+    ): Set<String> {
+        if (requiredTagIds.isEmpty()) return emptySet()
+        val ctDao = captureTagDao ?: return emptySet()
+        val intersect = mutableSetOf<String>()
+        var first = true
+        for (tagId in requiredTagIds) {
+            val ids = ctDao.captureIdsForTag(tagId).toSet()
+            if (first) {
+                intersect.addAll(ids)
+                first = false
+            } else {
+                intersect.retainAll(ids)
+            }
+            if (intersect.isEmpty()) return emptySet()
+        }
+        return intersect
     }
 
     /**

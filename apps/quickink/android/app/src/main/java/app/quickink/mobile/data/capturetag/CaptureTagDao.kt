@@ -144,6 +144,19 @@ interface CaptureTagDao {
     fun observeCaptureIdsForTag(tagId: String): Flow<List<String>>
 
     /**
+     * One-shot version of [observeCaptureIdsForTag] for non-Flow
+     * call sites — the `#tag` autocomplete on the search bar
+     * intersects multiple tag-id results once per debounce
+     * window, which doesn't need a live observation.
+     */
+    @Query("""
+        SELECT capture_id FROM capture_tags
+        WHERE tag_id = :tagId AND deleted_at IS NULL
+        ORDER BY created_at DESC
+    """)
+    suspend fun captureIdsForTag(tagId: String): List<String>
+
+    /**
      * Active-tag count per tag for the user. Used by the tag
      * cloud on Workspace home and the tag library's "31 documents"
      * subtitle. Excludes tombstoned join rows and tombstoned

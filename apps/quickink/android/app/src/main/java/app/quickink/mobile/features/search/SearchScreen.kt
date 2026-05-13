@@ -100,7 +100,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.quickink.mobile.data.tag.TagEntity
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capture.CaptureRepository
@@ -149,17 +153,22 @@ fun SearchScreen(
 
     val captureDao = remember(app) { app.database.captureDao() }
     val captureTagDao = remember(app) { app.database.captureTagDao() }
+    val tagDao = remember(app) { app.database.tagDao() }
     val repository = remember(app) {
         CaptureRepository(
             captureDao    = captureDao,
             ocrResultDao  = app.database.ocrResultDao(),
-            tagDao        = app.database.tagDao(),
+            tagDao        = tagDao,
             captureTagDao = captureTagDao,
         )
     }
     val preferences = remember { SettingsPreferences(context) }
 
     val captures by captureDao.observeActive(userId).collectAsState(initial = emptyList())
+    // Live tag list — fuels the `#`-prefix autocomplete strip and
+    // also resolves `#tagname` tokens to ids before they reach the
+    // search repository.
+    val allTags by tagDao.observeActive(userId).collectAsState(initial = emptyList())
 
     // Per-capture primary-tag-name lookup. Post-A.3c the
     // pre-existing `captures.category`-driven badges + title cascade
@@ -199,7 +208,7 @@ fun SearchScreen(
     var recentSearches by remember { mutableStateOf(preferences.recentSearches) }
 
     // Debounced search runner — same pattern as the prior surface.
-    LaunchedEffect(queryDraft) {
+    LaunchedEffect(queryDraft, allTags) {
         val draft = queryDraft.trim()
         if (draft.isEmpty()) {
             liveQuery = ""
@@ -212,7 +221,18 @@ fun SearchScreen(
         liveQuery = draft
         isSearching = true
         try {
-            hits = repository.search(userId, draft)
+            // Parse `#tag` tokens out of the query — resolved to
+            // tag ids, the remaining residual feeds the OCR /
+            // tag-name substring search. `#tag` tokens whose name
+            // doesn't match a known tag fall through as plain
+            // text (lets the user still find OCR matches for the
+            // literal hashtag string when they make a typo).
+            val parsed = parseHashtagQuery(draft, allTags)
+            hits = repository.search(
+                userId         = userId,
+                query          = parsed.residualQuery,
+                requiredTagIds = parsed.requiredTagIds,
+            )
         } catch (_: Exception) {
             hits = emptyList()
         } finally {
@@ -246,6 +266,29 @@ fun SearchScreen(
             dateRangeActive  = dateRangeStart != null || dateRangeEnd != null,
             onOpenDatePicker = { showDatePicker = true },
         )
+
+        // `#`-prefix autocomplete strip. Shows tag suggestions
+        // matching the trailing in-flight hashtag token so the user
+        // can pick a tag without remembering its full name. Tap →
+        // replace the partial token with the canonical tag name +
+        // a trailing space (so the next keystroke starts a new
+        // token). Hidden when the trailing token isn't a hashtag.
+        run {
+            val prefix = hashtagPrefixAtCursor(queryDraft)
+            if (prefix != null) {
+                val suggestions = allTags
+                    .filter { it.name.startsWith(prefix, ignoreCase = true) }
+                    .take(6)
+                if (suggestions.isNotEmpty()) {
+                    HashtagSuggestionStrip(
+                        suggestions = suggestions.map { it.name },
+                        onPick      = { name ->
+                            queryDraft = applyHashtagSuggestion(queryDraft, name)
+                        },
+                    )
+                }
+            }
+        }
 
         // Active-range chip — surfaces the picked range and a Clear
         // affordance below the input. Mirrors the Library pattern.
@@ -1022,5 +1065,110 @@ private fun relativeDate(iso: String): String {
         date == today.minusDays(1)        -> "Yesterday"
         date.isAfter(today.minusDays(7))  -> date.format(DateTimeFormatter.ofPattern("EEE"))
         else                              -> date.format(DateTimeFormatter.ofPattern("MMM d"))
+    }
+}
+
+// MARK: - Hashtag-aware search parsing
+
+/**
+ * Output of [parseHashtagQuery] — the raw search string split
+ * into resolved tag ids and the leftover non-hashtag text.
+ */
+internal data class ParsedSearchQuery(
+    val requiredTagIds: List<String>,
+    val residualQuery: String,
+)
+
+/**
+ * Pull every `#tagname` token out of the raw search string and
+ * resolve it against [knownTags] (case-insensitive, underscores
+ * treated as spaces so `#meeting_notes` matches a tag named
+ * "Meeting Notes"). Unresolved hashtags fall through to the
+ * residual so the user can still find OCR matches for the
+ * literal string they typed.
+ */
+internal fun parseHashtagQuery(
+    raw: String,
+    knownTags: List<TagEntity>,
+): ParsedSearchQuery {
+    if (!raw.contains('#')) return ParsedSearchQuery(emptyList(), raw)
+    val byNormalizedName = knownTags.associateBy {
+        it.name.trim().lowercase().replace("_", " ")
+    }
+    val tagIds = mutableListOf<String>()
+    val residual = mutableListOf<String>()
+    for (token in raw.split(Regex("\\s+"))) {
+        if (token.startsWith("#") && token.length > 1) {
+            val key = token.substring(1).lowercase().replace("_", " ")
+            val resolved = byNormalizedName[key]
+            if (resolved != null) {
+                if (resolved.id !in tagIds) tagIds += resolved.id
+                continue
+            }
+        }
+        if (token.isNotEmpty()) residual += token
+    }
+    return ParsedSearchQuery(tagIds, residual.joinToString(" "))
+}
+
+/**
+ * Return the in-flight hashtag prefix at the end of [raw], or
+ * `null` when the trailing token isn't a hashtag. `"#in"` → `"in"`;
+ * `"foo #in"` → `"in"`; `"foo"` / `"foo "` → `null`. Empty
+ * `#` (no chars yet) returns `""` so the suggestion strip can
+ * pop the full tag list the moment the user types the prefix.
+ */
+internal fun hashtagPrefixAtCursor(raw: String): String? {
+    if (raw.isEmpty() || raw.last().isWhitespace()) return null
+    val lastSpace = raw.lastIndexOf(' ')
+    val token = if (lastSpace < 0) raw else raw.substring(lastSpace + 1)
+    return if (token.startsWith("#")) token.substring(1) else null
+}
+
+/**
+ * Replace the trailing in-flight hashtag token in [raw] with the
+ * canonical tag name (normalised to `#word_word`) and a trailing
+ * space so the next keystroke starts a new token.
+ */
+internal fun applyHashtagSuggestion(raw: String, tagName: String): String {
+    val lastSpace = raw.lastIndexOf(' ')
+    val prefix = if (lastSpace < 0) "" else raw.substring(0, lastSpace + 1)
+    val canonical = "#" + tagName.trim().replace(Regex("\\s+"), "_") + " "
+    return prefix + canonical
+}
+
+@Composable
+private fun HashtagSuggestionStrip(
+    suggestions: List<String>,
+    onPick: (String) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(
+                start  = QuickInkSpacing.s5,
+                end    = QuickInkSpacing.s5,
+                bottom = QuickInkSpacing.s2,
+            ),
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+    ) {
+        suggestions.forEach { name ->
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(QuickInkRadius.pill))
+                    .background(colors.accentSoft)
+                    .clickable { onPick(name) }
+                    .padding(horizontal = QuickInkSpacing.s3, vertical = 6.dp),
+            ) {
+                Text(
+                    text  = "#$name",
+                    style = type.label.copy(fontSize = 12.sp),
+                    color = colors.accent,
+                )
+            }
+        }
     }
 }

@@ -51,6 +51,7 @@ struct SearchScreen: View {
     let onSettings: () -> Void
 
     @StateObject private var capturesVM: CaptureListViewModel
+    @StateObject private var tagsVM: TagListViewModel
     @State private var queryDraft: String = ""
     @State private var liveQuery: String = ""
     @State private var hits: [SearchHit] = []
@@ -85,11 +86,14 @@ struct SearchScreen: View {
         self.onSearch = onSearch
         self.onSettings = onSettings
         _capturesVM = StateObject(wrappedValue: CaptureListViewModel(userId: userId))
+        _tagsVM     = StateObject(wrappedValue: TagListViewModel(userId: userId))
     }
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
+
+            hashtagSuggestionStrip
 
             if !liveQuery.trimmingCharacters(in: .whitespaces).isEmpty {
                 resultCountStrip
@@ -119,6 +123,7 @@ struct SearchScreen: View {
         }
         .task {
             capturesVM.start()
+            tagsVM.start()
             if primaryTagCancellable == nil {
                 primaryTagCancellable = CaptureTagRepository()
                     .observePrimaryTagNames(userId: userId)
@@ -138,6 +143,46 @@ struct SearchScreen: View {
                 if newValue == queryDraft {
                     await runSearch(query: newValue)
                 }
+            }
+        }
+    }
+
+    // MARK: - Hashtag autocomplete strip
+
+    /// Sits directly under the search field. Renders tag-name
+    /// suggestions when the trailing in-flight token starts with
+    /// `#`. Tapping replaces the partial token with the canonical
+    /// name + a trailing space (so the next keystroke opens a new
+    /// token). Hidden otherwise.
+    @ViewBuilder
+    private var hashtagSuggestionStrip: some View {
+        if let prefix = hashtagPrefixAtCursor(queryDraft) {
+            let suggestions = tagsVM.categories
+                .filter { $0.name.lowercased().hasPrefix(prefix.lowercased()) }
+                .prefix(6)
+            if !suggestions.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: QuickInkSpacing.s2) {
+                        ForEach(Array(suggestions), id: \.id) { tag in
+                            Button {
+                                queryDraft = applyHashtagSuggestion(queryDraft, tagName: tag.name)
+                            } label: {
+                                Text("#" + tag.name)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(QuickInkColors.accent)
+                                    .padding(.horizontal, QuickInkSpacing.s3)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        QuickInkColors.accentSoft,
+                                        in: Capsule()
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, QuickInkSpacing.s5)
+                }
+                .padding(.bottom, QuickInkSpacing.s2)
             }
         }
     }
@@ -452,12 +497,95 @@ struct SearchScreen: View {
         isSearching = true
         defer { isSearching = false }
         do {
-            hits = try await repository.search(userId: userId, query: trimmed)
+            // Parse `#tag` tokens out of the query — resolved to
+            // tag ids, the remaining residual feeds the OCR /
+            // tag-name substring search. Unresolved hashtags fall
+            // through to the residual so the user can still find
+            // OCR matches for the literal string they typed.
+            let parsed = parseHashtagQuery(trimmed, knownTags: tagsVM.categories)
+            hits = try await repository.search(
+                userId:         userId,
+                query:          parsed.residualQuery,
+                requiredTagIds: parsed.requiredTagIds
+            )
         } catch {
             print("SearchScreen.runSearch failed: \(error)")
             hits = []
         }
     }
+}
+
+// MARK: - Hashtag-aware search parsing
+
+/// Output of `parseHashtagQuery` — the raw search string split
+/// into resolved tag ids and the leftover non-hashtag text.
+struct ParsedSearchQuery {
+    let requiredTagIds: [String]
+    let residualQuery: String
+}
+
+/// Pull every `#tagname` token out of the raw search string and
+/// resolve it against `knownTags` (case-insensitive, underscores
+/// treated as spaces so `#meeting_notes` matches a tag named
+/// "Meeting Notes"). Unresolved hashtags fall through to the
+/// residual so the user can still find OCR matches for the
+/// literal string they typed.
+func parseHashtagQuery(_ raw: String, knownTags: [TagEntity]) -> ParsedSearchQuery {
+    if !raw.contains("#") {
+        return ParsedSearchQuery(requiredTagIds: [], residualQuery: raw)
+    }
+    let byNormalizedName: [String: TagEntity] = Dictionary(
+        uniqueKeysWithValues: knownTags.map { tag in
+            (tag.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .replacingOccurrences(of: "_", with: " "),
+             tag)
+        }
+    )
+    var tagIds: [String] = []
+    var residual: [String] = []
+    for token in raw.split(whereSeparator: { $0.isWhitespace }) {
+        let t = String(token)
+        if t.hasPrefix("#") && t.count > 1 {
+            let key = String(t.dropFirst())
+                .lowercased()
+                .replacingOccurrences(of: "_", with: " ")
+            if let resolved = byNormalizedName[key] {
+                if !tagIds.contains(resolved.id) { tagIds.append(resolved.id) }
+                continue
+            }
+        }
+        if !t.isEmpty { residual.append(t) }
+    }
+    return ParsedSearchQuery(
+        requiredTagIds: tagIds,
+        residualQuery: residual.joined(separator: " ")
+    )
+}
+
+/// Return the in-flight hashtag prefix at the end of `raw`, or
+/// `nil` when the trailing token isn't a hashtag. Empty `#` (no
+/// chars yet) returns `""` so the suggestion strip can pop the
+/// full tag list the moment the user types the prefix.
+func hashtagPrefixAtCursor(_ raw: String) -> String? {
+    guard let last = raw.last, !last.isWhitespace else { return nil }
+    let lastSpace = raw.lastIndex(of: " ")
+    let token = lastSpace.map { String(raw[raw.index(after: $0)...]) } ?? raw
+    if token.hasPrefix("#") {
+        return String(token.dropFirst())
+    }
+    return nil
+}
+
+/// Replace the trailing in-flight hashtag token in `raw` with the
+/// canonical tag name (normalised to `#word_word`) and a trailing
+/// space so the next keystroke starts a new token.
+func applyHashtagSuggestion(_ raw: String, tagName: String) -> String {
+    let lastSpace = raw.lastIndex(of: " ")
+    let prefix: String = lastSpace.map { String(raw[..<raw.index(after: $0)]) } ?? ""
+    let normalized = tagName.trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: " ", with: "_")
+    return prefix + "#" + normalized + " "
 }
 
 // MARK: - Page-content result card (full width)
