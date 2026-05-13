@@ -144,6 +144,9 @@ fun WorkspaceHomeScreen(
     var actionsForFolder   by remember { mutableStateOf<FolderEntity?>(null) }
     var confirmDeleteFolder by remember { mutableStateOf<FolderEntity?>(null) }
     var showSmartEditor    by remember { mutableStateOf(false) }
+    var confirmDeleteCollection by remember {
+        mutableStateOf<SmartCollectionEntity?>(null)
+    }
 
     // Per-tab observers. `userId` keys the flow rebuild so a sign-out
     // / sign-in doesn't leak state across users.
@@ -256,9 +259,10 @@ fun WorkspaceHomeScreen(
             }
 
             SmartCollectionsStrip(
-                collections     = smartCollections,
-                onOpen          = onOpenSmartCollection,
-                onNewCollection = { showSmartEditor = true },
+                collections        = smartCollections,
+                onOpen             = onOpenSmartCollection,
+                onLongPress        = { sc -> confirmDeleteCollection = sc },
+                onNewCollection    = { showSmartEditor = true },
             )
             Spacer(Modifier.height(QuickInkSpacing.s4))
 
@@ -369,6 +373,49 @@ fun WorkspaceHomeScreen(
                     confirmDeleteFolder = null
                 }
             },
+        )
+    }
+
+    confirmDeleteCollection?.let { collection ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmDeleteCollection = null },
+            title = {
+                Text(
+                    text  = "Delete \"${collection.name}\"?",
+                    style = LocalQuickInkTypography.current.body.copy(
+                        fontWeight = FontWeight.SemiBold, fontSize = 17.sp,
+                    ),
+                    color = colors.ink,
+                )
+            },
+            text = {
+                Text(
+                    text  = "The rule is removed. Captures aren't deleted — " +
+                            "the collection is just a saved view.",
+                    style = LocalQuickInkTypography.current.meta,
+                    color = colors.inkSoft,
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    val target = collection
+                    scope.launch {
+                        app.database.smartCollectionDao()
+                            .softDelete(target.id, IsoClock.nowIso())
+                        confirmDeleteCollection = null
+                    }
+                }) {
+                    Text("Delete", color = colors.danger)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    confirmDeleteCollection = null
+                }) {
+                    Text("Cancel", color = colors.ink)
+                }
+            },
+            containerColor = colors.surface,
         )
     }
 
@@ -660,6 +707,7 @@ private fun ContinueCard(
 private fun SmartCollectionsStrip(
     collections: List<SmartCollectionEntity>,
     onOpen: (SmartCollectionEntity) -> Unit,
+    onLongPress: (SmartCollectionEntity) -> Unit,
     onNewCollection: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
@@ -695,8 +743,9 @@ private fun SmartCollectionsStrip(
     ) {
         items(collections, key = { it.id }) { collection ->
             SmartCollectionCard(
-                collection = collection,
-                onClick    = { onOpen(collection) },
+                collection  = collection,
+                onClick     = { onOpen(collection) },
+                onLongPress = { onLongPress(collection) },
             )
         }
     }
@@ -706,6 +755,7 @@ private fun SmartCollectionsStrip(
 private fun SmartCollectionCard(
     collection: SmartCollectionEntity,
     onClick: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
@@ -721,7 +771,10 @@ private fun SmartCollectionCard(
             .clip(shape)
             .background(colors.surface, shape)
             .border(1.dp, colors.border, shape)
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick     = onClick,
+                onLongClick = onLongPress,
+            )
             .padding(12.dp),
     ) {
         Box(

@@ -52,6 +52,7 @@ public struct WorkspaceHomeScreen: View {
     @State private var folderActionsTarget: FolderEntity? = nil
     @State private var folderDeleteTarget: FolderEntity? = nil
     @State private var showSmartEditor: Bool = false
+    @State private var confirmDeleteCollection: SmartCollectionEntity? = nil
 
     public init(
         userId: String,
@@ -162,6 +163,33 @@ public struct WorkspaceHomeScreen: View {
                 onCancel:  { folderEditorMode = nil }
             )
             .presentationDetents([.medium])
+        }
+        .alert(
+            "Delete \"\(confirmDeleteCollection?.name ?? "")\"?",
+            isPresented: Binding(
+                get: { confirmDeleteCollection != nil },
+                set: { if !$0 { confirmDeleteCollection = nil } }
+            ),
+            presenting: confirmDeleteCollection
+        ) { collection in
+            Button("Delete", role: .destructive) {
+                let id = collection.id
+                Task {
+                    let now = IsoClock.nowIso()
+                    let dbQueue = QuickInkDatabase.shared.dbQueue
+                    try? await dbQueue.write { db in
+                        try db.execute(sql: """
+                            UPDATE smart_collections
+                            SET deleted_at = ?, updated_at = ?, dirty = 1
+                            WHERE id = ?
+                            """, arguments: [now, now, id])
+                    }
+                    confirmDeleteCollection = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { confirmDeleteCollection = nil }
+        } message: { _ in
+            Text("The rule is removed. Captures aren't deleted — the collection is just a saved view.")
         }
         .sheet(isPresented: $showSmartEditor) {
             SmartCollectionEditorView(
@@ -382,6 +410,7 @@ public struct WorkspaceHomeScreen: View {
                     HStack(spacing: 10) {
                         ForEach(viewModel.smartCollections) { sc in
                             smartCollectionCard(sc)
+                                .onLongPressGesture { confirmDeleteCollection = sc }
                         }
                     }
                     .padding(.horizontal, AppSpacing.s4)
