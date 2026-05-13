@@ -26,7 +26,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -58,10 +61,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.tag.TagRepository
+import app.quickink.mobile.features.workspace.AutoTagSuggester
+import app.releaf.mobile.data.common.IsoClock
+import app.releaf.mobile.data.common.Uuidv7
 import app.quickink.mobile.features.onboarding.OnboardingPrimaryButton
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
@@ -72,6 +81,7 @@ import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppSpacing
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import kotlinx.coroutines.launch
 
 @Composable
 fun ScanReviewScreen(
@@ -92,6 +102,36 @@ fun ScanReviewScreen(
 
     val isFailed = state is ScanFlowController.State.Failed
     val isRecognizing = state is ScanFlowController.State.Recognizing
+
+    // Workspace v1 Phase E.2 — auto-tag suggestions on the scan
+    // review surface (per brief §5). Capture row + OCR rows exist
+    // by the time we land here because the controller creates them
+    // as each page completes; we read by captureId from state.
+    val captureId = when (val s = state) {
+        is ScanFlowController.State.Recognizing -> s.captureId
+        is ScanFlowController.State.Complete    -> s.captureId
+        else                                    -> null
+    }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val suggestedTags = androidx.compose.runtime.remember(captureId, categories) {
+        androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
+    }
+    val acceptedTagNames = androidx.compose.runtime.remember(captureId) {
+        androidx.compose.runtime.mutableStateOf<Set<String>>(emptySet())
+    }
+    androidx.compose.runtime.LaunchedEffect(captureId, state, categories) {
+        val id = captureId ?: return@LaunchedEffect
+        // Wait for at least one page to finish OCR so suggestions
+        // have something to fire on.
+        val capture = app.database.captureDao().findById(id) ?: return@LaunchedEffect
+        val ocrText = app.database.ocrResultDao().findFirstTextForCapture(id)
+        suggestedTags.value = AutoTagSuggester.suggest(
+            ocrText           = ocrText,
+            existingTagNames  = categories.map { it.name }.toSet(),
+            currentlyAttached = acceptedTagNames.value,
+            captureDateIso    = capture.createdAt,
+        )
+    }
 
     // Lift the content past the system status bar + add visual
     // breathing room so the category buttons clear the notch on
@@ -116,6 +156,38 @@ fun ScanReviewScreen(
                 ),
             verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s5),
         ) {
+            // Phase E.2 — AI-suggested chip strip above the
+            // category grid. Renders only while we have a
+            // captureId in flight and the suggester produced hits.
+            val cid = captureId
+            val suggestions = suggestedTags.value
+            if (cid != null && suggestions.isNotEmpty() && !isFailed) {
+                ScanReviewSuggestions(
+                    names = suggestions,
+                    onAccept = { name ->
+                        scope.launch {
+                            val tag = categoryRepo.findOrCreate(userId, name)
+                            val now = IsoClock.nowIso()
+                            app.database.captureTagDao().attachTag(
+                                joinId    = Uuidv7.generate(),
+                                captureId = cid,
+                                tagId     = tag.id,
+                                source    = "ai-suggested",
+                                timestamp = now,
+                            )
+                            acceptedTagNames.value = acceptedTagNames.value + name
+                            // Drop the accepted chip immediately
+                            // so the strip shows what's left to act
+                            // on. Re-running the suggester would
+                            // re-emit nothing because the new
+                            // currentlyAttached set excludes this
+                            // tag.
+                            suggestedTags.value = suggestions.filter { it != name }
+                        }
+                    },
+                )
+            }
+
             if (categories.isNotEmpty() && !isFailed) {
                 CategoryButtonsGrid(
                     categories       = categories.map { it.name },
@@ -329,6 +401,80 @@ private fun StatusIndicator(state: ScanFlowController.State) {
                     color    = colors.inkSoft,
                     textAlign = TextAlign.Center,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Workspace v1 Phase E.2 — AI-suggested tag chips. Surfaces tags
+ * inferred from the in-flight capture's OCR text. The user can
+ * tap "+#name" to attach immediately (writes to capture_tags with
+ * source = "ai-suggested"); rejecting is implicit — chips not
+ * tapped are simply discarded when the user leaves the screen.
+ */
+@Composable
+private fun ScanReviewSuggestions(
+    names: List<String>,
+    onAccept: (String) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val cardShape = RoundedCornerShape(QuickInkRadius.md)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .background(colors.accentSoft.copy(alpha = 0.4f), cardShape)
+            .padding(QuickInkSpacing.s3),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text  = "SUGGESTED FROM THIS SCAN",
+                style = type.label.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp),
+                color = colors.accentDeep,
+            )
+        }
+        Spacer(Modifier.height(QuickInkSpacing.s2))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement   = Arrangement.spacedBy(6.dp),
+        ) {
+            names.forEach { name ->
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(
+                            Color.White.copy(alpha = 0.85f),
+                            RoundedCornerShape(999.dp),
+                        )
+                        .border(
+                            1.dp,
+                            colors.accent.copy(alpha = 0.25f),
+                            RoundedCornerShape(999.dp),
+                        )
+                        .clickable { onAccept(name) }
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text  = "+",
+                        style = type.label.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                        color = colors.accentDeep,
+                    )
+                    Spacer(Modifier.width(3.dp))
+                    Text(
+                        text  = "#",
+                        style = type.label.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Bold),
+                        color = colors.accent.copy(alpha = 0.7f),
+                    )
+                    Text(
+                        text  = name,
+                        style = type.label.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Medium),
+                        color = colors.accentDeep,
+                        modifier = Modifier.padding(start = 1.dp),
+                    )
+                }
             }
         }
     }
