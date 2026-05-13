@@ -121,7 +121,7 @@ fun CategoriesSettingsScreen(
                     tint              = colors.ink,
                 )
             }
-            Text(text = "Categories", style = type.pageTitle, color = colors.ink)
+            Text(text = "Tags", style = type.pageTitle, color = colors.ink)
         }
 
         Column(

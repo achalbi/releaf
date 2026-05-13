@@ -141,8 +141,8 @@ fun ProfileDrawerOverlay(
                 DrawerRowAsset(
                     glyphTint   = colors.accent,
                     drawableId  = R.drawable.ic_note,
-                    label       = "Library",
-                    meta        = "all your scans · grid · search",
+                    label       = "Workspace",
+                    meta        = "folders · tags · smart collections",
                     onClick     = onOpenLibrary,
                 )
                 DashedInkSeparator()

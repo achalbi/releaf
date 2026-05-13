@@ -494,7 +494,7 @@ fun SettingsScreen(
             }
 
             if (onManageCategories != null) {
-                Section(title = "Categories") {
+                Section(title = "Tags") {
                     ManageCategoriesRow(onClick = onManageCategories)
                 }
             }
