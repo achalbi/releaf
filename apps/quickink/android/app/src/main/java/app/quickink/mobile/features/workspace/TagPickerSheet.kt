@@ -138,6 +138,22 @@ fun TagPickerSheet(
         app.database.captureTagDao().observeTagIdsForCapture(captureId)
     }.collectAsState(initial = emptyList())
 
+    // AI suggestions — read OCR text + the capture's createdAt
+    // and run the rule engine against the user's existing tag set.
+    var suggestedNames by remember(captureId) { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(captureId, allTags) {
+        val ocrText = app.database.ocrResultDao().findFirstTextForCapture(captureId)
+        val capture = app.database.captureDao().findById(captureId)
+        suggestedNames = AutoTagSuggester.suggest(
+            ocrText            = ocrText,
+            existingTagNames   = allTags.map { it.name }.toSet(),
+            currentlyAttached  = originalIds
+                .mapNotNull { id -> allTags.firstOrNull { it.id == id }?.name }
+                .toSet(),
+            captureDateIso     = capture?.createdAt,
+        )
+    }
+
     // Working set — initialised from the on-disk attachments the
     // first time they arrive. After that the user's toggles win
     // until Save / Cancel. `seeded` guards the one-time copy.
@@ -189,6 +205,24 @@ fun TagPickerSheet(
                     }
                 },
             )
+
+            // ─── AI-suggested strip ───────────────────────────
+            if (suggestedNames.isNotEmpty()) {
+                Spacer(Modifier.height(QuickInkSpacing.s3))
+                AiSuggestedStrip(
+                    names    = suggestedNames,
+                    onAccept = { name ->
+                        scope.launch {
+                            val tag = tagRepo.findOrCreate(userId, name)
+                            selectedIds = selectedIds + tag.id
+                            // Tagged source becomes "ai-suggested"
+                            // on Save (the writer below uses this
+                            // path; manual taps stay "manual").
+                            suggestedNames = suggestedNames.filter { it != name }
+                        }
+                    },
+                )
+            }
 
             Spacer(Modifier.height(QuickInkSpacing.s3))
 
@@ -346,6 +380,73 @@ private fun NewTagInputRow(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun AiSuggestedStrip(
+    names: List<String>,
+    onAccept: (String) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val shape  = RoundedCornerShape(QuickInkRadius.md)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.accentSoft.copy(alpha = 0.4f), shape)
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text  = "✨",
+                style = type.label.copy(fontSize = 12.sp),
+                color = colors.accent,
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                text  = "SUGGESTED FROM THIS DOCUMENT",
+                style = type.label.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp),
+                color = colors.accentDeep,
+            )
+        }
+        Spacer(Modifier.height(QuickInkSpacing.s2))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            names.forEach { name ->
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White.copy(alpha = 0.7f), RoundedCornerShape(999.dp))
+                        .border(1.dp, colors.accent.copy(alpha = 0.25f), RoundedCornerShape(999.dp))
+                        .clickable { onAccept(name) }
+                        .padding(horizontal = 9.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text  = "+",
+                        style = type.label.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                        color = colors.accentDeep,
+                    )
+                    Spacer(Modifier.width(3.dp))
+                    Text(
+                        text  = "#",
+                        style = type.label.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                        color = colors.accent.copy(alpha = 0.7f),
+                    )
+                    Text(
+                        text  = name,
+                        style = type.label.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                        color = colors.accentDeep,
+                        modifier = Modifier.padding(start = 1.dp),
+                    )
+                }
+            }
+        }
     }
 }
 
