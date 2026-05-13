@@ -217,9 +217,7 @@ public struct FolderDetailScreen: View {
         let overflow = max(0, (viewModel.captureTagsById[cap.id]?.count ?? 0) - 3)
         return Button(action: { onOpenCapture(cap) }) {
             HStack(alignment: .top, spacing: QuickInkSpacing.s3) {
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(QuickInkColors.borderSoft)
-                    .frame(width: 44, height: 56)
+                WorkspaceDocThumbnail(previewUri: cap.previewUri)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(title)
                         .font(.system(size: 14, weight: .semibold))

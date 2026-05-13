@@ -423,12 +423,7 @@ private fun SmartCollectionDocRow(
         .clickable(onClick = onClick)
         .padding(vertical = 13.dp)) {
         Row(verticalAlignment = Alignment.Top) {
-            Box(
-                modifier = Modifier
-                    .size(width = 44.dp, height = 56.dp)
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(colors.borderSoft),
-            )
+            DocRowThumbnail(previewUri = capture.previewUri)
             Spacer(Modifier.width(QuickInkSpacing.s3))
             Column(modifier = Modifier.weight(1f)) {
                 Text(

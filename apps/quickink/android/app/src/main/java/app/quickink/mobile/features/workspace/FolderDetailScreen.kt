@@ -54,6 +54,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.net.Uri
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Search
@@ -89,6 +90,8 @@ import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 
 @Composable
 fun FolderDetailScreen(
@@ -479,14 +482,7 @@ private fun DocRow(
             .padding(vertical = 13.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        // Thumbnail — 44x56 placeholder. Replace with the preview JPEG
-        // when wired in a follow-up (see ScanDetail's preview).
-        Box(
-            modifier = Modifier
-                .size(width = 44.dp, height = 56.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .background(colors.borderSoft),
-        )
+        DocRowThumbnail(previewUri = capture.previewUri)
 
         Spacer(Modifier.width(QuickInkSpacing.s3))
 
@@ -563,5 +559,39 @@ private fun DocRowTagChip(name: String) {
             color = fg,
             modifier = Modifier.padding(start = if (!isExtra) 1.dp else 0.dp),
         )
+    }
+}
+
+/**
+ * Shared 44×56 thumbnail tile for Workspace doc rows. Falls back
+ * to a soft-border placeholder when the previewUri is missing or
+ * fails to load — matches the lined-paper neutral tone the design
+ * specs for OCR-only documents.
+ */
+@Composable
+internal fun DocRowThumbnail(previewUri: String?) {
+    val colors = LocalQuickInkColors.current
+    val shape  = RoundedCornerShape(7.dp)
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .size(width = 44.dp, height = 56.dp)
+            .clip(shape)
+            .background(colors.borderSoft, shape),
+    ) {
+        val uri = previewUri?.takeIf { it.isNotBlank() }
+        if (uri != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(Uri.parse(uri))
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            )
+        }
     }
 }

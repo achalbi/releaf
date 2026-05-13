@@ -258,9 +258,7 @@ public struct WorkspaceHomeScreen: View {
 
         return Button(action: { onOpenContinue(capture) }) {
             HStack(spacing: AppSpacing.s3) {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(QuickInkColors.bg)
-                    .frame(width: 56, height: 70)
+                ContinueCardThumbnail(previewUri: capture.previewUri)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("CONTINUE")

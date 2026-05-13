@@ -217,9 +217,7 @@ public struct SmartCollectionScreen: View {
             (cap.category?.isEmpty == false ? cap.category! : "Untitled scan")
         return Button(action: { onOpenCapture(cap) }) {
             HStack(alignment: .top, spacing: QuickInkSpacing.s3) {
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(QuickInkColors.borderSoft)
-                    .frame(width: 44, height: 56)
+                WorkspaceDocThumbnail(previewUri: cap.previewUri)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(title)
                         .font(.system(size: 14, weight: .semibold))

@@ -501,15 +501,32 @@ private fun ContinueCard(
             .padding(QuickInkSpacing.s3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Thumbnail placeholder — lined-paper texture would be nicer
-        // but a flat tinted surface is fine for v1.
+        // Hero thumbnail — uses the preview JPEG when present;
+        // falls back to the dark-mode cream rectangle when the
+        // file isn't on disk (cross-device synced capture before
+        // restorePending finishes downloading the binary).
+        val previewUri = capture.previewUri?.takeIf { it.isNotBlank() }
         Box(
             modifier = Modifier
                 .width(56.dp)
                 .height(70.dp)
                 .clip(RoundedCornerShape(6.dp))
                 .background(colors.bg),
-        )
+        ) {
+            if (previewUri != null) {
+                coil.compose.AsyncImage(
+                    model = coil.request.ImageRequest.Builder(LocalContext.current)
+                        .data(android.net.Uri.parse(previewUri))
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .width(56.dp)
+                        .height(70.dp),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                )
+            }
+        }
 
         Spacer(Modifier.width(QuickInkSpacing.s3))
 
