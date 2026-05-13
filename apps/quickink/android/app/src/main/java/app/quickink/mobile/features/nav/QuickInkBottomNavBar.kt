@@ -73,6 +73,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.quickink.mobile.R
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
@@ -229,7 +230,18 @@ private fun RegularTab(
                 tint               = tint,
                 modifier           = Modifier.size(20.dp),
             )
-            Text(text = label, style = type.caption, color = tint)
+            Text(
+                text     = label,
+                // Slightly tighter than the global caption token so
+                // the longest label ("Workspace", 9 chars) clears
+                // the `weight(1f)` slot on stock devices without
+                // wrapping to two lines. The other four labels (4–8
+                // chars) read identically at this size.
+                style    = type.caption.copy(fontSize = 10.5.sp),
+                color    = tint,
+                maxLines = 1,
+                softWrap = false,
+            )
         }
     }
 }
@@ -277,7 +289,18 @@ private fun RegularTabAsset(
                 tint               = tint,
                 modifier           = Modifier.size(20.dp),
             )
-            Text(text = label, style = type.caption, color = tint)
+            Text(
+                text     = label,
+                // Slightly tighter than the global caption token so
+                // the longest label ("Workspace", 9 chars) clears
+                // the `weight(1f)` slot on stock devices without
+                // wrapping to two lines. The other four labels (4–8
+                // chars) read identically at this size.
+                style    = type.caption.copy(fontSize = 10.5.sp),
+                color    = tint,
+                maxLines = 1,
+                softWrap = false,
+            )
         }
     }
 }

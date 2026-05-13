@@ -143,8 +143,13 @@ public struct QuickInkBottomNavBar: View {
                     .font(.system(size: 20))
                     .foregroundStyle(tint)
                 Text(label)
-                    .font(QuickInkText.caption)
+                    // Slightly tighter than the global caption
+                    // token so the longest label ("Workspace") fits
+                    // its `frame(maxWidth: .infinity)` slot on stock
+                    // devices without wrapping to two lines.
+                    .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(tint)
+                    .lineLimit(1)
             }
             .padding(.horizontal, QuickInkSpacing.s2)
             .padding(.vertical, QuickInkSpacing.s2)
@@ -188,8 +193,13 @@ public struct QuickInkBottomNavBar: View {
                     .frame(width: 20, height: 20)
                     .foregroundStyle(tint)
                 Text(label)
-                    .font(QuickInkText.caption)
+                    // Slightly tighter than the global caption
+                    // token so the longest label ("Workspace") fits
+                    // its `frame(maxWidth: .infinity)` slot on stock
+                    // devices without wrapping to two lines.
+                    .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(tint)
+                    .lineLimit(1)
             }
             .padding(.horizontal, QuickInkSpacing.s2)
             .padding(.vertical, QuickInkSpacing.s2)
