@@ -13,6 +13,7 @@ import SwiftUI
 import GRDB
 import PDFKit
 import CoreLocation
+import ReleafCoreData
 import ReleafCoreScan
 
 struct ScanDetailScreen: View {
@@ -80,6 +81,14 @@ struct ScanDetailScreen: View {
     /// the row's label ("Preparing…") and disables further taps so
     /// a double-tap doesn't queue two renders.
     @State private var isPreparingImageShare = false
+
+    /// Workspace v1 — folder picker presentation. Tapping the
+    /// Actions card's "Move to folder" row flips this.
+    @State private var showFolderPicker = false
+    /// Workspace v1 — debouncer for the Continue card signal. The
+    /// PDF reader writes last_opened_* 500ms after the user lands
+    /// on a page so a quick flip-through doesn't pollute Home.
+    @State private var lastOpenedDebounceTask: Task<Void, Never>? = nil
 
     init(
         captureId: String,
@@ -176,6 +185,13 @@ struct ScanDetailScreen: View {
             // Runs once on every Details open; CLGeocoder's own
             // rate-limit naturally caps the retry frequency.
             await retryReverseGeocodeIfNeeded()
+            // Workspace v1 — register a "just opened" Continue
+            // signal on first appearance. Subsequent page changes
+            // refresh via .onChange below.
+            scheduleLastOpenedWrite()
+        }
+        .onChange(of: selectedPageIndex) { _ in
+            scheduleLastOpenedWrite()
         }
         .alert("Delete this scan?", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
@@ -192,6 +208,28 @@ struct ScanDetailScreen: View {
         // persists via `CaptureRepository.setCategory(...)` and
         // refreshes the in-screen capture state so the pill updates
         // immediately.
+        // Workspace v1 — folder picker on "Move to folder".
+        .sheet(isPresented: $showFolderPicker) {
+            FolderPickerSheet(
+                userId:          userId,
+                currentFolderId: capture?.folderId,
+                onPickFolder:    { folder in
+                    let cid = captureId
+                    Task {
+                        try? await CaptureRepository().setFolder(
+                            captureId: cid,
+                            folderId:  folder.id,
+                        )
+                        // Refresh in-screen capture so the
+                        // Details card reflects the new folder.
+                        await reloadCapture()
+                    }
+                    showFolderPicker = false
+                },
+                onDismiss:       { showFolderPicker = false }
+            )
+            .presentationDetents([.medium])
+        }
         .confirmationDialog(
             "Tag scan as",
             isPresented: $showRetagSheet,
@@ -837,7 +875,7 @@ struct ScanDetailScreen: View {
                     actionDivider
                 }
 
-                Button { showRetagSheet = true } label: {
+                Button { showFolderPicker = true } label: {
                     actionRowContent(icon: "folder", label: "Move to folder")
                 }
                 .buttonStyle(.plain)
@@ -1128,7 +1166,9 @@ struct ScanDetailScreen: View {
                 try CaptureSummary.fetchOne(db, sql: """
                     SELECT id, title, preview_uri, pdf_uri, category, page_count,
                            created_at, source, latitude, longitude,
-                           locality, sub_locality, address
+                           locality, sub_locality, address,
+                           folder_id, last_opened_at, last_opened_page,
+                           last_opened_device
                     FROM captures
                     WHERE id = ? AND deleted_at IS NULL
                     LIMIT 1
@@ -1137,6 +1177,35 @@ struct ScanDetailScreen: View {
             self.capture = result
         } catch {
             print("ScanDetailScreen.loadCapture failed: \(error)")
+        }
+    }
+
+    /// Convenience alias used by the folder-picker callback. Same
+    /// SELECT as the first-load path; SwiftUI re-renders the Details
+    /// card off the @State change.
+    private func reloadCapture() async {
+        await loadCapture()
+    }
+
+    // MARK: - Workspace v1 Continue card signal
+
+    /// Schedule a debounced write of last_opened_* — runs 500ms
+    /// after the user lands on a page so a quick swipe doesn't
+    /// churn the row.
+    private func scheduleLastOpenedWrite() {
+        lastOpenedDebounceTask?.cancel()
+        let cid = captureId
+        let page = selectedPageIndex + 1
+        let device = WorkspaceDeviceId.current
+        lastOpenedDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            if Task.isCancelled { return }
+            try? await CaptureRepository().setLastOpened(
+                captureId: cid,
+                openedAt:  IsoClock.nowIso(),
+                page:      page,
+                deviceId:  device,
+            )
         }
     }
 

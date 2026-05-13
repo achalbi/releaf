@@ -114,6 +114,41 @@ public final class CaptureRepository: @unchecked Sendable {
         }
     }
 
+    /// Workspace v1 — assign a capture to a folder. Mirror of
+    /// Android's `CaptureDao.setFolder`. Bumps dirty so the change
+    /// propagates via sync on the next push.
+    public func setFolder(captureId: String, folderId: String) async throws {
+        let now = IsoClock.nowIso()
+        try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE captures
+                SET folder_id = ?, updated_at = ?, dirty = 1
+                WHERE id = ?
+                """, arguments: [folderId, now, captureId])
+        }
+    }
+
+    /// Workspace v1 — Continue card signal. Writes the most-recent
+    /// page the user was on. Page is 1-indexed.
+    public func setLastOpened(
+        captureId: String,
+        openedAt: String,
+        page: Int,
+        deviceId: String?
+    ) async throws {
+        try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE captures
+                SET last_opened_at = ?,
+                    last_opened_page = ?,
+                    last_opened_device = ?,
+                    updated_at = ?,
+                    dirty = 1
+                WHERE id = ?
+                """, arguments: [openedAt, page, deviceId, openedAt, captureId])
+        }
+    }
+
     /// Update the user-editable title on a capture. Same dirty-bit
     /// pattern as `setCategory`. Pass `nil` to clear the title
     /// (which makes the Library card fall back to OCR snippet →
