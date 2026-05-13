@@ -259,6 +259,8 @@ private struct MainShell: View {
         // tab routes here when the flag is on; falls back to .notesList
         // otherwise.
         case workspaceHome
+        case folderDetail(folderId: String)
+        case smartCollection(collectionId: String)
     }
 
     /// Resolved per-process: which route the Workspace bottom-nav tap
@@ -404,6 +406,13 @@ private struct MainShell: View {
             // safe.
             let folderRepo = FolderRepository()
             try? await folderRepo.runFirstLaunchMigrationIfNeeded(userId: userId)
+
+            // Workspace v1 Phase C.3 — seed "Needs review" smart
+            // collection. Depends on the #needs-review tag landing
+            // via TagRepository.defaultSeed (above). Idempotent
+            // via is_seeded.
+            let smartRepo = SmartCollectionRepository()
+            try? await smartRepo.seedDefaultsIfNeeded(userId: userId)
             // One-shot post-onboarding location-permission ask.
             // Existing users who completed onboarding before the
             // Location step shipped (Phase 7) would otherwise never
@@ -632,9 +641,8 @@ private struct MainShell: View {
             WorkspaceHomeScreen(
                 userId:                userId,
                 onOpenSearch:          { navToTab(.search) },
-                onOpenFolder:          { _ in
-                    // Folder detail (Screen 2) lands in iOS C — tap
-                    // is a no-op until that route exists.
+                onOpenFolder:          { folder in
+                    path.append(.folderDetail(folderId: folder.id))
                 },
                 onOpenContinue:        { capture in
                     path.append(.scanDetail(captureId: capture.id))
@@ -646,13 +654,47 @@ private struct MainShell: View {
                     // ships in iOS D.
                     path.append(.categoryEntries(name: tag.name))
                 },
-                onOpenSmartCollection: { _ in
-                    // Smart-collection view lands in iOS C — no-op.
+                onOpenSmartCollection: { sc in
+                    path.append(.smartCollection(collectionId: sc.id))
                 },
                 onBrowseTags:          { /* Tag library lands in iOS D */ },
                 onHome:                { path.removeAll() },
                 onScan:                { showQuickCapture = true },
                 onSettings:            { navToTab(.settings) }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .folderDetail(let folderId):
+            FolderDetailScreen(
+                folderId:      folderId,
+                userId:        userId,
+                onBack:        { path.removeLast() },
+                onOpenCapture: { capture in
+                    path.append(.scanDetail(captureId: capture.id))
+                },
+                onOpenSearch:  { navToTab(.search) },
+                onHome:        { path.removeAll() },
+                onWorkspace:   { navToTab(workspaceTabRoute) },
+                onScan:        { showQuickCapture = true },
+                onSettings:    { navToTab(.settings) }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .smartCollection(let collectionId):
+            SmartCollectionScreen(
+                collectionId: collectionId,
+                userId:       userId,
+                onBack:       { path.removeLast() },
+                onOpenCapture: { capture in
+                    path.append(.scanDetail(captureId: capture.id))
+                },
+                onOpenSearch: { navToTab(.search) },
+                onHome:       { path.removeAll() },
+                onWorkspace:  { navToTab(workspaceTabRoute) },
+                onScan:       { showQuickCapture = true },
+                onSettings:   { navToTab(.settings) }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)

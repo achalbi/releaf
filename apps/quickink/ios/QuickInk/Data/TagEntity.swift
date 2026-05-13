@@ -12,7 +12,7 @@
 import Foundation
 import GRDB
 
-public struct TagEntity: Codable, FetchableRecord, PersistableRecord, Equatable, Sendable {
+public struct TagEntity: Codable, FetchableRecord, PersistableRecord, Equatable, Sendable, Identifiable {
 
     /// Table renamed from `categories` → `tags` in v8_workspace.
     /// The Swift type name stays `TagEntity` for one more

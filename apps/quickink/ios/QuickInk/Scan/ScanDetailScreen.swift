@@ -85,6 +85,9 @@ struct ScanDetailScreen: View {
     /// Workspace v1 — folder picker presentation. Tapping the
     /// Actions card's "Move to folder" row flips this.
     @State private var showFolderPicker = false
+    /// Workspace v1 — tag picker presentation. Tapping "Manage
+    /// tags" opens the bottom sheet.
+    @State private var showTagPicker = false
     /// Workspace v1 — debouncer for the Continue card signal. The
     /// PDF reader writes last_opened_* 500ms after the user lands
     /// on a page so a quick flip-through doesn't pollute Home.
@@ -208,6 +211,15 @@ struct ScanDetailScreen: View {
         // persists via `CaptureRepository.setCategory(...)` and
         // refreshes the in-screen capture state so the pill updates
         // immediately.
+        // Workspace v1 — tag picker on "Manage tags".
+        .sheet(isPresented: $showTagPicker) {
+            TagPickerSheet(
+                captureId: captureId,
+                userId:    userId,
+                onDismiss: { showTagPicker = false }
+            )
+            .presentationDetents([.large])
+        }
         // Workspace v1 — folder picker on "Move to folder".
         .sheet(isPresented: $showFolderPicker) {
             FolderPickerSheet(
@@ -877,6 +889,13 @@ struct ScanDetailScreen: View {
 
                 Button { showFolderPicker = true } label: {
                     actionRowContent(icon: "folder", label: "Move to folder")
+                }
+                .buttonStyle(.plain)
+
+                actionDivider
+
+                Button { showTagPicker = true } label: {
+                    actionRowContent(icon: "tag", label: "Manage tags")
                 }
                 .buttonStyle(.plain)
 
