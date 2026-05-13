@@ -201,6 +201,37 @@ interface CaptureTagDao {
     fun observeIntersectCount(userId: String, tagIds: List<String>, tagCount: Int): Flow<Int>
 
     /**
+     * For every active capture in the user's namespace that has at
+     * least one active tag attached, emit (capture_id, tag_name) for
+     * the *earliest-attached* tag — the closest analogue to the
+     * legacy `captures.category` "primary label". Drives the legacy
+     * Library / Search / Category-grid surfaces post-A.3c column
+     * drop. Window function picks one row per capture deterministically;
+     * SQLite 3.25+ is bundled via [BundledSQLiteDriver] so this is
+     * safe to run everywhere QuickInk runs.
+     */
+    @Query("""
+        WITH ranked AS (
+            SELECT
+                capture_tags.capture_id AS capture_id,
+                tags.name               AS tag_name,
+                ROW_NUMBER() OVER (
+                    PARTITION BY capture_tags.capture_id
+                    ORDER BY capture_tags.created_at ASC, capture_tags.id ASC
+                ) AS rn
+            FROM capture_tags
+            JOIN tags     ON tags.id     = capture_tags.tag_id
+            JOIN captures ON captures.id = capture_tags.capture_id
+            WHERE captures.user_id    = :userId
+              AND captures.deleted_at IS NULL
+              AND capture_tags.deleted_at IS NULL
+              AND tags.deleted_at     IS NULL
+        )
+        SELECT capture_id, tag_name FROM ranked WHERE rn = 1
+    """)
+    fun observePrimaryTagNames(userId: String): Flow<List<CapturePrimaryTagRow>>
+
+    /**
      * Soft-delete a single join row by id. Used by [detach] —
      * external callers should prefer that.
      */
@@ -260,4 +291,15 @@ interface CaptureTagDao {
 data class TagCount(
     @ColumnInfo(name = "tag_id")    val tagId: String,
     @ColumnInfo(name = "doc_count") val docCount: Int,
+)
+
+/**
+ * Projection for [CaptureTagDao.observePrimaryTagNames]. One row
+ * per capture that has at least one active tag — `tagName` is the
+ * earliest-attached tag's name. Callers typically collect into a
+ * `Map<String, String>` keyed by [captureId] for O(1) UI lookup.
+ */
+data class CapturePrimaryTagRow(
+    @ColumnInfo(name = "capture_id") val captureId: String,
+    @ColumnInfo(name = "tag_name")   val tagName: String,
 )

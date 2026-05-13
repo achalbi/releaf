@@ -472,7 +472,6 @@ private fun DocRow(
     }
 
     val title = capture.title?.takeIf { it.isNotBlank() }
-        ?: capture.category?.takeIf { it.isNotBlank() }
         ?: "Untitled scan"
 
     Row(

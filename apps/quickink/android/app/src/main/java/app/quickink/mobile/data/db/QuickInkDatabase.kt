@@ -69,6 +69,13 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         CaptureTagEntity::class,
         SmartCollectionEntity::class,
     ],
+    // v11 — Workspace v1 Phase A.3c. Drops the `captures.category`
+    // TEXT column. Per-capture single-label semantics now live in
+    // the `capture_tags` join (materialized in A.3a). The shared
+    // schema canonical record is v4_workspace.sql (the column drop
+    // sits in the same migration script per the brief §2). Room
+    // rebuilds destructively until real users have data.
+    //
     // v10 — Workspace v1 Phase A.2. Renames `categories` table to
     // `tags`; CategoryEntity → TagEntity (package data.tag).
     // Tagging is now a many-to-many relationship via the
@@ -107,7 +114,7 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // captures.category column. `fallbackToDestructiveMigration`
     // below handles the rebuild; when real users have data we'll
     // register real Migration objects.
-    version       = 10,
+    version       = 11,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {

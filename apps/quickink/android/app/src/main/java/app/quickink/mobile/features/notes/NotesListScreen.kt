@@ -175,6 +175,7 @@ fun NotesListScreen(
     val app = context.applicationContext as QuickInkApp
     val captureDao = remember(app) { app.database.captureDao() }
     val tagDao = remember(app) { app.database.tagDao() }
+    val captureTagDao = remember(app) { app.database.captureTagDao() }
     val ocrResultDao = remember(app) { app.database.ocrResultDao() }
 
     val captures by remember(userId, captureDao) {
@@ -184,6 +185,20 @@ fun NotesListScreen(
     val categories by remember(userId, tagDao) {
         tagDao.observeActive(userId)
     }.collectAsState(initial = emptyList())
+
+    // Per-capture primary-tag-name lookup. Replaces the pre-A.3c
+    // `captures.category` field's role of "the capture's single
+    // primary label" — for each capture, the name of its
+    // earliest-attached active tag. Used for the chip display,
+    // category-style filtering, and the title-cascade fallback
+    // (`displayedTitle`).
+    val primaryTagRows by remember(userId, captureTagDao) {
+        captureTagDao.observePrimaryTagNames(userId)
+    }.collectAsState(initial = emptyList())
+
+    val primaryTagByCapture: Map<String, String> = remember(primaryTagRows) {
+        primaryTagRows.associate { it.captureId to it.tagName }
+    }
 
     // Preload first-page OCR snippets in one Flow so cards render in
     // their final state — no per-card LaunchedEffect, no mid-screen
@@ -233,12 +248,12 @@ fun NotesListScreen(
 
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
-    val filteredSorted = remember(captures, activeCategory, dateRangeStart, dateRangeEnd) {
+    val filteredSorted = remember(captures, activeCategory, dateRangeStart, dateRangeEnd, primaryTagByCapture) {
         val byCategory = if (activeCategory == "All") {
             captures
         } else {
             val needle = activeCategory.lowercase()
-            captures.filter { (it.category ?: "").lowercase() == needle }
+            captures.filter { (primaryTagByCapture[it.id] ?: "").lowercase() == needle }
         }
         if (dateRangeStart == null && dateRangeEnd == null) return@remember byCategory  // DAO already returns newest-first; nothing further to do.
 
@@ -402,9 +417,10 @@ fun NotesListScreen(
                                     pair.forEach { capture ->
                                         Box(modifier = Modifier.weight(1f)) {
                                             LibraryNoteCard(
-                                                capture    = capture,
-                                                ocrSnippet = ocrSnippetByCapture[capture.id],
-                                                onTap      = { onOpenScan(capture.id) },
+                                                capture        = capture,
+                                                ocrSnippet     = ocrSnippetByCapture[capture.id],
+                                                primaryTagName = primaryTagByCapture[capture.id],
+                                                onTap          = { onOpenScan(capture.id) },
                                             )
                                         }
                                     }
@@ -421,8 +437,9 @@ fun NotesListScreen(
                     } else {
                         items(bucket.items, key = { "list-${bucket.title}-${it.id}" }) { capture ->
                             LibraryScanListRow(
-                                capture = capture,
-                                onTap   = { onOpenScan(capture.id) },
+                                capture        = capture,
+                                primaryTagName = primaryTagByCapture[capture.id],
+                                onTap          = { onOpenScan(capture.id) },
                             )
                         }
                     }
@@ -665,6 +682,7 @@ private fun parseDateOrNull(iso: String): LocalDate? = try {
 private fun LibraryNoteCard(
     capture: CaptureEntity,
     ocrSnippet: String?,
+    primaryTagName: String?,
     onTap: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
@@ -703,7 +721,7 @@ private fun LibraryNoteCard(
                                 .data(Uri.parse(capture.previewUri))
                                 .crossfade(true)
                                 .build(),
-                            contentDescription = capture.displayTitle(),
+                            contentDescription = capture.displayTitle(primaryTagName),
                             contentScale       = ContentScale.Crop,
                             loading = {
                                 LinedPaperPreview(
@@ -844,7 +862,7 @@ private fun LibraryNoteCard(
                 // it'll come out "Iphone" — accept that for now,
                 // OCR rarely surfaces brand-cased terms in the
                 // first line.
-                text     = displayedTitle(capture, ocrSnippet)
+                text     = displayedTitle(capture, ocrSnippet, primaryTagName)
                     .split(' ')
                     .joinToString(" ") { word ->
                         word.lowercase().replaceFirstChar(Char::titlecaseChar)
@@ -862,10 +880,10 @@ private fun LibraryNoteCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val cat = capture.category
-                if (!cat.isNullOrEmpty()) {
+                val tag = primaryTagName
+                if (!tag.isNullOrEmpty()) {
                     Text(
-                        text  = cat,
+                        text  = tag,
                         style = type.caption,
                         color = colors.accent,
                         modifier = Modifier
@@ -889,9 +907,14 @@ private fun LibraryNoteCard(
  * (trimmed, non-empty) — explicit user intent always wins;
  * (2) the OCR snippet's first line (≤40 chars) — gives the wall a
  * handwritten preview when the user hasn't titled the scan;
- * (3) the category; (4) "Untitled scan".
+ * (3) the capture's primary tag name (closest analogue to the
+ * pre-A.3c `captures.category` slot); (4) "Untitled scan".
  */
-private fun displayedTitle(capture: CaptureEntity, ocrSnippet: String?): String {
+private fun displayedTitle(
+    capture: CaptureEntity,
+    ocrSnippet: String?,
+    primaryTagName: String?,
+): String {
     val titled = capture.title?.trim().orEmpty()
     if (titled.isNotEmpty()) return titled
     val firstLine = ocrSnippet
@@ -899,7 +922,8 @@ private fun displayedTitle(capture: CaptureEntity, ocrSnippet: String?): String 
         ?.map { it.trim() }
         ?.firstOrNull { it.isNotEmpty() }
     if (!firstLine.isNullOrEmpty()) return firstLine.take(40)
-    if (!capture.category.isNullOrEmpty()) return capture.category!!
+    val tag = primaryTagName?.trim().orEmpty()
+    if (tag.isNotEmpty()) return tag
     return "Untitled scan"
 }
 
@@ -955,7 +979,11 @@ private fun LinedPaperPreview(
 // ────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun LibraryScanListRow(capture: CaptureEntity, onTap: () -> Unit) {
+private fun LibraryScanListRow(
+    capture: CaptureEntity,
+    primaryTagName: String?,
+    onTap: () -> Unit,
+) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     val context = LocalContext.current
@@ -1010,7 +1038,7 @@ private fun LibraryScanListRow(capture: CaptureEntity, onTap: () -> Unit) {
                 // card title (split on whitespace, lowercase the
                 // word, then titlecase the first char). Keeps the
                 // grid and list views visually consistent.
-                text     = capture.displayTitle()
+                text     = capture.displayTitle(primaryTagName)
                     .split(' ')
                     .joinToString(" ") { word ->
                         word.lowercase().replaceFirstChar(Char::titlecaseChar)

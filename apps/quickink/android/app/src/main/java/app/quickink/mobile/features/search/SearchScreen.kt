@@ -148,15 +148,27 @@ fun SearchScreen(
     val type = LocalQuickInkTypography.current
 
     val captureDao = remember(app) { app.database.captureDao() }
+    val captureTagDao = remember(app) { app.database.captureTagDao() }
     val repository = remember(app) {
         CaptureRepository(
-            captureDao   = captureDao,
-            ocrResultDao = app.database.ocrResultDao(),
+            captureDao    = captureDao,
+            ocrResultDao  = app.database.ocrResultDao(),
+            tagDao        = app.database.tagDao(),
+            captureTagDao = captureTagDao,
         )
     }
     val preferences = remember { SettingsPreferences(context) }
 
     val captures by captureDao.observeActive(userId).collectAsState(initial = emptyList())
+
+    // Per-capture primary-tag-name lookup. Post-A.3c the
+    // pre-existing `captures.category`-driven badges + title cascade
+    // read from `capture_tags` instead.
+    val primaryTagRows by captureTagDao.observePrimaryTagNames(userId)
+        .collectAsState(initial = emptyList())
+    val primaryTagByCapture: Map<String, String> = remember(primaryTagRows) {
+        primaryTagRows.associate { it.captureId to it.tagName }
+    }
 
     var queryDraft by remember { mutableStateOf("") }
     var liveQuery by remember { mutableStateOf("") }
@@ -304,14 +316,15 @@ fun SearchScreen(
             // Empty query — show recent searches + a captures
             // timeline preview so the screen never goes blank.
             liveQuery.isEmpty() -> EmptyQueryView(
-                recentSearches = recentSearches,
-                onPickRecent   = { queryDraft = it },
-                onClearRecents = {
+                recentSearches      = recentSearches,
+                onPickRecent        = { queryDraft = it },
+                onClearRecents      = {
                     preferences.clearRecentSearches()
                     recentSearches = emptyList()
                 },
-                captures = filteredCaptures,
-                onOpen   = { id ->
+                captures            = filteredCaptures,
+                primaryTagByCapture = primaryTagByCapture,
+                onOpen              = { id ->
                     commitToRecents()
                     onOpenScan(id)
                 },
@@ -319,9 +332,10 @@ fun SearchScreen(
             isSearching && filteredHits.isEmpty() -> LoadingState()
             filteredHits.isEmpty()                -> NoMatchesState()
             else                                  -> ResultsView(
-                hits  = filteredHits,
-                query = liveQuery,
-                onOpen = { id ->
+                hits                = filteredHits,
+                query               = liveQuery,
+                primaryTagByCapture = primaryTagByCapture,
+                onOpen              = { id ->
                     commitToRecents()
                     onOpenScan(id)
                 },
@@ -534,6 +548,7 @@ private fun EmptyQueryView(
     onPickRecent: (String) -> Unit,
     onClearRecents: () -> Unit,
     captures: List<CaptureEntity>,
+    primaryTagByCapture: Map<String, String>,
     onOpen: (String) -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
@@ -575,7 +590,10 @@ private fun EmptyQueryView(
             }
             items(captures, key = { "tl-${it.id}" }) { capture ->
                 CompactRow(
-                    title    = capture.displayTitle("Untitled scan"),
+                    title    = capture.displayTitle(
+                        primaryTagName = primaryTagByCapture[capture.id],
+                        fallback       = "Untitled scan",
+                    ),
                     subtitle = relativeDate(capture.createdAt) +
                         if (capture.pageCount > 1) " · ${capture.pageCount} pages" else "",
                     onClick  = { onOpen(capture.id) },
@@ -619,7 +637,12 @@ private fun RecentSearchPills(queries: List<String>, onPick: (String) -> Unit) {
 // ────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ResultsView(hits: List<SearchHit>, query: String, onOpen: (String) -> Unit) {
+private fun ResultsView(
+    hits: List<SearchHit>,
+    query: String,
+    primaryTagByCapture: Map<String, String>,
+    onOpen: (String) -> Unit,
+) {
     val pageHits  = hits.filter { !it.ocrSnippet.isNullOrBlank() }
     val titleHits = hits.filter { it.ocrSnippet.isNullOrBlank() }
 
@@ -638,7 +661,12 @@ private fun ResultsView(hits: List<SearchHit>, query: String, onOpen: (String) -
                 SectionEyebrow(icon = Icons.AutoMirrored.Filled.Article, label = "IN PAGE CONTENT")
             }
             items(pageHits, key = { "p-${it.capture.id}" }) { hit ->
-                PageContentResultCard(hit = hit, query = query, onClick = { onOpen(hit.capture.id) })
+                PageContentResultCard(
+                    hit            = hit,
+                    query          = query,
+                    primaryTagName = primaryTagByCapture[hit.capture.id],
+                    onClick        = { onOpen(hit.capture.id) },
+                )
             }
         }
 
@@ -647,7 +675,11 @@ private fun ResultsView(hits: List<SearchHit>, query: String, onOpen: (String) -
                 SectionEyebrow(icon = Icons.AutoMirrored.Filled.MenuBook, label = "IN TITLES")
             }
             items(titleHits, key = { "t-${it.capture.id}" }) { hit ->
-                TitleResultRow(hit = hit, onClick = { onOpen(hit.capture.id) })
+                TitleResultRow(
+                    hit            = hit,
+                    primaryTagName = primaryTagByCapture[hit.capture.id],
+                    onClick        = { onOpen(hit.capture.id) },
+                )
             }
         }
     }
@@ -660,7 +692,12 @@ private fun ResultsView(hits: List<SearchHit>, query: String, onOpen: (String) -
  * in coral underneath, and a category tag pinned to the bottom-left.
  */
 @Composable
-private fun PageContentResultCard(hit: SearchHit, query: String, onClick: () -> Unit) {
+private fun PageContentResultCard(
+    hit: SearchHit,
+    query: String,
+    primaryTagName: String?,
+    onClick: () -> Unit,
+) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     val capture = hit.capture
@@ -692,7 +729,7 @@ private fun PageContentResultCard(hit: SearchHit, query: String, onClick: () -> 
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text     = capture.displayTitle("Untitled scan"),
+                    text     = capture.displayTitle(primaryTagName, "Untitled scan"),
                     style    = type.label,
                     color    = colors.ink,
                     modifier = Modifier.weight(1f),
@@ -710,14 +747,14 @@ private fun PageContentResultCard(hit: SearchHit, query: String, onClick: () -> 
                 overflow = TextOverflow.Ellipsis,
             )
 
-            val cat = capture.category
-            if (!cat.isNullOrEmpty()) {
+            val tag = primaryTagName
+            if (!tag.isNullOrEmpty()) {
                 Box(
                     modifier = Modifier
                         .background(colors.accentSoft, RoundedCornerShape(QuickInkRadius.sm))
                         .padding(horizontal = QuickInkSpacing.s2, vertical = 2.dp),
                 ) {
-                    Text(text = cat, style = type.caption, color = colors.accent)
+                    Text(text = tag, style = type.caption, color = colors.accent)
                 }
             }
         }
@@ -730,7 +767,11 @@ private fun PageContentResultCard(hit: SearchHit, query: String, onClick: () -> 
  * row.
  */
 @Composable
-private fun TitleResultRow(hit: SearchHit, onClick: () -> Unit) {
+private fun TitleResultRow(
+    hit: SearchHit,
+    primaryTagName: String?,
+    onClick: () -> Unit,
+) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     val capture = hit.capture
@@ -762,14 +803,14 @@ private fun TitleResultRow(hit: SearchHit, onClick: () -> Unit) {
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text     = capture.displayTitle("Untitled scan"),
+                text     = capture.displayTitle(primaryTagName, "Untitled scan"),
                 style    = type.label,
                 color    = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = listOfNotNull(capture.category, relativeDate(capture.createdAt))
+                text = listOfNotNull(primaryTagName, relativeDate(capture.createdAt))
                     .joinToString(" · "),
                 style = type.caption,
                 color = colors.muted,

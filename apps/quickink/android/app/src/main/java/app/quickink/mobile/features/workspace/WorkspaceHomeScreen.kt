@@ -131,10 +131,8 @@ fun WorkspaceHomeScreen(
 
     val folderRepo = remember(app) {
         FolderRepository(
-            folderDao     = app.database.folderDao(),
-            captureDao    = app.database.captureDao(),
-            tagDao        = app.database.tagDao(),
-            captureTagDao = app.database.captureTagDao(),
+            folderDao  = app.database.folderDao(),
+            captureDao = app.database.captureDao(),
         )
     }
 
@@ -711,7 +709,6 @@ private fun ContinueCard(
     val shape  = RoundedCornerShape(18.dp)
 
     val title = capture.title?.takeIf { it.isNotBlank() }
-        ?: capture.category?.takeIf { it.isNotBlank() }
         ?: "Untitled scan"
     val page  = capture.lastOpenedPage ?: 1
     val total = capture.pageCount.coerceAtLeast(1)

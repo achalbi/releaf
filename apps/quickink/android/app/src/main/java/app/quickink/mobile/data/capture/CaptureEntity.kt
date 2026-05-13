@@ -55,15 +55,6 @@ data class CaptureEntity(
     val pageCount: Int,
 
     /**
-     * Pre-tagged category name picked on the scan review screen.
-     * Stored as a TEXT value (not an FK to `categories.id`) so a
-     * later soft-delete of the category row keeps the historical
-     * tag readable. See v2_capture_categories.sql for the rationale.
-     */
-    @ColumnInfo(name = "category")
-    val category: String?,
-
-    /**
      * How the capture was created. `"scan"` (default) — went through
      * the ML Kit / VisionKit document scanner. `"import"` — was
      * brought in from the system photo picker (single image, no
@@ -203,13 +194,25 @@ data class CaptureEntity(
 /**
  * Display title for [CaptureEntity] across the app's lists and
  * thumbnails. Priority: user-set [title] (trimmed, non-empty) →
- * [category] → [fallback]. Centralised so the Library, Home recents,
- * Search hits, and Category drill-down all surface the same string.
+ * [primaryTagName] (the capture's first attached tag) → [fallback].
+ * Centralised so the Library, Home recents, Search hits, and tag
+ * drill-down all surface the same string.
  */
-fun CaptureEntity.displayTitle(fallback: String = "Scan"): String {
+fun CaptureEntity.displayTitle(
+    primaryTagName: String?,
+    fallback: String = "Scan",
+): String {
     val titled = title?.trim().orEmpty()
     if (titled.isNotEmpty()) return titled
-    val cat = category?.trim().orEmpty()
-    if (cat.isNotEmpty()) return cat
+    val tag = primaryTagName?.trim().orEmpty()
+    if (tag.isNotEmpty()) return tag
     return fallback
 }
+
+/**
+ * Convenience overload for the legacy callers that didn't have a
+ * primary-tag lookup in hand. Equivalent to `displayTitle(null,
+ * fallback)` — falls straight from [title] to [fallback].
+ */
+fun CaptureEntity.displayTitle(fallback: String = "Scan"): String =
+    displayTitle(primaryTagName = null, fallback = fallback)

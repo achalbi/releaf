@@ -18,8 +18,11 @@
 package app.quickink.mobile.data.capture
 
 import androidx.room.RoomRawQuery
+import app.quickink.mobile.data.capturetag.CaptureTagDao
 import app.quickink.mobile.data.ocr.OcrResultDao
 import app.quickink.mobile.data.ocr.OcrResultEntity
+import app.quickink.mobile.data.tag.TagDao
+import app.quickink.mobile.data.tag.TagRepository
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import app.releaf.shared.scan.OcrResult
@@ -29,6 +32,17 @@ import kotlinx.serialization.json.Json
 class CaptureRepository(
     private val captureDao: CaptureDao,
     private val ocrResultDao: OcrResultDao,
+    /**
+     * Workspace v1: post-A.3c the legacy `captures.category` column
+     * is gone. The scan flow + business-card post-processor surface
+     * a user-picked label by attaching a `capture_tags` row through
+     * [attachOrEnsurePrimaryTag] — these two DAOs back that. Both
+     * default to null so legacy construction sites (tests, previews)
+     * keep compiling; the attach-by-name helper is a no-op until the
+     * caller wires them in.
+     */
+    private val tagDao: TagDao? = null,
+    private val captureTagDao: CaptureTagDao? = null,
 ) {
 
     /**
@@ -45,7 +59,6 @@ class CaptureRepository(
         pdfUri: String,
         previewUri: String?,
         pageCount: Int,
-        category: String? = null,
         /**
          * Capture origin. `"scan"` (default) — went through the ML
          * Kit scanner. `"import"` — picked from the system photo
@@ -72,7 +85,6 @@ class CaptureRepository(
                 pdfUri       = pdfUri,
                 previewUri   = previewUri,
                 pageCount    = pageCount,
-                category     = category,
                 source       = source,
                 latitude     = location?.latitude,
                 longitude    = location?.longitude,
@@ -90,20 +102,50 @@ class CaptureRepository(
     }
 
     /**
-     * Update an existing capture's `category` to the user's pick
-     * from the scan-review screen. Bumps `updated_at` + `dirty`
-     * so the next sync pass uploads the change.
+     * Attach a tag by name as the capture's primary label, the
+     * post-A.3c replacement for the legacy `setCategory`. Find-or-
+     * creates the tag in the user's namespace (so a fresh
+     * scan-review pick lazily materializes the row) then attaches
+     * via the join — idempotent if the same tag is already
+     * attached. Pass `null` / blank to clear ALL active tag
+     * attachments on the capture (keeps "set to no category" parity
+     * with the legacy single-field behavior).
+     *
+     * No-op when [tagDao] or [captureTagDao] weren't wired (test /
+     * preview construction). Best-effort: the caller's
+     * try/catch covers SQL failure modes the same way the legacy
+     * `setCategory` did.
      */
-    suspend fun setCategory(captureId: String, category: String?) {
-        captureDao.setCategory(captureId, category, IsoClock.nowIso())
+    suspend fun attachOrEnsurePrimaryTag(
+        captureId: String,
+        userId: String,
+        name: String?,
+        source: String = "manual",
+    ) {
+        val ctDao = captureTagDao ?: return
+        val tDao  = tagDao ?: return
+        val now   = IsoClock.nowIso()
+        val trimmed = name?.trim().orEmpty()
+        if (trimmed.isEmpty()) {
+            ctDao.softDeleteByCaptureId(captureId, now)
+            return
+        }
+        val tag = TagRepository(tDao).findOrCreate(userId, trimmed)
+        ctDao.attachTag(
+            joinId    = Uuidv7.generate(),
+            captureId = captureId,
+            tagId     = tag.id,
+            source    = source,
+            timestamp = now,
+        )
     }
 
     /**
-     * Update an existing capture's user-editable `title`. Same dirty-
-     * bit pattern as [setCategory]. Pass `null` to clear the title
-     * (the Library card then falls back to OCR snippet → category →
-     * "Untitled scan"). Used both by the scan-flow auto-populator
-     * and the scan-detail editor modal.
+     * Update an existing capture's user-editable `title`. Pass
+     * `null` to clear the title (the Library card then falls back
+     * to OCR snippet → primary tag → "Untitled scan"). Used both
+     * by the scan-flow auto-populator and the scan-detail editor
+     * modal.
      */
     suspend fun setTitle(captureId: String, title: String?) {
         captureDao.setTitle(captureId, title, IsoClock.nowIso())
@@ -141,15 +183,19 @@ class CaptureRepository(
     }
 
     /**
-     * Search captures across category name + OCR text. Mirror of
-     * iOS's `CaptureRepository.search`. Returns each capture once
-     * with the strongest OCR snippet (when the hit came via FTS5).
+     * Search captures across tag name + OCR text. Mirror of iOS's
+     * `CaptureRepository.search`. Returns each capture once with
+     * the strongest OCR snippet (when the hit came via FTS5).
+     *
      * The two passes:
-     *   1. Captures whose `category` contains [query] (substring,
-     *      case-insensitive). No OCR snippet for these.
-     *   2. OCR-text matches via `fts_ocr_text` MATCH joined back to
-     *      captures.
-     * Dedupes by `capture.id` with category hits ordered first.
+     *   1. Captures with a tag whose `name` contains [query]
+     *      (substring, case-insensitive). Replaces the legacy
+     *      `category`-substring pass after A.3c dropped the
+     *      column. No OCR snippet for these.
+     *   2. OCR-text matches via `fts_ocr_text` MATCH joined back
+     *      to captures.
+     *
+     * Dedupes by `capture.id` with tag hits ordered first.
      */
     suspend fun search(userId: String, query: String): List<SearchHit> {
         val trimmed = query.trim()
@@ -160,9 +206,20 @@ class CaptureRepository(
         val seen = mutableSetOf<String>()
         val hits = mutableListOf<SearchHit>()
 
-        for (row in captureDao.searchByCategory(userId, likePattern)) {
-            if (seen.add(row.id)) {
-                hits += SearchHit(capture = row, ocrSnippet = null)
+        // Pass 1 — tag-name substring. Runs only when both
+        // workspace DAOs were wired (legacy test/preview construction
+        // sites pass null). Replaces the pre-A.3c `searchByCategory`
+        // pass against `captures.category`.
+        val ctDao = captureTagDao
+        if (ctDao != null) {
+            try {
+                for (row in captureDao.searchByTagName(userId, likePattern)) {
+                    if (seen.add(row.id)) {
+                        hits += SearchHit(capture = row, ocrSnippet = null)
+                    }
+                }
+            } catch (_: Exception) {
+                // Tag-search pass failed — fall through to OCR.
             }
         }
 
@@ -173,7 +230,6 @@ class CaptureRepository(
                    c.user_id       AS user_id,
                    c.preview_uri   AS preview_uri,
                    c.pdf_uri       AS pdf_uri,
-                   c.category      AS category,
                    c.page_count    AS page_count,
                    c.created_at    AS created_at,
                    snippet(fts_ocr_text, 1, '‹', '›', '…', 24) AS ocr_snippet
@@ -209,7 +265,6 @@ class CaptureRepository(
                     pdfUri       = ocr.pdfUri,
                     previewUri   = ocr.previewUri,
                     pageCount    = ocr.pageCount,
-                    category     = ocr.category,
                     conflictStub = null,
                     driveFileId  = null,
                     createdAt    = ocr.createdAt,
@@ -234,7 +289,6 @@ class CaptureRepository(
                        c.user_id       AS user_id,
                        c.preview_uri   AS preview_uri,
                        c.pdf_uri       AS pdf_uri,
-                       c.category      AS category,
                        c.page_count    AS page_count,
                        c.created_at    AS created_at,
                        substr(r.text, max(1, instr(lower(r.text), lower(?)) - 30), 120) AS ocr_snippet
@@ -261,7 +315,6 @@ class CaptureRepository(
                         pdfUri       = ocr.pdfUri,
                         previewUri   = ocr.previewUri,
                         pageCount    = ocr.pageCount,
-                        category     = ocr.category,
                         conflictStub = null,
                         driveFileId  = null,
                         createdAt    = ocr.createdAt,
@@ -273,7 +326,7 @@ class CaptureRepository(
                 }
             } catch (_: Exception) {
                 // Last-resort path failed too — return whatever we
-                // have (probably category hits only).
+                // have (probably tag hits only).
             }
         }
 

@@ -83,15 +83,22 @@ fun CategoryEntriesScreen(
     val type = LocalQuickInkTypography.current
 
     // Same DAO Flow the home Recent rail and Library use. We filter
-    // client-side by category — dataset is small enough that a
-    // single observed Flow + client filter beats threading a
-    // category arg through the DAO.
+    // client-side by primary-tag name (the pre-A.3c
+    // `captures.category` replacement) — dataset is small enough
+    // that a single observed Flow + client filter beats threading a
+    // tag arg through the DAO.
     val captureDao = remember(app) { app.database.captureDao() }
+    val captureTagDao = remember(app) { app.database.captureTagDao() }
     val allCaptures by captureDao.observeActive(userId).collectAsState(initial = emptyList())
+    val primaryTagRows by captureTagDao.observePrimaryTagNames(userId)
+        .collectAsState(initial = emptyList())
+    val primaryTagByCapture: Map<String, String> = remember(primaryTagRows) {
+        primaryTagRows.associate { it.captureId to it.tagName }
+    }
 
     val needle = categoryName.lowercase()
-    val capturesInCategory = remember(needle, allCaptures) {
-        allCaptures.filter { (it.category ?: "").lowercase() == needle }
+    val capturesInCategory = remember(needle, allCaptures, primaryTagByCapture) {
+        allCaptures.filter { (primaryTagByCapture[it.id] ?: "").lowercase() == needle }
     }
 
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -123,13 +130,21 @@ fun CategoryEntriesScreen(
         if (capturesInCategory.isEmpty()) {
             EmptyCategoryState(categoryName = categoryName)
         } else {
-            Timeline(captures = capturesInCategory, onOpen = onOpenScan)
+            Timeline(
+                captures            = capturesInCategory,
+                primaryTagByCapture = primaryTagByCapture,
+                onOpen              = onOpenScan,
+            )
         }
     }
 }
 
 @Composable
-private fun Timeline(captures: List<CaptureEntity>, onOpen: (String) -> Unit) {
+private fun Timeline(
+    captures: List<CaptureEntity>,
+    primaryTagByCapture: Map<String, String>,
+    onOpen: (String) -> Unit,
+) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
 
@@ -157,14 +172,22 @@ private fun Timeline(captures: List<CaptureEntity>, onOpen: (String) -> Unit) {
                 )
             }
             items(dayCaptures, key = { "row-${it.id}" }) { capture ->
-                TimelineRow(capture = capture, onClick = { onOpen(capture.id) })
+                TimelineRow(
+                    capture        = capture,
+                    primaryTagName = primaryTagByCapture[capture.id],
+                    onClick        = { onOpen(capture.id) },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun TimelineRow(capture: CaptureEntity, onClick: () -> Unit) {
+private fun TimelineRow(
+    capture: CaptureEntity,
+    primaryTagName: String?,
+    onClick: () -> Unit,
+) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     val context = LocalContext.current
@@ -209,7 +232,7 @@ private fun TimelineRow(capture: CaptureEntity, onClick: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
         ) {
             Text(
-                text     = capture.displayTitle(),
+                text     = capture.displayTitle(primaryTagName),
                 style    = type.heading,
                 color    = colors.ink,
                 maxLines = 1,

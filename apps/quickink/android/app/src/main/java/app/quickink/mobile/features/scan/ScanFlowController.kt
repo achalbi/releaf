@@ -91,7 +91,15 @@ class ScanFlowController(
         val captureId:  String,
         val source:     String,
         val pageCount:  Int,
-        val category:   String?,
+        /**
+         * Primary tag name attached to the capture by the end of
+         * the pass (user pick or auto-match). Pre-A.3c this was
+         * `captures.category`; post-drop it's just whichever tag
+         * the controller attached via [CaptureRepository
+         * .attachOrEnsurePrimaryTag]. Surfaced here so the
+         * analytics enqueue picks the same label the user sees.
+         */
+        val primaryTagName: String?,
         val hasOcr:     Boolean,
         val ocrChars:   Int,
         /** ISO-8601 timestamp the user finished the scan pass. */
@@ -121,11 +129,14 @@ class ScanFlowController(
     val state: StateFlow<State> = _state.asStateFlow()
 
     /**
-     * User-selected category for the in-flight capture. Bound to
-     * the chip picker in `ScanReviewScreen`. Persisted to
-     * `captures.category` via [setCategory] whenever the user
-     * taps a chip; held here too so the chip's selected state
-     * survives state-machine transitions.
+     * User-selected primary tag for the in-flight capture. Bound to
+     * the chip picker in `ScanReviewScreen`. Persisted via
+     * [setCategory] → `CaptureRepository.attachOrEnsurePrimaryTag`
+     * (which writes into `capture_tags`); held here too so the
+     * chip's selected state survives state-machine transitions.
+     * Field name kept as `selectedCategory` for back-compat with
+     * `ScanReviewScreen`'s observers, even though "category" is
+     * now just a single-label view onto the tag join.
      */
     private val _selectedCategory = MutableStateFlow<String?>(null)
     val selectedCategory: StateFlow<String?> = _selectedCategory.asStateFlow()
@@ -202,10 +213,26 @@ class ScanFlowController(
                     pdfUri     = result.pdfUri?.toString().orEmpty(),
                     previewUri = result.previewUri?.toString(),
                     pageCount  = totalPages,
-                    category   = category,
                     source     = source,
                     location   = location,
                 )
+                // Pre-attach the seeded `category` (post-A.3c: a
+                // tag attach into `capture_tags`) when the caller
+                // already knows the label — typically the
+                // BusinessCardPostProcessor path that captures
+                // ahead of OCR. Best-effort: a SQL failure here
+                // leaves the capture row valid but un-tagged; the
+                // OCR auto-pick + the user's manual retag both
+                // recover.
+                if (!category.isNullOrBlank()) {
+                    try {
+                        repository.attachOrEnsurePrimaryTag(
+                            captureId = captureId,
+                            userId    = userId,
+                            name      = category,
+                        )
+                    } catch (_: Exception) { /* best-effort */ }
+                }
             } catch (e: Exception) {
                 _state.value = State.Failed("Couldn't save scan: ${e.message.orEmpty()}")
                 return@launch
@@ -257,7 +284,11 @@ class ScanFlowController(
                                 if (match != null) {
                                     _selectedCategory.value = match
                                     try {
-                                        repository.setCategory(captureId, match)
+                                        repository.attachOrEnsurePrimaryTag(
+                                            captureId = captureId,
+                                            userId    = userId,
+                                            name      = match,
+                                        )
                                     } catch (_: Exception) { /* best-effort */ }
                                 }
                             }
@@ -302,7 +333,11 @@ class ScanFlowController(
                     // unselected on disk but in-memory selection
                     // wins for the rest of this pass.
                     try {
-                        repository.setCategory(captureId, match)
+                        repository.attachOrEnsurePrimaryTag(
+                            captureId = captureId,
+                            userId    = userId,
+                            name      = match,
+                        )
                     } catch (_: Exception) { /* best-effort */ }
                 }
             }
@@ -357,13 +392,13 @@ class ScanFlowController(
             val totalChars = pageTexts.values.sumOf { it.length }
             onPassComplete(
                 PassSummary(
-                    captureId  = captureId,
-                    source     = source,
-                    pageCount  = totalPages,
-                    category   = _selectedCategory.value,
-                    hasOcr     = successCount > 0,
-                    ocrChars   = totalChars,
-                    capturedAt = capturedAt,
+                    captureId      = captureId,
+                    source         = source,
+                    pageCount      = totalPages,
+                    primaryTagName = _selectedCategory.value,
+                    hasOcr         = successCount > 0,
+                    ocrChars       = totalChars,
+                    capturedAt     = capturedAt,
                 )
             )
         }
@@ -379,22 +414,27 @@ class ScanFlowController(
     }
 
     /**
-     * Picked-category persistence hook for the review screen's
-     * chip row. Updates [selectedCategory] so the UI redraws, then
-     * fires-and-forgets the SQL update against the in-flight
-     * capture's row. No-ops when there's no active capture
-     * (Idle / Failed).
+     * Picked-tag persistence hook for the review screen's chip
+     * row. Updates [selectedCategory] so the UI redraws, then
+     * fires-and-forgets a tag attach against the in-flight
+     * capture's row through `capture_tags`. No-ops when there's
+     * no active capture (Idle / Failed). Pass `null`/blank to
+     * clear the current attached tags.
      */
     fun setCategory(name: String?) {
         _selectedCategory.value = name
         val captureId = currentCaptureId() ?: return
         scope.launch {
             try {
-                repository.setCategory(captureId, name)
+                repository.attachOrEnsurePrimaryTag(
+                    captureId = captureId,
+                    userId    = userId,
+                    name      = name,
+                )
             } catch (_: Exception) {
                 // Best-effort: a transient SQL failure shouldn't
                 // crash the review flow. The user can retap the
-                // chip to re-issue the UPDATE.
+                // chip to re-issue the attach.
             }
         }
     }

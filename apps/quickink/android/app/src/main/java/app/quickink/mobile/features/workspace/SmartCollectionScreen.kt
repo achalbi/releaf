@@ -415,7 +415,6 @@ private fun SmartCollectionDocRow(
     val type   = LocalQuickInkTypography.current
 
     val title = capture.title?.takeIf { it.isNotBlank() }
-        ?: capture.category?.takeIf { it.isNotBlank() }
         ?: "Untitled scan"
 
     Column(modifier = Modifier

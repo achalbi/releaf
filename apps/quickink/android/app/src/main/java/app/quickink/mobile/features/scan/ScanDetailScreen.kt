@@ -89,6 +89,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.sync.QuickInkBinarySync
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
@@ -139,6 +140,7 @@ fun ScanDetailScreen(
     val captureDao = remember(app) { app.database.captureDao() }
     val ocrDao = remember(app) { app.database.ocrResultDao() }
     val tagDao = remember(app) { app.database.tagDao() }
+    val captureTagDao = remember(app) { app.database.captureTagDao() }
     val folderDao = remember(app) { app.database.folderDao() }
 
     // Workspace v1 folder picker — opens when the Actions card's
@@ -195,6 +197,26 @@ fun ScanDetailScreen(
     val categories by remember(userId, tagDao) {
         tagDao.observeActive(userId)
     }.collectAsState(initial = emptyList())
+
+    // Live tag-id list for the in-view capture, so the legacy
+    // single-label badge + the Business Card mode switch can pick a
+    // primary tag name (the earliest-attached active tag). Replaces
+    // the pre-A.3c `captures.category` read.
+    val attachedTagIds by remember(captureId, captureTagDao) {
+        captureTagDao.observeTagIdsForCapture(captureId)
+    }.collectAsState(initial = emptyList())
+    val primaryTagName: String? = remember(attachedTagIds, categories) {
+        val byId = categories.associateBy { it.id }
+        attachedTagIds.firstNotNullOfOrNull { byId[it]?.name }
+    }
+    val captureRepository = remember(app) {
+        CaptureRepository(
+            captureDao    = captureDao,
+            ocrResultDao  = app.database.ocrResultDao(),
+            tagDao        = tagDao,
+            captureTagDao = captureTagDao,
+        )
+    }
 
     LaunchedEffect(captureId) {
         capture = captureDao.findById(captureId)
@@ -470,12 +492,13 @@ fun ScanDetailScreen(
                     horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
                 ) {
                     DetailsCard(
-                        capture     = current,
-                        pdfFileSize = pdfFileSize,
-                        onAddTag    = { showRetagSheet = true },
-                        modifier    = Modifier.weight(1f),
+                        capture        = current,
+                        primaryTagName = primaryTagName,
+                        pdfFileSize    = pdfFileSize,
+                        onAddTag       = { showRetagSheet = true },
+                        modifier       = Modifier.weight(1f),
                     )
-                    val isBusinessCard = current.category
+                    val isBusinessCard = primaryTagName
                         ?.equals("Business Card", ignoreCase = true) == true
                     ActionsCard(
                         capture               = current,
@@ -544,23 +567,26 @@ fun ScanDetailScreen(
     }
     } // end outer Box
 
-    // Retag bottom sheet — tapping the category pill (or the
+    // Retag bottom sheet — tapping the primary-tag pill (or the
     // untagged "Tag scan" affordance) opens this. One row per
-    // active category plus a "Remove tag" row when the capture
-    // already has one. Each row calls into [retagCapture] which
-    // persists via `CaptureDao.setCategory(...)` and refreshes
-    // the in-screen `capture` state so the pill flips
-    // immediately.
+    // active tag plus a "Remove tag" row when the capture already
+    // has one. Each row calls into [attachOrEnsurePrimaryTag] which
+    // attaches the tag through `capture_tags`. Refreshes the
+    // in-screen `capture` state so the pill flips immediately.
     if (showRetagSheet) {
         RetagSheet(
             categories = categories.map { it.name },
-            current    = capture?.category,
+            current    = primaryTagName,
             onDismiss  = { showRetagSheet = false },
             onPick     = { name ->
                 showRetagSheet = false
                 scope.launch {
                     try {
-                        captureDao.setCategory(captureId, name, IsoClock.nowIso())
+                        captureRepository.attachOrEnsurePrimaryTag(
+                            captureId = captureId,
+                            userId    = userId,
+                            name      = name,
+                        )
                         capture = captureDao.findById(captureId)
                     } catch (_: Exception) { /* best-effort */ }
                 }
@@ -784,7 +810,7 @@ private fun PreviewImage(
                     .data(Uri.parse(previewUri))
                     .crossfade(true)
                     .build(),
-                contentDescription = capture.category ?: "Scan preview",
+                contentDescription = "Scan preview",
                 contentScale       = ContentScale.Fit,
                 modifier = modifier
                     .fillMaxWidth()
@@ -1151,13 +1177,11 @@ private fun BreadcrumbRow(capture: CaptureEntity) {
             icon = Icons.Outlined.Description,
             text = "${capture.pageCount} page${if (capture.pageCount == 1) "" else "s"}",
         )
-        if (!capture.category.isNullOrEmpty()) {
-            BreadcrumbDot()
-            BreadcrumbItem(
-                icon = Icons.Outlined.Folder,
-                text = capture.category!!,
-            )
-        }
+        // Pre-A.3c this row carried the legacy `captures.category`
+        // breadcrumb. Post-drop the canonical per-capture primary
+        // label lives in `capture_tags`; the DetailsCard / pill row
+        // already surface it, so the breadcrumb no longer
+        // duplicates that signal.
     }
 }
 
@@ -1299,6 +1323,7 @@ private fun PageThumbnailsStrip(
 @Composable
 private fun DetailsCard(
     capture: CaptureEntity,
+    primaryTagName: String?,
     pdfFileSize: Long?,
     onAddTag: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1340,8 +1365,8 @@ private fun DetailsCard(
         )
         DetailRow(
             label      = "Folder",
-            value      = capture.category ?: "Unsorted",
-            valueColor = if (capture.category != null) colors.accent else colors.inkSoft,
+            value      = primaryTagName ?: "Unsorted",
+            valueColor = if (primaryTagName != null) colors.accent else colors.inkSoft,
         )
         // Address / Area / City rows render only when the reverse-
         // geocoded place name landed on the capture row. Captures
@@ -1365,7 +1390,7 @@ private fun DetailsCard(
         locOut
             ?.takeIf { it.isNotBlank() }
             ?.let { DetailRow(label = "City", value = it) }
-        TagsRow(category = capture.category, onAddTag = onAddTag)
+        TagsRow(primaryTagName = primaryTagName, onAddTag = onAddTag)
     }
 }
 
@@ -1399,7 +1424,7 @@ private fun DetailRow(
 }
 
 @Composable
-private fun TagsRow(category: String?, onAddTag: () -> Unit) {
+private fun TagsRow(primaryTagName: String?, onAddTag: () -> Unit) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     Row(
@@ -1412,7 +1437,7 @@ private fun TagsRow(category: String?, onAddTag: () -> Unit) {
             verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1),
         ) {
-            if (!category.isNullOrEmpty()) {
+            if (!primaryTagName.isNullOrEmpty()) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(QuickInkRadius.pill))
@@ -1420,7 +1445,7 @@ private fun TagsRow(category: String?, onAddTag: () -> Unit) {
                         .clickable(onClick = onAddTag)
                         .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
                 ) {
-                    Text(text = category, style = type.caption, color = colors.accent)
+                    Text(text = primaryTagName, style = type.caption, color = colors.accent)
                 }
             }
             Box(

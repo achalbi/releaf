@@ -7,11 +7,11 @@
  * (Screen 6).
  *
  * Renamed from `CategoryRepository` in Phase A.2 of the Workspace
- * redesign. The legacy `renameAndPropagate` flow is retained for
- * one more commit so the existing UI's `captures.category` reads
- * keep working; once Phase A.3 lands the seed/backfill +
- * capture_tags-driven reads, the captures-side propagation goes
- * away.
+ * redesign. Post-A.3c the legacy `captures.category` column is
+ * gone — the per-capture primary label lives in the `capture_tags`
+ * join, so a tag rename naturally propagates (the join row
+ * references the tag by id). The historical `renameAndPropagate`
+ * helper collapses to a plain rename.
  *
  * Mirror of `TagRepository.swift` in QuickInk's iOS target.
  */
@@ -99,22 +99,22 @@ class TagRepository(
     }
 
     /**
-     * Rename a tag and propagate the change to every capture row
-     * that still references it by name via the legacy
-     * `captures.category` field. Once Phase A.3 retires
-     * `captures.category` in favor of the `capture_tags` join, this
-     * method collapses to just [rename] — the join row already
-     * references the tag by id.
+     * Rename a tag. Post-A.3c the per-capture primary label lives
+     * in `capture_tags` (which FKs the tag by id), so a rename
+     * propagates to every attached capture for free — no
+     * per-capture write needed. Kept as a named helper because
+     * older callers spell the intent out clearly; the `oldName`
+     * and `userId` arguments are now unused, retained only to
+     * preserve the signature.
      */
+    @Suppress("UNUSED_PARAMETER")
     suspend fun renameAndPropagate(
         id: String,
         oldName: String,
         newName: String,
         userId: String,
     ) {
-        val now = IsoClock.nowIso()
-        tagDao.rename(id, newName, now)
-        captureDao?.renameCategory(userId, oldName, newName, now)
+        tagDao.rename(id, newName, IsoClock.nowIso())
     }
 
     suspend fun softDelete(id: String) {
@@ -151,8 +151,10 @@ class TagRepository(
     /**
      * One-shot migration for users who were on a previous default
      * seed that included "Study" (which has since been replaced by
-     * "Business Card"). Renames Study → Business Card and retags
-     * any captures still referencing the old name.
+     * "Business Card"). Renames Study → Business Card. Post-A.3c
+     * the rename propagates automatically through `capture_tags`
+     * (the join row FKs the tag id, not its name), so the
+     * historical per-capture retag pass is gone.
      *
      * Guarded by a SharedPreferences flag so it only runs once per
      * install. Body is defensive — if Business Card already exists
@@ -178,11 +180,6 @@ class TagRepository(
         } else if (study != null && businessCard != null) {
             tagDao.softDelete(study.id, now)
         }
-
-        // Retag captures even when no tag row was touched — covers
-        // the case where the user deleted "Study" earlier but older
-        // captures still hold the literal string.
-        captureDao?.renameCategory(userId, "Study", "Business Card", now)
 
         prefs.edit().putBoolean(flagKey, true).apply()
     }

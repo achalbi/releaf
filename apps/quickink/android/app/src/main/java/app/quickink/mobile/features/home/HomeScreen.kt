@@ -219,6 +219,20 @@ fun HomeScreen(
         tagDao.observeActive(userId)
     }.collectAsState(initial = emptyList())
 
+    // Per-capture primary-tag-name lookup. The pre-A.3c
+    // `captures.category` field carried this on the row; post-drop
+    // we derive it from `capture_tags` joined to `tags` and pick the
+    // earliest-attached active tag per capture. Used both by the
+    // categories grid (count captures per tag) and the title cascade
+    // (`Capture.displayTitle(primaryTagName)`).
+    val captureTagDao = remember(app) { app.database.captureTagDao() }
+    val primaryTagRows by remember(userId, captureTagDao) {
+        captureTagDao.observePrimaryTagNames(userId)
+    }.collectAsState(initial = emptyList())
+    val primaryTagByCapture: Map<String, String> = remember(primaryTagRows) {
+        primaryTagRows.associate { it.captureId to it.tagName }
+    }
+
     // System status-bar inset — without this, the greeting crowds the
     // notch / clock area on edge-to-edge devices (target SDK 35+
     // enforces edge-to-edge). Computed at composition time and added
@@ -337,15 +351,17 @@ fun HomeScreen(
             }
             Spacer(Modifier.size(QuickInkSpacing.s5))
             RecentRail(
-                captures    = recentCaptures.take(6),
-                onAllNotes  = onOpenNotes,
-                onOpenScan  = onOpenScan,
+                captures            = recentCaptures.take(6),
+                primaryTagByCapture = primaryTagByCapture,
+                onAllNotes          = onOpenNotes,
+                onOpenScan          = onOpenScan,
             )
             Spacer(Modifier.size(QuickInkSpacing.s5))
             CategoryGrid(
-                categories    = categories,
-                captures      = recentCaptures,
-                onTapCategory = onTapCategory,
+                categories          = categories,
+                captures            = recentCaptures,
+                primaryTagByCapture = primaryTagByCapture,
+                onTapCategory       = onTapCategory,
             )
             Spacer(Modifier.size(QuickInkSpacing.s4))
             RecentActivityPill(
@@ -1273,6 +1289,7 @@ private fun RecentActivityPill(
 @Composable
 private fun RecentRail(
     captures: List<CaptureEntity>,
+    primaryTagByCapture: Map<String, String>,
     onAllNotes: () -> Unit,
     onOpenScan: ((String) -> Unit)?,
 ) {
@@ -1329,8 +1346,9 @@ private fun RecentRail(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
                 itemsIndexed(captures) { _, capture ->
                     RecentScanThumb(
-                        capture = capture,
-                        onTap   = { onOpenScan?.invoke(capture.id) },
+                        capture        = capture,
+                        primaryTagName = primaryTagByCapture[capture.id],
+                        onTap          = { onOpenScan?.invoke(capture.id) },
                     )
                 }
             }
@@ -1345,11 +1363,15 @@ private fun RecentRail(
  * Mirror of iOS's `RecentScanThumb`.
  */
 @Composable
-private fun RecentScanThumb(capture: CaptureEntity, onTap: () -> Unit) {
+private fun RecentScanThumb(
+    capture: CaptureEntity,
+    primaryTagName: String?,
+    onTap: () -> Unit,
+) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     val context = LocalContext.current
-    val title = capture.displayTitle()
+    val title = capture.displayTitle(primaryTagName)
     val displayDate = friendlyMonthDay(capture.createdAt)
 
     Column(
@@ -1484,6 +1506,7 @@ private fun iconForCategory(name: String): ImageVector =
 private fun CategoryGrid(
     categories: List<TagEntity>,
     captures: List<CaptureEntity>,
+    primaryTagByCapture: Map<String, String>,
     onTapCategory: ((String) -> Unit)?,
 ) {
     val colors = LocalQuickInkColors.current
@@ -1496,9 +1519,9 @@ private fun CategoryGrid(
     // descending order); among those, the DAO's
     // (position ASC, name ASC) ordering carries through because
     // `sortedByDescending` is stable.
-    val sorted = remember(categories, captures) {
+    val sorted = remember(categories, captures, primaryTagByCapture) {
         val latestByName: Map<String, String> = captures
-            .groupBy { (it.category ?: "").lowercase() }
+            .groupBy { (primaryTagByCapture[it.id] ?: "").lowercase() }
             .mapValues { (_, list) -> list.maxOf { it.createdAt } }
         categories.sortedByDescending { latestByName[it.name.lowercase()] ?: "" }
     }
@@ -1517,8 +1540,8 @@ private fun CategoryGrid(
             if (i > 0) Spacer(Modifier.size(QuickInkSpacing.s2))
             Row(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
                 pair.forEach { cat ->
-                    val stats = remember(cat.name, captures) {
-                        categoryStats(cat.name, captures)
+                    val stats = remember(cat.name, captures, primaryTagByCapture) {
+                        categoryStats(cat.name, captures, primaryTagByCapture)
                     }
                     CategoryTile(
                         name     = cat.name,
@@ -1550,9 +1573,13 @@ private fun CategoryGrid(
  */
 private data class CategoryStats(val count: Int)
 
-private fun categoryStats(name: String, captures: List<CaptureEntity>): CategoryStats {
+private fun categoryStats(
+    name: String,
+    captures: List<CaptureEntity>,
+    primaryTagByCapture: Map<String, String>,
+): CategoryStats {
     val needle = name.lowercase()
-    val matching = captures.filter { (it.category ?: "").lowercase() == needle }
+    val matching = captures.filter { (primaryTagByCapture[it.id] ?: "").lowercase() == needle }
     return CategoryStats(count = matching.size)
 }
 

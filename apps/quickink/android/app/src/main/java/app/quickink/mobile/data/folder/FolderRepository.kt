@@ -8,9 +8,12 @@
  * One-time migration responsibilities (Phase A.3):
  *   - Seed the default "Unfiled" folder per user (idempotent).
  *   - Backfill every capture's `folder_id` to point at Unfiled.
- *   - Materialize `captures.category` → `capture_tags` (one row per
- *     non-null category value), so the legacy single-tag-per-capture
- *     data survives the column drop scheduled for A.3c.
+ *
+ * The legacy `captures.category` → `capture_tags` materialize step
+ * shipped in A.3a; A.3c then dropped the column, so the
+ * materialize is gone from this file. The SharedPreferences flag
+ * it set is kept around (no-op now) — clearing it would just
+ * waste a write on every install that already migrated.
  *
  * Mirror of `FolderRepository.swift` in QuickInk's iOS target
  * (lands in the iOS Phase A pass).
@@ -20,10 +23,6 @@ package app.quickink.mobile.data.folder
 
 import android.content.Context
 import app.quickink.mobile.data.capture.CaptureDao
-import app.quickink.mobile.data.capturetag.CaptureTagDao
-import app.quickink.mobile.data.capturetag.CaptureTagEntity
-import app.quickink.mobile.data.tag.TagDao
-import app.quickink.mobile.data.tag.TagRepository
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import kotlinx.coroutines.flow.Flow
@@ -31,8 +30,6 @@ import kotlinx.coroutines.flow.Flow
 class FolderRepository(
     private val folderDao: FolderDao,
     private val captureDao: CaptureDao? = null,
-    private val tagDao: TagDao? = null,
-    private val captureTagDao: CaptureTagDao? = null,
 ) {
 
     fun observe(userId: String): Flow<List<FolderEntity>> =
@@ -155,63 +152,7 @@ class FolderRepository(
     }
 
     /**
-     * Materialize `captures.category` → `capture_tags`. Run once
-     * per user on first launch after the v4 upgrade, before the
-     * `captures.category` column is dropped in A.3c.
-     *
-     * For each capture with a non-null category:
-     *   1. find-or-create the tag (by name, within the user's
-     *      namespace),
-     *   2. insert a `capture_tags` row with source = "migration"
-     *      (or skip if a row already exists for the pair).
-     *
-     * Idempotent via SharedPreferences guard; the underlying inserts
-     * are also race-safe via the unique-active index on
-     * (capture_id, tag_id).
-     */
-    suspend fun materializeCategoryToTagsIfNeeded(
-        context: Context,
-        userId: String,
-    ) {
-        val capDao = captureDao ?: return
-        val tDao   = tagDao ?: return
-        val tagRepo = TagRepository(tDao, capDao)
-        val ctDao  = captureTagDao ?: return
-
-        val prefs = context.applicationContext
-            .getSharedPreferences(MIGRATION_PREFS, Context.MODE_PRIVATE)
-        val flag = materializeCategoryFlag(userId)
-        if (prefs.getBoolean(flag, false)) return
-
-        val now = IsoClock.nowIso()
-        val captures = capDao.listWithCategory(userId)
-        for (cap in captures) {
-            val rawName = cap.category?.trim().orEmpty()
-            if (rawName.isEmpty()) continue
-            val tag = tagRepo.findOrCreate(userId, rawName)
-            // Skip if a join row (active or tombstoned) already
-            // exists for this pair — the unique-active index would
-            // refuse the insert anyway.
-            if (ctDao.findPair(cap.id, tag.id) != null) continue
-            ctDao.insert(
-                CaptureTagEntity(
-                    id          = Uuidv7.generate(),
-                    captureId   = cap.id,
-                    tagId       = tag.id,
-                    source      = SOURCE_MIGRATION,
-                    createdAt   = now,
-                    updatedAt   = now,
-                    dirty       = true,
-                    deletedAt   = null,
-                ),
-            )
-        }
-
-        prefs.edit().putBoolean(flag, true).apply()
-    }
-
-    /**
-     * Convenience wrapper that runs all three first-launch steps in
+     * Convenience wrapper that runs both first-launch steps in
      * order. Safe to call on every launch — each step is idempotent
      * and short-circuits when its work is done.
      */
@@ -220,7 +161,6 @@ class FolderRepository(
         userId: String,
     ) {
         seedDefaultsIfNeeded(userId)
-        materializeCategoryToTagsIfNeeded(context, userId)
         backfillFolderIdsIfNeeded(context, userId)
     }
 
@@ -234,14 +174,9 @@ class FolderRepository(
          */
         const val DEFAULT_FOLDER_COLOR = "#A8A29E"
 
-        const val SOURCE_MIGRATION = "migration"
-
         private const val MIGRATION_PREFS = "quickink_migrations"
 
         private fun backfillFolderIdsFlag(userId: String): String =
             "workspace-folder-backfill-v1:$userId"
-
-        private fun materializeCategoryFlag(userId: String): String =
-            "workspace-category-materialize-v1:$userId"
     }
 }

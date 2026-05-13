@@ -211,22 +211,10 @@ interface CaptureDao {
     suspend fun softDeleteChildOcrRows(id: String, timestamp: String, dirty: Boolean)
 
     /**
-     * Update an existing capture's `category` to the user's pick
-     * from the scan-review screen. Bumps `updated_at` + `dirty`
-     * so the next sync pass uploads the change.
-     */
-    @Query("""
-        UPDATE captures
-        SET category = :category, updated_at = :timestamp, dirty = 1
-        WHERE id = :id
-    """)
-    suspend fun setCategory(id: String, category: String?, timestamp: String)
-
-    /**
-     * Update the user-editable title on a capture. Same dirty-bit
-     * pattern as [setCategory] — the next sync pass mirrors the new
+     * Update the user-editable title on a capture. Bumps
+     * `updated_at` + `dirty` so the next sync pass mirrors the new
      * value to Drive. Pass `null` to clear the title (which makes
-     * the Library card fall back to OCR snippet → category →
+     * the Library card fall back to OCR snippet → primary tag →
      * "Untitled scan").
      */
     @Query("""
@@ -259,19 +247,6 @@ interface CaptureDao {
         address: String?,
         timestamp: String,
     )
-
-    /**
-     * Bulk-update [oldName] → [newName] across every capture for
-     * the given user. Used by [TagRepository.renameAndPropagate]
-     * so a category rename in Settings doesn't orphan historical
-     * tags. Bumps `updated_at` + `dirty` on each touched row.
-     */
-    @Query("""
-        UPDATE captures
-        SET category = :newName, updated_at = :timestamp, dirty = 1
-        WHERE user_id = :userId AND category = :oldName
-    """)
-    suspend fun renameCategory(userId: String, oldName: String, newName: String, timestamp: String)
 
     // ─── Workspace v1 (Phase A.3) ────────────────────────────────
 
@@ -324,21 +299,6 @@ interface CaptureDao {
           AND deleted_at IS NULL
     """)
     suspend fun assignOrphanCapturesToFolder(userId: String, folderId: String, timestamp: String)
-
-    /**
-     * Active captures with a non-null `category` value, for the
-     * one-time materialize-into-capture_tags pass. Used by
-     * [FolderRepository.materializeCategoryToTagsIfNeeded]. Caller
-     * iterates the result and writes a `capture_tags` row per
-     * (capture_id, tag_id) pair.
-     */
-    @Query("""
-        SELECT * FROM captures
-        WHERE user_id = :userId
-          AND category IS NOT NULL
-          AND deleted_at IS NULL
-    """)
-    suspend fun listWithCategory(userId: String): List<CaptureEntity>
 
     /**
      * Mark the user's last-opened position on a capture, debounced
@@ -450,23 +410,28 @@ interface CaptureDao {
     fun observeByFolderAndTag(folderId: String, tagId: String): Flow<List<CaptureEntity>>
 
     /**
-     * Captures whose category contains the substring (case-
-     * insensitive, space-insensitive). Used as the "fast" pass of
-     * search. Spaces are stripped from both sides of the comparison
-     * so a category named "todo" matches a search for "to do" (and
-     * vice versa). Returns every match — the UI uses LazyColumn so
-     * render cost stays bounded by the visible window, not the
-     * total row count.
+     * Captures with any attached tag whose `name` matches the
+     * substring (case-insensitive, space-insensitive). Replaces the
+     * pre-A.3c `searchByCategory` substring pass against the dropped
+     * `captures.category` column. Spaces are stripped both sides so
+     * a tag named "todo" matches a search for "to do" (and vice
+     * versa). Joins through the active capture_tags rows so
+     * tombstoned attachments don't leak. Returns each capture once
+     * even when multiple tags match — DISTINCT on capture id keeps
+     * the dedupe in SQL.
      */
     @Query("""
-        SELECT * FROM captures
-        WHERE user_id = :userId
-          AND deleted_at IS NULL
-          AND category IS NOT NULL
-          AND replace(lower(category), ' ', '') LIKE replace(lower(:like), ' ', '')
-        ORDER BY created_at DESC
+        SELECT DISTINCT captures.* FROM captures
+        JOIN capture_tags ON capture_tags.capture_id = captures.id
+        JOIN tags         ON tags.id         = capture_tags.tag_id
+        WHERE captures.user_id    = :userId
+          AND captures.deleted_at IS NULL
+          AND capture_tags.deleted_at IS NULL
+          AND tags.deleted_at     IS NULL
+          AND replace(lower(tags.name), ' ', '') LIKE replace(lower(:like), ' ', '')
+        ORDER BY captures.created_at DESC
     """)
-    suspend fun searchByCategory(userId: String, like: String): List<CaptureEntity>
+    suspend fun searchByTagName(userId: String, like: String): List<CaptureEntity>
 
     /**
      * FTS5-backed OCR search joined to captures. `@RawQuery` skips
@@ -590,7 +555,6 @@ data class CaptureSearchRow(
     @ColumnInfo(name = "user_id")     val userId: String,
     @ColumnInfo(name = "preview_uri") val previewUri: String?,
     @ColumnInfo(name = "pdf_uri")     val pdfUri: String,
-    @ColumnInfo(name = "category")    val category: String?,
     @ColumnInfo(name = "page_count")  val pageCount: Int,
     @ColumnInfo(name = "created_at")  val createdAt: String,
     @ColumnInfo(name = "ocr_snippet") val ocrSnippet: String?,

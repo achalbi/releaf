@@ -127,11 +127,12 @@ data class CapturePayloadV2(
     @SerialName("preview_uri")           val previewUri: String? = null,
     @SerialName("page_count")            val pageCount: Int,
     /**
-     * Pre-tagged category name (Phase 5 — Categories). `null` for
-     * captures created before v2 / by clients that haven't picked
-     * a category. Round-trips through Drive verbatim — captures
-     * don't FK into categories, so a deleted category name still
-     * reads back unchanged.
+     * Legacy pre-A.3c label slot. Post-A.3c the `captures.category`
+     * column is gone; the field is kept on the wire so older
+     * clients can still emit it (and so a fresh client deserializes
+     * older payloads without throwing), but the new send-path
+     * always writes `null` and the receive-path ignores it — the
+     * canonical per-capture label now lives in `capture_tags`.
      */
     @SerialName("category")              val category: String? = null,
     /**
@@ -188,7 +189,9 @@ fun CaptureEntity.toV2Payload(): CapturePayloadV2 = CapturePayloadV2(
     pdfUri             = pdfUri,
     previewUri         = previewUri,
     pageCount          = pageCount,
-    category           = category,
+    // Legacy slot — always null post-A.3c (column dropped). See
+    // `CapturePayloadV2.category` docstring.
+    category           = null,
     pdfDriveFileId     = pdfDriveFileId,
     previewDriveFileId = previewDriveFileId,
     source             = source,
@@ -208,7 +211,11 @@ fun CapturePayloadV2.toEntity(driveFileId: String?): CaptureEntity = CaptureEnti
     pdfUri             = pdfUri,
     previewUri         = previewUri,
     pageCount          = pageCount,
-    category           = category,
+    // `category` from the payload is intentionally dropped here —
+    // the column is gone post-A.3c. Older clients still emit the
+    // field; the receive side either has a corresponding
+    // capture_tags row already (from the A.3a materialize) or
+    // doesn't care about the legacy label for new captures.
     source             = source,
     latitude           = latitude,
     longitude          = longitude,

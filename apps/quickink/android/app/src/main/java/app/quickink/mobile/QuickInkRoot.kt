@@ -274,8 +274,10 @@ private fun MainShell(
         ScanFlowController(
             userId     = userId,
             repository = CaptureRepository(
-                captureDao   = app.database.captureDao(),
-                ocrResultDao = app.database.ocrResultDao(),
+                captureDao    = app.database.captureDao(),
+                ocrResultDao  = app.database.ocrResultDao(),
+                tagDao        = app.database.tagDao(),
+                captureTagDao = app.database.captureTagDao(),
             ),
             pipeline       = OcrPipeline(MlKitTextRecognizer(app)),
             notepadDao     = app.database.notepadDao(),
@@ -310,7 +312,14 @@ private fun MainShell(
                                 captureId  = summary.captureId,
                                 source     = summary.source,
                                 pageCount  = summary.pageCount,
-                                category   = summary.category,
+                                // Post-A.3c the `captures.category`
+                                // column is gone; the analytics
+                                // server-side `category` slot stays
+                                // for back-compat but new captures
+                                // emit null. Once the server schema
+                                // drops the field this column folds
+                                // out of the outbox row too.
+                                category   = null,
                                 hasOcr     = summary.hasOcr,
                                 ocrChars   = summary.ocrChars,
                                 capturedAt = summary.capturedAt,
@@ -347,15 +356,14 @@ private fun MainShell(
             // safe to call on every launch.
             tagRepo.migrateLegacyStudyToBusinessCardIfNeeded(context, userId)
 
-            // Workspace v1 Phase A.3 — seed Unfiled folder, backfill
-            // every capture's folder_id, materialize the legacy
-            // `captures.category` value into `capture_tags`.
+            // Workspace v1 Phase A.3 — seed Unfiled folder + backfill
+            // every capture's folder_id. The legacy
+            // `captures.category` → `capture_tags` materialize step
+            // shipped in A.3a and is gone post-A.3c column drop.
             // Idempotent via SharedPreferences guards.
             FolderRepository(
-                folderDao     = app.database.folderDao(),
-                captureDao    = app.database.captureDao(),
-                tagDao        = app.database.tagDao(),
-                captureTagDao = app.database.captureTagDao(),
+                folderDao  = app.database.folderDao(),
+                captureDao = app.database.captureDao(),
             ).runFirstLaunchMigrationIfNeeded(context, userId)
 
             // Workspace v1 Phase C.3 — seed the "Needs review"
