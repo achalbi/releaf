@@ -114,3 +114,96 @@ object SmartCollectionRule {
         }.getOrElse { emptyList() }
     }
 }
+
+/**
+ * Flat editor-input projection of a rule-clause list. Each field
+ * is one editable slot in the smart-collection editor; converting
+ * to / from a [RuleClause] list lives in [toClauses] /
+ * [fromClauses] so the UI doesn't have to reason about the JSON
+ * grammar directly.
+ *
+ * The DateRange clause's `field` is collapsed to `"created_at"`
+ * here — the editor doesn't yet expose the `last_opened_at`
+ * variant, and a UI for picking the field would need a clearer
+ * use case than "the rule grammar supports it".
+ *
+ * `null` / empty values mean "no clause of that kind". Round-trip
+ * is lossless for the slots we surface; clauses the editor
+ * doesn't know about (e.g. a date range over `last_opened_at`)
+ * are dropped on round-trip — same posture as the JSON decoder's
+ * `ignoreUnknownKeys = true`.
+ */
+data class SmartCollectionRuleInput(
+    val folderId: String? = null,
+    val datePreset: String? = null,
+    val tagIncludeIds: List<String> = emptyList(),
+    val tagExcludeIds: List<String> = emptyList(),
+    val sourceValue: String? = null,
+    val hasHandwriting: Boolean? = null,
+    val hasSignature: Boolean? = null,
+    val hasOcrText: Boolean? = null,
+) {
+    /** True when no clause is selected — the editor's Save guard. */
+    val isEmpty: Boolean
+        get() = folderId == null &&
+            datePreset == null &&
+            tagIncludeIds.isEmpty() &&
+            tagExcludeIds.isEmpty() &&
+            sourceValue == null &&
+            hasHandwriting == null &&
+            hasSignature == null &&
+            hasOcrText == null
+
+    /** Compile the input back into the canonical AND-of-clauses list. */
+    fun toClauses(): List<RuleClause> = buildList {
+        folderId?.let { add(RuleClause.FolderIs(it)) }
+        datePreset?.let { add(RuleClause.DateRange(field = "created_at", preset = it)) }
+        for (id in tagIncludeIds) add(RuleClause.TagIs(id))
+        for (id in tagExcludeIds) add(RuleClause.TagIsNot(id))
+        sourceValue?.let { add(RuleClause.SourceIs(it)) }
+        hasHandwriting?.let { add(RuleClause.HasHandwriting(it)) }
+        hasSignature?.let { add(RuleClause.HasSignature(it)) }
+        hasOcrText?.let { add(RuleClause.HasOcrText(it)) }
+    }
+
+    companion object {
+        /**
+         * Build a flat editor-input from a decoded clause list. When
+         * a clause type appears more than once the editor only
+         * tracks the first (folder / date / source / OCR flags) or
+         * unions ids (tag include / exclude).
+         */
+        fun fromClauses(clauses: List<RuleClause>): SmartCollectionRuleInput {
+            var folderId: String? = null
+            var datePreset: String? = null
+            val includes = mutableListOf<String>()
+            val excludes = mutableListOf<String>()
+            var source: String? = null
+            var hand: Boolean? = null
+            var sig: Boolean? = null
+            var ocr: Boolean? = null
+            for (c in clauses) {
+                when (c) {
+                    is RuleClause.FolderIs       -> if (folderId == null) folderId = c.folderId
+                    is RuleClause.DateRange      -> if (datePreset == null && c.field == "created_at") datePreset = c.preset
+                    is RuleClause.TagIs          -> if (c.tagId !in includes) includes += c.tagId
+                    is RuleClause.TagIsNot       -> if (c.tagId !in excludes) excludes += c.tagId
+                    is RuleClause.SourceIs       -> if (source == null) source = c.value
+                    is RuleClause.HasHandwriting -> if (hand   == null) hand   = c.value
+                    is RuleClause.HasSignature   -> if (sig    == null) sig    = c.value
+                    is RuleClause.HasOcrText     -> if (ocr    == null) ocr    = c.value
+                }
+            }
+            return SmartCollectionRuleInput(
+                folderId       = folderId,
+                datePreset     = datePreset,
+                tagIncludeIds  = includes,
+                tagExcludeIds  = excludes,
+                sourceValue    = source,
+                hasHandwriting = hand,
+                hasSignature   = sig,
+                hasOcrText     = ocr,
+            )
+        }
+    }
+}

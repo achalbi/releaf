@@ -171,27 +171,22 @@ public struct WorkspaceHomeScreen: View {
                 .presentationDetents([.height(200)])
         }
         .sheet(item: $editCollection) { collection in
-            let clauses = SmartCollectionRule.decode(collection.ruleJson)
-            let initialFolder: String? = clauses.compactMap { c -> String? in
-                if case .folderIs(let id) = c { return id } else { return nil }
-            }.first
-            let initialDate: String? = clauses.compactMap { c -> String? in
-                if case .dateRange(_, let p) = c { return p } else { return nil }
-            }.first
+            let initialInput = SmartCollectionRuleInput.fromClauses(
+                SmartCollectionRule.decode(collection.ruleJson)
+            )
             SmartCollectionEditorView(
-                folders:           viewModel.folders,
-                initialName:       collection.name,
-                initialFolderId:   initialFolder,
-                initialDatePreset: initialDate,
-                isEdit:            true,
-                onSubmit: { name, folderId, datePreset in
+                folders:      viewModel.folders,
+                tags:         viewModel.tags,
+                initialName:  collection.name,
+                initialInput: initialInput,
+                isEdit:       true,
+                onSubmit: { name, ruleInput in
                     let target = collection
                     Task {
                         await updateSmartCollection(
-                            target:     target,
-                            name:       name,
-                            folderId:   folderId,
-                            datePreset: datePreset
+                            target: target,
+                            name:   name,
+                            input:  ruleInput
                         )
                         editCollection = nil
                     }
@@ -230,13 +225,10 @@ public struct WorkspaceHomeScreen: View {
         .sheet(isPresented: $showSmartEditor) {
             SmartCollectionEditorView(
                 folders: viewModel.folders,
-                onSubmit: { name, folderId, datePreset in
+                tags:    viewModel.tags,
+                onSubmit: { name, ruleInput in
                     Task {
-                        await saveSmartCollection(
-                            name: name,
-                            folderId: folderId,
-                            datePreset: datePreset
-                        )
+                        await saveSmartCollection(name: name, input: ruleInput)
                         showSmartEditor = false
                     }
                 },
@@ -316,14 +308,9 @@ public struct WorkspaceHomeScreen: View {
     private func updateSmartCollection(
         target: SmartCollectionEntity,
         name: String,
-        folderId: String?,
-        datePreset: String?
+        input: SmartCollectionRuleInput
     ) async {
-        var clauses: [RuleClause] = []
-        if let folderId { clauses.append(.folderIs(folderId: folderId)) }
-        if let datePreset {
-            clauses.append(.dateRange(field: "created_at", preset: datePreset))
-        }
+        let clauses = input.toClauses()
         guard !clauses.isEmpty else { return }
         let now = IsoClock.nowIso()
         let dbQueue = QuickInkDatabase.shared.dbQueue
@@ -341,14 +328,9 @@ public struct WorkspaceHomeScreen: View {
 
     private func saveSmartCollection(
         name: String,
-        folderId: String?,
-        datePreset: String?
+        input: SmartCollectionRuleInput
     ) async {
-        var clauses: [RuleClause] = []
-        if let folderId { clauses.append(.folderIs(folderId: folderId)) }
-        if let datePreset {
-            clauses.append(.dateRange(field: "created_at", preset: datePreset))
-        }
+        let clauses = input.toClauses()
         guard !clauses.isEmpty else { return }
         let now = IsoClock.nowIso()
         let dbQueue = QuickInkDatabase.shared.dbQueue

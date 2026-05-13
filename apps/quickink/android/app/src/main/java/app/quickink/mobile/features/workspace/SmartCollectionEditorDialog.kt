@@ -1,17 +1,18 @@
 /*
  * SmartCollectionEditorDialog.kt
  *
- * Workspace v1 minimum-viable smart-collection editor. Lets the
- * user combine:
- *   - a name
- *   - an optional folder filter (folder_is)
- *   - an optional date-range preset (date_range over created_at)
+ * Workspace v1 smart-collection editor. Six clause types from
+ * `SmartCollectionRule.kt` are now reachable from the UI:
  *
- * Tag-based collections already have a fast-path in the tag
- * library's "Save as collection" affordance, so this editor
- * focuses on the OTHER clause types. Full multi-clause-type
- * authoring (tag_is_not, source_is, OCR signals) lands when the
- * use case is clearer.
+ *   - folder_is        (one folder)
+ *   - date_range       (created_at preset)
+ *   - tag_is           (one or more tags the capture must carry)
+ *   - tag_is_not       (one or more tags the capture must NOT carry)
+ *   - source_is        (scan / import / share-extension)
+ *   - has_handwriting / has_signature / has_ocr_text (OCR signals;
+ *     evaluator returns false until Phase E lights up the columns,
+ *     but authoring them is exposed today so users can pre-build
+ *     rules that activate when the signals arrive).
  *
  * Mirror of `SmartCollectionEditorView.swift` (iOS).
  */
@@ -26,14 +27,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -44,7 +43,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
@@ -53,6 +51,8 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.quickink.mobile.data.folder.FolderEntity
+import app.quickink.mobile.data.smartcollection.SmartCollectionRuleInput
+import app.quickink.mobile.data.tag.TagEntity
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
@@ -61,19 +61,18 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
 @Composable
 internal fun SmartCollectionEditorDialog(
     folders: List<FolderEntity>,
+    tags: List<TagEntity> = emptyList(),
     initialName: String = "",
-    initialFolderId: String? = null,
-    initialDatePreset: String? = null,
+    initialInput: SmartCollectionRuleInput = SmartCollectionRuleInput(),
     isEdit: Boolean = false,
     onDismiss: () -> Unit,
-    onSubmit: (name: String, folderId: String?, datePreset: String?) -> Unit,
+    onSubmit: (name: String, input: SmartCollectionRuleInput) -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
 
-    var name        by remember(initialName)       { mutableStateOf(initialName) }
-    var folderId    by remember(initialFolderId)   { mutableStateOf(initialFolderId) }
-    var datePreset  by remember(initialDatePreset) { mutableStateOf(initialDatePreset) }
+    var name        by remember(initialName) { mutableStateOf(initialName) }
+    var input       by remember(initialInput) { mutableStateOf(initialInput) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -86,7 +85,16 @@ internal fun SmartCollectionEditorDialog(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
+            // The dialog body holds a lot of clauses now; keep the
+            // height bounded by Material's AlertDialog and scroll
+            // internally when the user surfaces more sections than
+            // fit on a small screen.
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+            ) {
                 OutlinedTextField(
                     value         = name,
                     onValueChange = { name = it },
@@ -103,24 +111,14 @@ internal fun SmartCollectionEditorDialog(
                     ),
                 )
 
-                Text(
-                    text  = "FOLDER",
-                    style = type.label.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                                            letterSpacing = 1.2.sp),
-                    color = colors.muted,
-                )
+                SectionLabel("FOLDER")
                 ChoiceWrapRow(
                     options    = listOf(null to "Any") + folders.map { it.id to it.name },
-                    selected   = folderId,
-                    onSelect   = { folderId = it },
+                    selected   = input.folderId,
+                    onSelect   = { input = input.copy(folderId = it) },
                 )
 
-                Text(
-                    text  = "WHEN CREATED",
-                    style = type.label.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                                            letterSpacing = 1.2.sp),
-                    color = colors.muted,
-                )
+                SectionLabel("WHEN CREATED")
                 ChoiceWrapRow(
                     options    = listOf(
                         null to "Any time",
@@ -129,15 +127,75 @@ internal fun SmartCollectionEditorDialog(
                         "last_30_days" to "Last 30 days",
                         "this_quarter" to "This quarter",
                     ),
-                    selected   = datePreset,
-                    onSelect   = { datePreset = it },
+                    selected   = input.datePreset,
+                    onSelect   = { input = input.copy(datePreset = it) },
+                )
+
+                if (tags.isNotEmpty()) {
+                    SectionLabel("MUST HAVE TAG")
+                    TagMultiSelectRow(
+                        tags     = tags,
+                        selected = input.tagIncludeIds,
+                        onToggle = { id ->
+                            val next = input.tagIncludeIds.toMutableList().apply {
+                                if (id in this) remove(id) else add(id)
+                            }
+                            input = input.copy(tagIncludeIds = next)
+                        },
+                    )
+
+                    SectionLabel("MUST NOT HAVE TAG")
+                    TagMultiSelectRow(
+                        tags     = tags,
+                        selected = input.tagExcludeIds,
+                        onToggle = { id ->
+                            val next = input.tagExcludeIds.toMutableList().apply {
+                                if (id in this) remove(id) else add(id)
+                            }
+                            input = input.copy(tagExcludeIds = next)
+                        },
+                    )
+                }
+
+                SectionLabel("SOURCE")
+                ChoiceWrapRow(
+                    options  = listOf(
+                        null to "Any",
+                        "scan" to "Scan",
+                        "import" to "Import",
+                        "share-extension" to "Share",
+                    ),
+                    selected = input.sourceValue,
+                    onSelect = { input = input.copy(sourceValue = it) },
+                )
+
+                SectionLabel("OCR SIGNALS")
+                // Each OCR signal is a TRI-STATE chip: unset (no
+                // clause), require true, require false. Tap cycles
+                // through the three states. The dimmed third state
+                // (require absent) is rare but cheap to expose and
+                // matches the rule grammar's `Boolean` payload.
+                OcrTriStateChip(
+                    label   = "Handwriting",
+                    state   = input.hasHandwriting,
+                    onCycle = { input = input.copy(hasHandwriting = it) },
+                )
+                OcrTriStateChip(
+                    label   = "Signature",
+                    state   = input.hasSignature,
+                    onCycle = { input = input.copy(hasSignature = it) },
+                )
+                OcrTriStateChip(
+                    label   = "OCR text",
+                    state   = input.hasOcrText,
+                    onCycle = { input = input.copy(hasOcrText = it) },
                 )
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onSubmit(name.trim(), folderId, datePreset) },
-                enabled = folderId != null || datePreset != null,
+                onClick = { onSubmit(name.trim(), input) },
+                enabled = !input.isEmpty,
             ) {
                 Text("Save", color = colors.accent)
             }
@@ -148,6 +206,21 @@ internal fun SmartCollectionEditorDialog(
             }
         },
         containerColor = colors.surface,
+    )
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Text(
+        text  = text,
+        style = type.label.copy(
+            fontSize      = 10.sp,
+            fontWeight    = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
+        ),
+        color = colors.muted,
     )
 }
 
@@ -166,29 +239,99 @@ private fun ChoiceWrapRow(
     ) {
         options.forEach { (id, label) ->
             val isActive = selected == id
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(
-                        if (isActive) colors.ink else colors.surface,
-                        RoundedCornerShape(999.dp),
-                    )
-                    .border(
-                        1.dp,
-                        if (isActive) colors.ink else colors.border,
-                        RoundedCornerShape(999.dp),
-                    )
-                    .clickable { onSelect(id) }
-                    .padding(horizontal = 11.dp, vertical = 5.dp),
-            ) {
-                Text(
-                    text  = label,
-                    style = type.label.copy(fontSize = 11.5.sp),
-                    color = if (isActive) androidx.compose.ui.graphics.Color.White
-                            else colors.inkSoft,
-                )
-            }
+            ChipBox(label = label, active = isActive) { onSelect(id) }
+                .let { /* Compose returns Unit; nothing else needed */ }
         }
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun TagMultiSelectRow(
+    tags: List<TagEntity>,
+    selected: List<String>,
+    onToggle: (String) -> Unit,
+) {
+    if (tags.isEmpty()) return
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement   = Arrangement.spacedBy(6.dp),
+    ) {
+        tags.forEach { tag ->
+            val isActive = tag.id in selected
+            ChipBox(label = tag.name, active = isActive) { onToggle(tag.id) }
+        }
+    }
+}
+
+@Composable
+private fun OcrTriStateChip(
+    label: String,
+    state: Boolean?,
+    onCycle: (Boolean?) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    // null → "Any" (no clause); true → "Yes"; false → "No".
+    // Cycle order matches that triple.
+    val (suffix, isActive) = when (state) {
+        null  -> "Any" to false
+        true  -> "Yes" to true
+        false -> "No"  to true
+    }
+    val cycled: Boolean? = when (state) {
+        null  -> true
+        true  -> false
+        false -> null
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                if (isActive) colors.ink else colors.surface,
+                RoundedCornerShape(999.dp),
+            )
+            .border(
+                1.dp,
+                if (isActive) colors.ink else colors.border,
+                RoundedCornerShape(999.dp),
+            )
+            .clickable { onCycle(cycled) }
+            .padding(horizontal = 11.dp, vertical = 5.dp),
+    ) {
+        Text(
+            text  = "$label · $suffix",
+            style = type.label.copy(fontSize = 11.5.sp),
+            color = if (isActive) androidx.compose.ui.graphics.Color.White
+                    else colors.inkSoft,
+        )
+    }
+}
+
+@Composable
+private fun ChipBox(label: String, active: Boolean, onTap: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                if (active) colors.ink else colors.surface,
+                RoundedCornerShape(999.dp),
+            )
+            .border(
+                1.dp,
+                if (active) colors.ink else colors.border,
+                RoundedCornerShape(999.dp),
+            )
+            .clickable { onTap() }
+            .padding(horizontal = 11.dp, vertical = 5.dp),
+    ) {
+        Text(
+            text  = label,
+            style = type.label.copy(fontSize = 11.5.sp),
+            color = if (active) androidx.compose.ui.graphics.Color.White
+                    else colors.inkSoft,
+        )
+    }
+}

@@ -97,6 +97,7 @@ import app.quickink.mobile.data.folder.FolderRepository
 import app.quickink.mobile.data.smartcollection.RuleClause
 import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
 import app.quickink.mobile.data.smartcollection.SmartCollectionRule
+import app.quickink.mobile.data.smartcollection.SmartCollectionRuleInput
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import app.quickink.mobile.data.tag.TagEntity
@@ -441,34 +442,23 @@ fun WorkspaceHomeScreen(
     }
 
     editCollection?.let { collection ->
-        val clauses = remember(collection.id) {
-            SmartCollectionRule.decode(collection.ruleJson)
+        val initialInput = remember(collection.id) {
+            SmartCollectionRuleInput.fromClauses(
+                SmartCollectionRule.decode(collection.ruleJson),
+            )
         }
-        val initialFolder = clauses
-            .filterIsInstance<RuleClause.FolderIs>()
-            .firstOrNull()
-            ?.folderId
-        val initialDate = clauses
-            .filterIsInstance<RuleClause.DateRange>()
-            .firstOrNull()
-            ?.preset
         SmartCollectionEditorDialog(
-            folders           = folders,
-            initialName       = collection.name,
-            initialFolderId   = initialFolder,
-            initialDatePreset = initialDate,
-            isEdit            = true,
-            onDismiss         = { editCollection = null },
-            onSubmit          = { name, folderId, datePreset ->
+            folders      = folders,
+            tags         = tags,
+            initialName  = collection.name,
+            initialInput = initialInput,
+            isEdit       = true,
+            onDismiss    = { editCollection = null },
+            onSubmit     = { name, ruleInput ->
                 val target = collection
                 scope.launch {
                     val now = IsoClock.nowIso()
-                    val newClauses: List<RuleClause> = buildList {
-                        if (folderId != null) add(RuleClause.FolderIs(folderId))
-                        if (datePreset != null) {
-                            add(RuleClause.DateRange("created_at", datePreset))
-                        }
-                    }
+                    val newClauses = ruleInput.toClauses()
                     if (newClauses.isEmpty()) {
                         editCollection = null
                         return@launch
@@ -531,18 +521,12 @@ fun WorkspaceHomeScreen(
     if (showSmartEditor) {
         SmartCollectionEditorDialog(
             folders   = folders,
+            tags      = tags,
             onDismiss = { showSmartEditor = false },
-            onSubmit  = { name, folderId, datePreset ->
+            onSubmit  = { name, ruleInput ->
                 scope.launch {
                     val now = IsoClock.nowIso()
-                    val clauses: List<RuleClause> = buildList {
-                        if (folderId != null) {
-                            add(RuleClause.FolderIs(folderId))
-                        }
-                        if (datePreset != null) {
-                            add(RuleClause.DateRange(field = "created_at", preset = datePreset))
-                        }
-                    }
+                    val clauses = ruleInput.toClauses()
                     if (clauses.isEmpty()) {
                         showSmartEditor = false
                         return@launch

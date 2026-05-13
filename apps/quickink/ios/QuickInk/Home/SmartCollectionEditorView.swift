@@ -1,11 +1,18 @@
 /*
  * SmartCollectionEditorView.swift
  *
- * Workspace v1 minimum-viable smart-collection editor (iOS). Lets
- * the user combine:
- *   - a name
- *   - an optional folder filter (folder_is)
- *   - an optional date-range preset (date_range over created_at)
+ * Workspace v1 smart-collection editor. All six clause types from
+ * `SmartCollectionRule.swift` are reachable from the UI:
+ *
+ *   - folder_is        (one folder)
+ *   - date_range       (created_at preset)
+ *   - tag_is           (one or more tags the capture must carry)
+ *   - tag_is_not       (one or more tags the capture must NOT carry)
+ *   - source_is        (scan / import / share-extension)
+ *   - has_handwriting / has_signature / has_ocr_text (OCR signals;
+ *     evaluator returns false until Phase E lights up the columns,
+ *     but authoring them is exposed today so users can pre-build
+ *     rules that activate when the signals arrive).
  *
  * Mirror of `SmartCollectionEditorDialog.kt` (Android).
  */
@@ -18,36 +25,34 @@ import ReleafCoreDesignSystem
 @MainActor
 struct SmartCollectionEditorView: View {
     let folders: [FolderEntity]
+    let tags: [TagEntity]
     let initialName: String
-    let initialFolderId: String?
-    let initialDatePreset: String?
+    let initialInput: SmartCollectionRuleInput
     let isEdit: Bool
-    let onSubmit: (_ name: String, _ folderId: String?, _ datePreset: String?) -> Void
+    let onSubmit: (_ name: String, _ input: SmartCollectionRuleInput) -> Void
     let onCancel: () -> Void
 
     @State private var name: String
-    @State private var folderId: String?
-    @State private var datePreset: String?
+    @State private var input: SmartCollectionRuleInput
 
     init(
         folders: [FolderEntity],
+        tags: [TagEntity] = [],
         initialName: String = "",
-        initialFolderId: String? = nil,
-        initialDatePreset: String? = nil,
+        initialInput: SmartCollectionRuleInput = SmartCollectionRuleInput(),
         isEdit: Bool = false,
-        onSubmit: @escaping (String, String?, String?) -> Void,
+        onSubmit: @escaping (String, SmartCollectionRuleInput) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.folders = folders
+        self.tags = tags
         self.initialName = initialName
-        self.initialFolderId = initialFolderId
-        self.initialDatePreset = initialDatePreset
+        self.initialInput = initialInput
         self.isEdit = isEdit
         self.onSubmit = onSubmit
         self.onCancel = onCancel
-        _name       = State(initialValue: initialName)
-        _folderId   = State(initialValue: initialFolderId)
-        _datePreset = State(initialValue: initialDatePreset)
+        _name  = State(initialValue: initialName)
+        _input = State(initialValue: initialInput)
     }
 
     private struct Option<T: Hashable>: Hashable {
@@ -68,6 +73,13 @@ struct SmartCollectionEditorView: View {
         Option(id: "this_quarter",  label: "This quarter"),
     ]
 
+    private let sourceOptions: [Option<String>] = [
+        Option(id: nil,                 label: "Any"),
+        Option(id: "scan",              label: "Scan"),
+        Option(id: "import",            label: "Import"),
+        Option(id: "share-extension",   label: "Share"),
+    ]
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -75,17 +87,55 @@ struct SmartCollectionEditorView: View {
                     TextField("Name", text: $name)
                         .textFieldStyle(.roundedBorder)
 
-                    Text("FOLDER")
-                        .font(.system(size: 10, weight: .bold))
-                        .tracking(1.2)
-                        .foregroundColor(QuickInkColors.muted)
-                    chipRow(options: folderOptions, selected: folderId) { folderId = $0 }
+                    sectionLabel("FOLDER")
+                    chipRow(options: folderOptions, selected: input.folderId) {
+                        input.folderId = $0
+                    }
 
-                    Text("WHEN CREATED")
-                        .font(.system(size: 10, weight: .bold))
-                        .tracking(1.2)
-                        .foregroundColor(QuickInkColors.muted)
-                    chipRow(options: dateOptions, selected: datePreset) { datePreset = $0 }
+                    sectionLabel("WHEN CREATED")
+                    chipRow(options: dateOptions, selected: input.datePreset) {
+                        input.datePreset = $0
+                    }
+
+                    if !tags.isEmpty {
+                        sectionLabel("MUST HAVE TAG")
+                        tagMultiSelect(selected: input.tagIncludeIds) { id in
+                            if let idx = input.tagIncludeIds.firstIndex(of: id) {
+                                input.tagIncludeIds.remove(at: idx)
+                            } else {
+                                input.tagIncludeIds.append(id)
+                            }
+                        }
+
+                        sectionLabel("MUST NOT HAVE TAG")
+                        tagMultiSelect(selected: input.tagExcludeIds) { id in
+                            if let idx = input.tagExcludeIds.firstIndex(of: id) {
+                                input.tagExcludeIds.remove(at: idx)
+                            } else {
+                                input.tagExcludeIds.append(id)
+                            }
+                        }
+                    }
+
+                    sectionLabel("SOURCE")
+                    chipRow(options: sourceOptions, selected: input.sourceValue) {
+                        input.sourceValue = $0
+                    }
+
+                    sectionLabel("OCR SIGNALS")
+                    // Each OCR signal is a tri-state chip: unset →
+                    // require true → require false. Tap cycles
+                    // through. Cycling matches the rule grammar's
+                    // `Bool` payload.
+                    ocrChip(label: "Handwriting", state: input.hasHandwriting) {
+                        input.hasHandwriting = cycle(input.hasHandwriting)
+                    }
+                    ocrChip(label: "Signature", state: input.hasSignature) {
+                        input.hasSignature = cycle(input.hasSignature)
+                    }
+                    ocrChip(label: "OCR text", state: input.hasOcrText) {
+                        input.hasOcrText = cycle(input.hasOcrText)
+                    }
                 }
                 .padding(QuickInkSpacing.s4)
             }
@@ -98,12 +148,20 @@ struct SmartCollectionEditorView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                        onSubmit(trimmed, folderId, datePreset)
+                        onSubmit(trimmed, input)
                     }
-                    .disabled(folderId == nil && datePreset == nil)
+                    .disabled(input.isEmpty)
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .bold))
+            .tracking(1.2)
+            .foregroundColor(QuickInkColors.muted)
     }
 
     @ViewBuilder
@@ -116,22 +174,73 @@ struct SmartCollectionEditorView: View {
             ForEach(options, id: \.self) { option in
                 let isActive = option.id == selected
                 Button(action: { onSelect(option.id) }) {
-                    Text(option.label)
-                        .font(.system(size: 11.5))
-                        .foregroundColor(isActive ? .white : QuickInkColors.inkSoft)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 5)
-                        .background(isActive ? QuickInkColors.ink : QuickInkColors.surface,
-                                    in: Capsule())
-                        .overlay(
-                            Capsule().stroke(
-                                isActive ? QuickInkColors.ink : QuickInkColors.border,
-                                lineWidth: 1
-                            )
-                        )
+                    chipLabel(label: option.label, active: isActive)
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func tagMultiSelect(
+        selected: [String],
+        onToggle: @escaping (String) -> Void
+    ) -> some View {
+        FlowChipsRow {
+            ForEach(tags, id: \.id) { tag in
+                let isActive = selected.contains(tag.id)
+                Button(action: { onToggle(tag.id) }) {
+                    chipLabel(label: tag.name, active: isActive)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func ocrChip(
+        label: String,
+        state: Bool?,
+        onCycle: @escaping () -> Void
+    ) -> some View {
+        // Mirror the Android `OcrTriStateChip`: unset → "Any",
+        // true → "Yes", false → "No".
+        let suffix: String = {
+            switch state {
+            case .none:        return "Any"
+            case .some(true):  return "Yes"
+            case .some(false): return "No"
+            }
+        }()
+        let isActive = state != nil
+        Button(action: onCycle) {
+            chipLabel(label: "\(label) · \(suffix)", active: isActive)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func chipLabel(label: String, active: Bool) -> some View {
+        Text(label)
+            .font(.system(size: 11.5))
+            .foregroundColor(active ? .white : QuickInkColors.inkSoft)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .background(active ? QuickInkColors.ink : QuickInkColors.surface,
+                        in: Capsule())
+            .overlay(
+                Capsule().stroke(
+                    active ? QuickInkColors.ink : QuickInkColors.border,
+                    lineWidth: 1
+                )
+            )
+    }
+
+    private func cycle(_ s: Bool?) -> Bool? {
+        switch s {
+        case .none:        return true
+        case .some(true):  return false
+        case .some(false): return nil
         }
     }
 }
