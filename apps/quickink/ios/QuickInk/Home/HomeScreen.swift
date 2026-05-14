@@ -223,7 +223,7 @@ struct HomeScreen: View {
                         Spacer()
                         Text(Self.formatHomeStatusDateTime(context.date))
                             .font(.system(size: 12))
-                            .foregroundColor(QuickInkColors.muted)
+                            .foregroundColor(.black)
                     }
                 }
                 headerBlock
@@ -291,7 +291,7 @@ struct HomeScreen: View {
                 .padding(.top, QuickInkSpacing.s3)
             }
             .padding(.horizontal, QuickInkSpacing.s5)
-            .padding(.top, QuickInkSpacing.s5)
+            .padding(.top, 0)
             // Extra breathing room at the bottom so the sync pill
             // doesn't bump into the nav bar's safe-area inset when
             // scrolled to the end.
@@ -508,7 +508,7 @@ struct HomeScreen: View {
         let cal  = Calendar.current
         let day  = cal.component(.day, from: date)
         let year = cal.component(.year, from: date)
-        return "\(homeStatusDayFormatter.string(from: date)) \(day)\(homeStatusOrdinal(day)), \(year) \(homeStatusTimeFormatter.string(from: date))"
+        return "\(day)\(homeStatusOrdinal(day)) \(homeStatusDayFormatter.string(from: date)), \(year) \(homeStatusTimeFormatter.string(from: date))"
     }
 
     // MARK: - Pending-sync pill

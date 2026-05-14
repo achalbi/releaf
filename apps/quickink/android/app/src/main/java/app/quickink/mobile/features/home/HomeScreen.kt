@@ -294,7 +294,7 @@ fun HomeScreen(
                 .padding(
                     start  = QuickInkSpacing.s5,
                     end    = QuickInkSpacing.s5,
-                    top    = statusBarTop + QuickInkSpacing.s7,
+                    top    = statusBarTop,
                     // Reserve space behind nav bar (~80dp) plus a
                     // little extra (~40dp) so the sync pill at the
                     // end of the scroll content doesn't bump into
@@ -331,7 +331,7 @@ fun HomeScreen(
                 Text(
                     text       = statusDateTime,
                     style      = type.caption,
-                    color      = colors.muted,
+                    color      = Color.Black,
                 )
             }
             Spacer(Modifier.size(QuickInkSpacing.s2))
@@ -1154,14 +1154,14 @@ private fun homeStatusOrdinal(n: Int): String {
     }
 }
 
-/// "Mon 9th, 2026 03:34 pm" — top-right status strip on Home.
+/// "9th Mon May, 2026 03:34 pm" — top-right status strip on Home.
 private fun formatHomeStatusDateTime(now: java.time.ZonedDateTime): String {
     val dayName = now.format(HomeStatusDayFormatter)
     val day     = now.dayOfMonth
     val suffix  = homeStatusOrdinal(day)
     val year    = now.year
     val time    = now.format(HomeStatusTimeFormatter).lowercase(java.util.Locale.US)
-    return "$dayName $day$suffix, $year $time"
+    return "$day$suffix $dayName, $year $time"
 }
 
 // endregion
