@@ -152,7 +152,7 @@ private fun DaylightStatusBarContent(
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(24.dp)
+                .height(16.dp)
                 .semantics {
                     contentDescription = accessibilityLabel(phase)
                 },
@@ -187,7 +187,7 @@ private fun CaptionsRow(
     // would be cleaner but adds boilerplate for a two-element row.
     Box(modifier = Modifier
         .fillMaxWidth()
-        .height(9.dp)
+        .height(12.dp)
     ) {
         // Elapsed label — center on the midpoint of [0, fraction].
         val elapsedFrac   = (fraction / 2f).coerceIn(0f, 1f)
@@ -198,10 +198,11 @@ private fun CaptionsRow(
                 Text(
                     text = "$elapsed in",
                     fontFamily = QuickInkFonts.ui,
-                    fontSize   = 8.sp,
+                    fontSize   = 12.sp,
                     fontWeight = FontWeight.Normal,
                     color      = ColorLabel,
                     textAlign  = TextAlign.Center,
+                    style      = TightTextStyle,
                 )
             }
             Spacer(modifier = Modifier.weight((1f - elapsedFrac).coerceAtLeast(0.0001f)))
@@ -212,10 +213,11 @@ private fun CaptionsRow(
                 Text(
                     text = "$remaining left",
                     fontFamily = QuickInkFonts.ui,
-                    fontSize   = 8.sp,
+                    fontSize   = 12.sp,
                     fontWeight = FontWeight.Normal,
                     color      = ColorLabel,
                     textAlign  = TextAlign.Center,
+                    style      = TightTextStyle,
                 )
             }
             Spacer(modifier = Modifier.weight((1f - remainingFrac).coerceAtLeast(0.0001f)))
@@ -239,7 +241,7 @@ private fun CapsLabel(text: String) {
 private fun ClockText(text: String, sizeSp: Float) {
     Text(
         text       = text,
-        fontFamily = QuickInkFonts.serif,
+        fontFamily = QuickInkFonts.ui,
         fontSize   = sizeSp.sp,
         fontWeight = FontWeight.Normal,
         color      = ColorInk,
@@ -296,13 +298,13 @@ private fun DaylightStatusBarShell(modifier: Modifier = Modifier) {
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(24.dp),
+                .height(16.dp),
         ) {
             drawTrack(size.width, size.height)
         }
         // Reserve caption-row height so the layout doesn't jump
         // when the live phase arrives.
-        Spacer(modifier = Modifier.height(9.dp))
+        Spacer(modifier = Modifier.height(12.dp))
     }
 }
 
@@ -316,7 +318,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMeter(
     fraction: Float,
     isDay: Boolean,
 ) {
-    val trackHeight = 5f
+    val trackHeight = 8f
     val trackY = (height - trackHeight) / 2f
 
     // 1. Track
