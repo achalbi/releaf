@@ -102,12 +102,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import android.view.View
-import android.view.Window
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.net.Uri
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.R
@@ -945,19 +944,19 @@ private fun computeTreeImpact(pagesBySize: Map<String, Int>): TreeImpact {
 // MARK: - Sustainability breakdown sheet
 
 /**
- * Walk the view-tree ancestry looking for a node that implements
- * [DialogWindowProvider]. Material3 `ModalBottomSheet` (1.3.x) renders
- * inside a private `ModalBottomSheetDialogLayout` which IS such a
- * provider — but the cast target shifts between Compose versions
- * (sometimes the AbstractComposeView itself, sometimes its parent),
- * so a defensive chain-walk avoids version-brittleness here. Returns
- * `null` when called outside a Compose Dialog context.
+ * Walk the `ContextWrapper.baseContext` chain looking for the host
+ * [Activity]. `LocalView.current.context` inside a Compose Popup
+ * (which Material3 1.3.x uses for ModalBottomSheet) is the popup's
+ * ContextThemeWrapper, not the activity directly — so we have to
+ * unwrap to reach the window we need to re-apply immersive flags
+ * to. Returns `null` if called outside an Activity-hosted context
+ * (e.g., a Compose preview), which the caller treats as a no-op.
  */
-private fun findDialogWindow(start: View): Window? {
-    var node: Any? = start
-    while (node != null) {
-        if (node is DialogWindowProvider) return node.window
-        node = (node as? View)?.parent
+private fun Context.findHostActivity(): Activity? {
+    var ctx: Context? = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
     }
     return null
 }
@@ -986,37 +985,28 @@ private fun SustainabilityBreakdownSheet(
     val type = LocalQuickInkTypography.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // ModalBottomSheet renders in its own Dialog window, which does
-    // NOT inherit the activity window's immersive flag — so the
-    // system status bar (clock / battery / wifi) reappears as soon
-    // as the sheet's dialog window claims focus, even though
-    // MainActivity has hidden it app-wide. Reach into the dialog's
-    // window from inside the sheet's composition and re-apply the
-    // same hide-statusBars call here.
-    //
-    // In Material3 1.3.x the `DialogWindowProvider` is implemented
-    // by the AbstractComposeView itself (LocalView.current) — its
-    // parent is the dialog's decor view, which is NOT a
-    // DialogWindowProvider. Walk the entire view chain to be
-    // resilient to layout-tree changes between Compose versions.
-    //
-    // `setDecorFitsSystemWindows(false)` is required on the dialog
-    // window for the InsetsController hide call to take effect —
-    // without it, the dialog window's decor reserves status-bar
-    // space and the bar renders there regardless. Matches the
-    // pairing used by MainActivity at activity-window level.
+    // Material3 1.3.x renders ModalBottomSheet inside a `Popup`, not
+    // a `Dialog` — so there's no separate dialog window to grab a
+    // DialogWindowProvider from. Instead, re-apply hide-statusBars
+    // directly on the host Activity's window each time the sheet
+    // opens. Some OEM skins (and the popup's focus claim) reset the
+    // app-wide immersive flag set in `MainActivity.onCreate`, which
+    // is why the bar reappears here even though it's supposed to be
+    // hidden globally. Re-applying on the Activity's decorView via
+    // WindowInsetsControllerCompat reasserts it.
     //
     // `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE` matches the activity-
     // level config so a swipe-from-top reveals the bar briefly and
-    // it re-hides on its own. No onDispose restore needed — when
-    // the sheet dismisses, the activity window regains focus and
-    // its existing immersive flag keeps the bar hidden.
+    // it re-hides on its own. No onDispose restore — MainActivity's
+    // intent is "hide app-wide", so we leave the activity in its
+    // intended state when the sheet dismisses rather than fighting
+    // it.
     val view = LocalView.current
-    DisposableEffect(view) {
-        val window = findDialogWindow(view)
+    DisposableEffect(Unit) {
+        val activity = view.context.findHostActivity()
+        val window = activity?.window
         if (window != null) {
-            WindowCompat.setDecorFitsSystemWindows(window, false)
-            val controller = WindowInsetsControllerCompat(window, view)
+            val controller = WindowInsetsControllerCompat(window, window.decorView)
             controller.hide(WindowInsetsCompat.Type.statusBars())
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -1039,13 +1029,6 @@ private fun SustainabilityBreakdownSheet(
         onDismissRequest = onDismiss,
         sheetState       = sheetState,
         containerColor   = colors.bg,
-        // Zero out the default top inset so the sheet bg paints all
-        // the way up past the system status bar — without this, M3
-        // reserves the status-bar height as a transparent strip
-        // above the sheet and the bar's clock / battery icons sit
-        // on top of the home view rather than on the sheet, which
-        // reads as a chrome bar above the sheet header.
-        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = {
             Box(modifier = Modifier.padding(top = QuickInkSpacing.s2, bottom = QuickInkSpacing.s3)) {
                 Box(
