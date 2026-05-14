@@ -112,6 +112,14 @@ struct HomeScreen: View {
     @State private var primaryTagByCapture: [String: String] = [:]
     @State private var primaryTagCancellable: AnyCancellable? = nil
 
+    /// Whether the SustainabilityBreakdown sheet is up. Hoisted here
+    /// (rather than living inside [SustainabilityHero]) so the home
+    /// screen's view-controller can drive `.statusBarHidden(_)` on
+    /// the underlying VC — at `.large` detent the sheet doesn't
+    /// cover the status-bar strip, so hiding it has to happen on
+    /// the presenter, not inside the sheet's content.
+    @State private var showSustainabilityBreakdown: Bool = false
+
     init(
         controller: ScanFlowController,
         userId: String,
@@ -193,6 +201,16 @@ struct HomeScreen: View {
                 .zIndex(1)
             }
         }
+        // Hide the system status bar (clock / battery / wifi) while
+        // the SustainabilityBreakdown sheet is up. At `.large`
+        // detent the sheet stops just below the bar, so the bar
+        // would otherwise render over the home view in the
+        // remaining strip and read as chrome above the sheet's
+        // own header. Driven from here (the presenting VC) because
+        // a `.statusBarHidden(_)` modifier inside the sheet's
+        // content doesn't reach the underlying VC that owns the
+        // status-bar appearance at this detent.
+        .statusBarHidden(showSustainabilityBreakdown)
     }
 
     /// Original home content (scrolling dashboard + bottom nav).
@@ -252,7 +270,10 @@ struct HomeScreen: View {
                 // breakdown sheet. Mirror of Android's
                 // `SustainabilityHero(totalPages = totalPagesSaved ?: 0)`
                 // call site in `HomeScreen.kt`.
-                SustainabilityHero(pagesBySize: capturesVM.pagesBySize)
+                SustainabilityHero(
+                    pagesBySize:   capturesVM.pagesBySize,
+                    showBreakdown: $showSustainabilityBreakdown
+                )
                     // Mirror the displayed Tree-points value into a
                     // shared UserDefaults key so the next cold launch's
                     // cinematic counter (`LaunchAnimationView`) ticks

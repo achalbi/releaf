@@ -161,7 +161,13 @@ struct SustainabilityHero: View {
     /// empty-state branch.
     let pagesBySize: [String: Int]
 
-    @State private var showBreakdown: Bool = false
+    /// Bound by the parent so the underlying view controller can
+    /// drive `.statusBarHidden(showBreakdown)` from the home screen
+    /// — at `.large` detent the sheet doesn't cover the status-bar
+    /// strip, so hiding it has to happen on the presenting VC, not
+    /// inside the sheet's content. Defaults to a local
+    /// `@State` for preview / standalone-use cases.
+    @Binding var showBreakdown: Bool
 
     /// Lifetime page count derived from the size breakdown — drives
     /// the headline + empty-state branch. Computed (not stored) so a
@@ -268,14 +274,6 @@ struct SustainabilityHero: View {
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
-            // Hide the system status bar (clock / battery / wifi
-            // overlay) while the breakdown is presented — at
-            // `.large` the sheet pushes the home view almost to
-            // the very top edge, and the status bar pinned over
-            // the thin remaining strip is the only chrome left
-            // visible above the sheet's own header. Suppressing
-            // it gives the sheet a clean full-bleed top.
-            .statusBarHidden(true)
         }
     }
 }
@@ -543,11 +541,11 @@ private func formatWhOrKWh(_ wh: Double) -> String {
 struct SustainabilityHero_Previews: PreviewProvider {
     static var previews: some View {
         VStack(spacing: 16) {
-            SustainabilityHero(pagesBySize: [:])
-            SustainabilityHero(pagesBySize: ["a4": 1])
-            SustainabilityHero(pagesBySize: ["a4": 100])
-            SustainabilityHero(pagesBySize: ["a4": 980, "card": 20])
-            SustainabilityHero(pagesBySize: ["a4": 8_300, "card": 33])
+            SustainabilityHero(pagesBySize: [:],                              showBreakdown: .constant(false))
+            SustainabilityHero(pagesBySize: ["a4": 1],                        showBreakdown: .constant(false))
+            SustainabilityHero(pagesBySize: ["a4": 100],                      showBreakdown: .constant(false))
+            SustainabilityHero(pagesBySize: ["a4": 980, "card": 20],          showBreakdown: .constant(false))
+            SustainabilityHero(pagesBySize: ["a4": 8_300, "card": 33],        showBreakdown: .constant(false))
         }
         .padding()
         .background(QuickInkColors.bg)
