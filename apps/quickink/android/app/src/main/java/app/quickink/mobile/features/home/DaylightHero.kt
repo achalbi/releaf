@@ -358,7 +358,7 @@ internal fun DaylightHero(
                 progress = snapshot.dayProgress,
                 trackBg  = QuickInkColors.LeafYellowBase.copy(alpha = 0.30f),
                 fill     = QuickInkColors.LeafYellowDeep,
-                disc     = QuickInkColors.LeafYellowDeep,
+                disc     = QuickInkColors.CoralDeep,
                 rayColor = QuickInkColors.CoralDeep,
             )
         }
@@ -458,7 +458,7 @@ private fun DaylightMeter(
             .height(18.dp),
     ) {
         val centerY  = size.height / 2f
-        val trackH   = 8.dp.toPx()
+        val trackH   = 4.dp.toPx()
         val dotSize  = 18.dp.toPx()
         // Track (full width).
         drawRoundRect(
@@ -477,9 +477,9 @@ private fun DaylightMeter(
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackH / 2f),
             )
         }
-        // Now indicator — rayed sun. Disc matches the fill; rays
-        // carry the contrast so the marker reads against both
-        // halves of the track.
+        // Now indicator — rayed sun, full coral. Disc + rays share
+        // the accent so the marker reads as a single unit against
+        // both halves of the track (matching the status bar's sun).
         val dotCx     = fillW.coerceIn(dotSize / 2f, size.width - dotSize / 2f)
         val discR     = 4.dp.toPx()
         val rayInner  = discR + 1.5.dp.toPx()

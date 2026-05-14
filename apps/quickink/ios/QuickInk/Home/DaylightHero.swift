@@ -348,13 +348,14 @@ struct DaylightHero: View {
                 Capsule()
                     .fill(QuickInkColors.leafYellowDeep)
                     .frame(width: max(0, CGFloat(progress) * width), height: 8)
-                // Now indicator — rayed sun. Disc matches the fill;
-                // rays carry the contrast so the marker reads against
-                // both halves of the track.
+                // Now indicator — rayed sun, full coral. Disc + rays
+                // share the accent so the marker reads as a single
+                // unit against both halves of the track (matching
+                // the status bar's sun).
                 let rayColor = QuickInkColors.coralDeep
                 ZStack {
                     Circle()
-                        .fill(QuickInkColors.leafYellowDeep)
+                        .fill(rayColor)
                         .frame(width: 8, height: 8)
                     ForEach(0..<8, id: \.self) { i in
                         Capsule()
