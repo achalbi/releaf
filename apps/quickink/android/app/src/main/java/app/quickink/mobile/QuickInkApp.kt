@@ -31,6 +31,7 @@ import android.util.Log
 import app.quickink.mobile.data.analytics.AnalyticsFlushWorker
 import app.quickink.mobile.data.analytics.AnalyticsRepository
 import app.quickink.mobile.data.db.QuickInkDatabase
+import app.quickink.mobile.data.panchanga.PanchangaRepository
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.data.sync.QuickInkSyncWorker
 import app.releaf.mobile.auth.AuthState
@@ -125,6 +126,17 @@ class QuickInkApp : Application() {
         private set
 
     /**
+     * Read-mostly repository over the bundled Vontikoppal Panchanga
+     * dataset. Backs the standalone Calendar screen
+     * (`features/calendar`). Seeded on first launch from
+     * `assets/panchanga_2026_27.csv`; subsequent launches no-op the
+     * `ensureLoaded` call via the row-count guard inside the repo.
+     * Mirror of Releaf's `app.panchangaRepository` pattern.
+     */
+    lateinit var panchangaRepository: PanchangaRepository
+        private set
+
+    /**
      * Process-scoped scope for the auth-state observer. Main
      * dispatcher because it only schedules / cancels WorkManager
      * jobs and that has to happen on the main thread anyway.
@@ -186,6 +198,18 @@ class QuickInkApp : Application() {
             InMemoryDriveClient()
         } else {
             OkHttpDriveClient()
+        }
+
+        // Bundled panchanga dataset → SQLite. Fire-and-forget on the
+        // app scope so screen mounts don't have to await CSV parsing;
+        // the repo's row-count guard makes subsequent calls cheap.
+        panchangaRepository = PanchangaRepository(
+            context = this,
+            dao     = database.panchangaDao(),
+        )
+        appScope.launch(Dispatchers.IO) {
+            runCatching { panchangaRepository.ensureLoaded() }
+                .onFailure { Log.w("QuickInkPanchanga", "ensureLoaded failed: $it") }
         }
 
         observeAuthForSyncLifecycle()

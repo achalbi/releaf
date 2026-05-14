@@ -79,6 +79,13 @@ let package = Package(
                 // screen sidesteps this by using the pre-rendered
                 // QuickInkWordmark imageset.
                 .process("DesignSystem/Fonts"),
+                // Bundled Vontikoppal panchanga dataset — read by
+                // PanchangaRepository.ensureLoaded() on first launch
+                // and seeded into the `panchanga` SQLite table.
+                // `.copy` (not `.process`) so the CSV ships
+                // byte-for-byte; `Bundle.module.url(forResource:)`
+                // picks it up by name.
+                .copy("Resources/panchanga_2026_27.csv"),
             ]
         ),
         // Phase 4 Slice 4.4 — cross-platform interop tests for the

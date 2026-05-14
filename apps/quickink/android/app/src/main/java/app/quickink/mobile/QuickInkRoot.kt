@@ -23,6 +23,9 @@ import android.Manifest
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -31,6 +34,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -40,6 +44,9 @@ import androidx.navigation.navArgument
 import app.quickink.mobile.data.analytics.AnalyticsFlushWorker
 import app.quickink.mobile.data.analytics.AnalyticsRepository
 import app.quickink.mobile.data.capture.CaptureRepository
+import app.quickink.mobile.features.calendar.CalendarScreen
+import app.quickink.mobile.features.daylight.DaylightLocationStore
+import app.quickink.mobile.features.daylight.DaylightStatusBar
 import app.quickink.mobile.data.folder.FolderRepository
 import app.quickink.mobile.data.tag.TagRepository
 import app.quickink.mobile.data.smartcollection.SmartCollectionRepository
@@ -203,6 +210,10 @@ private object Routes {
 
     /** Workspace v1 tag library (Phase D — Screen 4). */
     const val TAG_LIBRARY       = "tag_library"
+
+    /** Standalone Calendar — panchanga + Indian holidays + per-day
+     *  capture dots. Pushed from the home header's calendar button. */
+    const val CALENDAR          = "calendar"
 
     fun noteEditor(entryId: String): String =
         "note_editor/${Uri.encode(entryId)}"
@@ -522,7 +533,32 @@ private fun MainShell(
         }
     }
 
-    NavHost(navController = navController, startDestination = Routes.HOME) {
+    // Daylight status bar that sits above the NavHost. Hosts a small
+    // location cache (`DaylightLocationStore`) seeded from
+    // SharedPreferences on construction so the bar paints on cold
+    // launch; the LaunchedEffect below refreshes the cache after
+    // the location-permission flow above has settled. The bar
+    // intentionally wraps only the NavHost — full-screen task
+    // surfaces (ScanReviewScreen + QuickCaptureScreen) early-return
+    // before this code runs, so they take the whole screen as on
+    // iOS.
+    val daylightStore = remember(context.applicationContext) {
+        DaylightLocationStore(context.applicationContext)
+    }
+    LaunchedEffect(Unit) {
+        daylightStore.refreshIfNeeded()
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        DaylightStatusBar(
+            latitude  = daylightStore.latitude,
+            longitude = daylightStore.longitude,
+        )
+        NavHost(
+            navController     = navController,
+            startDestination  = Routes.HOME,
+            modifier          = Modifier.weight(1f).fillMaxWidth(),
+        ) {
         composable(Routes.HOME) {
             HomeScreen(
                 controller     = controller,
@@ -537,10 +573,24 @@ private fun MainShell(
                     navController.navigate(Routes.scanDetail(captureId))
                 },
                 onOpenProfile  = { navController.navigate(Routes.PROFILE) },
+                onOpenCalendar = { navController.navigate(Routes.CALENDAR) },
                 onSignOut      = { app.authStore.signOut() },
                 email          = (authStateForName as? AuthState.SignedIn)?.session?.email.orEmpty(),
                 displayName    = resolvedDisplayName,
                 profilePhotoUri = profilePhotoUri,
+            )
+        }
+        composable(Routes.CALENDAR) {
+            CalendarScreen(
+                userId        = userId,
+                onBack        = { navController.popBackStack() },
+                onOpenCapture = { captureId ->
+                    // Replace the calendar step with the detail so popping
+                    // back from detail returns to Home, not the calendar —
+                    // matches the search → result idiom.
+                    navController.popBackStack()
+                    navController.navigate(Routes.scanDetail(captureId))
+                },
             )
         }
         composable(Routes.SEARCH) {
@@ -726,4 +776,5 @@ private fun MainShell(
             )
         }
     }
+    }   // closes Column opened before the NavHost
 }

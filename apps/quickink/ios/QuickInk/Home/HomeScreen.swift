@@ -50,6 +50,11 @@ struct HomeScreen: View {
     /// Picked from the avatar dropdown menu alongside "Sign out".
     /// Wired at QuickInkRoot.
     var onOpenProfile: (() -> Void)? = nil
+    /// Pushes the standalone Calendar screen — panchanga + Indian
+    /// holidays + moon phases + a coral dot per scan day. Reached via
+    /// the small calendar icon in the home header. Wired at
+    /// QuickInkRoot to `path.append(.calendar)`.
+    var onOpenCalendar: (() -> Void)? = nil
     /// Avatar dropdown's Sign out action. Wired at QuickInkRoot to
     /// `authStore.signOut()` so the avatar menu can drop the user
     /// straight to the SignIn gate without a Settings detour.
@@ -110,6 +115,7 @@ struct HomeScreen: View {
         onOpenEntry: ((String) -> Void)? = nil,
         onOpenScan: ((String) -> Void)? = nil,
         onOpenProfile: (() -> Void)? = nil,
+        onOpenCalendar: (() -> Void)? = nil,
         onSignOut: (() -> Void)? = nil,
         displayName: String? = nil,
         email: String = "",
@@ -123,6 +129,7 @@ struct HomeScreen: View {
         self.onOpenEntry = onOpenEntry
         self.onOpenScan = onOpenScan
         self.onOpenProfile = onOpenProfile
+        self.onOpenCalendar = onOpenCalendar
         self.onSignOut = onSignOut
         self.displayName = displayName
         self.email = email
@@ -196,6 +203,18 @@ struct HomeScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
                 headerBlock
+                // Daylight hero — slim card showing today's sunrise
+                // and sunset times with a now-marker meter beneath.
+                // Sits directly above the sustainability hero per
+                // the home layout brief; both cards share an
+                // editorial / warm-tinted register so the pair
+                // reads as one block of ambient context. Times
+                // come from `sunTimesFor(_:)` — the same USNO
+                // solar calculator the Calendar's Rahu Kala
+                // window uses, anchored at Mysuru. Mirror of
+                // Android's `DaylightHero()` call site in
+                // `HomeScreen.kt`.
+                DaylightHero()
                 // Sustainability hero — frames QuickInk as a paper-
                 // saving tool. Total pages is sourced from the
                 // `CaptureListViewModel`'s lifetime SUM observation
@@ -312,8 +331,36 @@ struct HomeScreen: View {
                     .lineLimit(1)
             }
             Spacer()
+            calendarIconButton
             profileIconButton
         }
+    }
+
+    /// Top-right calendar button — small 44pt accent-soft disc with
+    /// a coral calendar glyph. Tapping pushes the standalone Calendar
+    /// screen (panchanga + Indian holidays + per-day capture dots).
+    /// Sits to the left of the profile avatar so the header reads
+    /// "name | calendar | profile" — calendar is a destination,
+    /// profile is the account menu.
+    @ViewBuilder
+    private var calendarIconButton: some View {
+        Button {
+            onOpenCalendar?()
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(QuickInkColors.accentSoft)
+                    .frame(width: 44, height: 44)
+                Image(systemName: "calendar")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(QuickInkColors.accent)
+            }
+            .overlay(
+                Circle().stroke(QuickInkColors.accent.opacity(0.55), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open calendar")
     }
 
     /// "Settings override > Google session > QuickInk fallback".

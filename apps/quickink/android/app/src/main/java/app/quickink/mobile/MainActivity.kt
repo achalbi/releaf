@@ -52,6 +52,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import app.quickink.mobile.features.scan.PendingShare
 import app.quickink.mobile.features.settings.SettingsPreferences
 import app.quickink.mobile.features.splash.QuickInkLaunchAnimation
@@ -110,6 +113,22 @@ class MainActivity : ComponentActivity() {
         // wordmark together (matching the brand prototype board).
         installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        // Hide the top status bar app-wide. We draw the Compose tree
+        // edge-to-edge under where the bar used to live, then ask the
+        // window-insets controller to hide just the `statusBars()`
+        // type so the bottom nav bar stays as-is. `BEHAVIOR_SHOW_
+        // TRANSIENT_BARS_BY_SWIPE` matches the standard immersive UX
+        // — a swipe-down from the top reveals the bar briefly and
+        // it re-hides on its own. WindowCompat / WindowInsetsCompat
+        // are the AndroidX shims, so this works back to minSdk 26
+        // without API-level branching.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.statusBars())
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
 
         // Restore the launch-intent latch first. On config-change
         // recreation `savedInstanceState` is non-null and carries

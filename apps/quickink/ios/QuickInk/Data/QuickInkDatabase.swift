@@ -624,6 +624,39 @@ public final class QuickInkDatabase: @unchecked Sendable {
             try db.execute(sql: "ALTER TABLE captures DROP COLUMN category")
         }
 
+        // ─── v10_panchanga ──────────────────────────────────────
+        //
+        // Adds the read-mostly `panchanga` table backing the Calendar
+        // screen's Hindu-calendar panel. Seeded on first launch from
+        // the bundled `Resources/panchanga_2026_27.csv` via
+        // `PanchangaRepository.ensureLoaded()` — the migration only
+        // creates the schema, never inserts rows (CSV parsing happens
+        // off the migration's writer to keep the migration fast).
+        //
+        // Schema mirrors Releaf Android's `PanchangaEntity` Room
+        // table: composite-string primary key `date#thithi_num`
+        // (handles transition days carrying two tithis), an indexed
+        // `date` column for per-day / per-month reads, and a
+        // lower-cased `special_day_lc` mirror that lets the in-memory
+        // festival search stay case-insensitive without function
+        // calls in the WHERE clause.
+        migrator.registerMigration("v10_panchanga") { db in
+            try db.execute(sql: """
+                CREATE TABLE panchanga (
+                    id              TEXT PRIMARY KEY NOT NULL,
+                    date            TEXT NOT NULL,
+                    masa            TEXT NOT NULL DEFAULT '',
+                    paksha          TEXT NOT NULL DEFAULT '',
+                    thithi          TEXT NOT NULL DEFAULT '',
+                    thithi_num      TEXT NOT NULL DEFAULT '',
+                    special_day     TEXT NOT NULL DEFAULT '',
+                    special_day_lc  TEXT NOT NULL DEFAULT ''
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_panchanga_date           ON panchanga (date)")
+            try db.execute(sql: "CREATE INDEX idx_panchanga_special_day_lc ON panchanga (special_day_lc)")
+        }
+
         return migrator
     }
 }

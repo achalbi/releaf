@@ -126,6 +126,15 @@ public struct QuickInkRoot: View {
             handleAuthStateForAnalytics(newState)
             handleAuthStateForSettings(newState)
         }
+        // Hide the iOS status bar app-wide. SwiftUI's
+        // `.statusBarHidden` only reaches descendents that don't
+        // wrap themselves in their own UIKit hosting controller —
+        // every screen below this point is a plain SwiftUI surface,
+        // so a single root-level modifier is enough. The Info.plist
+        // toggles below let the splash window itself also launch
+        // status-bar-hidden so we don't see a cream→hidden flicker
+        // on cold start.
+        .statusBarHidden(true)
     }
 
     /// Drop identity-leaking SettingsState overrides on sign-out so
@@ -262,6 +271,12 @@ private struct MainShell: View {
         case folderDetail(folderId: String)
         case smartCollection(collectionId: String)
         case tagLibrary
+        // Standalone Calendar surface — pushed from the Home header's
+        // calendar button. Combines the bundled Vontikoppal panchanga
+        // (festival / moon / Rahu Kala) with QuickInk capture dots so
+        // users can browse their scans by date alongside the lunar
+        // calendar.
+        case calendar
     }
 
     /// Canonical Workspace bottom-nav destination.
@@ -275,6 +290,13 @@ private struct MainShell: View {
     /// re-renders the Home greeting reactively without round-tripping
     /// through UserDefaults observers.
     @StateObject private var settings = SettingsState()
+    /// Lat/long cache for the DaylightStatusBar that sits above every
+    /// main-shell screen. Seeded from UserDefaults so the bar paints
+    /// on cold launch; refreshed once permission is granted via a
+    /// non-prompting `refreshIfNeeded` call on `.task` + on every
+    /// `scenePhase == .active` transition. See
+    /// `Calendar/DaylightLocationStore.swift` for the caching rules.
+    @StateObject private var daylightLocation = DaylightLocationStore()
     @State private var path: [Route] = []
     /// Lifted out of HomeScreen so the ⚡ FAB on Library / Search /
     /// Settings can also present the QuickCapture sheet without
@@ -357,12 +379,23 @@ private struct MainShell: View {
         // that should land them on the review surface. When the
         // user dismisses, `path` is preserved (still @State on
         // MainShell), so they return to wherever they were.
+        //
+        // The daylight status bar wraps only the .idle navigation
+        // surfaces — full-screen task surfaces (ScanReviewScreen,
+        // the QuickCaptureScreen fullScreenCover below) intentionally
+        // take over the whole screen, including the bar's slot, so
+        // OCR review + capture remain immersive.
         Group {
             switch controller.state {
             case .recognizing, .complete, .failed:
                 ScanReviewScreen(controller: controller, userId: userId)
             case .idle:
-                NavigationStack(path: $path) {
+                VStack(spacing: 0) {
+                    DaylightStatusBar(
+                        latitude:  daylightLocation.latitude,
+                        longitude: daylightLocation.longitude
+                    )
+                    NavigationStack(path: $path) {
                     HomeScreen(
                         controller:     controller,
                         userId:         userId,
@@ -372,6 +405,7 @@ private struct MainShell: View {
                         onOpenEntry:    { entryId in path.append(.noteEditor(entryId: entryId)) },
                         onOpenScan:     { captureId in path.append(.scanDetail(captureId: captureId)) },
                         onOpenProfile:  { path.append(.profile) },
+                        onOpenCalendar: { path.append(.calendar) },
                         onSignOut:      { Task { await authStore.signOut() } },
                         displayName:    resolvedDisplayName,
                         email: {
@@ -386,6 +420,7 @@ private struct MainShell: View {
                         destination(for: route)
                     }
                 }
+                }   // closes VStack opened at the top of `case .idle:`
             }
         }
         .task(id: userId) {
@@ -430,6 +465,14 @@ private struct MainShell: View {
             // `LocationPermissionScreen` so this branch no-ops for
             // them.
             await Self.requestLocationIfNeeded(settings: settings)
+
+            // Refresh the daylight-bar location cache once permission
+            // is settled. No-op when permission is denied or the cache
+            // is still fresh (<24h); see DaylightLocationStore for the
+            // staleness + de-dup rules. Runs after
+            // `requestLocationIfNeeded` so a brand-new user grants
+            // permission first, fetch second.
+            daylightLocation.refreshIfNeeded()
         }
         // Quick-capture modal lifted from HomeScreen so the ⚡ FAB
         // on Library / Search / Settings can present it too. Same
@@ -717,6 +760,22 @@ private struct MainShell: View {
                 onWorkspace:  { navToTab(workspaceTabRoute) },
                 onScan:       { showQuickCapture = true },
                 onSettings:   { navToTab(.settings) }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .calendar:
+            CalendarScreen(
+                userId:         userId,
+                onBack:         { path.removeLast() },
+                onOpenCapture:  { captureId in
+                    // Replace the calendar step with the detail so
+                    // popping back from detail returns to Home, not
+                    // the calendar — matches the search → result
+                    // navigation idiom.
+                    path.removeLast()
+                    path.append(.scanDetail(captureId: captureId))
+                }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)

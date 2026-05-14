@@ -54,6 +54,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.automirrored.filled.ListAlt
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Bolt
@@ -144,6 +145,11 @@ fun HomeScreen(
     /// Picked from the avatar dropdown menu alongside "Sign out".
     /// Wired at QuickInkRoot.
     onOpenProfile: (() -> Unit)? = null,
+    /// Pushes the standalone Calendar screen — panchanga + Indian
+    /// holidays + moon phases + a coral dot per scan day. Reached via
+    /// the small calendar icon in the home header. Wired at
+    /// QuickInkRoot to `navController.navigate(Routes.CALENDAR)`.
+    onOpenCalendar: (() -> Unit)? = null,
     /// Avatar dropdown's Sign out action. Wired at QuickInkRoot to
     /// `authStore.signOut()` so the avatar menu can drop the user
     /// straight to the SignIn gate without a Settings detour.
@@ -294,8 +300,20 @@ fun HomeScreen(
                 displayName     = displayName,
                 profilePhotoUri = profilePhotoUri,
                 onTapAvatar     = { showProfileDrawer = true },
+                onTapCalendar   = { onOpenCalendar?.invoke() },
             )
             Spacer(Modifier.size(QuickInkSpacing.s4))
+            // Daylight hero — slim card showing today's sunrise and
+            // sunset times with a now-marker meter beneath. Sits
+            // directly above the sustainability hero per the home
+            // layout brief; both cards share an editorial, warm-
+            // tinted register so the pair reads as one block of
+            // ambient context. Times come from `sunTimesFor()` —
+            // the same commons-suncalc calculator the Calendar's
+            // Rahu Kala window uses, anchored at Mysuru. Mirror of
+            // iOS's `DaylightHero()` call site in `HomeScreen.swift`.
+            DaylightHero()
+            Spacer(Modifier.size(QuickInkSpacing.s3))
             SustainabilityHero(totalPages = totalPagesSaved ?: 0)
             // Mirror the displayed Tree-points value into a shared
             // SharedPreferences key so the next cold launch's
@@ -413,6 +431,7 @@ private fun HomeHeader(
     displayName: String?,
     profilePhotoUri: String,
     onTapAvatar: () -> Unit,
+    onTapCalendar: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
@@ -605,6 +624,33 @@ private fun HomeHeader(
                 color    = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // Top-right calendar button — coral-soft disc with the
+        // Material `CalendarMonth` glyph. Tap pushes the standalone
+        // Calendar screen (panchanga + Indian holidays + per-day
+        // capture dots). Smaller than the profile avatar by design:
+        // calendar is a destination, not an identity affordance, so
+        // it sits at 40dp rather than the avatar's 64dp outer.
+        val calendarInteraction = remember { MutableInteractionSource() }
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(colors.accentSoft)
+                .border(1.dp, colors.accent.copy(alpha = 0.55f), CircleShape)
+                .clickable(
+                    interactionSource = calendarInteraction,
+                    indication        = null,
+                    onClick           = onTapCalendar,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = Icons.Outlined.CalendarMonth,
+                contentDescription = "Open calendar",
+                tint               = colors.accent,
+                modifier           = Modifier.size(22.dp),
             )
         }
     }

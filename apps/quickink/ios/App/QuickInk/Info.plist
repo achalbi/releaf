@@ -116,5 +116,20 @@
 		<key>UIImageName</key>
 		<string>QuickInkSplashMark</string>
 	</dict>
+	<!--
+	  Hide the iOS status bar app-wide. `UIStatusBarHidden=true`
+	  hides it from the very first frame of the launch image
+	  (otherwise the bar shows on the splash and disappears once
+	  SwiftUI mounts, which reads as a flicker). The runtime
+	  `.statusBarHidden(true)` on `QuickInkRoot` keeps it hidden
+	  after launch — both ends are required for a clean look.
+	  `UIViewControllerBasedStatusBarAppearance=false` tells iOS to
+	  honor the global Info.plist value rather than asking each
+	  view controller for its preferred status-bar style.
+	-->
+	<key>UIStatusBarHidden</key>
+	<true/>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
 </dict>
 </plist>

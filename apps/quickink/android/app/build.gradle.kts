@@ -322,6 +322,12 @@ dependencies {
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
 
+    // commons-suncalc — pure-JVM sunrise/sunset/twilight calculator.
+    // Drives the Calendar feature's Rahu Kala + sunrise/sunset rows
+    // on the per-day panchanga card. Same dep Releaf carries; the
+    // version pin lives in `libs.versions.toml`.
+    implementation(libs.commons.suncalc)
+
     // Phase 4 Slice 4.4 — unit-test toolchain. Keeps the test
     // dep set minimal (junit + kotlinx-serialization for the
     // canonical-JSON interop test). Match the version pins

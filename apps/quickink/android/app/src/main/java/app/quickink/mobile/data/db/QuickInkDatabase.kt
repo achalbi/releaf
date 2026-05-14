@@ -41,6 +41,8 @@ import app.quickink.mobile.data.folder.FolderDao
 import app.quickink.mobile.data.folder.FolderEntity
 import app.quickink.mobile.data.ocr.OcrResultDao
 import app.quickink.mobile.data.ocr.OcrResultEntity
+import app.quickink.mobile.data.panchanga.PanchangaDao
+import app.quickink.mobile.data.panchanga.PanchangaEntity
 import app.quickink.mobile.data.profile.ProfileSettingsDao
 import app.quickink.mobile.data.profile.ProfileSettingsEntity
 import app.quickink.mobile.data.smartcollection.SmartCollectionDao
@@ -68,7 +70,17 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         FolderEntity::class,
         CaptureTagEntity::class,
         SmartCollectionEntity::class,
+        // Calendar / panchanga — bundled Vontikoppal dataset table
+        // seeded on first launch from `assets/panchanga_2026_27.csv`
+        // via `PanchangaRepository.ensureLoaded()`.
+        PanchangaEntity::class,
     ],
+    // v12 — Calendar feature. Adds the `panchanga` table that backs
+    // the standalone Calendar screen (masa / paksha / thithi /
+    // special_day rows for the Vontikoppal dataset). Schema mirrors
+    // the Releaf Android entity. Room rebuilds destructively under
+    // `fallbackToDestructiveMigration` until real users have data.
+    //
     // v11 — Workspace v1 Phase A.3c. Drops the `captures.category`
     // TEXT column. Per-capture single-label semantics now live in
     // the `capture_tags` join (materialized in A.3a). The shared
@@ -114,7 +126,7 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // captures.category column. `fallbackToDestructiveMigration`
     // below handles the rebuild; when real users have data we'll
     // register real Migration objects.
-    version       = 11,
+    version       = 12,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {
@@ -131,6 +143,9 @@ abstract class QuickInkDatabase : RoomDatabase() {
     abstract fun folderDao():            FolderDao
     abstract fun captureTagDao():        CaptureTagDao
     abstract fun smartCollectionDao():   SmartCollectionDao
+
+    // ─── Calendar (panchanga) ────────────────────────────────────
+    abstract fun panchangaDao():         PanchangaDao
 
     companion object {
         @Volatile
