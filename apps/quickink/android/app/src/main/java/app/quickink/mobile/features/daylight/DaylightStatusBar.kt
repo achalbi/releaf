@@ -119,7 +119,7 @@ private fun DaylightStatusBarContent(
             .fillMaxWidth()
             .background(ColorCanvas)
             .padding(top = 8.dp)
-            .padding(horizontal = 22.dp, vertical = 0.dp),
+            .padding(horizontal = 16.dp, vertical = 0.dp),
         verticalArrangement = Arrangement.Top,
     ) {
         // Labels row
@@ -146,62 +146,47 @@ private fun DaylightStatusBarContent(
             ClockText(formatClock(phase.anchorRight,  zone), sizeSp = 12f)
         }
 
-        // Bar row
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(16.dp)
-                .semantics {
-                    contentDescription = accessibilityLabel(phase)
-                },
+        // Meter row — elapsed caption pinned to the start, remaining
+        // pinned to the end, bar canvas filling the space between.
+        // Replaces the prior split (bar on its own row, captions
+        // below) so the two durations bracket the meter visually
+        // instead of floating under it.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            drawMeter(
-                width    = size.width,
-                height   = size.height,
-                fraction = phase.fraction.toFloat(),
-                isDay    = isDay,
-            )
+            CaptionText(text = "${formatDuration(phase.elapsedMillis)} in")
+            Canvas(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(16.dp)
+                    .padding(horizontal = 6.dp)
+                    .semantics {
+                        contentDescription = accessibilityLabel(phase)
+                    },
+            ) {
+                drawMeter(
+                    width    = size.width,
+                    height   = size.height,
+                    fraction = phase.fraction.toFloat(),
+                    isDay    = isDay,
+                )
+            }
+            CaptionText(text = "${formatDuration(phase.remainingMillis)} left")
         }
-
-        // Captions row — elapsed pinned to the start, remaining
-        // pinned to the end. Reads like a min/max label pair below
-        // the meter rather than tracking the marker position.
-        CaptionsRow(
-            elapsed   = formatDuration(phase.elapsedMillis),
-            remaining = formatDuration(phase.remainingMillis),
-        )
     }
 }
 
 @Composable
-private fun CaptionsRow(
-    elapsed: String,
-    remaining: String,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top,
-    ) {
-        Text(
-            text = "$elapsed in",
-            fontFamily = QuickInkFonts.ui,
-            fontSize   = 12.sp,
-            fontWeight = FontWeight.Normal,
-            color      = ColorLabel,
-            style      = TightTextStyle,
-        )
-        Text(
-            text = "$remaining left",
-            fontFamily = QuickInkFonts.ui,
-            fontSize   = 12.sp,
-            fontWeight = FontWeight.Normal,
-            color      = ColorLabel,
-            style      = TightTextStyle,
-        )
-    }
+private fun CaptionText(text: String) {
+    Text(
+        text       = text,
+        fontFamily = QuickInkFonts.ui,
+        fontSize   = 12.sp,
+        fontWeight = FontWeight.Normal,
+        color      = ColorLabel,
+        style      = TightTextStyle,
+    )
 }
 
 @Composable
@@ -274,16 +259,24 @@ private fun DaylightStatusBarShell(modifier: Modifier = Modifier) {
             Spacer(modifier = Modifier.weight(1f))
             ClockText("—:—", 11f)
         }
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(16.dp),
+        // Combined meter row with placeholder captions — matches the
+        // live content's layout so nothing shifts when the location
+        // fix resolves.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            drawTrack(size.width, size.height)
+            CaptionText(text = "—m in")
+            Canvas(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(16.dp)
+                    .padding(horizontal = 6.dp),
+            ) {
+                drawTrack(size.width, size.height)
+            }
+            CaptionText(text = "—m left")
         }
-        // Reserve caption-row height so the layout doesn't jump
-        // when the live phase arrives.
-        Spacer(modifier = Modifier.height(12.dp))
     }
 }
 

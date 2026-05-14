@@ -75,8 +75,7 @@ private struct DaylightStatusBarContent: View {
         VStack(spacing: 0) {
             labelsRow
             timesRow
-            barRow
-            captionsRow
+            meterRow
         }
         .padding(.horizontal, DaylightStatusBarMetrics.horizontalPadding)
         .padding(.vertical,   DaylightStatusBarMetrics.verticalPadding)
@@ -115,28 +114,31 @@ private struct DaylightStatusBarContent: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private var barRow: some View {
-        Canvas { context, size in
-            DaylightStatusBarMetrics.draw(
-                in:       context,
-                size:     size,
-                fraction: phase.fraction,
-                isDay:    phase.phase == .day
-            )
-        }
-        .frame(height: DaylightStatusBarMetrics.barRowHeight)
-        .accessibilityLabel(Self.accessibilityLabel(for: phase))
-    }
-
-    private var captionsRow: some View {
-        HStack {
+    /// Combined meter row — elapsed caption pinned left, remaining
+    /// caption pinned right, bar canvas filling the space between.
+    /// Replaces the prior split (bar on its own row, captions below)
+    /// so the two durations bracket the meter visually instead of
+    /// floating under it.
+    private var meterRow: some View {
+        HStack(spacing: 6) {
             Text(Self.formatDuration(phase.elapsed) + " in")
-            Spacer()
+                .font(.system(size: 8, weight: .regular))
+                .foregroundColor(DaylightStatusBarMetrics.labelGray)
+            Canvas { context, size in
+                DaylightStatusBarMetrics.draw(
+                    in:       context,
+                    size:     size,
+                    fraction: phase.fraction,
+                    isDay:    phase.phase == .day
+                )
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: DaylightStatusBarMetrics.barRowHeight)
+            .accessibilityLabel(Self.accessibilityLabel(for: phase))
             Text(Self.formatDuration(phase.remaining) + " left")
+                .font(.system(size: 8, weight: .regular))
+                .foregroundColor(DaylightStatusBarMetrics.labelGray)
         }
-        .font(.system(size: 8, weight: .regular))
-        .foregroundColor(DaylightStatusBarMetrics.labelGray)
-        .frame(height: 9)
     }
 
     // MARK: Formatters
@@ -192,18 +194,26 @@ private struct DaylightStatusBarShell: View {
             .frame(height: 13)
             .padding(.vertical, -1)
 
-            Canvas { context, size in
-                let track = DaylightStatusBarMetrics.trackRect(size: size)
-                context.fill(
-                    Path(roundedRect: track, cornerRadius: track.height / 2),
-                    with: .color(DaylightStatusBarMetrics.track)
-                )
+            // Combined meter row — placeholder captions on left + right
+            // bracket an empty-track canvas. Matches the live content's
+            // layout so nothing shifts when location resolves.
+            HStack(spacing: 6) {
+                Text("—m in")
+                    .font(.system(size: 8, weight: .regular))
+                    .foregroundColor(DaylightStatusBarMetrics.labelGray)
+                Canvas { context, size in
+                    let track = DaylightStatusBarMetrics.trackRect(size: size)
+                    context.fill(
+                        Path(roundedRect: track, cornerRadius: track.height / 2),
+                        with: .color(DaylightStatusBarMetrics.track)
+                    )
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: DaylightStatusBarMetrics.barRowHeight)
+                Text("—m left")
+                    .font(.system(size: 8, weight: .regular))
+                    .foregroundColor(DaylightStatusBarMetrics.labelGray)
             }
-            .frame(height: DaylightStatusBarMetrics.barRowHeight)
-
-            // Spacer to match captions row height in the real content,
-            // so the layout doesn't shift once location resolves.
-            Color.clear.frame(height: 9)
         }
         .padding(.horizontal, DaylightStatusBarMetrics.horizontalPadding)
         .padding(.vertical,   DaylightStatusBarMetrics.verticalPadding)
