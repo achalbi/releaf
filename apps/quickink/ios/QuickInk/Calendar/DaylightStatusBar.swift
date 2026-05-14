@@ -97,7 +97,7 @@ private struct DaylightStatusBarContent: View {
         .font(.system(size: 8, weight: .regular))
         .tracking(0.8)
         .foregroundColor(DaylightStatusBarMetrics.labelGray)
-        .frame(height: 9)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var timesRow: some View {
@@ -185,7 +185,7 @@ private struct DaylightStatusBarShell: View {
             .font(.system(size: 8, weight: .regular))
             .tracking(0.8)
             .foregroundColor(DaylightStatusBarMetrics.labelGray)
-            .frame(height: 9)
+            .fixedSize(horizontal: false, vertical: true)
 
             HStack {
                 Text("—:—").font(.system(size: 11, design: .serif))

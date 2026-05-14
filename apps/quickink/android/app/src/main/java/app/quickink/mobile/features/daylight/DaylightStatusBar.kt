@@ -126,7 +126,7 @@ private fun DaylightStatusBarContent(
     ) {
         // Labels row
         Row(
-            modifier = Modifier.fillMaxWidth().height(9.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             CapsLabel(if (isDay) "SUNRISE" else "SUNSET")
@@ -274,7 +274,7 @@ private fun DaylightStatusBarShell(modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.Top,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(9.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             CapsLabel("SUNRISE")
