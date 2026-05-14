@@ -10,8 +10,6 @@
  * or marker geometry here, change `DaylightStatusBar.swift` too.
  */
 
-@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-
 package app.quickink.mobile.features.daylight
 
 import androidx.compose.foundation.Canvas
@@ -21,12 +19,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -125,7 +120,7 @@ private fun DaylightStatusBarContent(
         modifier = modifier
             .fillMaxWidth()
             .background(ColorCanvas)
-            .windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility)
+            .padding(top = 28.dp)
             .padding(horizontal = 22.dp, vertical = 0.dp),
         verticalArrangement = Arrangement.Top,
     ) {
@@ -274,7 +269,7 @@ private fun DaylightStatusBarShell(modifier: Modifier = Modifier) {
         modifier = modifier
             .fillMaxWidth()
             .background(ColorCanvas)
-            .windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility)
+            .padding(top = 28.dp)
             .padding(horizontal = 22.dp, vertical = 0.dp),
         verticalArrangement = Arrangement.Top,
     ) {
