@@ -75,6 +75,7 @@ private struct DaylightStatusBarContent: View {
         VStack(spacing: 4) {
             labelsAndTimesRow
             meterRow
+            nowTimeRow
         }
         .padding(.horizontal, DaylightStatusBarMetrics.horizontalPadding)
         .padding(.vertical,   DaylightStatusBarMetrics.verticalPadding)
@@ -84,9 +85,12 @@ private struct DaylightStatusBarContent: View {
 
     // MARK: Rows
 
-    /// Single header row: sunrise label + sunrise time on the left,
-    /// the center "now" time bracketed by middle dots, sunset time
-    /// + sunset label on the right. During night, the day/night
+    /// Header row: sunrise label + sunrise time on the left, sunset
+    /// time + sunset label on the right. The current "now" clock
+    /// used to sit between two middle dots in the middle of this
+    /// row — it's been moved below the meter (see `nowTimeRow`) so
+    /// the labels row brackets the anchors cleanly without
+    /// competing with a third time. During night, the day/night
     /// labels flip — left becomes "SUNSET", right becomes "SUNRISE".
     private var labelsAndTimesRow: some View {
         HStack(spacing: 4) {
@@ -98,16 +102,6 @@ private struct DaylightStatusBarContent: View {
                 .font(.system(size: 11, design: .serif))
                 .foregroundColor(DaylightStatusBarMetrics.ink)
             Spacer()
-            Text("•")
-                .font(.system(size: 11))
-                .foregroundColor(DaylightStatusBarMetrics.labelGray)
-            Text(Self.formatClock(phase.now))
-                .font(.system(size: 13, design: .serif))
-                .foregroundColor(DaylightStatusBarMetrics.ink)
-            Text("•")
-                .font(.system(size: 11))
-                .foregroundColor(DaylightStatusBarMetrics.labelGray)
-            Spacer()
             Text(Self.formatClock(phase.anchorRight))
                 .font(.system(size: 11, design: .serif))
                 .foregroundColor(DaylightStatusBarMetrics.ink)
@@ -117,6 +111,21 @@ private struct DaylightStatusBarContent: View {
                 .foregroundColor(DaylightStatusBarMetrics.labelGray)
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Now-time row — current wall-clock time, centered below the
+    /// meter. Sized one step up from the anchor labels (13pt vs
+    /// 11pt) so it still reads as the strip's primary "you are
+    /// here" anchor even though it's no longer between the
+    /// sunrise / sunset times.
+    private var nowTimeRow: some View {
+        HStack {
+            Spacer()
+            Text(Self.formatClock(phase.now))
+                .font(.system(size: 13, design: .serif))
+                .foregroundColor(DaylightStatusBarMetrics.ink)
+            Spacer()
+        }
     }
 
     /// Combined meter row — elapsed caption pinned left, remaining

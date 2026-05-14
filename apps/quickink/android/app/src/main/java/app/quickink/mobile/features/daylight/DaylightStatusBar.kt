@@ -123,11 +123,14 @@ private fun DaylightStatusBarContent(
             .padding(horizontal = 16.dp, vertical = 0.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // Single header row: sunrise label + sunrise time on the
-        // left, the center "now" time bracketed by middle dots,
-        // sunset time + sunset label on the right. During night,
-        // the day/night labels flip — left becomes "SUNSET",
-        // right becomes "SUNRISE".
+        // Header row: sunrise label + sunrise time on the left,
+        // sunset time + sunset label on the right. The current
+        // "now" clock used to sit between two middle dots in the
+        // middle of this row — it's been moved below the meter
+        // (see `nowRow` below) so the labels row brackets the
+        // anchors cleanly without competing with a third time. The
+        // day/night labels flip during night — left becomes
+        // "SUNSET", right becomes "SUNRISE".
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -135,12 +138,6 @@ private fun DaylightStatusBarContent(
             CapsLabel(if (isDay) "SUNRISE" else "SUNSET")
             Spacer(modifier = Modifier.width(4.dp))
             ClockText(formatClock(phase.anchorLeft, zone), sizeSp = 12f)
-            Spacer(modifier = Modifier.weight(1f))
-            MidDot()
-            Spacer(modifier = Modifier.width(6.dp))
-            ClockText(formatClock(phase.now,        zone), sizeSp = 14f)
-            Spacer(modifier = Modifier.width(6.dp))
-            MidDot()
             Spacer(modifier = Modifier.weight(1f))
             ClockText(formatClock(phase.anchorRight, zone), sizeSp = 12f)
             Spacer(modifier = Modifier.width(4.dp))
@@ -174,6 +171,19 @@ private fun DaylightStatusBarContent(
                 )
             }
             CaptionText(text = "${formatDuration(phase.remainingMillis)} left")
+        }
+
+        // Now-time row — current wall-clock time, centered below
+        // the meter. Sized one step up from the anchor labels (14sp
+        // vs 12sp) so it still reads as the strip's primary "you
+        // are here" anchor even though it's no longer between the
+        // sunrise / sunset times.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ClockText(formatClock(phase.now, zone), sizeSp = 14f)
         }
     }
 }
