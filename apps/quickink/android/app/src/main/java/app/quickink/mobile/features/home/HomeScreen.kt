@@ -119,6 +119,7 @@ import coil.request.ImageRequest
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkColors
+import app.quickink.mobile.ui.theme.QuickInkFonts
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.quickink.mobile.ui.theme.quickInkDotGridBackground
@@ -294,7 +295,7 @@ fun HomeScreen(
                 .padding(
                     start  = QuickInkSpacing.s5,
                     end    = QuickInkSpacing.s5,
-                    top    = statusBarTop,
+                    top    = statusBarTop + 4.dp,
                     // Reserve space behind nav bar (~80dp) plus a
                     // little extra (~40dp) so the sync pill at the
                     // end of the scroll content doesn't bump into
@@ -316,21 +317,28 @@ fun HomeScreen(
                     clockNowMs = System.currentTimeMillis()
                 }
             }
-            val statusDateTime = remember(clockNowMs) {
-                formatHomeStatusDateTime(
-                    java.time.ZonedDateTime.ofInstant(
-                        java.time.Instant.ofEpochMilli(clockNowMs),
-                        java.time.ZoneId.systemDefault(),
-                    )
+            val clockNow = remember(clockNowMs) {
+                java.time.ZonedDateTime.ofInstant(
+                    java.time.Instant.ofEpochMilli(clockNowMs),
+                    java.time.ZoneId.systemDefault(),
                 )
             }
+            val statusDate = remember(clockNow) { formatHomeStatusDate(clockNow) }
+            val statusTime = remember(clockNow) { formatHomeStatusTime(clockNow) }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text       = statusDateTime,
-                    style      = type.caption,
+                    text       = statusDate,
+                    fontFamily = QuickInkFonts.ui,
+                    fontSize   = 14.sp,
+                    color      = Color.Black,
+                )
+                Text(
+                    text       = statusTime,
+                    fontFamily = QuickInkFonts.ui,
+                    fontSize   = 14.sp,
                     color      = Color.Black,
                 )
             }
@@ -1154,15 +1162,18 @@ private fun homeStatusOrdinal(n: Int): String {
     }
 }
 
-/// "9th Mon May, 2026 03:34 pm" — top-right status strip on Home.
-private fun formatHomeStatusDateTime(now: java.time.ZonedDateTime): String {
+/// "9th Mon May, 2026" — left side of the home status strip.
+private fun formatHomeStatusDate(now: java.time.ZonedDateTime): String {
     val dayName = now.format(HomeStatusDayFormatter)
     val day     = now.dayOfMonth
     val suffix  = homeStatusOrdinal(day)
     val year    = now.year
-    val time    = now.format(HomeStatusTimeFormatter).lowercase(java.util.Locale.US)
-    return "$day$suffix $dayName, $year $time"
+    return "$day$suffix $dayName, $year"
 }
+
+/// "03:34 pm" — right side of the home status strip.
+private fun formatHomeStatusTime(now: java.time.ZonedDateTime): String =
+    now.format(HomeStatusTimeFormatter).lowercase(java.util.Locale.US)
 
 // endregion
 

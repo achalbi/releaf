@@ -220,11 +220,12 @@ struct HomeScreen: View {
                 // below the hour scale.
                 TimelineView(.periodic(from: Date(), by: 60)) { context in
                     HStack {
+                        Text(Self.formatHomeStatusDate(context.date))
                         Spacer()
-                        Text(Self.formatHomeStatusDateTime(context.date))
-                            .font(.system(size: 12))
-                            .foregroundColor(.black)
+                        Text(Self.formatHomeStatusTime(context.date))
                     }
+                    .font(.system(size: 14))
+                    .foregroundColor(.black)
                 }
                 headerBlock
                 // Daylight hero — slim card showing today's sunrise
@@ -291,7 +292,7 @@ struct HomeScreen: View {
                 .padding(.top, QuickInkSpacing.s3)
             }
             .padding(.horizontal, QuickInkSpacing.s5)
-            .padding(.top, 0)
+            .padding(.top, 4)
             // Extra breathing room at the bottom so the sync pill
             // doesn't bump into the nav bar's safe-area inset when
             // scrolled to the end.
@@ -504,11 +505,15 @@ struct HomeScreen: View {
         }
     }
 
-    private static func formatHomeStatusDateTime(_ date: Date) -> String {
+    private static func formatHomeStatusDate(_ date: Date) -> String {
         let cal  = Calendar.current
         let day  = cal.component(.day, from: date)
         let year = cal.component(.year, from: date)
-        return "\(day)\(homeStatusOrdinal(day)) \(homeStatusDayFormatter.string(from: date)), \(year) \(homeStatusTimeFormatter.string(from: date))"
+        return "\(day)\(homeStatusOrdinal(day)) \(homeStatusDayFormatter.string(from: date)), \(year)"
+    }
+
+    private static func formatHomeStatusTime(_ date: Date) -> String {
+        homeStatusTimeFormatter.string(from: date)
     }
 
     // MARK: - Pending-sync pill
