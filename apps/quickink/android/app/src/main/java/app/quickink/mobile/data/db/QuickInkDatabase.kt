@@ -75,6 +75,12 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         // via `PanchangaRepository.ensureLoaded()`.
         PanchangaEntity::class,
     ],
+    // v13 — Sustainability hero size-weighted score. Adds
+    // `captures.paper_size` so each capture row carries its page-size
+    // class (card / a4 / small), which the home screen's tree-points
+    // calculation reads to weight each page differently (+4 / +2 / +1
+    // pts respectively). Mirror of iOS GRDB v11_capture_paper_size.
+    //
     // v12 — Calendar feature. Adds the `panchanga` table that backs
     // the standalone Calendar screen (masa / paksha / thithi /
     // special_day rows for the Vontikoppal dataset). Schema mirrors
@@ -126,7 +132,7 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // captures.category column. `fallbackToDestructiveMigration`
     // below handles the rebuild; when real users have data we'll
     // register real Migration objects.
-    version       = 12,
+    version       = 13,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {

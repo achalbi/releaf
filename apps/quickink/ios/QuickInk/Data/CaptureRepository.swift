@@ -62,6 +62,12 @@ public final class CaptureRepository: @unchecked Sendable {
         /// the system photo picker. Drives the "Import" pill in
         /// the Library cards.
         source: String = "scan",
+        /// Page-size class. Drives the sustainability hero's per-page
+        /// weight — `.card` scores +4 pts/page, `.a4` +2, `.small`
+        /// +1. Defaulted to `.a4` so legacy callers (and rows synced
+        /// from older clients without the field on the wire) read
+        /// back as standard pages.
+        paperSize: PaperSize = .a4,
         /// Optional geolocation captured at scan/import time. All
         /// fields are nullable in the schema; pass `nil` when the
         /// user has the "Location for scans" toggle off, when the
@@ -75,10 +81,10 @@ public final class CaptureRepository: @unchecked Sendable {
             try db.execute(sql: """
                 INSERT INTO captures (
                     id, user_id, title, pdf_uri, preview_uri,
-                    page_count, source,
+                    page_count, source, paper_size,
                     latitude, longitude, locality, sub_locality, address,
                     created_at, updated_at, dirty
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """, arguments: [
                     id,
                     userId,
@@ -87,6 +93,7 @@ public final class CaptureRepository: @unchecked Sendable {
                     previewURL?.absoluteString,
                     pageCount,
                     source,
+                    paperSize.rawValue,
                     location?.latitude,
                     location?.longitude,
                     location?.locality,

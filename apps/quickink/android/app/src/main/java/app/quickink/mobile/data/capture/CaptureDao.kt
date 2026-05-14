@@ -121,6 +121,34 @@ interface CaptureDao {
     fun observeTotalPageCount(userId: String): Flow<Int?>
 
     /**
+     * Row type for [observePagesBySize] — one row per `paper_size`
+     * bucket. The home screen weights each bucket independently:
+     * card +4, A4 +2, smaller +1 per page.
+     */
+    data class PagesBySizeRow(
+        @ColumnInfo(name = "paper_size") val paperSize: String,
+        @ColumnInfo(name = "pages")      val pages: Int,
+    )
+
+    /**
+     * Live per-size page totals for the user. Replaces
+     * [observeTotalPageCount] for the home sustainability hero — the
+     * hero now needs the per-bucket split to score each size class
+     * with its own weight. Returns an empty list when the user has no
+     * captures yet (the hero maps that to the empty-state copy).
+     *
+     * Mirror of iOS' grouped GRDB observation in
+     * `CaptureListViewModel.start()`.
+     */
+    @Query("""
+        SELECT paper_size, COALESCE(SUM(page_count), 0) AS pages
+        FROM captures
+        WHERE user_id = :userId AND deleted_at IS NULL
+        GROUP BY paper_size
+    """)
+    fun observePagesBySize(userId: String): Flow<List<PagesBySizeRow>>
+
+    /**
      * Soft-delete a capture AND cascade-soft-delete its child
      * `ocr_results` rows in the same transaction.
      *

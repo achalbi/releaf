@@ -154,6 +154,14 @@ data class CapturePayloadV2(
      */
     @SerialName("source")                val source: String = "scan",
     /**
+     * Page-size class — `"card"`, `"a4"` (default), or `"small"`.
+     * Drives the sustainability hero's per-page weight on receivers
+     * exactly as on the producer. Defaulted to `"a4"` so payloads
+     * from older clients that didn't write the field hydrate with
+     * the same value the local column default uses.
+     */
+    @SerialName("paper_size")            val paperSize: String = "a4",
+    /**
      * Decimal-degree latitude captured at scan time (Phase 7 —
      * Geolocation). `null` on the wire when the user has the
      * "Attach location to scans" toggle off, when permission is
@@ -195,6 +203,7 @@ fun CaptureEntity.toV2Payload(): CapturePayloadV2 = CapturePayloadV2(
     pdfDriveFileId     = pdfDriveFileId,
     previewDriveFileId = previewDriveFileId,
     source             = source,
+    paperSize          = paperSize,
     latitude           = latitude,
     longitude          = longitude,
     locality           = locality,
@@ -217,6 +226,7 @@ fun CapturePayloadV2.toEntity(driveFileId: String?): CaptureEntity = CaptureEnti
     // capture_tags row already (from the A.3a materialize) or
     // doesn't care about the legacy label for new captures.
     source             = source,
+    paperSize          = paperSize,
     latitude           = latitude,
     longitude          = longitude,
     locality           = locality,

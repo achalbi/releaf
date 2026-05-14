@@ -657,6 +657,25 @@ public final class QuickInkDatabase: @unchecked Sendable {
             try db.execute(sql: "CREATE INDEX idx_panchanga_special_day_lc ON panchanga (special_day_lc)")
         }
 
+        // ─── v11_capture_paper_size ─────────────────────────────
+        //
+        // Adds `captures.paper_size` so the sustainability hero can
+        // weight each page differently based on its size — business
+        // cards get a bulk-print bonus (+4 pts/page), A4 / Letter the
+        // baseline (+2), smaller-than-A4 imports the minimum (+1).
+        // Free-form TEXT (mirrors `source` in v4) so future formats
+        // land without another migration. Defaulted to `'a4'` so
+        // existing rows and rows synced from older clients without
+        // the field on the wire read back as standard pages — no
+        // retroactive credit for historical card scans, which is the
+        // intentional behavior (we don't know which past captures
+        // were card-mode without a per-row signal we never stored).
+        //
+        // Mirror of Android's Room v13 schema bump.
+        migrator.registerMigration("v11_capture_paper_size") { db in
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN paper_size TEXT NOT NULL DEFAULT 'a4'")
+        }
+
         return migrator
     }
 }

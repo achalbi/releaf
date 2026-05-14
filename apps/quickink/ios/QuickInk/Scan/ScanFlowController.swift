@@ -126,12 +126,17 @@ public final class ScanFlowController: ObservableObject {
     ///   document scanner (default), `"import"` when it came from
     ///   the system photo picker. Persisted on the capture row so
     ///   the Library cards can render an "Import" pill.
+    /// - Parameter paperSize: Page-size class for the sustainability
+    ///   hero's per-page weight. Defaults to `.a4`; the business-
+    ///   card camera surface passes `.card` so each card scan scores
+    ///   the bulk-print bonus.
     public func onScanComplete(
         pdfURL: URL?,
         previewURL: URL?,
         pageURLs: [URL],
         category: String? = nil,
-        source: String = "scan"
+        source: String = "scan",
+        paperSize: PaperSize = .a4
     ) {
         // Cancel any previous in-flight pass before starting a new
         // one. The user could conceivably tap Scan twice in quick
@@ -182,6 +187,7 @@ public final class ScanFlowController: ObservableObject {
                     previewURL: previewURL,
                     pageCount:  totalPages,
                     source:     source,
+                    paperSize:  paperSize,
                     location:   location
                 )
                 // Pre-attach the seeded `category` (post-A.3c: a

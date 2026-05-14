@@ -69,6 +69,18 @@ data class CaptureEntity(
     val source: String = "scan",
 
     /**
+     * Page-size class. `"card"` (business cards, +4 pts/page in the
+     * tree score), `"a4"` (default, +2 pts/page), or `"small"`
+     * (reserved for future smaller-than-A4 PDF imports, +1 pt/page).
+     * Free-form TEXT so future formats land without another schema
+     * bump; defaulted to `"a4"` so legacy rows synced down from
+     * Drive (without the field on the wire) read back as standard
+     * pages — no retroactive credit for historical card scans.
+     */
+    @ColumnInfo(name = "paper_size", defaultValue = "a4")
+    val paperSize: String = "a4",
+
+    /**
      * Decimal-degree latitude captured at scan / import time. Null
      * when the user has the "Attach location to scans" toggle off,
      * when system location permission is denied, or when the fetch

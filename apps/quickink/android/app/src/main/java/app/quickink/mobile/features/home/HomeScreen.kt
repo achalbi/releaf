@@ -79,6 +79,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -96,10 +97,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import android.net.Uri
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.R
@@ -110,6 +115,7 @@ import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.data.sync.QuickInkSyncWorker
+import app.quickink.mobile.features.scan.PaperSize
 import app.quickink.mobile.features.scan.QuickCaptureScreen
 import app.quickink.mobile.features.scan.ScanFlowController
 import coil.compose.AsyncImage
@@ -128,7 +134,6 @@ import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.sync.SyncStateKeys
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import kotlin.math.ln
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import java.time.LocalTime
@@ -213,14 +218,17 @@ fun HomeScreen(
         captureDao.observeRecent(userId, limit = 30)
     }.collectAsState(initial = emptyList())
 
-    // Lifetime page total — drives the sustainability hero. Sums
-    // `page_count` across every active capture in SQL so the figure
-    // is accurate regardless of how many rows the recent rail has
-    // loaded. Returns `null` for the empty-library case (SUM over zero
-    // rows), which the hero maps to its first-capture copy.
-    val totalPagesSaved by remember(userId, captureDao) {
-        captureDao.observeTotalPageCount(userId)
-    }.collectAsState(initial = 0)
+    // Lifetime page totals grouped by `paper_size` — drives the
+    // sustainability hero, which weights each size bucket independently
+    // (card +4, A4 +2, smaller +1). GROUP BY collapses unused buckets,
+    // so a fresh-install library reads back as an empty list and the
+    // hero renders its empty-state copy.
+    val pagesBySizeRows by remember(userId, captureDao) {
+        captureDao.observePagesBySize(userId)
+    }.collectAsState(initial = emptyList())
+    val pagesBySize: Map<String, Int> = remember(pagesBySizeRows) {
+        pagesBySizeRows.associate { it.paperSize to it.pages }
+    }
 
     // Per-capture primary-tag-name lookup. The pre-A.3c
     // `captures.category` field carried this on the row; post-drop
@@ -364,7 +372,7 @@ fun HomeScreen(
                 longitude = daylightLongitude,
             )
             Spacer(Modifier.size(QuickInkSpacing.s3))
-            SustainabilityHero(totalPages = totalPagesSaved ?: 0)
+            SustainabilityHero(pagesBySize = pagesBySize)
             // Mirror the displayed Tree-points value into a shared
             // SharedPreferences key so the next cold launch's
             // cinematic counter (`QuickInkLaunchAnimation`) ticks up
@@ -372,9 +380,12 @@ fun HomeScreen(
             // hardcoded preview default. The splash runs at
             // MainActivity onCreate, before any DAO flow can resolve,
             // so a cached pref is the only way to surface a real
-            // number on the launch screen.
-            LaunchedEffect(totalPagesSaved) {
-                val pts = computeTreeImpact(totalPagesSaved ?: 0).totalPoints
+            // number on the launch screen. Observed on the per-size
+            // dict so a card-only scan (which doesn't change the
+            // total page count proportionally to its 4× weight)
+            // still flushes the cache.
+            LaunchedEffect(pagesBySize) {
+                val pts = computeTreeImpact(pagesBySize).totalPoints
                 SettingsPreferences.writeCachedTreePoints(context, pts)
             }
             // "N pending" pill — one tap kicks the upload-only sync
@@ -723,8 +734,10 @@ private fun HomeHeader(
  * is huge). Instead we blend five independent paper-LCA factors into
  * one integer score:
  *
- *   1. Sheet engagement   — flat per-page reward; each capture has to
- *                           feel like it moved the needle.
+ *   1. Sheet engagement   — per-page reward, weighted by page size
+ *                           (card +4, A4 +2, smaller +1) so a
+ *                           bulk-print-saving card scan beats a
+ *                           one-off small page.
  *   2. Tree-equivalent    — pages → fractional mature pine using the
  *                           conventional 8,333 sheets/tree, then
  *                           de-rated by the typical ~17% pulp yield
@@ -735,18 +748,14 @@ private fun HomeHeader(
  *   4. CO₂ avoided        — ~4.6 g CO₂e per sheet, cradle-to-grave.
  *   5. Energy spared      — ~50 Wh per sheet (mill + transport).
  *
- * A logarithmic engagement boost is layered on top so the curve still
- * rewards sustained use without being purely linear — each order of
- * magnitude of pages adds a fixed bump rather than the score creeping
- * up at a constant per-page rate. Numbers are deliberately
- * conservative; the goal is a directional impact score, not a
- * precise lifecycle assessment.
+ * Numbers are deliberately conservative; the goal is a directional
+ * impact score, not a precise lifecycle assessment.
  *
  * Tapping the card opens [SustainabilityBreakdownSheet], which
  * surfaces the per-component math behind the displayed score.
  */
 @Composable
-private fun SustainabilityHero(totalPages: Int) {
+private fun SustainabilityHero(pagesBySize: Map<String, Int>) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
 
@@ -754,7 +763,8 @@ private fun SustainabilityHero(totalPages: Int) {
     val ecoBg   = QuickInkColors.LeafGreenBase.copy(alpha = 0.18f)
     val ecoBorder = QuickInkColors.LeafGreenBase.copy(alpha = 0.40f)
 
-    val impact = remember(totalPages) { computeTreeImpact(totalPages) }
+    val impact = remember(pagesBySize) { computeTreeImpact(pagesBySize) }
+    val totalPages = impact.pages
     var showBreakdown by remember { mutableStateOf(false) }
 
     // Refined-warm pass: points + water are their own right-aligned
@@ -851,6 +861,9 @@ private fun SustainabilityHero(totalPages: Int) {
  */
 private data class TreeImpact(
     val pages: Int,
+    val cardPages: Int,
+    val a4Pages: Int,
+    val smallPages: Int,
     val pulpYield: Double,
     val treeFraction: Double,
     val waterLiters: Int,
@@ -861,16 +874,28 @@ private data class TreeImpact(
     val pWater: Double,
     val pCarbon: Double,
     val pEnergy: Double,
-    val pStreak: Double,
     val totalPoints: Int,
 )
 
 /**
- * Build a [TreeImpact] for the given lifetime page count. See the
- * [SustainabilityHero] KDoc for the rationale behind each factor and
- * weight.
+ * Build a [TreeImpact] from a per-size page count breakdown. The
+ * `Sheet engagement` factor weights each bucket independently:
+ *   - card  → +4 pts/page (bonus for digitising what's normally
+ *                          printed in bulk)
+ *   - a4    → +2 pts/page (default for camera scans)
+ *   - small → +1 pt/page  (reserved for sub-A4 PDF imports)
+ *
+ * The other four factors and the streak boost still scale with total
+ * lifetime pages — they capture pulp / water / CO₂ / energy per
+ * sheet, which is roughly size-agnostic at the precision the score
+ * is meant to convey.
  */
-private fun computeTreeImpact(totalPages: Int): TreeImpact {
+private fun computeTreeImpact(pagesBySize: Map<String, Int>): TreeImpact {
+    val cardPages  = pagesBySize[PaperSize.Card.raw]  ?: 0
+    val a4Pages    = pagesBySize[PaperSize.A4.raw]    ?: 0
+    val smallPages = pagesBySize[PaperSize.Small.raw] ?: 0
+    val totalPages = cardPages + a4Pages + smallPages
+
     val sheets       = totalPages.toDouble()
     val pulpYield    = 0.17                          // tree biomass → paper
     val treeFraction = (sheets / 8333.0) * pulpYield
@@ -878,24 +903,28 @@ private fun computeTreeImpact(totalPages: Int): TreeImpact {
     val co2Grams     = sheets * 4.6
     val energyWh     = sheets * 50.0
 
-    // Component weights are calibrated so a single tree-milestone
-    // (~8,333 pages) lands in the low six figures, while a single
-    // captured page still scores in the low hundreds — enough to feel
-    // rewarding without making the empty-state-to-first-scan jump
-    // feel cheap.
-    val pSheets = sheets       * 7.5
-    val pTrees  = treeFraction * 12_000.0
-    val pWater  = waterLiters  * 0.6
-    val pCarbon = co2Grams     * 1.2
-    val pEnergy = energyWh     * 0.4
-    val pStreak = if (sheets > 0) ln(sheets + 1.0) * 180.0 else 0.0
+    // Size-weighted sheet engagement. Cards score 0.4, A4 0.2,
+    // smaller 0.1 per page. All five component weights are tuned
+    // 10× smaller than the earlier model so the lifetime total
+    // stays in a comfortably-readable range rather than ballooning
+    // into the high tens-of-thousands for everyday users.
+    val pSheets = cardPages  * 0.4 +
+                  a4Pages    * 0.2 +
+                  smallPages * 0.1
+    val pTrees  = treeFraction * 1_200.0
+    val pWater  = waterLiters  * 0.06
+    val pCarbon = co2Grams     * 0.12
+    val pEnergy = energyWh     * 0.04
 
-    val total = (pSheets + pTrees + pWater + pCarbon + pEnergy + pStreak)
+    val total = (pSheets + pTrees + pWater + pCarbon + pEnergy)
         .roundToInt()
         .coerceAtLeast(0)
 
     return TreeImpact(
         pages        = totalPages,
+        cardPages    = cardPages,
+        a4Pages      = a4Pages,
+        smallPages   = smallPages,
         pulpYield    = pulpYield,
         treeFraction = treeFraction,
         waterLiters  = waterLiters,
@@ -906,7 +935,6 @@ private fun computeTreeImpact(totalPages: Int): TreeImpact {
         pWater       = pWater,
         pCarbon      = pCarbon,
         pEnergy      = pEnergy,
-        pStreak      = pStreak,
         totalPoints  = total,
     )
 }
@@ -937,6 +965,30 @@ private fun SustainabilityBreakdownSheet(
     val type = LocalQuickInkTypography.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    // ModalBottomSheet renders in its own Dialog window, which does
+    // NOT inherit the activity window's immersive flag — so the
+    // system status bar (clock / battery / wifi) reappears as soon
+    // as the sheet's dialog window claims focus, even though
+    // MainActivity has hidden it app-wide. Reach into the dialog's
+    // window from inside the sheet's composition and re-apply the
+    // same hide-statusBars call here. `BEHAVIOR_SHOW_TRANSIENT_BARS_
+    // BY_SWIPE` matches the activity-level config in MainActivity
+    // so a swipe-from-top reveals the bar briefly and it re-hides
+    // on its own. No onDispose restore needed — when the sheet
+    // dismisses the activity window regains focus and its existing
+    // immersive flag keeps the bar hidden.
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val window = (view.parent as? DialogWindowProvider)?.window
+        if (window != null) {
+            val controller = WindowInsetsControllerCompat(window, view)
+            controller.hide(WindowInsetsCompat.Type.statusBars())
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+        onDispose {}
+    }
+
     val ecoDeep = QuickInkColors.LeafGreenDeep
     val ecoBg   = QuickInkColors.LeafGreenBase.copy(alpha = 0.18f)
 
@@ -952,6 +1004,13 @@ private fun SustainabilityBreakdownSheet(
         onDismissRequest = onDismiss,
         sheetState       = sheetState,
         containerColor   = colors.bg,
+        // Zero out the default top inset so the sheet bg paints all
+        // the way up past the system status bar — without this, M3
+        // reserves the status-bar height as a transparent strip
+        // above the sheet and the bar's clock / battery icons sit
+        // on top of the home view rather than on the sheet, which
+        // reads as a chrome bar above the sheet header.
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = {
             Box(modifier = Modifier.padding(top = QuickInkSpacing.s2, bottom = QuickInkSpacing.s3)) {
                 Box(
@@ -983,7 +1042,7 @@ private fun SustainabilityBreakdownSheet(
                         color = colors.ink,
                     )
                     Text(
-                        text  = "Five LCA factors plus an engagement boost.",
+                        text  = "Five LCA factors. Per-page weight scales with page size.",
                         style = type.meta,
                         color = colors.inkSoft,
                     )
@@ -1020,11 +1079,41 @@ private fun SustainabilityBreakdownSheet(
 
             // Section 1 — raw lifecycle outputs.
             BreakdownSectionHeader(label = "What we measured")
-            BreakdownRow(
-                label   = "Sheets engaged",
-                value   = String.format(locale, "%,d pages", impact.pages),
-                caption = "Lifetime captures across all notebooks",
-            )
+            // Per-size breakdown of pages captured. Each row only
+            // renders when its bucket is non-empty so a brand-new
+            // library doesn't read as three "0 pages" lines. Falls
+            // back to a single "Sheets engaged" row when no bucket
+            // has any pages yet — preserves the previous empty-state
+            // copy.
+            if (impact.cardPages == 0 && impact.a4Pages == 0 && impact.smallPages == 0) {
+                BreakdownRow(
+                    label   = "Sheets engaged",
+                    value   = "0 pages",
+                    caption = "Lifetime captures across all notebooks",
+                )
+            } else {
+                if (impact.cardPages > 0) {
+                    BreakdownRow(
+                        label   = "Business cards",
+                        value   = String.format(locale, "%,d cards", impact.cardPages),
+                        caption = "Each card saves a bulk print run",
+                    )
+                }
+                if (impact.a4Pages > 0) {
+                    BreakdownRow(
+                        label   = "A4 documents",
+                        value   = String.format(locale, "%,d pages", impact.a4Pages),
+                        caption = "Standard letter / A4 captures",
+                    )
+                }
+                if (impact.smallPages > 0) {
+                    BreakdownRow(
+                        label   = "Smaller pages",
+                        value   = String.format(locale, "%,d pages", impact.smallPages),
+                        caption = "Imports smaller than A4",
+                    )
+                }
+            }
             BreakdownRow(
                 label   = "Tree-equivalent",
                 value   = String.format(locale, "%.4f trees", impact.treeFraction),
@@ -1057,32 +1146,27 @@ private fun SustainabilityBreakdownSheet(
             BreakdownRow(
                 label   = "Sheet engagement",
                 value   = pointsLabel(locale, impact.pSheets),
-                caption = "+7.5 pts per page captured",
+                caption = "+0.4 / +0.2 / +0.1 pts per page (card / A4 / smaller)",
             )
             BreakdownRow(
                 label   = "Tree milestone",
                 value   = pointsLabel(locale, impact.pTrees),
-                caption = "+12,000 pts per tree-equivalent saved",
+                caption = "+1,200 pts per tree-equivalent saved",
             )
             BreakdownRow(
                 label   = "Water",
                 value   = pointsLabel(locale, impact.pWater),
-                caption = "+0.6 pts per litre",
+                caption = "+6 pts per 100 L",
             )
             BreakdownRow(
                 label   = "CO₂",
                 value   = pointsLabel(locale, impact.pCarbon),
-                caption = "+1.2 pts per gram avoided",
+                caption = "+12 pts per 100 g avoided",
             )
             BreakdownRow(
                 label   = "Energy",
                 value   = pointsLabel(locale, impact.pEnergy),
-                caption = "+0.4 pts per watt-hour",
-            )
-            BreakdownRow(
-                label   = "Engagement boost",
-                value   = pointsLabel(locale, impact.pStreak),
-                caption = "ln(pages + 1) × 180 — rewards sustained use",
+                caption = "+4 pts per 100 Wh",
             )
 
             HorizontalDivider(color = colors.border, thickness = 1.dp)

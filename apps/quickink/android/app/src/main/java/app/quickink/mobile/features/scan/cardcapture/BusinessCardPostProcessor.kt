@@ -39,6 +39,7 @@ import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.net.Uri
+import app.quickink.mobile.features.scan.PaperSize
 import app.quickink.mobile.features.scan.ScanFlowController
 import app.releaf.mobile.data.common.AttachmentStorage
 import app.releaf.mobile.data.common.Uuidv7
@@ -102,8 +103,9 @@ object BusinessCardPostProcessor {
             pageUris   = listOf(jpegUri),
         )
         controller.onScanComplete(
-            result   = result,
-            category = "Business Card",
+            result    = result,
+            category  = "Business Card",
+            paperSize = PaperSize.Card,
         )
         return jpegUri
     }

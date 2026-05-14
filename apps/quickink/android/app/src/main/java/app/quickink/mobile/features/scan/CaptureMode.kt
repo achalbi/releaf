@@ -47,10 +47,49 @@ enum class CaptureMode {
             BusinessCard -> "Business Card"
         }
 
+    /**
+     * Maps the capture surface to the paper-size class persisted on
+     * the capture row. The sustainability hero reads `paper_size` to
+     * weight each page (card +4, A4 +2, smaller +1). Document mode
+     * covers ML Kit's standard rectangular-document path; we assume
+     * A4 / Letter rather than trying to infer dimensions from the
+     * captured pixels.
+     */
+    val paperSize: PaperSize
+        get() = when (this) {
+            Document     -> PaperSize.A4
+            BusinessCard -> PaperSize.Card
+        }
+
     companion object {
         fun fromAnalyticsKey(key: String?): CaptureMode = when (key) {
             "business_card" -> BusinessCard
             else            -> Document
+        }
+    }
+}
+
+/**
+ * Coarse page-size class persisted on each capture row. Three buckets:
+ *   - [Card]  — business-card scans. +4 pts/page in the tree score.
+ *   - [A4]    — A4 / Letter documents (default). +2 pts/page.
+ *   - [Small] — smaller-than-A4 imports. +1 pt/page. Reserved for a
+ *               future PDF-from-Files import path that can read
+ *               MediaBox dimensions; no current code path writes it.
+ *
+ * The [raw] string round-trips through the SQLite `paper_size`
+ * column (TEXT NOT NULL DEFAULT 'a4') without a separate codec.
+ */
+enum class PaperSize(val raw: String) {
+    Card("card"),
+    A4("a4"),
+    Small("small");
+
+    companion object {
+        fun fromRaw(value: String?): PaperSize = when (value) {
+            "card"  -> Card
+            "small" -> Small
+            else    -> A4
         }
     }
 }

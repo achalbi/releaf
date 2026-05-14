@@ -32,6 +32,12 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
     /// search-result construction site (and rows synced from older
     /// clients) reading back as scans.
     public let source: String
+    /// Page-size class — `"card"` (business cards, +4 pts/page),
+    /// `"a4"` (default, +2 pts/page), or `"small"` (reserved for
+    /// future smaller-than-A4 PDF imports, +1 pt/page). Free-form
+    /// TEXT in the schema (v11), defaulting to `"a4"` for rows that
+    /// predate the column or were synced from older clients.
+    public let paperSize: String
     /// Geographic latitude (decimal degrees) captured at scan time
     /// when the user has "Location for scans" enabled. `nil` for
     /// captures taken with location off, denied, or older rows.
@@ -75,6 +81,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         pageCount: Int,
         createdAt: String,
         source: String = "scan",
+        paperSize: String = "a4",
         latitude: Double? = nil,
         longitude: Double? = nil,
         locality: String? = nil,
@@ -92,6 +99,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         self.pageCount   = pageCount
         self.createdAt   = createdAt
         self.source      = source
+        self.paperSize   = paperSize
         self.latitude    = latitude
         self.longitude   = longitude
         self.locality    = locality
@@ -116,6 +124,9 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         // to "scan". The schema column is NOT NULL DEFAULT 'scan'
         // so a real DB row always has a value.
         self.source      = (try c.decodeIfPresent(String.self, forKey: .source)) ?? "scan"
+        // Same tolerance for `paper_size` (v11 column). Defaults to
+        // "a4" so any SELECT that omits the column still constructs.
+        self.paperSize   = (try c.decodeIfPresent(String.self, forKey: .paperSize)) ?? "a4"
         // Geolocation columns landed in v6 and remain nullable — a
         // SELECT that doesn't request them, or a row from before the
         // migration ran, reads back as `nil`. `address` joined them
@@ -142,6 +153,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         case pageCount   = "page_count"
         case createdAt   = "created_at"
         case source
+        case paperSize   = "paper_size"
         case latitude
         case longitude
         case locality
@@ -158,13 +170,20 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
 public final class CaptureListViewModel: ObservableObject {
 
     @Published public private(set) var captures: [CaptureSummary] = []
-    /// Lifetime sum of `page_count` across all of the user's
-    /// non-deleted captures. Backs the sustainability hero on the
-    /// home screen — kept here (alongside `captures`) because both
-    /// reads watch the same `captures` table, so a single screen
-    /// holds both observations rather than spawning a sibling VM.
-    /// Mirror of Android's `captureDao.observeTotalPageCount(userId)`.
-    @Published public private(set) var totalPageCount: Int = 0
+    /// Lifetime page counts grouped by `paper_size` across all of
+    /// the user's non-deleted captures. Backs the sustainability
+    /// hero on the home screen, which weights each bucket
+    /// independently (card +4, A4 +2, smaller +1). Keys mirror the
+    /// `PaperSize` raw values; missing keys are absent (treat as 0).
+    /// Mirror of Android's `captureDao.observePagesBySize(userId)`.
+    @Published public private(set) var pagesBySize: [String: Int] = [:]
+
+    /// Convenience — total of `pagesBySize`. Preserves the previous
+    /// `totalPageCount` API for the hero headline + empty-state
+    /// branch, which only need the lifetime sheet count.
+    public var totalPageCount: Int {
+        pagesBySize.values.reduce(0, +)
+    }
 
     private let dbQueue: DatabaseQueue
     private let userId: String
@@ -179,7 +198,7 @@ public final class CaptureListViewModel: ObservableObject {
     public func start() {
         cancellable = ValueObservation.tracking { [userId] db in
             try CaptureSummary.fetchAll(db, sql: """
-                SELECT id, title, preview_uri, pdf_uri, page_count, created_at, source
+                SELECT id, title, preview_uri, pdf_uri, page_count, created_at, source, paper_size
                 FROM captures
                 WHERE user_id = ? AND deleted_at IS NULL
                 ORDER BY created_at DESC
@@ -193,22 +212,33 @@ public final class CaptureListViewModel: ObservableObject {
             receiveValue: { [weak self] in self?.captures = $0 }
         )
 
-        // Lifetime page total — drives the home sustainability hero.
-        // `COALESCE(SUM(...), 0)` keeps the empty-library case as `0`
-        // rather than NULL, so the hero's empty-state branch reads a
-        // real Int without a separate Optional unwrap.
+        // Lifetime page totals grouped by `paper_size` — drives the
+        // home sustainability hero, which weights each size bucket
+        // independently (card +4, A4 +2, smaller +1). `GROUP BY`
+        // collapses buckets that aren't represented yet, so a
+        // freshly-installed library reads back as an empty dict;
+        // missing keys are treated as 0 by the hero.
         totalCancellable = ValueObservation.tracking { [userId] db in
-            try Int.fetchOne(db, sql: """
-                SELECT COALESCE(SUM(page_count), 0)
+            try Row.fetchAll(db, sql: """
+                SELECT paper_size, COALESCE(SUM(page_count), 0) AS pages
                 FROM captures
                 WHERE user_id = ? AND deleted_at IS NULL
-                """, arguments: [userId]) ?? 0
+                GROUP BY paper_size
+                """, arguments: [userId])
         }
         .publisher(in: dbQueue)
         .receive(on: DispatchQueue.main)
         .sink(
             receiveCompletion: { _ in },
-            receiveValue: { [weak self] in self?.totalPageCount = $0 }
+            receiveValue: { [weak self] rows in
+                var buckets: [String: Int] = [:]
+                for row in rows {
+                    let key: String = row["paper_size"]
+                    let pages: Int = row["pages"]
+                    buckets[key] = pages
+                }
+                self?.pagesBySize = buckets
+            }
         )
     }
 }

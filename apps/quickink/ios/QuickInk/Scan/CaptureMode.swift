@@ -54,4 +54,33 @@ public enum CaptureMode: String, CaseIterable, Sendable {
         default:              return .document
         }
     }
+
+    /// Maps the capture surface to the paper-size class persisted on
+    /// the capture row. The sustainability hero reads `paper_size` to
+    /// weight each page (card +4, A4 +2, smaller +1). Document mode
+    /// covers VisionKit's standard rectangular-document path; we
+    /// assume A4 / Letter rather than trying to infer dimensions
+    /// from the captured pixels.
+    public var paperSize: PaperSize {
+        switch self {
+        case .document:     return .a4
+        case .businessCard: return .card
+        }
+    }
 }
+
+/// Coarse page-size class persisted on each capture row. Three buckets:
+///   - `.card`  — business-card scans. +4 pts/page in the tree score.
+///   - `.a4`    — A4 / Letter documents (default). +2 pts/page.
+///   - `.small` — smaller-than-A4 imports. +1 pt/page. Reserved for
+///                a future PDF-from-Files import path that can read
+///                MediaBox dimensions; no current code path writes it.
+///
+/// String-backed so it round-trips through the SQLite `paper_size`
+/// column (TEXT NOT NULL DEFAULT 'a4') without a separate codec.
+public enum PaperSize: String, CaseIterable, Sendable {
+    case card
+    case a4
+    case small
+}
+

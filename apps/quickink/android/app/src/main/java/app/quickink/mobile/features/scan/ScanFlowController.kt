@@ -172,11 +172,16 @@ class ScanFlowController(
      *   scanner (the default), `"import"` when it came from the
      *   system photo picker. Persisted on the capture row so the
      *   Library cards can render an "Import" pill.
+     * @param paperSize Page-size class for the sustainability hero's
+     *   per-page weight. Defaults to [PaperSize.A4]; the business-
+     *   card camera surface passes [PaperSize.Card] so each card
+     *   scan scores the bulk-print bonus.
      */
     fun onScanComplete(
         result: DocumentScanResult,
         category: String? = null,
         source: String = "scan",
+        paperSize: PaperSize = PaperSize.A4,
     ) {
         // Cancel any previous in-flight pass before starting a new
         // one. The user could conceivably tap Scan twice in quick
@@ -226,6 +231,7 @@ class ScanFlowController(
                     previewUri = result.previewUri?.toString(),
                     pageCount  = totalPages,
                     source     = source,
+                    paperSize  = paperSize,
                     location   = location,
                 )
                 // Pre-attach the seeded `category` (post-A.3c: a

@@ -23,6 +23,7 @@ import app.quickink.mobile.data.ocr.OcrResultDao
 import app.quickink.mobile.data.ocr.OcrResultEntity
 import app.quickink.mobile.data.tag.TagDao
 import app.quickink.mobile.data.tag.TagRepository
+import app.quickink.mobile.features.scan.PaperSize
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import app.releaf.shared.scan.OcrResult
@@ -66,6 +67,14 @@ class CaptureRepository(
          */
         source: String = "scan",
         /**
+         * Page-size class. Drives the sustainability hero's per-page
+         * weight — [PaperSize.Card] scores +4 pts/page, [PaperSize.A4]
+         * +2, [PaperSize.Small] +1. Defaulted to [PaperSize.A4] so
+         * legacy callers (and rows synced from older clients without
+         * the field on the wire) read back as standard pages.
+         */
+        paperSize: PaperSize = PaperSize.A4,
+        /**
          * Optional geolocation captured at scan / import time. Pass
          * `null` when the user has the "Attach location to scans"
          * setting off, when location permission is denied, or when
@@ -86,6 +95,7 @@ class CaptureRepository(
                 previewUri   = previewUri,
                 pageCount    = pageCount,
                 source       = source,
+                paperSize    = paperSize.raw,
                 latitude     = location?.latitude,
                 longitude    = location?.longitude,
                 locality     = location?.locality,

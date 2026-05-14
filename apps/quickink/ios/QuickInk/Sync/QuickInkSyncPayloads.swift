@@ -263,6 +263,12 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
     /// didn't write the field; the column-level default in the
     /// captures schema mirrors this.
     public let source: String
+    /// Page-size class — `"card"`, `"a4"` (default), or `"small"`.
+    /// Drives the sustainability hero's per-page weight on receivers
+    /// exactly as on the producer. Defaulted to `"a4"` so payloads
+    /// from older clients that didn't write the field hydrate with
+    /// the same value the local column default uses.
+    public let paperSize: String
     /// Decimal-degree latitude captured at scan time (Phase 7 —
     /// Geolocation). Both lat + lon are nullable, and `nil` on the
     /// wire when the user has the "Location for scans" toggle off,
@@ -301,6 +307,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         pdfDriveFileId: String? = nil,
         previewDriveFileId: String? = nil,
         source: String = "scan",
+        paperSize: String = "a4",
         latitude: Double? = nil,
         longitude: Double? = nil,
         locality: String? = nil,
@@ -319,6 +326,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         self.pdfDriveFileId = pdfDriveFileId
         self.previewDriveFileId = previewDriveFileId
         self.source = source
+        self.paperSize = paperSize
         self.latitude = latitude
         self.longitude = longitude
         self.locality = locality
@@ -344,6 +352,11 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         // such an older payload should read back as a scan rather
         // than crash on a missing key.
         self.source             = (try c.decodeIfPresent(String.self, forKey: .source)) ?? "scan"
+        // `paper_size` landed in v11 (iOS) / Room v13 (Android).
+        // Same back-compat treatment as `source` — payloads from
+        // older clients hydrate as `"a4"`, matching the column-level
+        // default.
+        self.paperSize          = (try c.decodeIfPresent(String.self, forKey: .paperSize)) ?? "a4"
         // Geolocation keys landed in Phase 7. Tolerate their absence
         // (older payloads, captures from clients that haven't shipped
         // the feature, or captures the user took with location off)
@@ -369,6 +382,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         case pdfDriveFileId     = "pdf_drive_file_id"
         case previewDriveFileId = "preview_drive_file_id"
         case source
+        case paperSize          = "paper_size"
         case latitude
         case longitude
         case locality

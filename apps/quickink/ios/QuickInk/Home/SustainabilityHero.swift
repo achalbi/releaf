@@ -15,8 +15,10 @@
  * Instead we blend five independent paper-LCA factors into one
  * integer score:
  *
- *   1. Sheet engagement   — flat per-page reward; each capture has
- *                           to feel like it moved the needle.
+ *   1. Sheet engagement   — per-page reward, weighted by page size
+ *                           (card +4, A4 +2, smaller +1) so a
+ *                           bulk-print-saving card scan beats a
+ *                           one-off small page.
  *   2. Tree-equivalent    — pages → fractional mature pine using the
  *                           conventional 8,333 sheets/tree, then
  *                           de-rated by the typical ~17% pulp yield
@@ -28,20 +30,16 @@
  *   4. CO₂ avoided        — ~4.6 g CO₂e per sheet, cradle-to-grave.
  *   5. Energy spared      — ~50 Wh per sheet (mill + transport).
  *
- * A logarithmic engagement boost is layered on top so the curve
- * still rewards sustained use without being purely linear — each
- * order of magnitude of pages adds a fixed bump rather than the
- * score creeping up at a constant per-page rate. Numbers are
- * deliberately conservative; the goal is a directional impact
- * score, not a precise lifecycle assessment.
+ * Numbers are deliberately conservative; the goal is a directional
+ * impact score, not a precise lifecycle assessment.
  *
  * Tapping the card presents `SustainabilityBreakdownSheet`, which
  * surfaces the per-component math behind the displayed score.
  *
  * Counterpart: Android `SustainabilityHero` in `HomeScreen.kt`. The
- * `TreeImpact` struct + `computeTreeImpact(totalPages:)` factory
+ * `TreeImpact` struct + `computeTreeImpact(pagesBySize:)` factory
  * mirror the Kotlin equivalents 1-to-1 so the displayed score
- * matches across platforms for the same lifetime page count.
+ * matches across platforms for the same lifetime page split.
  */
 
 import SwiftUI
@@ -55,8 +53,16 @@ import Foundation
 /// `totalPoints`. The hero card and the breakdown sheet both read
 /// from this struct so the displayed score and the per-row math
 /// can never drift out of sync.
+///
+/// `cardPages` / `a4Pages` / `smallPages` carry the size-bucket
+/// split that drives the variable per-page weight in `pSheets`. The
+/// breakdown sheet's "What we measured" section also renders from
+/// these so the user sees where their points come from.
 struct TreeImpact: Equatable {
     let pages: Int
+    let cardPages: Int
+    let a4Pages: Int
+    let smallPages: Int
     let pulpYield: Double
     let treeFraction: Double
     let waterLiters: Int
@@ -67,14 +73,42 @@ struct TreeImpact: Equatable {
     let pWater: Double
     let pCarbon: Double
     let pEnergy: Double
-    let pStreak: Double
     let totalPoints: Int
 }
 
-/// Build a `TreeImpact` for the given lifetime page count. See the
-/// `SustainabilityHero` doc-comment for the rationale behind each
-/// factor and weight.
-func computeTreeImpact(totalPages: Int) -> TreeImpact {
+/// Translate the raw-string-keyed dict that GRDB delivers (column
+/// values are `TEXT`) into the typed `[PaperSize: Int]` shape the
+/// impact calculator expects. Unknown keys (forward-compatibility
+/// hedge: a future schema bump could introduce values we don't have
+/// in the enum yet) are silently dropped — better than fatal-erroring
+/// the home screen on rollout.
+func typedPagesBySize(_ raw: [String: Int]) -> [PaperSize: Int] {
+    var out: [PaperSize: Int] = [:]
+    for (key, pages) in raw {
+        if let size = PaperSize(rawValue: key) {
+            out[size] = pages
+        }
+    }
+    return out
+}
+
+/// Build a `TreeImpact` from a per-size page count breakdown. The
+/// `Sheet engagement` factor weights each bucket independently:
+///   - card  → +4 pts/page (bonus for digitising what's normally
+///                          printed in bulk)
+///   - a4    → +2 pts/page (default for camera scans)
+///   - small → +1 pt/page  (reserved for sub-A4 PDF imports)
+///
+/// The other four factors and the streak boost still scale with
+/// total lifetime pages — they capture pulp / water / CO₂ / energy
+/// per sheet, which is roughly size-agnostic at the precision the
+/// score is meant to convey.
+func computeTreeImpact(pagesBySize: [PaperSize: Int]) -> TreeImpact {
+    let cardPages  = pagesBySize[.card]  ?? 0
+    let a4Pages    = pagesBySize[.a4]    ?? 0
+    let smallPages = pagesBySize[.small] ?? 0
+    let totalPages = cardPages + a4Pages + smallPages
+
     let sheets       = Double(totalPages)
     let pulpYield    = 0.17                          // tree biomass → paper
     let treeFraction = (sheets / 8333.0) * pulpYield
@@ -82,22 +116,26 @@ func computeTreeImpact(totalPages: Int) -> TreeImpact {
     let co2Grams     = sheets * 4.6
     let energyWh     = sheets * 50.0
 
-    // Component weights are calibrated so a single tree-milestone
-    // (~8,333 pages) lands in the low six figures, while a single
-    // captured page still scores in the low hundreds — enough to
-    // feel rewarding without making the empty-state-to-first-scan
-    // jump feel cheap.
-    let pSheets = sheets       * 7.5
-    let pTrees  = treeFraction * 12_000.0
-    let pWater  = Double(waterLiters) * 0.6
-    let pCarbon = co2Grams     * 1.2
-    let pEnergy = energyWh     * 0.4
-    let pStreak = sheets > 0 ? log(sheets + 1.0) * 180.0 : 0.0
+    // Size-weighted sheet engagement. Cards score 0.4, A4 0.2,
+    // smaller 0.1 per page. All five component weights are tuned
+    // 10× smaller than the earlier model so the lifetime total
+    // stays in a comfortably-readable range rather than ballooning
+    // into the high tens-of-thousands for everyday users.
+    let pSheets = Double(cardPages)  * 0.4
+                + Double(a4Pages)    * 0.2
+                + Double(smallPages) * 0.1
+    let pTrees  = treeFraction * 1_200.0
+    let pWater  = Double(waterLiters) * 0.06
+    let pCarbon = co2Grams     * 0.12
+    let pEnergy = energyWh     * 0.04
 
-    let total = max(0, Int((pSheets + pTrees + pWater + pCarbon + pEnergy + pStreak).rounded()))
+    let total = max(0, Int((pSheets + pTrees + pWater + pCarbon + pEnergy).rounded()))
 
     return TreeImpact(
         pages:        totalPages,
+        cardPages:    cardPages,
+        a4Pages:      a4Pages,
+        smallPages:   smallPages,
         pulpYield:    pulpYield,
         treeFraction: treeFraction,
         waterLiters:  waterLiters,
@@ -108,7 +146,6 @@ func computeTreeImpact(totalPages: Int) -> TreeImpact {
         pWater:       pWater,
         pCarbon:      pCarbon,
         pEnergy:      pEnergy,
-        pStreak:      pStreak,
         totalPoints:  total
     )
 }
@@ -116,13 +153,26 @@ func computeTreeImpact(totalPages: Int) -> TreeImpact {
 // MARK: - Sustainability hero
 
 struct SustainabilityHero: View {
-    let totalPages: Int
+    /// Per-size page counts keyed by `PaperSize` raw value. The
+    /// home screen feeds this from `CaptureListViewModel.pagesBySize`
+    /// (which mirrors the SQL `GROUP BY paper_size` on captures).
+    /// Missing keys are treated as 0 — a freshly-installed library
+    /// flows through as an empty dict and the hero renders its
+    /// empty-state branch.
+    let pagesBySize: [String: Int]
 
     @State private var showBreakdown: Bool = false
 
-    /// Recompute only when `totalPages` changes — same intent as
-    /// Android's `remember(totalPages)`.
-    private var impact: TreeImpact { computeTreeImpact(totalPages: totalPages) }
+    /// Lifetime page count derived from the size breakdown — drives
+    /// the headline + empty-state branch. Computed (not stored) so a
+    /// new `pagesBySize` value re-derives it on the same render.
+    private var totalPages: Int { pagesBySize.values.reduce(0, +) }
+
+    /// Recompute only when `pagesBySize` changes — same intent as
+    /// Android's `remember(pagesBySize)`.
+    private var impact: TreeImpact {
+        computeTreeImpact(pagesBySize: typedPagesBySize(pagesBySize))
+    }
 
     var body: some View {
         let ecoDeep   = QuickInkColors.leafGreenDeep
@@ -218,6 +268,14 @@ struct SustainabilityHero: View {
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+            // Hide the system status bar (clock / battery / wifi
+            // overlay) while the breakdown is presented — at
+            // `.large` the sheet pushes the home view almost to
+            // the very top edge, and the status bar pinned over
+            // the thin remaining strip is the only chrome left
+            // visible above the sheet's own header. Suppressing
+            // it gives the sheet a clean full-bleed top.
+            .statusBarHidden(true)
         }
     }
 }
@@ -268,7 +326,7 @@ struct SustainabilityBreakdownSheet: View {
                         Text("How your Tree score works")
                             .font(QuickInkText.heading)
                             .foregroundStyle(QuickInkColors.ink)
-                        Text("Five LCA factors plus an engagement boost.")
+                        Text("Five LCA factors. Per-page weight scales with page size.")
                             .font(QuickInkText.meta)
                             .foregroundStyle(QuickInkColors.inkSoft)
                     }
@@ -304,12 +362,44 @@ struct SustainabilityBreakdownSheet: View {
 
                 // Section 1 — raw lifecycle outputs.
                 breakdownSectionHeader("What we measured")
-                breakdownRow(
-                    label:   "Sheets engaged",
-                    value:   String(format: "%@ pages",
-                                    integerFormatter.string(from: NSNumber(value: impact.pages)) ?? "0"),
-                    caption: "Lifetime captures across all notebooks"
-                )
+                // Per-size breakdown of pages captured. Each row only
+                // renders when its bucket is non-empty so a brand-new
+                // library doesn't read as three "0 pages" lines.
+                // Falls back to a single "Sheets engaged" row when no
+                // bucket has any pages yet — preserves the previous
+                // empty-state copy.
+                if impact.cardPages == 0 && impact.a4Pages == 0 && impact.smallPages == 0 {
+                    breakdownRow(
+                        label:   "Sheets engaged",
+                        value:   "0 pages",
+                        caption: "Lifetime captures across all notebooks"
+                    )
+                } else {
+                    if impact.cardPages > 0 {
+                        breakdownRow(
+                            label:   "Business cards",
+                            value:   String(format: "%@ cards",
+                                            integerFormatter.string(from: NSNumber(value: impact.cardPages)) ?? "0"),
+                            caption: "Each card saves a bulk print run"
+                        )
+                    }
+                    if impact.a4Pages > 0 {
+                        breakdownRow(
+                            label:   "A4 documents",
+                            value:   String(format: "%@ pages",
+                                            integerFormatter.string(from: NSNumber(value: impact.a4Pages)) ?? "0"),
+                            caption: "Standard letter / A4 captures"
+                        )
+                    }
+                    if impact.smallPages > 0 {
+                        breakdownRow(
+                            label:   "Smaller pages",
+                            value:   String(format: "%@ pages",
+                                            integerFormatter.string(from: NSNumber(value: impact.smallPages)) ?? "0"),
+                            caption: "Imports smaller than A4"
+                        )
+                    }
+                }
                 breakdownRow(
                     label:   "Tree-equivalent",
                     value:   String(format: "%.4f trees", impact.treeFraction),
@@ -339,22 +429,19 @@ struct SustainabilityBreakdownSheet: View {
                 breakdownSectionHeader("How that scores")
                 breakdownRow(label: "Sheet engagement",
                              value: pointsLabel(impact.pSheets),
-                             caption: "+7.5 pts per page captured")
+                             caption: "+0.4 / +0.2 / +0.1 pts per page (card / A4 / smaller)")
                 breakdownRow(label: "Tree milestone",
                              value: pointsLabel(impact.pTrees),
-                             caption: "+12,000 pts per tree-equivalent saved")
+                             caption: "+1,200 pts per tree-equivalent saved")
                 breakdownRow(label: "Water",
                              value: pointsLabel(impact.pWater),
-                             caption: "+0.6 pts per litre")
+                             caption: "+6 pts per 100 L")
                 breakdownRow(label: "CO₂",
                              value: pointsLabel(impact.pCarbon),
-                             caption: "+1.2 pts per gram avoided")
+                             caption: "+12 pts per 100 g avoided")
                 breakdownRow(label: "Energy",
                              value: pointsLabel(impact.pEnergy),
-                             caption: "+0.4 pts per watt-hour")
-                breakdownRow(label: "Engagement boost",
-                             value: pointsLabel(impact.pStreak),
-                             caption: "ln(pages + 1) × 180 — rewards sustained use")
+                             caption: "+4 pts per 100 Wh")
 
                 Divider().background(QuickInkColors.border)
 
@@ -456,11 +543,11 @@ private func formatWhOrKWh(_ wh: Double) -> String {
 struct SustainabilityHero_Previews: PreviewProvider {
     static var previews: some View {
         VStack(spacing: 16) {
-            SustainabilityHero(totalPages: 0)
-            SustainabilityHero(totalPages: 1)
-            SustainabilityHero(totalPages: 100)
-            SustainabilityHero(totalPages: 1_000)
-            SustainabilityHero(totalPages: 8_333)
+            SustainabilityHero(pagesBySize: [:])
+            SustainabilityHero(pagesBySize: ["a4": 1])
+            SustainabilityHero(pagesBySize: ["a4": 100])
+            SustainabilityHero(pagesBySize: ["a4": 980, "card": 20])
+            SustainabilityHero(pagesBySize: ["a4": 8_300, "card": 33])
         }
         .padding()
         .background(QuickInkColors.bg)

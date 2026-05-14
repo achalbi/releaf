@@ -252,7 +252,7 @@ struct HomeScreen: View {
                 // breakdown sheet. Mirror of Android's
                 // `SustainabilityHero(totalPages = totalPagesSaved ?: 0)`
                 // call site in `HomeScreen.kt`.
-                SustainabilityHero(totalPages: capturesVM.totalPageCount)
+                SustainabilityHero(pagesBySize: capturesVM.pagesBySize)
                     // Mirror the displayed Tree-points value into a
                     // shared UserDefaults key so the next cold launch's
                     // cinematic counter (`LaunchAnimationView`) ticks
@@ -260,14 +260,17 @@ struct HomeScreen: View {
                     // of the hardcoded preview default. The splash
                     // runs before any DAO observation can resolve, so
                     // a cached pref is the only way to surface a real
-                    // number on the launch screen.
-                    .onChange(of: capturesVM.totalPageCount) { newCount in
+                    // number on the launch screen. Observed on the
+                    // per-size dict so a card-only scan (which doesn't
+                    // change `totalPageCount` proportionally to its
+                    // 4x weight) still flushes the cache.
+                    .onChange(of: capturesVM.pagesBySize) { newBuckets in
                         SettingsState.cachedTreePoints =
-                            computeTreeImpact(totalPages: newCount).totalPoints
+                            computeTreeImpact(pagesBySize: typedPagesBySize(newBuckets)).totalPoints
                     }
                     .onAppear {
                         SettingsState.cachedTreePoints =
-                            computeTreeImpact(totalPages: capturesVM.totalPageCount).totalPoints
+                            computeTreeImpact(pagesBySize: typedPagesBySize(capturesVM.pagesBySize)).totalPoints
                     }
                 // "N pending" pill — renders only while there are
                 // local rows that haven't been pushed to Drive. One

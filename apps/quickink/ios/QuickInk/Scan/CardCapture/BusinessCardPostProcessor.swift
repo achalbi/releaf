@@ -76,6 +76,7 @@ public enum BusinessCardPostProcessor {
             previewURL: warpedURL,
             pageURLs:   [warpedURL],
             category:   "Business Card",
+            paperSize:  .card,
         )
         return warpedURL
     }

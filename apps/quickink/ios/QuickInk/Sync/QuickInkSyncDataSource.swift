@@ -110,6 +110,10 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                     // read for safety so an unexpected schema state
                     // doesn't crash the sync export.
                     source:             (row["source"] as String?) ?? "scan",
+                    // `paper_size` landed in v11; same back-compat
+                    // tolerance — fall back to "a4" if the column
+                    // is absent from the row read.
+                    paperSize:          (row["paper_size"] as String?) ?? "a4",
                     latitude:           row["latitude"] as Double?,
                     longitude:          row["longitude"] as Double?,
                     locality:           row["locality"] as String?,
@@ -693,10 +697,10 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
         try db.execute(sql: """
             INSERT INTO captures (
                 id, user_id, title, pdf_uri, preview_uri, page_count,
-                source, drive_file_id, pdf_drive_file_id, preview_drive_file_id,
+                source, paper_size, drive_file_id, pdf_drive_file_id, preview_drive_file_id,
                 latitude, longitude, locality, sub_locality, address,
                 created_at, updated_at, dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ON CONFLICT(id) DO UPDATE SET
                 user_id               = excluded.user_id,
                 title                 = excluded.title,
@@ -704,6 +708,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 preview_uri           = excluded.preview_uri,
                 page_count            = excluded.page_count,
                 source                = excluded.source,
+                paper_size            = excluded.paper_size,
                 drive_file_id         = excluded.drive_file_id,
                 pdf_drive_file_id     = excluded.pdf_drive_file_id,
                 preview_drive_file_id = excluded.preview_drive_file_id,
@@ -718,7 +723,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             """, arguments: [
                 payload.id, payload.userId, payload.title,
                 resolvedPdfUri, resolvedPreviewUri, payload.pageCount,
-                payload.source, driveFileId,
+                payload.source, payload.paperSize, driveFileId,
                 payload.pdfDriveFileId, payload.previewDriveFileId,
                 payload.latitude, payload.longitude,
                 payload.locality, payload.subLocality, payload.address,
