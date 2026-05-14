@@ -51,6 +51,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import android.view.WindowManager
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -123,12 +124,23 @@ class MainActivity : ComponentActivity() {
         // it re-hides on its own. WindowCompat / WindowInsetsCompat
         // are the AndroidX shims, so this works back to minSdk 26
         // without API-level branching.
+        //
+        // Belt-and-suspenders: the legacy `FLAG_FULLSCREEN` is also
+        // set on the activity's window. Some OEM skins (MIUI /
+        // HyperOS, certain ColorOS builds) silently ignore the
+        // modern InsetsController hide() call — confirmed on a
+        // Xiaomi-family device where the bar kept rendering across
+        // Home, Workspace and the breakdown sheet despite the
+        // AndroidX path being applied. The older window flag is
+        // still respected on those ROMs and forces the fullscreen
+        // layout.
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.statusBars())
             systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
 
         // Restore the launch-intent latch first. On config-change
         // recreation `savedInstanceState` is non-null and carries

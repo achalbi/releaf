@@ -71,7 +71,6 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -79,10 +78,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
-import android.view.WindowManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -135,24 +130,6 @@ fun WorkspaceHomeScreen(
     val context = LocalContext.current
     val app     = remember(context) { context.applicationContext as QuickInkApp }
     val scope   = rememberCoroutineScope()
-
-    // Hide the system status bar while Workspace is on screen. The
-    // modern `WindowInsetsControllerCompat.hide(statusBars())` set
-    // in `MainActivity.onCreate` doesn't take on some OEM skins
-    // (MIUI / HyperOS), so the user reported the bar still rendering
-    // here. Layer the legacy `FLAG_FULLSCREEN` on the activity
-    // window only for the duration of this composition — those ROMs
-    // still honor the older flag. Cleared on dispose so leaving
-    // Workspace restores the activity's baseline state for screens
-    // (Home, Settings, …) that want the bar's space reserved.
-    val activity = context.findActivity()
-    DisposableEffect(activity) {
-        val window = activity?.window
-        window?.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        onDispose {
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        }
-    }
 
     val folderRepo = remember(app) {
         FolderRepository(
@@ -1179,18 +1156,3 @@ private fun TagChip(
     }
 }
 
-/**
- * Walk the `ContextWrapper.baseContext` chain looking for the host
- * [Activity] so the Workspace screen can reach into the activity's
- * window and toggle `FLAG_FULLSCREEN`. Returns `null` if called
- * outside an Activity-hosted context (e.g., a Compose preview),
- * which the caller treats as a no-op.
- */
-private fun Context.findActivity(): Activity? {
-    var ctx: Context? = this
-    while (ctx is ContextWrapper) {
-        if (ctx is Activity) return ctx
-        ctx = ctx.baseContext
-    }
-    return null
-}
