@@ -198,6 +198,7 @@ private fun CapsLabel(text: String) {
         fontWeight = FontWeight.Normal,
         letterSpacing = 1.sp,
         color      = ColorLabel,
+        style      = TightTextStyle,
     )
 }
 
