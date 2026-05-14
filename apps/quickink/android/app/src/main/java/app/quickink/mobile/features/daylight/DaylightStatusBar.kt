@@ -117,11 +117,14 @@ private fun DaylightStatusBarContent(
         modifier = modifier
             .fillMaxWidth()
             .background(ColorCanvas)
-            .padding(horizontal = 22.dp, vertical = 2.dp),
+            .padding(horizontal = 22.dp, vertical = 0.dp),
         verticalArrangement = Arrangement.Top,
     ) {
         // Labels row
-        Row(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             CapsLabel(if (isDay) "SUNRISE" else "SUNSET")
             Spacer(modifier = Modifier.weight(1f))
             CapsLabel("NOW")
@@ -129,18 +132,17 @@ private fun DaylightStatusBarContent(
             CapsLabel(if (isDay) "SUNSET" else "SUNRISE")
         }
 
-        Spacer(modifier = Modifier.height(2.dp))
-
         // Times row
-        Row(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             ClockText(formatClock(phase.anchorLeft, zone), sizeSp = 11f)
             Spacer(modifier = Modifier.weight(1f))
             ClockText(formatClock(phase.now,          zone), sizeSp = 13f)
             Spacer(modifier = Modifier.weight(1f))
             ClockText(formatClock(phase.anchorRight,  zone), sizeSp = 11f)
         }
-
-        Spacer(modifier = Modifier.height(2.dp))
 
         // Bar row
         Canvas(
@@ -250,25 +252,29 @@ private fun DaylightStatusBarShell(modifier: Modifier = Modifier) {
         modifier = modifier
             .fillMaxWidth()
             .background(ColorCanvas)
-            .padding(horizontal = 22.dp, vertical = 2.dp),
+            .padding(horizontal = 22.dp, vertical = 0.dp),
         verticalArrangement = Arrangement.Top,
     ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             CapsLabel("SUNRISE")
             Spacer(modifier = Modifier.weight(1f))
             CapsLabel("NOW")
             Spacer(modifier = Modifier.weight(1f))
             CapsLabel("SUNSET")
         }
-        Spacer(modifier = Modifier.height(2.dp))
-        Row(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             ClockText("—:—", 11f)
             Spacer(modifier = Modifier.weight(1f))
             ClockText("—:—", 13f)
             Spacer(modifier = Modifier.weight(1f))
             ClockText("—:—", 11f)
         }
-        Spacer(modifier = Modifier.height(2.dp))
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()

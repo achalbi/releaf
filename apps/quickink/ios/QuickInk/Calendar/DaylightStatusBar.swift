@@ -74,9 +74,7 @@ private struct DaylightStatusBarContent: View {
     var body: some View {
         VStack(spacing: 0) {
             labelsRow
-            Spacer().frame(height: 2)
             timesRow
-            Spacer().frame(height: 2)
             barRow
             captionsRow
         }
@@ -99,6 +97,7 @@ private struct DaylightStatusBarContent: View {
         .font(.system(size: 8, weight: .regular))
         .tracking(0.8)
         .foregroundColor(DaylightStatusBarMetrics.labelGray)
+        .frame(height: 9)
     }
 
     private var timesRow: some View {
@@ -113,6 +112,7 @@ private struct DaylightStatusBarContent: View {
                 .font(.system(size: 11, design: .serif))
         }
         .foregroundColor(DaylightStatusBarMetrics.ink)
+        .frame(height: 14)
     }
 
     private var barRow: some View {
@@ -185,8 +185,7 @@ private struct DaylightStatusBarShell: View {
             .font(.system(size: 8, weight: .regular))
             .tracking(0.8)
             .foregroundColor(DaylightStatusBarMetrics.labelGray)
-
-            Spacer().frame(height: 2)
+            .frame(height: 9)
 
             HStack {
                 Text("—:—").font(.system(size: 11, design: .serif))
@@ -196,8 +195,7 @@ private struct DaylightStatusBarShell: View {
                 Text("—:—").font(.system(size: 11, design: .serif))
             }
             .foregroundColor(DaylightStatusBarMetrics.ink.opacity(0.4))
-
-            Spacer().frame(height: 2)
+            .frame(height: 14)
 
             Canvas { context, size in
                 let track = DaylightStatusBarMetrics.trackRect(size: size)
@@ -227,7 +225,7 @@ private struct DaylightStatusBarShell: View {
 private enum DaylightStatusBarMetrics {
 
     static let horizontalPadding: CGFloat = 22
-    static let verticalPadding:   CGFloat = 2
+    static let verticalPadding:   CGFloat = 0
 
     /// Total height reserved for the bar row (track + marker). Tall
     /// enough that the marker's halo doesn't clip the row above or
