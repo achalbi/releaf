@@ -294,7 +294,7 @@ fun HomeScreen(
                 .padding(
                     start  = QuickInkSpacing.s5,
                     end    = QuickInkSpacing.s5,
-                    top    = statusBarTop + QuickInkSpacing.s6,
+                    top    = statusBarTop + QuickInkSpacing.s7,
                     // Reserve space behind nav bar (~80dp) plus a
                     // little extra (~40dp) so the sync pill at the
                     // end of the scroll content doesn't bump into
