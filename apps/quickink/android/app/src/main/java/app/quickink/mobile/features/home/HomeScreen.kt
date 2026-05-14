@@ -107,6 +107,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.view.WindowManager
 import android.net.Uri
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.R
@@ -985,22 +986,32 @@ private fun SustainabilityBreakdownSheet(
     val type = LocalQuickInkTypography.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    // Hide the system status bar while the breakdown sheet is up.
+    //
     // Material3 1.3.x renders ModalBottomSheet inside a `Popup`, not
-    // a `Dialog` — so there's no separate dialog window to grab a
-    // DialogWindowProvider from. Instead, re-apply hide-statusBars
-    // directly on the host Activity's window each time the sheet
-    // opens. Some OEM skins (and the popup's focus claim) reset the
-    // app-wide immersive flag set in `MainActivity.onCreate`, which
-    // is why the bar reappears here even though it's supposed to be
-    // hidden globally. Re-applying on the Activity's decorView via
-    // WindowInsetsControllerCompat reasserts it.
+    // a `Dialog`, so there's no separate dialog window to grab. We
+    // operate on the host Activity's window directly. Two layers,
+    // applied together for OEM coverage:
+    //
+    //   1. Modern: WindowInsetsControllerCompat.hide(statusBars()).
+    //      This is the AndroidX-blessed path and is enough on stock
+    //      Android / Pixel / most OEMs.
+    //   2. Legacy: WindowManager.LayoutParams.FLAG_FULLSCREEN. Some
+    //      OEM skins (MIUI / HyperOS, ColorOS variants) silently
+    //      ignore the modern InsetsController hide for popup-hosted
+    //      composables and only honor the older window flag — that's
+    //      the case the user hit on a Xiaomi-family device where the
+    //      bar kept rendering above the sheet despite the modern
+    //      call being applied at both Activity onCreate and sheet
+    //      open. Setting FLAG_FULLSCREEN forces the issue.
     //
     // `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE` matches the activity-
-    // level config so a swipe-from-top reveals the bar briefly and
-    // it re-hides on its own. No onDispose restore — MainActivity's
-    // intent is "hide app-wide", so we leave the activity in its
-    // intended state when the sheet dismisses rather than fighting
-    // it.
+    // level config in MainActivity so a swipe-from-top still reveals
+    // the bar briefly. onDispose clears FLAG_FULLSCREEN so the home
+    // screen returns to its baseline state when the sheet closes —
+    // we don't explicitly re-show the bar via the InsetsController,
+    // because MainActivity's intent is "hide app-wide" and we don't
+    // want to fight that on devices where it actually works.
     val view = LocalView.current
     DisposableEffect(Unit) {
         val activity = view.context.findHostActivity()
@@ -1010,8 +1021,11 @@ private fun SustainabilityBreakdownSheet(
             controller.hide(WindowInsetsCompat.Type.statusBars())
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         }
-        onDispose {}
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        }
     }
 
     val ecoDeep = QuickInkColors.LeafGreenDeep
