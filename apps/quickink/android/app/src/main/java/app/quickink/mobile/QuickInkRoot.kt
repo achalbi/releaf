@@ -577,7 +577,9 @@ private fun MainShell(
                 onSignOut      = { app.authStore.signOut() },
                 email          = (authStateForName as? AuthState.SignedIn)?.session?.email.orEmpty(),
                 displayName    = resolvedDisplayName,
-                profilePhotoUri = profilePhotoUri,
+                profilePhotoUri   = profilePhotoUri,
+                daylightLatitude  = daylightStore.latitude,
+                daylightLongitude = daylightStore.longitude,
             )
         }
         composable(Routes.CALENDAR) {

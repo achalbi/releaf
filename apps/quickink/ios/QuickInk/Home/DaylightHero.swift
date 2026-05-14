@@ -74,10 +74,19 @@ struct DaylightSnapshot: Equatable {
 }
 
 /// Build a `DaylightSnapshot` for `now`. Sunrise/sunset come from
-/// the shared `sunTimesFor` helper so the displayed times match
-/// the Calendar's panchanga card.
-func computeDaylight(now: Date) -> DaylightSnapshot {
-    let times = sunTimesFor(now)
+/// the shared `sunTimesFor` helper. `latitude` / `longitude` come
+/// from `DaylightLocationStore` (threaded through HomeScreen) so
+/// the hero's times match the user-location-anchored status bar
+/// above it; nil falls back to Mysuru, matching the panchanga
+/// card's default anchor.
+func computeDaylight(
+    now: Date,
+    latitude: Double? = nil,
+    longitude: Double? = nil
+) -> DaylightSnapshot {
+    let lat = latitude  ?? 12.2958
+    let lng = longitude ?? 76.6394
+    let times = sunTimesFor(now, latitude: lat, longitude: lng)
     guard let sunrise = times.sunrise, let sunset = times.sunset else {
         return DaylightSnapshot(
             phase:         .unresolved,
@@ -109,7 +118,7 @@ func computeDaylight(now: Date) -> DaylightSnapshot {
         // slot. Falls back to nil-of-times silently if the next
         // day's solar calc fails (only at polar latitudes).
         let tomorrow = now.addingTimeInterval(24 * 3600)
-        let tomorrowSunrise = sunTimesFor(tomorrow).sunrise
+        let tomorrowSunrise = sunTimesFor(tomorrow, latitude: lat, longitude: lng).sunrise
         let trailing: String
         if let next = tomorrowSunrise {
             trailing = "Sunrise in \(formatDuration(next.timeIntervalSince(now)))"
@@ -147,9 +156,20 @@ struct DaylightHero: View {
     /// Optional fixed `now` for previews / tests. Live screen passes
     /// `nil` so a `TimelineView(.periodic)` drives a 60 s recompute.
     let fixedNow: Date?
+    /// User's location, threaded from `DaylightLocationStore` via
+    /// HomeScreen so the hero's sunrise/sunset match the status bar
+    /// above. `nil` for either falls back to Mysuru.
+    let latitude:  Double?
+    let longitude: Double?
 
-    init(fixedNow: Date? = nil) {
-        self.fixedNow = fixedNow
+    init(
+        fixedNow: Date? = nil,
+        latitude: Double? = nil,
+        longitude: Double? = nil
+    ) {
+        self.fixedNow  = fixedNow
+        self.latitude  = latitude
+        self.longitude = longitude
     }
 
     var body: some View {
@@ -160,7 +180,7 @@ struct DaylightHero: View {
         // timeline tick.
         TimelineView(.periodic(from: Date(), by: 60)) { context in
             let now = fixedNow ?? context.date
-            content(for: computeDaylight(now: now))
+            content(for: computeDaylight(now: now, latitude: latitude, longitude: longitude))
         }
     }
 

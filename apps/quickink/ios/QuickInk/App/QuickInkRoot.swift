@@ -412,7 +412,9 @@ private struct MainShell: View {
                             if case .signedIn(let s) = authStore.state { return s.email }
                             return ""
                         }(),
-                        profilePhotoUri: settings.profilePhotoUri
+                        profilePhotoUri:   settings.profilePhotoUri,
+                        daylightLatitude:  daylightLocation.latitude,
+                        daylightLongitude: daylightLocation.longitude
                     )
                     .navigationBarBackButtonHidden(true)
                     .toolbar(.hidden, for: .navigationBar)

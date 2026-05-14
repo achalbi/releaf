@@ -129,12 +129,21 @@ internal data class DaylightSnapshot(
 
 /**
  * Build a [DaylightSnapshot] for `now`. Sunrise/sunset come from
- * the shared [sunTimesFor] helper so the displayed times match the
- * Calendar's panchanga card.
+ * the shared [sunTimesFor] helper. [latitude] / [longitude] come
+ * from `DaylightLocationStore` (threaded through HomeScreen) so the
+ * hero's times match the user-location-anchored status bar above
+ * it; null falls back to Mysuru, matching the panchanga card's
+ * default anchor.
  */
-internal fun computeDaylight(now: ZonedDateTime): DaylightSnapshot {
+internal fun computeDaylight(
+    now: ZonedDateTime,
+    latitude: Double? = null,
+    longitude: Double? = null,
+): DaylightSnapshot {
+    val lat = latitude  ?: 12.2958
+    val lng = longitude ?: 76.6394
     val today = now.toLocalDate()
-    val (sunrise, sunset) = sunTimesFor(today)
+    val (sunrise, sunset) = sunTimesFor(today, latitude = lat, longitude = lng)
     if (sunrise == null || sunset == null) {
         return DaylightSnapshot(
             phase         = DaylightPhase.Unresolved,
@@ -166,7 +175,7 @@ internal fun computeDaylight(now: ZonedDateTime): DaylightSnapshot {
             // the information the user actually wants in the
             // "remaining" slot. Fallback silently to today's total
             // if the next-day solar calc fails (polar only).
-            val tomorrowRise = sunTimesFor(today.plusDays(1)).first
+            val tomorrowRise = sunTimesFor(today.plusDays(1), latitude = lat, longitude = lng).first
             val trailing = if (tomorrowRise != null) {
                 "Sunrise in ${formatDuration(Duration.between(now, tomorrowRise))}"
             } else {
@@ -213,6 +222,8 @@ internal fun computeDaylight(now: ZonedDateTime): DaylightSnapshot {
 @Composable
 internal fun DaylightHero(
     fixedNow: ZonedDateTime? = null,
+    latitude: Double? = null,
+    longitude: Double? = null,
 ) {
     val type = LocalQuickInkTypography.current
     val colors = LocalQuickInkColors.current
@@ -246,7 +257,9 @@ internal fun DaylightHero(
     }
     val now: ZonedDateTime = fixedNow
         ?: ZonedDateTime.ofInstant(Instant.ofEpochMilli(nowMs), IST)
-    val snapshot = remember(now.toEpochSecond()) { computeDaylight(now) }
+    val snapshot = remember(now.toEpochSecond(), latitude, longitude) {
+        computeDaylight(now, latitude = latitude, longitude = longitude)
+    }
 
     // Pulse animation for the two tile rings — shared infinite
     // transition so both rings re-use the same animation engine,

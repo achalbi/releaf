@@ -168,6 +168,12 @@ fun HomeScreen(
     /// at the parent so a Profile-screen edit re-renders the home
     /// avatar without a SharedPreferences observer.
     profilePhotoUri: String = "",
+    /// User's location, threaded down from `DaylightLocationStore`
+    /// in `QuickInkRoot` so the `DaylightHero` card uses the same
+    /// sunrise/sunset times as the `DaylightStatusBar` above. Null
+    /// for either falls back to Mysuru — the panchanga anchor.
+    daylightLatitude: Double? = null,
+    daylightLongitude: Double? = null,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
@@ -312,7 +318,10 @@ fun HomeScreen(
             // the same commons-suncalc calculator the Calendar's
             // Rahu Kala window uses, anchored at Mysuru. Mirror of
             // iOS's `DaylightHero()` call site in `HomeScreen.swift`.
-            DaylightHero()
+            DaylightHero(
+                latitude  = daylightLatitude,
+                longitude = daylightLongitude,
+            )
             Spacer(Modifier.size(QuickInkSpacing.s3))
             SustainabilityHero(totalPages = totalPagesSaved ?: 0)
             // Mirror the displayed Tree-points value into a shared

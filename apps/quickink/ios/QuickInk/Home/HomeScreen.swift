@@ -73,6 +73,12 @@ struct HomeScreen: View {
     /// at the parent so a Profile-screen edit re-renders the home
     /// avatar without a UserDefaults observer.
     var profilePhotoUri: String = ""
+    /// User's location, threaded down from `DaylightLocationStore`
+    /// in `QuickInkRoot` so the `DaylightHero` card uses the same
+    /// sunrise/sunset times as the `DaylightStatusBar` above. `nil`
+    /// for either falls back to Mysuru — the panchanga anchor.
+    var daylightLatitude:  Double? = nil
+    var daylightLongitude: Double? = nil
 
     @State private var showQuickCapture = false
     /// Side-panel drawer that slides in from the leading edge when
@@ -119,7 +125,9 @@ struct HomeScreen: View {
         onSignOut: (() -> Void)? = nil,
         displayName: String? = nil,
         email: String = "",
-        profilePhotoUri: String = ""
+        profilePhotoUri: String = "",
+        daylightLatitude: Double? = nil,
+        daylightLongitude: Double? = nil
     ) {
         self.controller = controller
         self.userId = userId
@@ -134,6 +142,8 @@ struct HomeScreen: View {
         self.displayName = displayName
         self.email = email
         self.profilePhotoUri = profilePhotoUri
+        self.daylightLatitude = daylightLatitude
+        self.daylightLongitude = daylightLongitude
 
         _capturesVM = StateObject(
             wrappedValue: CaptureListViewModel(userId: userId)
@@ -214,7 +224,10 @@ struct HomeScreen: View {
                 // window uses, anchored at Mysuru. Mirror of
                 // Android's `DaylightHero()` call site in
                 // `HomeScreen.kt`.
-                DaylightHero()
+                DaylightHero(
+                    latitude:  daylightLatitude,
+                    longitude: daylightLongitude
+                )
                 // Sustainability hero — frames QuickInk as a paper-
                 // saving tool. Total pages is sourced from the
                 // `CaptureListViewModel`'s lifetime SUM observation
