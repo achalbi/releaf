@@ -120,7 +120,7 @@ private fun DaylightStatusBarContent(
         modifier = modifier
             .fillMaxWidth()
             .background(ColorCanvas)
-            .padding(top = 28.dp)
+            .padding(top = 8.dp)
             .padding(horizontal = 22.dp, vertical = 0.dp),
         verticalArrangement = Arrangement.Top,
     ) {
@@ -131,7 +131,7 @@ private fun DaylightStatusBarContent(
         ) {
             CapsLabel(if (isDay) "SUNRISE" else "SUNSET")
             Spacer(modifier = Modifier.weight(1f))
-            CapsLabel("NOW")
+           // CapsLabel("NOW")
             Spacer(modifier = Modifier.weight(1f))
             CapsLabel(if (isDay) "SUNSET" else "SUNRISE")
         }
@@ -141,18 +141,18 @@ private fun DaylightStatusBarContent(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ClockText(formatClock(phase.anchorLeft, zone), sizeSp = 11f)
+            ClockText(formatClock(phase.anchorLeft, zone), sizeSp = 12f)
             Spacer(modifier = Modifier.weight(1f))
-            ClockText(formatClock(phase.now,          zone), sizeSp = 13f)
+            ClockText(formatClock(phase.now,          zone), sizeSp = 14f)
             Spacer(modifier = Modifier.weight(1f))
-            ClockText(formatClock(phase.anchorRight,  zone), sizeSp = 11f)
+            ClockText(formatClock(phase.anchorRight,  zone), sizeSp = 12f)
         }
 
         // Bar row
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(22.dp)
+                .height(24.dp)
                 .semantics {
                     contentDescription = accessibilityLabel(phase)
                 },
@@ -228,9 +228,9 @@ private fun CapsLabel(text: String) {
     Text(
         text       = text,
         fontFamily = QuickInkFonts.ui,
-        fontSize   = 8.sp,
+        fontSize   = 11.sp,
         fontWeight = FontWeight.Normal,
-        letterSpacing = 0.8.sp,
+        letterSpacing = 1.sp,
         color      = ColorLabel,
     )
 }
@@ -296,7 +296,7 @@ private fun DaylightStatusBarShell(modifier: Modifier = Modifier) {
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(22.dp),
+                .height(24.dp),
         ) {
             drawTrack(size.width, size.height)
         }
@@ -364,11 +364,11 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrack(
  * identically.
  */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSun(center: Offset) {
-    val bodyR    = 4f
-    val haloR    = 6f
-    val rayInner = 7f
-    val rayOuter = 10f
-    val rayWidth = 1.4f
+    val bodyR    = 8f
+    val haloR    = 12f
+    val rayInner = 14f
+    val rayOuter = 20f
+    val rayWidth = 2f
     val ord  = rayInner / sqrt(2f)
     val ord2 = rayOuter / sqrt(2f)
 
@@ -405,14 +405,14 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSun(center: Off
  * the upper-right, producing a waxing shape.
  */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMoon(center: Offset) {
-    val bodyR = 6.5f
-    val cutR  = 5.1f
-    val cutDx =  2.3f
-    val cutDy = -1.2f
+    val bodyR = 12f
+    val cutR  = 9.4f
+    val cutDx =  4.2f
+    val cutDy = -2.2f
 
     // Halo (separates the moon from the inky bar fill on its left
     // side, matching the sun's halo for consistency).
-    drawCircle(color = ColorCanvas, radius = bodyR + 1.5f, center = center)
+    drawCircle(color = ColorCanvas, radius = bodyR + 3f, center = center)
 
     // Body.
     drawCircle(color = ColorMoon, radius = bodyR, center = center)
@@ -430,7 +430,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMoon(center: Of
 // region Formatters
 
 private val ClockFormatter: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("h:mm a", Locale.US)
+    DateTimeFormatter.ofPattern("h:mm a", Locale.UK)
 
 private fun formatClock(instant: Instant, zone: ZoneId): String {
     val zoned = ZonedDateTime.ofInstant(instant, zone)

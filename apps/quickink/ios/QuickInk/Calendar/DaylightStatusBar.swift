@@ -231,7 +231,7 @@ private enum DaylightStatusBarMetrics {
     /// Total height reserved for the bar row (track + marker). Tall
     /// enough that the marker's halo doesn't clip the row above or
     /// below.
-    static let barRowHeight: CGFloat = 22
+    static let barRowHeight: CGFloat = 24
 
     static let trackHeight: CGFloat = 5
 
@@ -297,11 +297,11 @@ private enum DaylightStatusBarMetrics {
     /// from the locked SVG so the prototype and the live component
     /// render identically.
     static func drawSun(in context: GraphicsContext, center: CGPoint) {
-        let bodyR:     CGFloat = 4.0
-        let haloR:     CGFloat = 6.0   // body + 2px cream stroke
-        let rayInner:  CGFloat = 7.0
-        let rayOuter:  CGFloat = 10.0
-        let rayWidth:  CGFloat = 1.4
+        let bodyR:     CGFloat = 8.0
+        let haloR:     CGFloat = 12.0  // body + 4px cream stroke
+        let rayInner:  CGFloat = 14.0
+        let rayOuter:  CGFloat = 20.0
+        let rayWidth:  CGFloat = 2.0
         let ord = rayInner / sqrt(2)   // diagonal ray start
         let ord2 = rayOuter / sqrt(2)
 
@@ -348,15 +348,15 @@ private enum DaylightStatusBarMetrics {
     /// Crescent moon: dark-grey disc with a cream punch-out offset
     /// to the upper-right, producing a waxing shape.
     static func drawMoon(in context: GraphicsContext, center: CGPoint) {
-        let bodyR:  CGFloat = 6.5
-        let cutR:   CGFloat = 5.1
-        let cutDx:  CGFloat =  2.3
-        let cutDy:  CGFloat = -1.2
+        let bodyR:  CGFloat = 12.0
+        let cutR:   CGFloat = 9.4
+        let cutDx:  CGFloat =  4.2
+        let cutDy:  CGFloat = -2.2
 
         // Halo (separates moon body from the inky bar fill on its
         // left side, matching the sun's halo treatment for
         // consistency).
-        let haloR: CGFloat = bodyR + 1.5
+        let haloR: CGFloat = bodyR + 3
         let haloRect = CGRect(
             x: center.x - haloR, y: center.y - haloR,
             width: haloR * 2, height: haloR * 2
