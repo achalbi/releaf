@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -122,28 +123,28 @@ private fun DaylightStatusBarContent(
             .padding(horizontal = 16.dp, vertical = 0.dp),
         verticalArrangement = Arrangement.Top,
     ) {
-        // Labels row
+        // Single header row: sunrise label + sunrise time on the
+        // left, the center "now" time bracketed by middle dots,
+        // sunset time + sunset label on the right. During night,
+        // the day/night labels flip — left becomes "SUNSET",
+        // right becomes "SUNRISE".
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             CapsLabel(if (isDay) "SUNRISE" else "SUNSET")
-            Spacer(modifier = Modifier.weight(1f))
-           // CapsLabel("NOW")
-            Spacer(modifier = Modifier.weight(1f))
-            CapsLabel(if (isDay) "SUNSET" else "SUNRISE")
-        }
-
-        // Times row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+            Spacer(modifier = Modifier.width(4.dp))
             ClockText(formatClock(phase.anchorLeft, zone), sizeSp = 12f)
             Spacer(modifier = Modifier.weight(1f))
-            ClockText(formatClock(phase.now,          zone), sizeSp = 14f)
+            MidDot()
+            Spacer(modifier = Modifier.width(6.dp))
+            ClockText(formatClock(phase.now,        zone), sizeSp = 14f)
+            Spacer(modifier = Modifier.width(6.dp))
+            MidDot()
             Spacer(modifier = Modifier.weight(1f))
-            ClockText(formatClock(phase.anchorRight,  zone), sizeSp = 12f)
+            ClockText(formatClock(phase.anchorRight, zone), sizeSp = 12f)
+            Spacer(modifier = Modifier.width(4.dp))
+            CapsLabel(if (isDay) "SUNSET" else "SUNRISE")
         }
 
         // Meter row — elapsed caption pinned to the start, remaining
@@ -183,6 +184,18 @@ private fun CaptionText(text: String) {
         text       = text,
         fontFamily = QuickInkFonts.ui,
         fontSize   = 12.sp,
+        fontWeight = FontWeight.Normal,
+        color      = ColorLabel,
+        style      = TightTextStyle,
+    )
+}
+
+@Composable
+private fun MidDot() {
+    Text(
+        text       = "•",
+        fontFamily = QuickInkFonts.ui,
+        fontSize   = 11.sp,
         fontWeight = FontWeight.Normal,
         color      = ColorLabel,
         style      = TightTextStyle,
@@ -245,20 +258,18 @@ private fun DaylightStatusBarShell(modifier: Modifier = Modifier) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             CapsLabel("SUNRISE")
+            Spacer(modifier = Modifier.width(4.dp))
+            ClockText("—:—", 12f)
             Spacer(modifier = Modifier.weight(1f))
-            CapsLabel("NOW")
+            MidDot()
+            Spacer(modifier = Modifier.width(6.dp))
+            ClockText("—:—", 14f)
+            Spacer(modifier = Modifier.width(6.dp))
+            MidDot()
             Spacer(modifier = Modifier.weight(1f))
+            ClockText("—:—", 12f)
+            Spacer(modifier = Modifier.width(4.dp))
             CapsLabel("SUNSET")
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ClockText("—:—", 11f)
-            Spacer(modifier = Modifier.weight(1f))
-            ClockText("—:—", 13f)
-            Spacer(modifier = Modifier.weight(1f))
-            ClockText("—:—", 11f)
         }
         // Combined meter row with placeholder captions — matches the
         // live content's layout so nothing shifts when the location

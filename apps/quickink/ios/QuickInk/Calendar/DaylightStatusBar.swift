@@ -73,8 +73,7 @@ private struct DaylightStatusBarContent: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            labelsRow
-            timesRow
+            labelsAndTimesRow
             meterRow
         }
         .padding(.horizontal, DaylightStatusBarMetrics.horizontalPadding)
@@ -85,33 +84,38 @@ private struct DaylightStatusBarContent: View {
 
     // MARK: Rows
 
-    private var labelsRow: some View {
-        HStack {
+    /// Single header row: sunrise label + sunrise time on the left,
+    /// the center "now" time bracketed by middle dots, sunset time
+    /// + sunset label on the right. During night, the day/night
+    /// labels flip — left becomes "SUNSET", right becomes "SUNRISE".
+    private var labelsAndTimesRow: some View {
+        HStack(spacing: 4) {
             Text(phase.phase == .day ? "SUNRISE" : "SUNSET")
-            Spacer()
-            Text("NOW")
-            Spacer()
-            Text(phase.phase == .day ? "SUNSET" : "SUNRISE")
-        }
-        .font(.system(size: 8, weight: .regular))
-        .tracking(0.8)
-        .foregroundColor(DaylightStatusBarMetrics.labelGray)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.bottom, -2)
-    }
-
-    private var timesRow: some View {
-        HStack {
+                .font(.system(size: 8, weight: .regular))
+                .tracking(0.8)
+                .foregroundColor(DaylightStatusBarMetrics.labelGray)
             Text(Self.formatClock(phase.anchorLeft))
                 .font(.system(size: 11, design: .serif))
+                .foregroundColor(DaylightStatusBarMetrics.ink)
             Spacer()
+            Text("•")
+                .font(.system(size: 11))
+                .foregroundColor(DaylightStatusBarMetrics.labelGray)
             Text(Self.formatClock(phase.now))
                 .font(.system(size: 13, design: .serif))
+                .foregroundColor(DaylightStatusBarMetrics.ink)
+            Text("•")
+                .font(.system(size: 11))
+                .foregroundColor(DaylightStatusBarMetrics.labelGray)
             Spacer()
             Text(Self.formatClock(phase.anchorRight))
                 .font(.system(size: 11, design: .serif))
+                .foregroundColor(DaylightStatusBarMetrics.ink)
+            Text(phase.phase == .day ? "SUNSET" : "SUNRISE")
+                .font(.system(size: 8, weight: .regular))
+                .tracking(0.8)
+                .foregroundColor(DaylightStatusBarMetrics.labelGray)
         }
-        .foregroundColor(DaylightStatusBarMetrics.ink)
         .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -176,25 +180,34 @@ private struct DaylightStatusBarContent: View {
 private struct DaylightStatusBarShell: View {
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("SUNRISE"); Spacer(); Text("NOW"); Spacer(); Text("SUNSET")
+            HStack(spacing: 4) {
+                Text("SUNRISE")
+                    .font(.system(size: 8, weight: .regular))
+                    .tracking(0.8)
+                    .foregroundColor(DaylightStatusBarMetrics.labelGray)
+                Text("—:—")
+                    .font(.system(size: 11, design: .serif))
+                    .foregroundColor(DaylightStatusBarMetrics.ink.opacity(0.4))
+                Spacer()
+                Text("•")
+                    .font(.system(size: 11))
+                    .foregroundColor(DaylightStatusBarMetrics.labelGray)
+                Text("—:—")
+                    .font(.system(size: 13, design: .serif))
+                    .foregroundColor(DaylightStatusBarMetrics.ink.opacity(0.4))
+                Text("•")
+                    .font(.system(size: 11))
+                    .foregroundColor(DaylightStatusBarMetrics.labelGray)
+                Spacer()
+                Text("—:—")
+                    .font(.system(size: 11, design: .serif))
+                    .foregroundColor(DaylightStatusBarMetrics.ink.opacity(0.4))
+                Text("SUNSET")
+                    .font(.system(size: 8, weight: .regular))
+                    .tracking(0.8)
+                    .foregroundColor(DaylightStatusBarMetrics.labelGray)
             }
-            .font(.system(size: 8, weight: .regular))
-            .tracking(0.8)
-            .foregroundColor(DaylightStatusBarMetrics.labelGray)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.bottom, -2)
-
-            HStack {
-                Text("—:—").font(.system(size: 11, design: .serif))
-                Spacer()
-                Text("—:—").font(.system(size: 13, design: .serif))
-                Spacer()
-                Text("—:—").font(.system(size: 11, design: .serif))
-            }
-            .foregroundColor(DaylightStatusBarMetrics.ink.opacity(0.4))
-            .frame(height: 13)
-            .padding(.vertical, -1)
 
             // Combined meter row — placeholder captions on left + right
             // bracket an empty-track canvas. Matches the live content's
