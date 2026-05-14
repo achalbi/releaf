@@ -112,7 +112,8 @@ private struct DaylightStatusBarContent: View {
                 .font(.system(size: 11, design: .serif))
         }
         .foregroundColor(DaylightStatusBarMetrics.ink)
-        .frame(height: 14)
+        .frame(height: 13)
+        .padding(.vertical, -1)
     }
 
     private var barRow: some View {
@@ -195,7 +196,8 @@ private struct DaylightStatusBarShell: View {
                 Text("—:—").font(.system(size: 11, design: .serif))
             }
             .foregroundColor(DaylightStatusBarMetrics.ink.opacity(0.4))
-            .frame(height: 14)
+            .frame(height: 13)
+            .padding(.vertical, -1)
 
             Canvas { context, size in
                 let track = DaylightStatusBarMetrics.trackRect(size: size)

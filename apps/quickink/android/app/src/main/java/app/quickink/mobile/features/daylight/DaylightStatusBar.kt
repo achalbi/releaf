@@ -36,7 +36,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -134,7 +137,7 @@ private fun DaylightStatusBarContent(
 
         // Times row
         Row(
-            modifier = Modifier.fillMaxWidth().height(14.dp),
+            modifier = Modifier.fillMaxWidth().height(13.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ClockText(formatClock(phase.anchorLeft, zone), sizeSp = 11f)
@@ -239,8 +242,21 @@ private fun ClockText(text: String, sizeSp: Float) {
         fontSize   = sizeSp.sp,
         fontWeight = FontWeight.Normal,
         color      = ColorInk,
+        style      = TightTextStyle,
     )
 }
+
+// Disables Android's legacy `includeFontPadding` and forces the
+// line height to exactly the glyph height. Together they strip the
+// 4-6sp of invisible padding the platform normally tacks onto every
+// Text — so the times row hugs its glyphs with no extra space.
+private val TightTextStyle = TextStyle(
+    platformStyle = PlatformTextStyle(includeFontPadding = false),
+    lineHeightStyle = LineHeightStyle(
+        alignment = LineHeightStyle.Alignment.Center,
+        trim      = LineHeightStyle.Trim.Both,
+    ),
+)
 
 // endregion
 
@@ -266,7 +282,7 @@ private fun DaylightStatusBarShell(modifier: Modifier = Modifier) {
             CapsLabel("SUNSET")
         }
         Row(
-            modifier = Modifier.fillMaxWidth().height(14.dp),
+            modifier = Modifier.fillMaxWidth().height(13.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ClockText("—:—", 11f)
