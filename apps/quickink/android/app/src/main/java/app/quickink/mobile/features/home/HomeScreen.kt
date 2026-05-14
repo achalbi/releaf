@@ -79,7 +79,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -97,17 +96,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
-import android.view.WindowManager
 import android.net.Uri
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.R
@@ -944,23 +936,6 @@ private fun computeTreeImpact(pagesBySize: Map<String, Int>): TreeImpact {
 
 // MARK: - Sustainability breakdown sheet
 
-/**
- * Walk the `ContextWrapper.baseContext` chain looking for the host
- * [Activity]. `LocalView.current.context` inside a Compose Popup
- * (which Material3 1.3.x uses for ModalBottomSheet) is the popup's
- * ContextThemeWrapper, not the activity directly — so we have to
- * unwrap to reach the window we need to re-apply immersive flags
- * to. Returns `null` if called outside an Activity-hosted context
- * (e.g., a Compose preview), which the caller treats as a no-op.
- */
-private fun Context.findHostActivity(): Activity? {
-    var ctx: Context? = this
-    while (ctx is ContextWrapper) {
-        if (ctx is Activity) return ctx
-        ctx = ctx.baseContext
-    }
-    return null
-}
 
 /**
  * Bottom sheet that opens when the user taps [SustainabilityHero].
@@ -986,47 +961,6 @@ private fun SustainabilityBreakdownSheet(
     val type = LocalQuickInkTypography.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // Hide the system status bar while the breakdown sheet is up.
-    //
-    // Material3 1.3.x renders ModalBottomSheet inside a `Popup`, not
-    // a `Dialog`, so there's no separate dialog window to grab. We
-    // operate on the host Activity's window directly. Two layers,
-    // applied together for OEM coverage:
-    //
-    //   1. Modern: WindowInsetsControllerCompat.hide(statusBars()).
-    //      This is the AndroidX-blessed path and is enough on stock
-    //      Android / Pixel / most OEMs.
-    //   2. Legacy: WindowManager.LayoutParams.FLAG_FULLSCREEN. Some
-    //      OEM skins (MIUI / HyperOS, ColorOS variants) silently
-    //      ignore the modern InsetsController hide for popup-hosted
-    //      composables and only honor the older window flag — that's
-    //      the case the user hit on a Xiaomi-family device where the
-    //      bar kept rendering above the sheet despite the modern
-    //      call being applied at both Activity onCreate and sheet
-    //      open. Setting FLAG_FULLSCREEN forces the issue.
-    //
-    // `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE` matches the activity-
-    // level config in MainActivity so a swipe-from-top still reveals
-    // the bar briefly. onDispose clears FLAG_FULLSCREEN so the home
-    // screen returns to its baseline state when the sheet closes —
-    // we don't explicitly re-show the bar via the InsetsController,
-    // because MainActivity's intent is "hide app-wide" and we don't
-    // want to fight that on devices where it actually works.
-    val view = LocalView.current
-    DisposableEffect(Unit) {
-        val activity = view.context.findHostActivity()
-        val window = activity?.window
-        if (window != null) {
-            val controller = WindowInsetsControllerCompat(window, window.decorView)
-            controller.hide(WindowInsetsCompat.Type.statusBars())
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        }
-        onDispose {
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        }
-    }
 
     val ecoDeep = QuickInkColors.LeafGreenDeep
     val ecoBg   = QuickInkColors.LeafGreenBase.copy(alpha = 0.18f)
