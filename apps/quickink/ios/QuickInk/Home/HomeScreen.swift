@@ -477,7 +477,7 @@ struct HomeScreen: View {
     /// localized chrome.
     private static let homeStatusDayFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "EEE"
+        f.dateFormat = "EEE MMM"
         f.locale     = Locale(identifier: "en_US_POSIX")
         return f
     }()

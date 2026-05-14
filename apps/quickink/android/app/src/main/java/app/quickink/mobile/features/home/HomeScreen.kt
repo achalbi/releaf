@@ -1137,7 +1137,7 @@ private fun pointsLabel(locale: java.util.Locale, raw: Double): String =
 /// Locked to US English so the abbreviated weekday + am/pm tokens
 /// match the design spec regardless of device locale.
 private val HomeStatusDayFormatter =
-    java.time.format.DateTimeFormatter.ofPattern("EEE", java.util.Locale.US)
+    java.time.format.DateTimeFormatter.ofPattern("EEE MMM", java.util.Locale.US)
 private val HomeStatusTimeFormatter =
     java.time.format.DateTimeFormatter.ofPattern("hh:mm a", java.util.Locale.US)
 
