@@ -212,6 +212,20 @@ struct HomeScreen: View {
         // never sits behind the bar — no manual `Spacer` needed.
         ScrollView {
             VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
+                // Live-updating system date/time strip at top-right
+                // — small temporal anchor in the space where the OS
+                // status bar would be (hidden app-wide) and where
+                // the daylight bar would be (suppressed on Home).
+                // 60 s tick is enough; only the minute digit moves
+                // below the hour scale.
+                TimelineView(.periodic(from: Date(), by: 60)) { context in
+                    HStack {
+                        Spacer()
+                        Text(Self.formatHomeStatusDateTime(context.date))
+                            .font(.system(size: 12))
+                            .foregroundColor(QuickInkColors.muted)
+                    }
+                }
                 headerBlock
                 // Daylight hero — slim card showing today's sunrise
                 // and sunset times with a now-marker meter beneath.
@@ -452,6 +466,49 @@ struct HomeScreen: View {
         case 12..<18: return "Good afternoon"
         default:      return "Good evening"
         }
+    }
+
+    // MARK: - Date/time strip helpers
+
+    /// Cached formatters so the TimelineView's 60 s reformat doesn't
+    /// re-allocate one per tick. Locked to `en_US_POSIX` so the
+    /// abbreviated weekday and am/pm tokens read the same regardless
+    /// of the device locale — the format is the design spec, not
+    /// localized chrome.
+    private static let homeStatusDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE"
+        f.locale     = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    private static let homeStatusTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "hh:mm a"
+        f.amSymbol   = "am"
+        f.pmSymbol   = "pm"
+        f.locale     = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    /// Standard English ordinal suffix — `1st`, `2nd`, `3rd`, `4th`,
+    /// with the 11/12/13 exception so "11th" not "11st".
+    private static func homeStatusOrdinal(_ n: Int) -> String {
+        let mod100 = n % 100
+        if mod100 >= 11 && mod100 <= 13 { return "th" }
+        switch n % 10 {
+        case 1: return "st"
+        case 2: return "nd"
+        case 3: return "rd"
+        default: return "th"
+        }
+    }
+
+    private static func formatHomeStatusDateTime(_ date: Date) -> String {
+        let cal  = Calendar.current
+        let day  = cal.component(.day, from: date)
+        let year = cal.component(.year, from: date)
+        return "\(homeStatusDayFormatter.string(from: date)) \(day)\(homeStatusOrdinal(day)), \(year) \(homeStatusTimeFormatter.string(from: date))"
     }
 
     // MARK: - Pending-sync pill

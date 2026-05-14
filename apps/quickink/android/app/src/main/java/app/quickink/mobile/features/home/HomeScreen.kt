@@ -302,6 +302,39 @@ fun HomeScreen(
                     bottom = 140.dp,
                 ),
         ) {
+            // Live-updating system date/time strip at top-right —
+            // small temporal anchor in the space where the OS
+            // status bar would be (hidden app-wide) and where the
+            // daylight bar would be (suppressed on Home). 60 s tick
+            // is enough; only the minute digit moves below the hour
+            // scale. Reuses `nowMs` (already maintained for the
+            // sync-tap-ack window) plus a top-level minute ticker.
+            var clockNowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    delay(60_000L)
+                    clockNowMs = System.currentTimeMillis()
+                }
+            }
+            val statusDateTime = remember(clockNowMs) {
+                formatHomeStatusDateTime(
+                    java.time.ZonedDateTime.ofInstant(
+                        java.time.Instant.ofEpochMilli(clockNowMs),
+                        java.time.ZoneId.systemDefault(),
+                    )
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                Text(
+                    text       = statusDateTime,
+                    style      = type.caption,
+                    color      = colors.muted,
+                )
+            }
+            Spacer(Modifier.size(QuickInkSpacing.s2))
             HomeHeader(
                 displayName     = displayName,
                 profilePhotoUri = profilePhotoUri,
@@ -1098,6 +1131,40 @@ private fun BreakdownRow(label: String, value: String, caption: String) {
 /** "+1,234 pts" — used for the per-component point contributions. */
 private fun pointsLabel(locale: java.util.Locale, raw: Double): String =
     String.format(locale, "+%,d pts", raw.roundToInt().coerceAtLeast(0))
+
+// region — Home status date/time strip
+
+/// Locked to US English so the abbreviated weekday + am/pm tokens
+/// match the design spec regardless of device locale.
+private val HomeStatusDayFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("EEE", java.util.Locale.US)
+private val HomeStatusTimeFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("hh:mm a", java.util.Locale.US)
+
+/// Standard English ordinal suffix — 1st / 2nd / 3rd / 4th, with the
+/// 11/12/13 exception so "11th" not "11st".
+private fun homeStatusOrdinal(n: Int): String {
+    val mod100 = n % 100
+    if (mod100 in 11..13) return "th"
+    return when (n % 10) {
+        1 -> "st"
+        2 -> "nd"
+        3 -> "rd"
+        else -> "th"
+    }
+}
+
+/// "Mon 9th, 2026 03:34 pm" — top-right status strip on Home.
+private fun formatHomeStatusDateTime(now: java.time.ZonedDateTime): String {
+    val dayName = now.format(HomeStatusDayFormatter)
+    val day     = now.dayOfMonth
+    val suffix  = homeStatusOrdinal(day)
+    val year    = now.year
+    val time    = now.format(HomeStatusTimeFormatter).lowercase(java.util.Locale.US)
+    return "$dayName $day$suffix, $year $time"
+}
+
+// endregion
 
 /** "812 g" under a kilo, "1.23 kg" once we cross the threshold. */
 private fun formatGramsOrKg(grams: Double): String {
