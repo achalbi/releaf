@@ -39,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.quickink.mobile.data.analytics.AnalyticsFlushWorker
@@ -549,11 +550,21 @@ private fun MainShell(
         daylightStore.refreshIfNeeded()
     }
 
+    // Daylight bar hides on Home — the DaylightHero card already
+    // shows the same sunrise/sunset, so the bar would be a
+    // redundant duplicate at the top of the Home tab. Other routes
+    // (Settings, Workspace, Calendar, etc.) keep the bar since they
+    // have no daylight context of their own.
+    val currentBackStackEntry by navController.currentBackStackEntryAsState()
+    val onHome = currentBackStackEntry?.destination?.route == Routes.HOME
+
     Column(modifier = Modifier.fillMaxSize()) {
-        DaylightStatusBar(
-            latitude  = daylightStore.latitude,
-            longitude = daylightStore.longitude,
-        )
+        if (!onHome) {
+            DaylightStatusBar(
+                latitude  = daylightStore.latitude,
+                longitude = daylightStore.longitude,
+            )
+        }
         NavHost(
             navController     = navController,
             startDestination  = Routes.HOME,

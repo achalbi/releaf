@@ -391,10 +391,18 @@ private struct MainShell: View {
                 ScanReviewScreen(controller: controller, userId: userId)
             case .idle:
                 VStack(spacing: 0) {
-                    DaylightStatusBar(
-                        latitude:  daylightLocation.latitude,
-                        longitude: daylightLocation.longitude
-                    )
+                    // Daylight bar hides on Home — the DaylightHero
+                    // card already shows the same sunrise/sunset, so
+                    // the bar would be a redundant duplicate at the
+                    // top of the Home tab. Pushed routes (Settings,
+                    // Workspace, Calendar, etc.) keep the bar since
+                    // they have no daylight context of their own.
+                    if !path.isEmpty {
+                        DaylightStatusBar(
+                            latitude:  daylightLocation.latitude,
+                            longitude: daylightLocation.longitude
+                        )
+                    }
                     NavigationStack(path: $path) {
                     HomeScreen(
                         controller:     controller,
