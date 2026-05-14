@@ -121,7 +121,7 @@ private fun DaylightStatusBarContent(
             .background(ColorCanvas)
             .padding(top = 8.dp)
             .padding(horizontal = 16.dp, vertical = 0.dp),
-        verticalArrangement = Arrangement.Top,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         // Single header row: sunrise label + sunrise time on the
         // left, the center "now" time bracketed by middle dots,

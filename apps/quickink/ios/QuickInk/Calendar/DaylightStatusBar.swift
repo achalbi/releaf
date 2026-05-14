@@ -72,7 +72,7 @@ private struct DaylightStatusBarContent: View {
     let phase: SolarPhase
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 4) {
             labelsAndTimesRow
             meterRow
         }
