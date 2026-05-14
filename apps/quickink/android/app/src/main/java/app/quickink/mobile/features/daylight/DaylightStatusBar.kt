@@ -10,6 +10,8 @@
  * or marker geometry here, change `DaylightStatusBar.swift` too.
  */
 
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package app.quickink.mobile.features.daylight
 
 import androidx.compose.foundation.Canvas
