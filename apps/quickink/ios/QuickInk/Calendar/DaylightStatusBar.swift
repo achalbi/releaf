@@ -112,8 +112,7 @@ private struct DaylightStatusBarContent: View {
                 .font(.system(size: 11, design: .serif))
         }
         .foregroundColor(DaylightStatusBarMetrics.ink)
-        .frame(height: 13)
-        .padding(.vertical, -1)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var barRow: some View {

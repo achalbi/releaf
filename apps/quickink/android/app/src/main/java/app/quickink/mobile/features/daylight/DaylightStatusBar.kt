@@ -137,7 +137,7 @@ private fun DaylightStatusBarContent(
 
         // Times row
         Row(
-            modifier = Modifier.fillMaxWidth().height(13.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ClockText(formatClock(phase.anchorLeft, zone), sizeSp = 11f)
@@ -282,7 +282,7 @@ private fun DaylightStatusBarShell(modifier: Modifier = Modifier) {
             CapsLabel("SUNSET")
         }
         Row(
-            modifier = Modifier.fillMaxWidth().height(13.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ClockText("—:—", 11f)
