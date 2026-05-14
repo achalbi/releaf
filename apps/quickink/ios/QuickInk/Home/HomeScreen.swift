@@ -292,7 +292,7 @@ struct HomeScreen: View {
                 .padding(.top, QuickInkSpacing.s3)
             }
             .padding(.horizontal, QuickInkSpacing.s5)
-            .padding(.top, 4)
+            .padding(.top, 6)
             // Extra breathing room at the bottom so the sync pill
             // doesn't bump into the nav bar's safe-area inset when
             // scrolled to the end.

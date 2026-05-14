@@ -295,7 +295,7 @@ fun HomeScreen(
                 .padding(
                     start  = QuickInkSpacing.s5,
                     end    = QuickInkSpacing.s5,
-                    top    = statusBarTop + 4.dp,
+                    top    = statusBarTop + 6.dp,
                     // Reserve space behind nav bar (~80dp) plus a
                     // little extra (~40dp) so the sync pill at the
                     // end of the scroll content doesn't bump into
@@ -332,14 +332,14 @@ fun HomeScreen(
                 Text(
                     text       = statusDate,
                     fontFamily = QuickInkFonts.ui,
-                    fontSize   = 14.sp,
-                    color      = Color.Black,
+                    fontSize   = 12.sp,
+                    color      = colors.muted,
                 )
                 Text(
                     text       = statusTime,
                     fontFamily = QuickInkFonts.ui,
-                    fontSize   = 14.sp,
-                    color      = Color.Black,
+                    fontSize   = 12.sp,
+                    color      = colors.muted,
                 )
             }
             Spacer(Modifier.size(QuickInkSpacing.s2))
