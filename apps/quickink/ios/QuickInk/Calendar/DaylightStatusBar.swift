@@ -129,19 +129,13 @@ private struct DaylightStatusBarContent: View {
     }
 
     private var captionsRow: some View {
-        GeometryReader { geo in
-            let fraction = CGFloat(phase.fraction)
-            let elapsedCenter   = geo.size.width * fraction   / 2
-            let remainingCenter = geo.size.width * (fraction + 1) / 2
-            ZStack(alignment: .topLeading) {
-                Text(Self.formatDuration(phase.elapsed) + " in")
-                    .position(x: elapsedCenter, y: 4.5)
-                Text(Self.formatDuration(phase.remaining) + " left")
-                    .position(x: remainingCenter, y: 4.5)
-            }
-            .font(.system(size: 8, weight: .regular))
-            .foregroundColor(DaylightStatusBarMetrics.labelGray)
+        HStack {
+            Text(Self.formatDuration(phase.elapsed) + " in")
+            Spacer()
+            Text(Self.formatDuration(phase.remaining) + " left")
         }
+        .font(.system(size: 8, weight: .regular))
+        .foregroundColor(DaylightStatusBarMetrics.labelGray)
         .frame(height: 9)
     }
 

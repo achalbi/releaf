@@ -15,7 +15,6 @@ package app.quickink.mobile.features.daylight
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,7 +39,6 @@ import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -165,13 +163,12 @@ private fun DaylightStatusBarContent(
             )
         }
 
-        // Captions row — the two duration labels are centered on
-        // the elapsed / remaining halves of the bar so they
-        // visually anchor to their portions of the meter.
+        // Captions row — elapsed pinned to the start, remaining
+        // pinned to the end. Reads like a min/max label pair below
+        // the meter rather than tracking the marker position.
         CaptionsRow(
             elapsed   = formatDuration(phase.elapsedMillis),
             remaining = formatDuration(phase.remainingMillis),
-            fraction  = phase.fraction.toFloat(),
         )
     }
 }
@@ -180,48 +177,30 @@ private fun DaylightStatusBarContent(
 private fun CaptionsRow(
     elapsed: String,
     remaining: String,
-    fraction: Float,
 ) {
-    // Wrap in a Box so the two labels can position themselves at
-    // the elapsed-half and remaining-half centers. Using Layout
-    // would be cleaner but adds boilerplate for a two-element row.
-    Box(modifier = Modifier
-        .fillMaxWidth()
-        .height(12.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top,
     ) {
-        // Elapsed label — center on the midpoint of [0, fraction].
-        val elapsedFrac   = (fraction / 2f).coerceIn(0f, 1f)
-        val remainingFrac = ((fraction + 1f) / 2f).coerceIn(0f, 1f)
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Spacer(modifier = Modifier.weight(elapsedFrac.coerceAtLeast(0.0001f)))
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = "$elapsed in",
-                    fontFamily = QuickInkFonts.ui,
-                    fontSize   = 12.sp,
-                    fontWeight = FontWeight.Normal,
-                    color      = ColorLabel,
-                    textAlign  = TextAlign.Center,
-                    style      = TightTextStyle,
-                )
-            }
-            Spacer(modifier = Modifier.weight((1f - elapsedFrac).coerceAtLeast(0.0001f)))
-        }
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Spacer(modifier = Modifier.weight(remainingFrac.coerceAtLeast(0.0001f)))
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = "$remaining left",
-                    fontFamily = QuickInkFonts.ui,
-                    fontSize   = 12.sp,
-                    fontWeight = FontWeight.Normal,
-                    color      = ColorLabel,
-                    textAlign  = TextAlign.Center,
-                    style      = TightTextStyle,
-                )
-            }
-            Spacer(modifier = Modifier.weight((1f - remainingFrac).coerceAtLeast(0.0001f)))
-        }
+        Text(
+            text = "$elapsed in",
+            fontFamily = QuickInkFonts.ui,
+            fontSize   = 12.sp,
+            fontWeight = FontWeight.Normal,
+            color      = ColorLabel,
+            style      = TightTextStyle,
+        )
+        Text(
+            text = "$remaining left",
+            fontFamily = QuickInkFonts.ui,
+            fontSize   = 12.sp,
+            fontWeight = FontWeight.Normal,
+            color      = ColorLabel,
+            style      = TightTextStyle,
+        )
     }
 }
 
