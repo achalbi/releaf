@@ -51,6 +51,11 @@ keystore.properties
 .fleet/
 node_modules/
 
+# Claude Code per-project state — agent worktrees, transcripts,
+# plan files. Lives next to the repo it operates on and is
+# personal to whoever ran the agent. Never tracked.
+.claude/
+
 # ─── Misc ───────────────────────────────────────────────
 *.log
 *.tmp
