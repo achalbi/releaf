@@ -40,7 +40,7 @@ import androidx.compose.ui.graphics.Color
 
 object QuickInkColors {
     // Fixed canvas + text triplet — does NOT change with the picker.
-    val Canvas        = Color(0xFFF5EEDF)
+    val Canvas        = Color(0xFFFBF6EE)
     val TextPrimary   = Color(0xFF463C31)
     val TextSecondary = Color(0xFF5F5245)
 

@@ -99,7 +99,7 @@ public enum QuickInkColors {
     //     swaps it at runtime by reading SettingsState.primaryColor
     //     and SettingsState.themeMode (light → deep variant, dark →
     //     base variant).
-    public static let bg           = dynamic(light: 0xF5EEDF, dark: 0x1C1917)
+    public static let bg           = dynamic(light: 0xFBF6EE, dark: 0x1C1917)
     public static let surface      = dynamic(light: 0xFFFFFF, dark: 0x292524)
     public static let border       = dynamic(light: 0xEDE4D2, dark: 0x3D3733)
     public static let borderSoft   = dynamic(light: 0xF0E9DD, dark: 0x35302C)
