@@ -51,11 +51,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import android.view.WindowManager
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import app.quickink.mobile.features.scan.PendingShare
 import app.quickink.mobile.features.settings.SettingsPreferences
 import app.quickink.mobile.features.splash.QuickInkLaunchAnimation
@@ -115,32 +112,16 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
 
-        // Hide the top status bar app-wide. We draw the Compose tree
-        // edge-to-edge under where the bar used to live, then ask the
-        // window-insets controller to hide just the `statusBars()`
-        // type so the bottom nav bar stays as-is. `BEHAVIOR_SHOW_
-        // TRANSIENT_BARS_BY_SWIPE` matches the standard immersive UX
-        // — a swipe-down from the top reveals the bar briefly and
-        // it re-hides on its own. WindowCompat / WindowInsetsCompat
-        // are the AndroidX shims, so this works back to minSdk 26
-        // without API-level branching.
-        //
-        // Belt-and-suspenders: the legacy `FLAG_FULLSCREEN` is also
-        // set on the activity's window. Some OEM skins (MIUI /
-        // HyperOS, certain ColorOS builds) silently ignore the
-        // modern InsetsController hide() call — confirmed on a
-        // Xiaomi-family device where the bar kept rendering across
-        // Home, Workspace and the breakdown sheet despite the
-        // AndroidX path being applied. The older window flag is
-        // still respected on those ROMs and forces the fullscreen
-        // layout.
+        // Draw the Compose tree edge-to-edge under the system bars.
+        // We keep the status bar VISIBLE on regular screens; the
+        // only surface that hides it is the Sustainability
+        // Tree-points modal, which toggles the immersive flags on
+        // the activity window for the duration of its composition
+        // (see `SustainabilityBreakdownSheet` in `HomeScreen.kt`).
+        // Doing edge-to-edge here means content layouts already
+        // account for the bar's inset, so the modal's transition
+        // doesn't shift the rest of the UI when the bar fades.
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            hide(WindowInsetsCompat.Type.statusBars())
-            systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
-        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
 
         // Restore the launch-intent latch first. On config-change
         // recreation `savedInstanceState` is non-null and carries

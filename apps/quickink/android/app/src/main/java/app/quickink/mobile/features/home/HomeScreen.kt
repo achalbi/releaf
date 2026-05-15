@@ -79,6 +79,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -96,10 +97,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.view.WindowManager
 import android.net.Uri
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.R
@@ -957,6 +965,21 @@ private fun computeTreeImpact(pagesBySize: Map<String, Int>): TreeImpact {
 
 // MARK: - Sustainability breakdown sheet
 
+/**
+ * Walk the `ContextWrapper.baseContext` chain looking for the host
+ * [Activity] so the Tree-points modal can reach into the activity's
+ * window and toggle status-bar visibility while it's shown. Returns
+ * `null` if called outside an Activity-hosted context (e.g., a
+ * Compose preview), which the caller treats as a no-op.
+ */
+private fun Context.findHostActivity(): Activity? {
+    var ctx: Context? = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
 
 /**
  * Bottom sheet that opens when the user taps [SustainabilityHero].
@@ -982,6 +1005,40 @@ private fun SustainabilityBreakdownSheet(
     val type = LocalQuickInkTypography.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    // Hide the system status bar for the duration of this composition
+    // so the modal reads as a clean full-bleed surface rather than
+    // sitting under the system clock / battery strip. Two layers:
+    //
+    //   1. Modern AndroidX `WindowInsetsControllerCompat.hide(
+    //      statusBars())` — works on stock Android / Pixel / most
+    //      OEMs.
+    //   2. Legacy `WindowManager.LayoutParams.FLAG_FULLSCREEN` —
+    //      MIUI / HyperOS and some ColorOS builds silently ignore
+    //      the modern API for popup-hosted composables but still
+    //      honor the older window flag. Keeps the modal immersive
+    //      across the OEM long tail.
+    //
+    // Restored on dispose so leaving the modal returns the activity
+    // window to its baseline (status bar visible app-wide on every
+    // other surface).
+    val view = LocalView.current
+    DisposableEffect(Unit) {
+        val window = view.context.findHostActivity()?.window
+        if (window != null) {
+            val controller = WindowInsetsControllerCompat(window, window.decorView)
+            controller.hide(WindowInsetsCompat.Type.statusBars())
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        }
+        onDispose {
+            if (window != null) {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+                WindowInsetsControllerCompat(window, window.decorView)
+                    .show(WindowInsetsCompat.Type.statusBars())
+            }
+        }
+    }
 
     val ecoDeep = QuickInkColors.LeafGreenDeep
     val ecoBg   = QuickInkColors.LeafGreenBase.copy(alpha = 0.18f)
