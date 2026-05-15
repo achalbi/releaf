@@ -858,7 +858,9 @@ private data class TreeImpact(
     val pages: Int,
     val cardPages: Int,
     val a4Pages: Int,
-    val smallPages: Int,
+    val a5Pages: Int,
+    val letterPages: Int,
+    val customPages: Int,
     val pulpYield: Double,
     val treeFraction: Double,
     val waterLiters: Int,
@@ -875,21 +877,37 @@ private data class TreeImpact(
 /**
  * Build a [TreeImpact] from a per-size page count breakdown. The
  * `Sheet engagement` factor weights each bucket independently:
- *   - card  → +4 pts/page (bonus for digitising what's normally
- *                          printed in bulk)
- *   - a4    → +2 pts/page (default for camera scans)
- *   - small → +1 pt/page  (reserved for sub-A4 PDF imports)
+ *   - card        → +0.4 pts/page (bonus for digitising what's
+ *                                  normally printed in bulk)
+ *   - a4 / letter → +0.2 pts/page (≈ same physical paper area)
+ *   - a5          → +0.1 pts/page (half the paper of A4)
+ *   - custom      → +0.2 pts/page (treated as A4-equivalent for
+ *                                  scoring; we don't know the true
+ *                                  size by definition)
  *
- * The other four factors and the streak boost still scale with total
- * lifetime pages — they capture pulp / water / CO₂ / energy per
- * sheet, which is roughly size-agnostic at the precision the score
- * is meant to convey.
+ * The other four factors scale with total lifetime pages — they
+ * capture pulp / water / CO₂ / energy per sheet, which is roughly
+ * size-agnostic at the precision the score is meant to convey.
+ *
+ * Legacy `"small"` raw values (from the v13 schema's reserved slot)
+ * are folded into the `a5` bucket via [PaperSize.fromRaw] before
+ * lookup, so no historical pages get dropped.
  */
 private fun computeTreeImpact(pagesBySize: Map<String, Int>): TreeImpact {
-    val cardPages  = pagesBySize[PaperSize.Card.raw]  ?: 0
-    val a4Pages    = pagesBySize[PaperSize.A4.raw]    ?: 0
-    val smallPages = pagesBySize[PaperSize.Small.raw] ?: 0
-    val totalPages = cardPages + a4Pages + smallPages
+    // Re-bucket by PaperSize.fromRaw so legacy "small" rows fold into
+    // .A5 and unknown values fall through to .A4 rather than getting
+    // silently dropped on a typo. Collisions sum.
+    val byEnum: Map<PaperSize, Int> = pagesBySize
+        .entries
+        .groupingBy { PaperSize.fromRaw(it.key) }
+        .fold(0) { acc, entry -> acc + entry.value }
+
+    val cardPages   = byEnum[PaperSize.Card]   ?: 0
+    val a4Pages     = byEnum[PaperSize.A4]     ?: 0
+    val a5Pages     = byEnum[PaperSize.A5]     ?: 0
+    val letterPages = byEnum[PaperSize.Letter] ?: 0
+    val customPages = byEnum[PaperSize.Custom] ?: 0
+    val totalPages  = cardPages + a4Pages + a5Pages + letterPages + customPages
 
     val sheets       = totalPages.toDouble()
     val pulpYield    = 0.17                          // tree biomass → paper
@@ -898,14 +916,15 @@ private fun computeTreeImpact(pagesBySize: Map<String, Int>): TreeImpact {
     val co2Grams     = sheets * 4.6
     val energyWh     = sheets * 50.0
 
-    // Size-weighted sheet engagement. Cards score 0.4, A4 0.2,
-    // smaller 0.1 per page. All five component weights are tuned
-    // 10× smaller than the earlier model so the lifetime total
-    // stays in a comfortably-readable range rather than ballooning
-    // into the high tens-of-thousands for everyday users.
-    val pSheets = cardPages  * 0.4 +
-                  a4Pages    * 0.2 +
-                  smallPages * 0.1
+    // Size-weighted sheet engagement. Card +0.4 / A4 +0.2 / A5 +0.1 /
+    // Letter +0.2 / Custom +0.2. Letter ≈ A4 area, so same weight.
+    // Custom defaults to A4-equivalent — we don't know its true
+    // size by definition.
+    val pSheets = cardPages   * 0.4 +
+                  a4Pages     * 0.2 +
+                  a5Pages     * 0.1 +
+                  letterPages * 0.2 +
+                  customPages * 0.2
     val pTrees  = treeFraction * 1_200.0
     val pWater  = waterLiters  * 0.06
     val pCarbon = co2Grams     * 0.12
@@ -919,7 +938,9 @@ private fun computeTreeImpact(pagesBySize: Map<String, Int>): TreeImpact {
         pages        = totalPages,
         cardPages    = cardPages,
         a4Pages      = a4Pages,
-        smallPages   = smallPages,
+        a5Pages      = a5Pages,
+        letterPages  = letterPages,
+        customPages  = customPages,
         pulpYield    = pulpYield,
         treeFraction = treeFraction,
         waterLiters  = waterLiters,
@@ -1051,7 +1072,7 @@ private fun SustainabilityBreakdownSheet(
             // back to a single "Sheets engaged" row when no bucket
             // has any pages yet — preserves the previous empty-state
             // copy.
-            if (impact.cardPages == 0 && impact.a4Pages == 0 && impact.smallPages == 0) {
+            if (impact.pages == 0) {
                 BreakdownRow(
                     label   = "Sheets engaged",
                     value   = "0 pages",
@@ -1069,14 +1090,28 @@ private fun SustainabilityBreakdownSheet(
                     BreakdownRow(
                         label   = "A4 documents",
                         value   = String.format(locale, "%,d pages", impact.a4Pages),
-                        caption = "Standard letter / A4 captures",
+                        caption = "Standard A4 captures",
                     )
                 }
-                if (impact.smallPages > 0) {
+                if (impact.a5Pages > 0) {
                     BreakdownRow(
-                        label   = "Smaller pages",
-                        value   = String.format(locale, "%,d pages", impact.smallPages),
-                        caption = "Imports smaller than A4",
+                        label   = "A5 documents",
+                        value   = String.format(locale, "%,d pages", impact.a5Pages),
+                        caption = "Half the paper of A4",
+                    )
+                }
+                if (impact.letterPages > 0) {
+                    BreakdownRow(
+                        label   = "Letter documents",
+                        value   = String.format(locale, "%,d pages", impact.letterPages),
+                        caption = "US Letter ≈ A4 area",
+                    )
+                }
+                if (impact.customPages > 0) {
+                    BreakdownRow(
+                        label   = "Other documents",
+                        value   = String.format(locale, "%,d pages", impact.customPages),
+                        caption = "Non-standard sizes, scored as A4",
                     )
                 }
             }
@@ -1112,7 +1147,7 @@ private fun SustainabilityBreakdownSheet(
             BreakdownRow(
                 label   = "Sheet engagement",
                 value   = pointsLabel(locale, impact.pSheets),
-                caption = "+0.4 / +0.2 / +0.1 pts per page (card / A4 / smaller)",
+                caption = "+0.4 / +0.2 / +0.1 pts per page (card / A4·Letter·Custom / A5)",
             )
             BreakdownRow(
                 label   = "Tree milestone",

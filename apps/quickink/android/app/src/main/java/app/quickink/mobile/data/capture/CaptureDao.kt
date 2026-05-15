@@ -253,6 +253,21 @@ interface CaptureDao {
     suspend fun setTitle(id: String, title: String?, timestamp: String)
 
     /**
+     * Update the `paper_size` bucket on an existing capture. Called
+     * from `ScanReviewScreen`'s paper-size chip when the user
+     * disambiguates the auto-detection (typically A4 vs A5 — aspect
+     * ratio alone can't tell them apart since both are 1:√2). Same
+     * dirty + updated_at pattern as [setTitle] / [setFolder] so the
+     * change syncs through Drive.
+     */
+    @Query("""
+        UPDATE captures
+        SET paper_size = :paperSize, updated_at = :timestamp, dirty = 1
+        WHERE id = :id
+    """)
+    suspend fun setPaperSize(id: String, paperSize: String, timestamp: String)
+
+    /**
      * Backfill the reverse-geocoded place name + full address on a
      * capture whose coordinates landed without them at scan time
      * (rate-limited Geocoder, offline, or a remote area the system

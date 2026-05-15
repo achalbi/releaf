@@ -214,6 +214,29 @@ public final class SettingsState: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: Keys.cachedTreePoints) }
     }
 
+    /// Last `PaperSize` raw value the user picked on the ScanReviewScreen
+    /// paper-size chip. Used as the default for the next scan's chip,
+    /// and consulted by the auto-classifier in `ScanFlowController` to
+    /// disambiguate A4 vs A5 within the A-series ratio bucket (which
+    /// aspect ratio alone cannot resolve — they share 1:√2). `nil` on
+    /// fresh-install / pre-feature builds; the caller treats that as
+    /// "no preference, fall back to .a4".
+    ///
+    /// `static` mirroring `cachedTreePoints` since the classifier needs
+    /// to read this without holding a live SettingsState instance.
+    ///
+    /// Counterpart: Android `SettingsPreferences.lastPaperSize`.
+    public static var lastPaperSize: String? {
+        get { UserDefaults.standard.string(forKey: Keys.lastPaperSize) }
+        set {
+            if let value = newValue {
+                UserDefaults.standard.set(value, forKey: Keys.lastPaperSize)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Keys.lastPaperSize)
+            }
+        }
+    }
+
     /// Drop every identity-leaking pref on sign-out so the next
     /// account on the same device doesn't inherit the previous
     /// user's custom display name / phone / photo / punchline /
@@ -252,6 +275,7 @@ public final class SettingsState: ObservableObject {
         static let primaryColor         = "quickink.settings.primary_color"
         static let themeMode            = "quickink.settings.theme_mode"
         static let cachedTreePoints     = "quickink.settings.cached_tree_points"
+        static let lastPaperSize        = "quickink.settings.last_paper_size"
         // Public key per spec (`quickink.capture.last_mode`).
         // Literal here so the on-disk shape stays grep-able and
         // matches the Android SharedPreferences key 1:1.

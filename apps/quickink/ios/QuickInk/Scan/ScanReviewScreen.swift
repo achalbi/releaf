@@ -63,6 +63,9 @@ struct ScanReviewScreen: View {
                         folderButtonsGrid
                     }
                     if !isFailed {
+                        paperSizeChipRow
+                    }
+                    if !isFailed {
                         savedImagePreview
                     }
                     statusIndicator
@@ -266,6 +269,76 @@ struct ScanReviewScreen: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(folder.name)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
+    // MARK: - Paper-size chip
+
+    /// Four-up chip row letting the user disambiguate the auto-
+    /// detected paper-size class (A4 / A5 / Letter / Custom). The
+    /// auto-classifier seeds the selection from the first page's
+    /// rectified aspect ratio + the user's last pick — A4 vs A5
+    /// can't be told apart from ratio alone (both 1:√2 by ISO
+    /// design), so this is the user's escape hatch.
+    ///
+    /// `.card` isn't surfaced here because card-shaped captures
+    /// flow through the dedicated business-card capture surface,
+    /// which writes `.card` directly without going through this
+    /// review screen.
+    @ViewBuilder
+    private var paperSizeChipRow: some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+            Text("PAPER SIZE")
+                .font(QuickInkText.eyebrow)
+                .tracking(QuickInkLetterSpacing.eyebrow)
+                .foregroundStyle(QuickInkColors.muted)
+
+            HStack(spacing: 6) {
+                ForEach([PaperSize.a4, .a5, .letter, .custom], id: \.rawValue) { size in
+                    paperSizeChip(size: size,
+                                  selected: controller.selectedPaperSize == size)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func paperSizeChip(size: PaperSize, selected: Bool) -> some View {
+        let label: String = {
+            switch size {
+            case .a4:     return "A4"
+            case .a5:     return "A5"
+            case .letter: return "Letter"
+            case .custom: return "Custom"
+            case .card:   return "Card"
+            }
+        }()
+        Button(action: { controller.setPaperSize(size) }) {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(selected
+                                 ? QuickInkColors.textOnAccent
+                                 : QuickInkColors.ink)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(selected
+                              ? QuickInkColors.accent
+                              : Color.white.opacity(0.85))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(
+                            selected
+                            ? QuickInkColors.accent
+                            : QuickInkColors.accent.opacity(0.25),
+                            lineWidth: 1
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Paper size \(label)")
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 

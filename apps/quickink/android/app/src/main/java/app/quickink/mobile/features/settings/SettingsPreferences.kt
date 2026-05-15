@@ -231,6 +231,7 @@ class SettingsPreferences(context: Context) {
         private const val KEY_PRIMARY_COLOR       = "primary_color"
         private const val KEY_THEME_MODE          = "theme_mode"
         private const val KEY_CACHED_TREE_POINTS  = "cached_tree_points"
+        private const val KEY_LAST_PAPER_SIZE     = "last_paper_size"
         // Public key per spec (`quickink.capture.last_mode`). Kept
         // literal here so the on-disk shape stays grep-able and
         // matches the iOS UserDefaults key 1:1.
@@ -265,6 +266,36 @@ class SettingsPreferences(context: Context) {
                 .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
                 .putInt(KEY_CACHED_TREE_POINTS, points)
+                .apply()
+        }
+
+        /**
+         * Last `PaperSize` raw value the user picked on the
+         * ScanReviewScreen paper-size chip. Used as the default for
+         * the next scan's chip, and consulted by the auto-classifier
+         * in `ScanFlowController` to disambiguate A4 vs A5 within
+         * the A-series ratio bucket (which aspect ratio alone cannot
+         * resolve — they share 1:√2 by ISO design). `null` on
+         * fresh-install / pre-feature builds; callers treat that as
+         * "no preference, fall back to `a4`".
+         *
+         * Companion-scoped (rather than an instance property) so
+         * `ScanFlowController` can read it without holding a live
+         * `SettingsPreferences` — same justification as
+         * [readCachedTreePoints].
+         *
+         * Counterpart: iOS `SettingsState.lastPaperSize`.
+         */
+        fun readLastPaperSize(context: Context): String? =
+            context.applicationContext
+                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(KEY_LAST_PAPER_SIZE, null)
+
+        fun writeLastPaperSize(context: Context, raw: String) {
+            context.applicationContext
+                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_LAST_PAPER_SIZE, raw)
                 .apply()
         }
     }

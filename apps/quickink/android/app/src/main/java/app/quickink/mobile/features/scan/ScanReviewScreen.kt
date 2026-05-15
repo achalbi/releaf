@@ -84,6 +84,7 @@ import app.releaf.mobile.ui.theme.AppSpacing
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
+import app.quickink.mobile.ui.theme.QuickInkFonts
 
 @Composable
 fun ScanReviewScreen(
@@ -93,6 +94,7 @@ fun ScanReviewScreen(
     val state by controller.state.collectAsState()
     val selectedFolderId by controller.selectedFolderId.collectAsState()
     val previewImageUri by controller.previewImageUri.collectAsState()
+    val selectedPaperSize by controller.selectedPaperSize.collectAsState()
     val colors = LocalQuickInkColors.current
 
     val context = LocalContext.current
@@ -208,6 +210,13 @@ fun ScanReviewScreen(
             }
 
             if (!isFailed) {
+                PaperSizeChipRow(
+                    selected = selectedPaperSize,
+                    onSelect = { controller.setPaperSize(it) },
+                )
+            }
+
+            if (!isFailed) {
                 SavedImagePreview(previewImageUri = previewImageUri)
             }
 
@@ -319,6 +328,85 @@ private fun FolderButton(folder: FolderEntity, selected: Boolean, onClick: () ->
         }
     }
 }
+
+/**
+ * Four-up chip row letting the user disambiguate the auto-detected
+ * paper-size class (A4 / A5 / Letter / Custom). The auto-classifier
+ * seeds the selection from the first page's rectified aspect ratio
+ * plus the user's last pick — A4 vs A5 can't be told apart from
+ * ratio alone (both are 1:√2 by ISO design), so this is the user's
+ * escape hatch.
+ *
+ * `Card` isn't surfaced here because card-shaped captures flow
+ * through the dedicated business-card capture surface, which writes
+ * `PaperSize.Card` directly without going through this review
+ * screen.
+ */
+@Composable
+private fun PaperSizeChipRow(
+    selected: PaperSize,
+    onSelect: (PaperSize) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val options = listOf(
+        PaperSize.A4     to "A4",
+        PaperSize.A5     to "A5",
+        PaperSize.Letter to "Letter",
+        PaperSize.Custom to "Custom",
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+        Text(
+            text       = "PAPER SIZE",
+            style      = type.eyebrow,
+            color      = colors.muted,
+            fontFamily = QuickInkFonts.ui,
+        )
+        Row(
+            modifier             = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            options.forEach { (size, label) ->
+                PaperSizeChip(
+                    label    = label,
+                    selected = size == selected,
+                    onClick  = { onSelect(size) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PaperSizeChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    Text(
+        text       = label,
+        fontFamily = QuickInkFonts.ui,
+        fontSize   = 12.sp,
+        fontWeight = FontWeight.Medium,
+        color      = if (selected) colors.textOnAccent else colors.ink,
+        modifier   = Modifier
+            .clip(PaperSizeChipShape)
+            .clickable(onClick = onClick)
+            .background(
+                color = if (selected) colors.accent else Color.White.copy(alpha = 0.85f),
+                shape = PaperSizeChipShape,
+            )
+            .border(
+                width = 1.dp,
+                color = if (selected) colors.accent else colors.accent.copy(alpha = 0.25f),
+                shape = PaperSizeChipShape,
+            )
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    )
+}
+
+private val PaperSizeChipShape = RoundedCornerShape(percent = 50)
 
 @Composable
 private fun SavedImagePreview(previewImageUri: String?) {

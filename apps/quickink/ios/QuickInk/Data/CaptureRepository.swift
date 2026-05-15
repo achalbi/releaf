@@ -187,6 +187,22 @@ public final class CaptureRepository: @unchecked Sendable {
         }
     }
 
+    /// Update the `paper_size` bucket on an existing capture. Called
+    /// from `ScanReviewScreen`'s paper-size chip when the user
+    /// disambiguates the auto-detection (typically A4 vs A5, where
+    /// aspect ratio alone can't tell). Same dirty + updated_at
+    /// pattern as `setTitle` / `setFolder` so the change syncs.
+    public func setPaperSize(captureId: String, paperSize: PaperSize) async throws {
+        let now = IsoClock.nowIso()
+        try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE captures
+                SET paper_size = ?, updated_at = ?, dirty = 1
+                WHERE id = ?
+                """, arguments: [paperSize.rawValue, now, captureId])
+        }
+    }
+
     /// Backfill the reverse-geocoded place name + full address on a
     /// capture whose coordinates landed without them at scan time
     /// (rate-limited CLGeocoder, no network, or a remote area the

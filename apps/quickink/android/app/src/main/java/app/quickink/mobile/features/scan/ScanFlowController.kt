@@ -24,6 +24,8 @@ package app.quickink.mobile.features.scan
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.capture.CapturedLocation
 import app.quickink.mobile.data.tag.TagDao
+import app.quickink.mobile.features.settings.SettingsPreferences
+import android.graphics.BitmapFactory
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import app.releaf.mobile.data.notepad.NotepadDao
@@ -162,6 +164,16 @@ class ScanFlowController(
     private val _previewImageUri = MutableStateFlow<String?>(null)
     val previewImageUri: StateFlow<String?> = _previewImageUri.asStateFlow()
 
+    /**
+     * Currently-selected [PaperSize] for the in-flight capture.
+     * Seeded by the auto-classifier in [onScanComplete] and updated
+     * whenever the user taps a chip on `ScanReviewScreen` (via
+     * [setPaperSize]). Defaults to [PaperSize.A4] between passes so
+     * the review-screen preview doesn't flicker before scan-1.
+     */
+    private val _selectedPaperSize = MutableStateFlow(PaperSize.A4)
+    val selectedPaperSize: StateFlow<PaperSize> = _selectedPaperSize.asStateFlow()
+
     private var activeJob: Job? = null
 
     /**
@@ -191,6 +203,43 @@ class ScanFlowController(
 
         val captureId  = Uuidv7.generate()
         val totalPages = result.pageUris.size
+
+        // Auto-classify the page-size class from the first page's
+        // rectified aspect ratio when the caller hasn't pinned a
+        // specific bucket (default [PaperSize.A4]). The card-mode
+        // capture path explicitly passes [PaperSize.Card] so this
+        // branch is skipped there — no risk of an in-frame ID card
+        // being misread as a tiny A-series sheet. For A-series
+        // ratios (where ratio alone can't tell A4 from A5), fall
+        // back to the user's last-picked size so a power user who
+        // routinely scans A5 doesn't have to flip the chip every
+        // time. The user can still override per-scan on
+        // ScanReviewScreen.
+        //
+        // Uses `BitmapFactory.Options.inJustDecodeBounds = true` so
+        // the bitmap pixels are never actually loaded — we only need
+        // the header's width/height. Fast and allocation-free.
+        val resolvedPaperSize: PaperSize = run {
+            if (paperSize != PaperSize.A4) return@run paperSize
+            val ctx = appContext ?: return@run paperSize
+            val firstUri = result.pageUris.firstOrNull() ?: return@run paperSize
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            try {
+                ctx.contentResolver.openInputStream(firstUri).use { stream ->
+                    BitmapFactory.decodeStream(stream, null, opts)
+                }
+            } catch (_: Exception) {
+                return@run paperSize
+            }
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) return@run paperSize
+            val detected = classifyPaperSize(opts.outWidth, opts.outHeight)
+            if (detected == PaperSize.A4) {
+                val lastPick = PaperSize.fromRaw(SettingsPreferences.readLastPaperSize(ctx))
+                if (lastPick == PaperSize.A5) PaperSize.A5 else PaperSize.A4
+            } else {
+                detected
+            }
+        }
         // Stamp once at the start of the pass so retries / OCR-pipeline
         // jitter don't shift the analytics timestamp away from "when
         // the user actually finished scanning". The capturedAt field
@@ -200,8 +249,9 @@ class ScanFlowController(
         // Reset the picker selection so a fresh capture starts with
         // no category. The previous capture's choice was already
         // persisted to its own row.
-        _selectedCategory.value = category
-        _previewImageUri.value  = result.previewUri?.toString()
+        _selectedCategory.value  = category
+        _previewImageUri.value   = result.previewUri?.toString()
+        _selectedPaperSize.value = resolvedPaperSize
         _state.value = State.Recognizing(
             captureId      = captureId,
             totalPages     = totalPages,
@@ -231,7 +281,7 @@ class ScanFlowController(
                     previewUri = result.previewUri?.toString(),
                     pageCount  = totalPages,
                     source     = source,
-                    paperSize  = paperSize,
+                    paperSize  = resolvedPaperSize,
                     location   = location,
                 )
                 // Pre-attach the seeded `category` (post-A.3c: a
@@ -453,6 +503,28 @@ class ScanFlowController(
                 // Best-effort: a transient SQL failure shouldn't
                 // crash the review flow. The user can retap the
                 // folder button to re-issue the write.
+            }
+        }
+    }
+
+    /**
+     * Picked-paper-size persistence hook for the review screen's
+     * paper-size chip. Updates the in-flight capture's `paper_size`
+     * column AND stamps the choice as the user's `lastPaperSize`
+     * preference so the next scan can default to the same bucket
+     * (relevant for A4 vs A5 — the chip is the only way to
+     * disambiguate within the A-series ratio bucket). Fires-and-
+     * forgets; no-ops when there's no active capture.
+     */
+    fun setPaperSize(paperSize: PaperSize) {
+        _selectedPaperSize.value = paperSize
+        appContext?.let { SettingsPreferences.writeLastPaperSize(it, paperSize.raw) }
+        val captureId = currentCaptureId() ?: return
+        scope.launch {
+            try {
+                repository.setPaperSize(captureId = captureId, paperSize = paperSize)
+            } catch (_: Exception) {
+                // Best-effort, same rationale as [setFolder].
             }
         }
     }

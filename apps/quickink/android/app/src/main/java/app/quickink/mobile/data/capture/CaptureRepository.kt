@@ -172,6 +172,16 @@ class CaptureRepository(
     }
 
     /**
+     * Update the `paper_size` bucket on a capture. Called from
+     * `ScanReviewScreen`'s paper-size chip when the user
+     * disambiguates the auto-detection (typically A4 vs A5).
+     * Same dirty + updated_at pattern as [setTitle] / [setFolder].
+     */
+    suspend fun setPaperSize(captureId: String, paperSize: PaperSize) {
+        captureDao.setPaperSize(captureId, paperSize.raw, IsoClock.nowIso())
+    }
+
+    /**
      * Persist a successful page recognition into `ocr_results`.
      * `OcrResult.blocks` is encoded to JSON via the
      * `@Serializable` annotations on the value types.

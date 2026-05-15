@@ -18,6 +18,7 @@
  */
 
 import Foundation
+import UIKit
 import GRDB
 import ReleafCoreData
 import ReleafCoreScan
@@ -78,6 +79,13 @@ public final class ScanFlowController: ObservableObject {
     /// to `ScanReviewScreen` so it can render the saved image below
     /// the category picker. `nil` outside of an active scan pass.
     @Published public var previewImageURL: URL? = nil
+
+    /// Currently-selected `PaperSize` for the in-flight capture.
+    /// Seeded by the auto-classifier in `onScanComplete` and
+    /// updated whenever the user taps a chip on `ScanReviewScreen`
+    /// (via [setPaperSize]). Defaults to `.a4` between passes so
+    /// the review-screen preview doesn't flicker before scan-1.
+    @Published public var selectedPaperSize: PaperSize = .a4
 
     private let userId: String
     private let repository: CaptureRepository
@@ -146,6 +154,33 @@ public final class ScanFlowController: ObservableObject {
 
         let captureId = UUID().uuidString.lowercased()
         let totalPages = pageURLs.count
+
+        // Auto-classify the page-size class from the first page's
+        // rectified aspect ratio when the caller hasn't pinned a
+        // specific bucket (default `.a4`). The card-mode capture
+        // path explicitly passes `.card` so this branch is skipped
+        // there — no risk of an in-frame ID card being misread as
+        // a tiny A-series sheet. For A-series ratios (where ratio
+        // alone can't tell A4 from A5), fall back to the user's
+        // last-picked size so a power user who routinely scans A5
+        // doesn't have to flip the chip every time. The user can
+        // still override per-scan on `ScanReviewScreen`.
+        let resolvedPaperSize: PaperSize = {
+            guard paperSize == .a4 else { return paperSize }
+            guard
+                let firstURL = pageURLs.first,
+                let image    = UIImage(contentsOfFile: firstURL.path)
+            else { return paperSize }
+            let detected = classifyPaperSize(
+                width:  Int(image.size.width),
+                height: Int(image.size.height)
+            )
+            if detected == .a4 {
+                let lastPick = PaperSize.fromRaw(SettingsState.lastPaperSize)
+                return lastPick == .a5 ? .a5 : .a4
+            }
+            return detected
+        }()
         // Stamp once at the start of the pass so retries / OCR-pipeline
         // jitter don't shift the analytics timestamp away from "when
         // the user actually finished scanning". The capturedAt field
@@ -155,8 +190,9 @@ public final class ScanFlowController: ObservableObject {
         // Reset the picker selection so a fresh capture starts with
         // no category. The previous capture's choice was already
         // persisted to its own row.
-        selectedCategory = category
-        previewImageURL  = previewURL
+        selectedCategory  = category
+        previewImageURL   = previewURL
+        selectedPaperSize = resolvedPaperSize
         state = .recognizing(captureId: captureId, totalPages: totalPages, completedPages: 0)
 
         let userId = self.userId
@@ -187,7 +223,7 @@ public final class ScanFlowController: ObservableObject {
                     previewURL: previewURL,
                     pageCount:  totalPages,
                     source:     source,
-                    paperSize:  paperSize,
+                    paperSize:  resolvedPaperSize,
                     location:   location
                 )
                 // Pre-attach the seeded `category` (post-A.3c: a
@@ -511,6 +547,25 @@ public final class ScanFlowController: ObservableObject {
         selectedCategory = nil
         selectedFolderId = nil
         previewImageURL  = nil
+    }
+
+    /// Picked-paper-size persistence hook for the review screen's
+    /// paper-size chip. Updates the in-flight capture's `paper_size`
+    /// column AND stamps the choice as the user's `lastPaperSize`
+    /// preference so the next scan can default to the same bucket
+    /// (especially relevant for A4 vs A5 — the chip is the only way
+    /// to disambiguate within the A-series ratio bucket). Fires-and-
+    /// forgets; no-ops when there's no active capture.
+    public func setPaperSize(_ paperSize: PaperSize) {
+        selectedPaperSize = paperSize
+        SettingsState.lastPaperSize = paperSize.rawValue
+        guard let captureId = currentCaptureId else { return }
+        Task {
+            try? await repository.setPaperSize(
+                captureId: captureId,
+                paperSize: paperSize
+            )
+        }
     }
 
     /// Picked-folder persistence hook for the review screen's
