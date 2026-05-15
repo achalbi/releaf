@@ -102,11 +102,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
+import android.view.View
+import android.view.Window
 import android.view.WindowManager
 import android.net.Uri
 import app.quickink.mobile.QuickInkApp
@@ -966,17 +967,21 @@ private fun computeTreeImpact(pagesBySize: Map<String, Int>): TreeImpact {
 // MARK: - Sustainability breakdown sheet
 
 /**
- * Walk the `ContextWrapper.baseContext` chain looking for the host
- * [Activity] so the Tree-points modal can reach into the activity's
- * window and toggle status-bar visibility while it's shown. Returns
- * `null` if called outside an Activity-hosted context (e.g., a
- * Compose preview), which the caller treats as a no-op.
+ * Walk the view-tree ancestry looking for a [DialogWindowProvider].
+ * Material3 `ModalBottomSheet` (1.3.x) renders inside a private
+ * `ModalBottomSheetDialogLayout` (an `AbstractComposeView`) that
+ * implements this interface and exposes the dialog's window. Some
+ * Compose versions put the provider on the AbstractComposeView
+ * itself, others on a parent — so we walk the chain rather than
+ * casting `view.parent` directly. Returns `null` when called
+ * outside a Compose dialog (e.g., a preview), in which case the
+ * caller no-ops.
  */
-private fun Context.findHostActivity(): Activity? {
-    var ctx: Context? = this
-    while (ctx is ContextWrapper) {
-        if (ctx is Activity) return ctx
-        ctx = ctx.baseContext
+private fun findDialogWindow(start: View): Window? {
+    var node: Any? = start
+    while (node != null) {
+        if (node is DialogWindowProvider) return node.window
+        node = (node as? View)?.parent
     }
     return null
 }
@@ -1007,36 +1012,45 @@ private fun SustainabilityBreakdownSheet(
 
     // Hide the system status bar for the duration of this composition
     // so the modal reads as a clean full-bleed surface rather than
-    // sitting under the system clock / battery strip. Two layers:
+    // sitting under the system clock / battery strip.
     //
+    // Critical: ModalBottomSheet (Material3 1.3.x) renders inside a
+    // private `ComponentDialog` which has its OWN window — separate
+    // from the host Activity's. System-bar visibility is determined
+    // by the topmost focused window, which is the dialog when the
+    // modal is open. Applying immersive flags to the Activity's
+    // window does nothing here; we have to reach the dialog's
+    // window and apply on its `WindowInsetsController`.
+    //
+    // Two layers, both on the dialog window:
     //   1. Modern AndroidX `WindowInsetsControllerCompat.hide(
     //      statusBars())` — works on stock Android / Pixel / most
     //      OEMs.
     //   2. Legacy `WindowManager.LayoutParams.FLAG_FULLSCREEN` —
     //      MIUI / HyperOS and some ColorOS builds silently ignore
-    //      the modern API for popup-hosted composables but still
-    //      honor the older window flag. Keeps the modal immersive
-    //      across the OEM long tail.
+    //      the modern API and only honor the older window flag.
     //
-    // Restored on dispose so leaving the modal returns the activity
-    // window to its baseline (status bar visible app-wide on every
-    // other surface).
+    // [findDialogWindow] walks the view-tree ancestry looking for
+    // `DialogWindowProvider` — Material3's
+    // `ModalBottomSheetDialogLayout` implements that interface,
+    // exposing the dialog's window. Returns `null` outside a Compose
+    // dialog (e.g., a preview), in which case the effect no-ops.
     val view = LocalView.current
     DisposableEffect(Unit) {
-        val window = view.context.findHostActivity()?.window
+        val window = findDialogWindow(view)
         if (window != null) {
-            val controller = WindowInsetsControllerCompat(window, window.decorView)
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            val controller = WindowInsetsControllerCompat(window, view)
             controller.hide(WindowInsetsCompat.Type.statusBars())
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         }
         onDispose {
-            if (window != null) {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-                WindowInsetsControllerCompat(window, window.decorView)
-                    .show(WindowInsetsCompat.Type.statusBars())
-            }
+            // No explicit show() — the dialog window is being torn
+            // down anyway, and the activity window's status bar
+            // visibility is unaffected since we never touched it.
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         }
     }
 
