@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -65,18 +66,29 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Eco
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.CenterFocusWeak
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Park
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material.icons.filled.NightsStay
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -85,6 +97,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -99,6 +112,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -114,13 +128,13 @@ import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.R
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capture.displayTitle
+import app.quickink.mobile.data.location.LocationEntity
+import app.quickink.mobile.data.location.LocationRepository
 import app.quickink.mobile.data.tag.TagEntity
-import app.quickink.mobile.features.nav.NavTab
-import app.quickink.mobile.features.nav.QuickInkBottomNavBar
+import app.quickink.mobile.features.workspace.LocationEditorDialog
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.data.sync.QuickInkSyncWorker
 import app.quickink.mobile.features.scan.PaperSize
-import app.quickink.mobile.features.scan.QuickCaptureScreen
 import app.quickink.mobile.features.scan.ScanFlowController
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
@@ -132,7 +146,6 @@ import app.quickink.mobile.ui.theme.QuickInkColors
 import app.quickink.mobile.ui.theme.QuickInkFonts
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
-import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import app.quickink.mobile.ui.theme.quickInkLinedPaper
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.sync.SyncStateKeys
@@ -140,6 +153,7 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.LocalTime
 
 @Composable
@@ -179,9 +193,9 @@ fun HomeScreen(
     /// avatar without a SharedPreferences observer.
     profilePhotoUri: String = "",
     /// User's location, threaded down from `DaylightLocationStore`
-    /// in `QuickInkRoot` so the `DaylightHero` card uses the same
-    /// sunrise/sunset times as the `DaylightStatusBar` above. Null
-    /// for either falls back to Mysuru — the panchanga anchor.
+    /// in `QuickInkRoot` so the `DaylightHero` card resolves sunrise
+    /// and sunset against the user's actual position. Null for
+    /// either falls back to Mysuru — the panchanga anchor.
     daylightLatitude: Double? = null,
     daylightLongitude: Double? = null,
 ) {
@@ -190,27 +204,12 @@ fun HomeScreen(
     val context = LocalContext.current
     val app = context.applicationContext as QuickInkApp
 
-    // Tap on the Zap FAB now shows QuickCaptureScreen (the dark
-    // mode-picker surface) rather than launching the system
-    // scanner directly. QuickCapture's Zap shutter then triggers
-    // the system scanner internally and dismisses itself on
-    // completion.
-    var showQuickCapture by remember { mutableStateOf(false) }
-
     // Slide-in profile drawer triggered by the avatar tap — mirror
     // of Releaf's home drawer (apps/releaf/android/.../HomeScreen.kt).
     // Replaces the previous Material `DropdownMenu` so the avatar
     // action surface is visually consistent across the two sibling
     // apps.
     var showProfileDrawer by remember { mutableStateOf(false) }
-
-    if (showQuickCapture) {
-        QuickCaptureScreen(
-            controller = controller,
-            onDismiss  = { showQuickCapture = false },
-        )
-        return
-    }
 
     // Live recent-captures rail — surfaces the actual scanned-page
     // preview JPEGs, newest first. Tap on a thumb routes to
@@ -247,6 +246,22 @@ fun HomeScreen(
     val primaryTagByCapture: Map<String, String> = remember(primaryTagRows) {
         primaryTagRows.associate { it.captureId to it.tagName }
     }
+
+    // Locations rail — user-defined places ("Home", "Work", …) the
+    // user can attach to documents. Seeded with two defaults on
+    // first launch via [LocationRepository.seedDefaultsIfEmpty] from
+    // QuickInkRoot; this observation reflects the live list.
+    val locationDao  = remember(app) { app.database.locationDao() }
+    val locationRepo = remember(locationDao) { LocationRepository(locationDao) }
+    val locations by remember(userId, locationDao) {
+        locationRepo.observe(userId)
+    }.collectAsState(initial = emptyList())
+    val locationScope = rememberCoroutineScope()
+    var showLocationsSheet by remember { mutableStateOf(false) }
+    // Editor dialog state — `editorOpen` toggles the dialog,
+    // `editorExisting` chooses create (null) vs edit (a row).
+    var editorOpen by remember { mutableStateOf(false) }
+    var editorExisting by remember { mutableStateOf<LocationEntity?>(null) }
 
     // System status-bar inset — without this, the greeting crowds the
     // notch / clock area on edge-to-edge devices (target SDK 35+
@@ -299,7 +314,7 @@ fun HomeScreen(
         ?.getInt(QuickInkSyncWorker.SYNC_PROGRESS_PERCENT_KEY, 0)
         ?.coerceIn(0, 100)
 
-    Box(modifier = Modifier.fillMaxSize().quickInkDotGridBackground()) {
+    Box(modifier = Modifier.fillMaxSize().background(colors.bg)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -340,6 +355,7 @@ fun HomeScreen(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically,
             ) {
                 Text(
                     text       = statusDate,
@@ -347,6 +363,9 @@ fun HomeScreen(
                     fontSize   = 12.sp,
                     color      = colors.muted,
                 )
+                // Sun glyph moved out — now sits next to the
+                // "Good morning" greeting below. The status row
+                // shows just time on the right.
                 Text(
                     text       = statusTime,
                     fontFamily = QuickInkFonts.ui,
@@ -430,21 +449,51 @@ fun HomeScreen(
                 onOpenScan          = onOpenScan,
             )
             Spacer(Modifier.size(QuickInkSpacing.s4))
+            LocationsRail(
+                locations  = locations,
+                onAddTap   = { showLocationsSheet = true },
+                onChipTap  = { showLocationsSheet = true },
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s4))
             RecentActivityPill(
                 pendingReviewCount = pendingCount,
                 pendingSyncCount   = localDirtyCount,
             )
         }
 
-        QuickInkBottomNavBar(
-            activeTab  = NavTab.Home,
-            onHome     = { /* current */ },
-            onWorkspace  = onOpenNotes,
-            onScan     = { showQuickCapture = true },
-            onSearch   = { onOpenSearch?.invoke() },
-            onSettings = onOpenSettings,
-            modifier   = Modifier.align(Alignment.BottomCenter),
-        )
+        // Bottom sheet — list / edit / delete locations. Opens from
+        // the rail's "+" chip and from tapping an existing chip; the
+        // sheet itself routes Add and row-tap into the shared
+        // [LocationEditorDialog] (sibling layer below).
+        if (showLocationsSheet) {
+            LocationsManageSheet(
+                locations = locations,
+                onDismiss = { showLocationsSheet = false },
+                onAdd     = {
+                    editorExisting = null
+                    editorOpen     = true
+                },
+                onEditRow = { loc ->
+                    editorExisting = loc
+                    editorOpen     = true
+                },
+                onDelete  = { id ->
+                    locationScope.launch { locationRepo.softDelete(id) }
+                },
+            )
+        }
+
+        // Editor dialog — create or edit a single location row.
+        // Owns its own DAO writes; we just supply the userId + the
+        // row being edited (null for create).
+        if (editorOpen) {
+            LocationEditorDialog(
+                userId   = userId,
+                existing = editorExisting,
+                onDismiss = { editorOpen = false },
+                onSaved   = { editorOpen = false },
+            )
+        }
 
         // Slide-in profile drawer — sibling layer above the home
         // content + bottom nav. Renders edge-to-edge so the banner
@@ -507,6 +556,13 @@ private fun HomeHeader(
             in 12..17 -> "Good afternoon"
             else      -> "Good evening"
         }
+    }
+    // True when the greeting reads "Good evening" — drives the moon
+    // glyph (vs. sun) in the header Row. Same window as the `else`
+    // branch above: hour >= 18 or hour < 5.
+    val isEvening = remember {
+        val h = LocalTime.now().hour
+        h < 5 || h >= 18
     }
     val resolvedName = (displayName?.trim().orEmpty()).ifEmpty { "QuickInk" }
 
@@ -681,7 +737,27 @@ private fun HomeHeader(
         }
         Spacer(Modifier.size(QuickInkSpacing.s3))
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = greeting, style = type.body, color = colors.muted)
+            // Daylight cue sits before the greeting — sun during the
+            // day, moon-with-stars after 18:00 (and before 05:00).
+            // Replaces the glyph that used to live in the top status
+            // row.
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(
+                    imageVector        = if (isEvening) Icons.Filled.NightsStay
+                                          else Icons.Filled.WbSunny,
+                    contentDescription = null,
+                    tint               = if (isEvening) colors.inkSoft
+                                          else QuickInkColors.LeafYellowDeep,
+                    modifier           = Modifier.size(17.dp),
+                )
+                // Deep taupe (#5F5245) — the `InkSoft` light-mode
+                // value, pinned as a fixed tone for the greeting in
+                // both light and dark.
+                Text(text = greeting, style = type.body, color = Color(0xFF5F5245))
+            }
             Spacer(Modifier.size(QuickInkSpacing.s1))
             Text(
                 text     = resolvedName,
@@ -691,31 +767,49 @@ private fun HomeHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        // Top-right calendar button — coral-soft disc with the
-        // Material `CalendarMonth` glyph. Tap pushes the standalone
-        // Calendar screen (panchanga + Indian holidays + per-day
-        // capture dots). Smaller than the profile avatar by design:
-        // calendar is a destination, not an identity affordance, so
-        // it sits at 40dp rather than the avatar's 64dp outer.
+        // Top-right calendar tile — squared surface card with a
+        // coral calendar glyph and a small "Calendar" label. Reads
+        // as a destination card (vs the avatar's identity disc) and
+        // matches the home mockup's tile-on-tile rhythm. Tap pushes
+        // the standalone Calendar screen (panchanga + Indian holidays
+        // + per-day capture dots).
         val calendarInteraction = remember { MutableInteractionSource() }
-        Box(
+        val calendarShape = RoundedCornerShape(QuickInkRadius.md)
+        Column(
             modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(colors.accentSoft)
-                .border(1.dp, colors.accent.copy(alpha = 0.55f), CircleShape)
+                .size(60.dp)
+                // Shadow renders before clip/background so it falls
+                // outside the tile rather than getting masked away.
+                // Soft 4dp lift to match the home mockup's raised
+                // calendar card.
+                .shadow(
+                    elevation = 4.dp,
+                    shape     = calendarShape,
+                    clip      = false,
+                )
+                .clip(calendarShape)
+                .background(colors.surface)
+                .border(1.dp, colors.border, calendarShape)
                 .clickable(
                     interactionSource = calendarInteraction,
                     indication        = null,
                     onClick           = onTapCalendar,
-                ),
-            contentAlignment = Alignment.Center,
+                )
+                .padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
             Icon(
                 imageVector        = Icons.Outlined.CalendarMonth,
                 contentDescription = "Open calendar",
                 tint               = colors.accent,
-                modifier           = Modifier.size(22.dp),
+                modifier           = Modifier.size(24.dp),
+            )
+            Spacer(Modifier.size(2.dp))
+            Text(
+                text  = "Calendar",
+                style = type.caption,
+                color = colors.ink,
             )
         }
     }
@@ -771,19 +865,23 @@ private fun SustainabilityHero(pagesBySize: Map<String, Int>) {
     val totalPages = impact.pages
     var showBreakdown by remember { mutableStateOf(false) }
 
-    // Refined-warm pass: points + water are their own right-aligned
-    // data column to the right of the headline. We always render two
-    // numeric labels (points, water) so the rhythm stays consistent —
-    // no more "first tree on the way" prose case, the integer score
-    // does the same job at a glance and reads as a real metric.
-    val ecoPointsLabel =
-        String.format(java.util.Locale.ROOT, "%,d Tree pts", impact.totalPoints)
+    val locale = java.util.Locale.ROOT
     val title    = "By going digital"
     val headline = when {
         totalPages == 0 -> "Start saving paper"
         totalPages == 1 -> "1 page saved"
         else            -> "$totalPages pages saved"
     }
+    val treePointsValue = String.format(locale, "%,d", impact.totalPoints)
+    val waterValue      = String.format(locale, "%,d L", impact.waterLiters)
+
+    // Water-drop stat sits on a steady blue regardless of the user's
+    // accent — same posture as `ecoDeep` for the Tree-points icon, so
+    // both badges carry semantic colour (green = pages saved, blue =
+    // water spared) rather than the warm coral that signals primary
+    // app actions elsewhere.
+    val waterDeep = Color(0xFF1F8FCB)
+    val waterBg   = Color(0xFFE3F2FB)
 
     Row(
         modifier = Modifier
@@ -796,7 +894,7 @@ private fun SustainabilityHero(pagesBySize: Map<String, Int>) {
             // empty-state ("here's how the score will work once you
             // start scanning").
             .clickable { showBreakdown = true }
-            .padding(QuickInkSpacing.s4),
+            .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -819,13 +917,15 @@ private fun SustainabilityHero(pagesBySize: Map<String, Int>) {
             // muted gray) so the whole card reads as a coherent green
             // family rather than gray-on-green.
             Text(text = title, style = type.meta, color = ecoDeep)
-            // Sustainability Campaigns sit on the dedicated
-            // [editorial] token (Roboto Serif Bold) per the type
-            // spec — the eco card is the canonical campaign surface.
-            // Sans [heading] would fight the editorial register here.
-            Text(text = headline, style = type.editorial, color = colors.ink)
+            Text(
+                text       = headline,
+                fontFamily = QuickInkFonts.ui,
+                fontWeight = FontWeight.Thin,
+                fontSize   = 12.sp,
+                color      = colors.ink,
+            )
             // Empty-state prompt only — once there's any saved page
-            // the right-hand stat column carries the secondary line.
+            // the right-hand stat badges carry the secondary line.
             if (totalPages == 0) {
                 Spacer(Modifier.size(QuickInkSpacing.s1))
                 Text(
@@ -836,11 +936,43 @@ private fun SustainabilityHero(pagesBySize: Map<String, Int>) {
             }
         }
         if (totalPages > 0) {
-            Spacer(Modifier.size(QuickInkSpacing.s2))
-            Column(horizontalAlignment = Alignment.End) {
-                Text(text = ecoPointsLabel, style = type.meta, color = ecoDeep)
-                Text(text = "${impact.waterLiters} L water", style = type.meta, color = ecoDeep)
-            }
+            // Subtle divider between the headline copy and the
+            // numeric stats — pulls the eye into the badge cluster
+            // and breaks the card into "story" + "numbers" zones
+            // without a heavier rule.
+            Spacer(Modifier.size(QuickInkSpacing.s3))
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(56.dp)
+                    .background(ecoBorder),
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s3))
+            SustainabilityStat(
+                badgeBg   = ecoBg,
+                badgeBorder = ecoBorder,
+                iconTint  = ecoDeep,
+                icon      = Icons.Filled.Park,
+                value     = treePointsValue,
+                caption   = "Tree pts",
+                inkColor  = colors.ink,
+                captionColor = colors.inkSoft,
+                valueStyle   = type.heading,
+                captionStyle = type.caption,
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s3))
+            SustainabilityStat(
+                badgeBg   = waterBg,
+                badgeBorder = waterDeep.copy(alpha = 0.40f),
+                iconTint  = waterDeep,
+                icon      = Icons.Filled.WaterDrop,
+                value     = waterValue,
+                caption   = "Water saved",
+                inkColor  = colors.ink,
+                captionColor = colors.inkSoft,
+                valueStyle   = type.heading,
+                captionStyle = type.caption,
+            )
         }
     }
 
@@ -849,6 +981,48 @@ private fun SustainabilityHero(pagesBySize: Map<String, Int>) {
             impact    = impact,
             onDismiss = { showBreakdown = false },
         )
+    }
+}
+
+/**
+ * One stat column inside the sustainability card. Renders as a
+ * small circular icon badge stacked above a bold value and a muted
+ * caption. Centred on the badge so two adjacent stats sit on the
+ * same vertical axis even when the numeric values have different
+ * widths.
+ */
+@Composable
+private fun SustainabilityStat(
+    badgeBg: Color,
+    badgeBorder: Color,
+    iconTint: Color,
+    icon: ImageVector,
+    value: String,
+    caption: String,
+    inkColor: Color,
+    captionColor: Color,
+    valueStyle: androidx.compose.ui.text.TextStyle,
+    captionStyle: androidx.compose.ui.text.TextStyle,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(badgeBg)
+                .border(1.dp, badgeBorder, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = icon,
+                contentDescription = null,
+                tint               = iconTint,
+                modifier           = Modifier.size(18.dp),
+            )
+        }
+        Spacer(Modifier.size(QuickInkSpacing.s1))
+        Text(text = value,   style = valueStyle,   color = inkColor)
+        Text(text = caption, style = captionStyle, color = captionColor)
     }
 }
 
@@ -1298,38 +1472,22 @@ private fun pointsLabel(locale: java.util.Locale, raw: Double): String =
 
 // region — Home status date/time strip
 
-/// Locked to US English so the abbreviated weekday + am/pm tokens
+/// Locked to US English so the abbreviated weekday + AM/PM tokens
 /// match the design spec regardless of device locale.
-private val HomeStatusDayFormatter =
-    java.time.format.DateTimeFormatter.ofPattern("EEE MMM", java.util.Locale.US)
+private val HomeStatusDateFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("EEE, d MMM yyyy", java.util.Locale.US)
 private val HomeStatusTimeFormatter =
     java.time.format.DateTimeFormatter.ofPattern("hh:mm a", java.util.Locale.US)
 
-/// Standard English ordinal suffix — 1st / 2nd / 3rd / 4th, with the
-/// 11/12/13 exception so "11th" not "11st".
-private fun homeStatusOrdinal(n: Int): String {
-    val mod100 = n % 100
-    if (mod100 in 11..13) return "th"
-    return when (n % 10) {
-        1 -> "st"
-        2 -> "nd"
-        3 -> "rd"
-        else -> "th"
-    }
-}
+/// "Sat, 16 May 2026" — left side of the home status strip.
+private fun formatHomeStatusDate(now: java.time.ZonedDateTime): String =
+    now.format(HomeStatusDateFormatter)
 
-/// "9th Mon May, 2026" — left side of the home status strip.
-private fun formatHomeStatusDate(now: java.time.ZonedDateTime): String {
-    val dayName = now.format(HomeStatusDayFormatter)
-    val day     = now.dayOfMonth
-    val suffix  = homeStatusOrdinal(day)
-    val year    = now.year
-    return "$day$suffix $dayName, $year"
-}
-
-/// "03:34 pm" — right side of the home status strip.
+/// "07:20 AM" — right side of the home status strip. Uppercase per
+/// the design spec; java.time's `a` token is already uppercase on
+/// US locale, so no further casing is required.
 private fun formatHomeStatusTime(now: java.time.ZonedDateTime): String =
-    now.format(HomeStatusTimeFormatter).lowercase(java.util.Locale.US)
+    now.format(HomeStatusTimeFormatter)
 
 // endregion
 
@@ -1518,8 +1676,16 @@ private fun RecentActivityPill(
             "You have $pendingReviewCount scan${if (pendingReviewCount == 1) "" else "s"} pending review"
         pendingSyncCount > 0   ->
             "$pendingSyncCount item${if (pendingSyncCount == 1) "" else "s"} pending sync"
-        else                   -> "You're all caught up"
+        else                   -> "You're all caught up!"
     }
+    val isCaughtUp = pendingReviewCount == 0 && pendingSyncCount == 0
+
+    // Steady leaf-green for the "all caught up" affirmation badge.
+    // Independent of the user's accent picker so the checkmark
+    // always reads as a confirmation cue rather than a coral CTA.
+    val checkDeep = QuickInkColors.LeafGreenDeep
+    val checkBg   = QuickInkColors.LeafGreenBase.copy(alpha = 0.22f)
+    val checkBorder = QuickInkColors.LeafGreenBase.copy(alpha = 0.55f)
 
     Row(
         modifier = Modifier
@@ -1552,6 +1718,26 @@ private fun RecentActivityPill(
             // activity" is functional UI copy, not editorial.
             Text(text = "Recent activity", style = type.label, color = colors.ink)
             Text(text = subtitle, style = type.caption, color = colors.muted)
+        }
+        if (isCaughtUp) {
+            // Affirmation badge — green disc + check glyph on the
+            // trailing edge so "all caught up" reads visually, not
+            // just via the subtitle copy.
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(checkBg)
+                    .border(1.dp, checkBorder, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.Filled.CheckCircle,
+                    contentDescription = null,
+                    tint               = checkDeep,
+                    modifier           = Modifier.size(18.dp),
+                )
+            }
         }
     }
 }
@@ -1645,29 +1831,49 @@ private fun RecentScanThumb(
     val context = LocalContext.current
     val title = capture.displayTitle(primaryTagName)
     val displayDate = friendlyMonthDay(capture.createdAt)
+    val cardShape  = RoundedCornerShape(QuickInkRadius.md)
+    // Image fills the card's full width and top corners — flat at
+    // the bottom so the title row below sits flush against it.
+    val imageShape = RoundedCornerShape(
+        topStart    = QuickInkRadius.md,
+        topEnd      = QuickInkRadius.md,
+        bottomStart = 0.dp,
+        bottomEnd   = 0.dp,
+    )
+    val isImport   = capture.source == "import"
 
     Column(
         modifier = Modifier
-            .width(140.dp)
+            .width(168.dp)
+            .clip(cardShape)
+            // Paper tone — same warm cream the scan-detail per-page
+            // thumbnail strip sits on. Reads as a "paper note" surface
+            // rather than the cooler pure-white `colors.surface`.
+            .background(colors.paper2)
+            .border(1.dp, colors.border, cardShape)
             .clickable(onClick = onTap),
     ) {
+        // Image area — full bleed to the card edges horizontally and
+        // at the top; flat bottom so the title row sits flush against
+        // it. Badges align to this Box's corners.
         Box(
             modifier = Modifier
-                .size(width = 140.dp, height = 120.dp)
-                .clip(RoundedCornerShape(QuickInkRadius.md))
-                .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md)),
+                .fillMaxWidth()
+                .height(132.dp)
+                .clip(imageShape)
+                .background(colors.borderSoft),
         ) {
             val previewUri = capture.previewUri
             if (previewUri.isNullOrBlank()) {
                 Box(
-                    modifier         = Modifier.fillMaxSize().background(colors.borderSoft),
+                    modifier         = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector       = Icons.Filled.Description,
+                        imageVector        = Icons.Filled.Description,
                         contentDescription = null,
-                        tint              = colors.muted,
-                        modifier          = Modifier.size(28.dp),
+                        tint               = colors.muted,
+                        modifier           = Modifier.size(28.dp),
                     )
                 }
             } else {
@@ -1682,22 +1888,31 @@ private fun RecentScanThumb(
                 )
             }
 
+            // Source badge — viewfinder glyph + "Scan" / "Import"
+            // text on a soft surface chip. Coral fill for imports
+            // so the source distinction reads at a glance.
             Row(
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(QuickInkSpacing.s2)
                     .background(
-                        color = if (capture.source == "import") colors.accent else colors.surface.copy(alpha = 0.9f),
-                        shape = RoundedCornerShape(QuickInkRadius.sm),
+                        color = if (isImport) colors.accent else colors.surface.copy(alpha = 0.92f),
+                        shape = RoundedCornerShape(4.dp),
                     )
-                    .padding(horizontal = QuickInkSpacing.s2, vertical = 2.dp),
+                    .padding(horizontal = QuickInkSpacing.s2, vertical = 3.dp),
             ) {
+                Icon(
+                    imageVector        = Icons.Filled.CenterFocusWeak,
+                    contentDescription = null,
+                    tint               = if (isImport) colors.textOnAccent else colors.ink.copy(alpha = 0.75f),
+                    modifier           = Modifier.size(12.dp),
+                )
                 Text(
-                    text  = if (capture.source == "import") "Import" else "Scan",
+                    text  = if (isImport) "Import" else "Scan",
                     style = type.caption,
-                    color = if (capture.source == "import") colors.textOnAccent else colors.ink.copy(alpha = 0.7f),
+                    color = if (isImport) colors.textOnAccent else colors.ink.copy(alpha = 0.75f),
                 )
             }
 
@@ -1710,47 +1925,67 @@ private fun RecentScanThumb(
                         .align(Alignment.TopEnd)
                         .padding(QuickInkSpacing.s2)
                         .background(
-                            color = colors.ink.copy(alpha = 0.55f),
-                            shape = RoundedCornerShape(QuickInkRadius.sm),
+                            color = colors.ink.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(4.dp),
                         )
-                        .padding(horizontal = QuickInkSpacing.s2, vertical = 2.dp),
+                        .padding(horizontal = QuickInkSpacing.s2, vertical = 3.dp),
                 )
             }
         }
 
-        Spacer(Modifier.size(QuickInkSpacing.s2))
-
-        Text(
-            // Title Case — matches the library grid/list/search
-            // normalisation. Per-word: split on whitespace, lower
-            // then titlecase first char.
-            text     = title
-                .split(' ')
-                .joinToString(" ") { word ->
-                    word.lowercase().replaceFirstChar(Char::titlecaseChar)
-                },
-            style    = type.cardTitle,
-            color    = colors.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text  = displayDate,
-            style = type.caption,
-            color = colors.muted,
-        )
+        // Footer row — title + date on the left, three-dot menu on
+        // the right. Menu is currently visual only; tapping the card
+        // surface routes to scan detail.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    // Title Case — matches the library grid/list/
+                    // search normalisation.
+                    text     = title
+                        .split(' ')
+                        .joinToString(" ") { word ->
+                            word.lowercase().replaceFirstChar(Char::titlecaseChar)
+                        },
+                    style    = type.cardTitle.copy(
+                        fontSize   = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color    = colors.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.size(2.dp))
+                Text(
+                    text  = displayDate,
+                    style = type.caption,
+                    color = colors.muted,
+                )
+            }
+            Icon(
+                imageVector        = Icons.Filled.MoreVert,
+                contentDescription = "More",
+                tint               = colors.muted,
+                modifier           = Modifier.size(20.dp),
+            )
+        }
     }
 }
 
 /**
- * `2026-05-02T14:30:00.000Z` → `May 2`. Falls back to the input's
- * date prefix when parsing fails — mirrors iOS's `friendlyDate`.
+ * `2026-05-02T14:30:00.000Z` → `May 2, 2026`. Falls back to the
+ * input's date prefix when parsing fails — mirrors iOS's
+ * `friendlyDate`.
  */
 private fun friendlyMonthDay(iso: String): String =
     try {
         val instant = java.time.Instant.parse(iso)
         val date    = instant.atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-        date.format(java.time.format.DateTimeFormatter.ofPattern("MMM d"))
+        date.format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy"))
     } catch (_: Exception) {
         iso.take(10)
     }
@@ -1760,3 +1995,254 @@ private fun friendlyMonthDay(iso: String): String =
 // cloud now. Helpers (CategoryGrid / CategoryTile / categoryStats
 // / iconForCategory / CategoryStats) and the `onTapCategory`
 // callback on `HomeScreen` come along with it.
+
+// MARK: - Locations rail
+
+/**
+ * Horizontal chip rail of user-defined locations ("Home", "Work",
+ * etc.) with a trailing "+" chip that opens the create / manage
+ * sheet. Seeded with two defaults on first launch
+ * (LocationRepository.seedDefaultsIfEmpty in QuickInkRoot).
+ */
+@Composable
+private fun LocationsRail(
+    locations: List<LocationEntity>,
+    onAddTap: () -> Unit,
+    onChipTap: (LocationEntity) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    Column {
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text  = "Locations",
+                style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
+                color = colors.ink,
+            )
+            Text(
+                text     = "MANAGE",
+                style    = type.label.copy(
+                    letterSpacing = 1.2.sp,
+                    fontSize      = 10.5.sp,
+                    fontWeight    = FontWeight.SemiBold,
+                ),
+                color    = colors.accent,
+                modifier = Modifier.clickable(onClick = onAddTap),
+            )
+        }
+        Spacer(Modifier.size(QuickInkSpacing.s2))
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+            items(locations, key = { it.id }) { loc ->
+                LocationChip(location = loc, onClick = { onChipTap(loc) })
+            }
+            item {
+                AddLocationChip(onClick = onAddTap)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocationChip(
+    location: LocationEntity,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val shape  = RoundedCornerShape(999.dp)
+    Row(
+        modifier = Modifier
+            .clip(shape)
+            .background(colors.surface, shape)
+            .border(1.dp, colors.border, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector        = Icons.Filled.LocationOn,
+            contentDescription = null,
+            tint               = colors.accent,
+            modifier           = Modifier.size(13.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text  = location.name,
+            style = type.label.copy(fontSize = 12.sp),
+            color = colors.inkSoft,
+        )
+    }
+}
+
+@Composable
+private fun AddLocationChip(onClick: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val shape  = RoundedCornerShape(999.dp)
+    Row(
+        modifier = Modifier
+            .clip(shape)
+            .background(colors.borderSoft, shape)
+            .border(1.dp, colors.border, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector        = Icons.Filled.Add,
+            contentDescription = "Add location",
+            tint               = colors.inkSoft,
+            modifier           = Modifier.size(13.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text  = "Add",
+            style = type.label.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+            color = colors.inkSoft,
+        )
+    }
+}
+
+/**
+ * Bottom sheet for creating and removing locations. Currently the
+ * surface where the user actually edits the list — the rail itself
+ * routes both "+" and chip taps in here.
+ *
+ * Linking a location to a document lives on the capture-detail
+ * screen (separate sheet); this sheet is the rail's CRUD entry point.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LocationsManageSheet(
+    locations: List<LocationEntity>,
+    onDismiss: () -> Unit,
+    onAdd: () -> Unit,
+    onEditRow: (LocationEntity) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    val colors     = LocalQuickInkColors.current
+    val type       = LocalQuickInkTypography.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = colors.bg,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start  = QuickInkSpacing.s5,
+                    end    = QuickInkSpacing.s5,
+                    bottom = QuickInkSpacing.s5,
+                ),
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+        ) {
+            Text(
+                text  = "Locations",
+                style = type.heading,
+                color = colors.ink,
+            )
+            Text(
+                text  = "Places you scan from. Tap a row to edit its address; attach a location to a document from the document's detail screen.",
+                style = type.meta,
+                color = colors.inkSoft,
+            )
+
+            // Full-width "+ Add location" button routes to the editor
+            // dialog. The editor handles name + Use-current /
+            // Search-address commit; this sheet just opens it.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(QuickInkRadius.md))
+                    .background(colors.accent)
+                    .clickable(onClick = onAdd)
+                    .padding(vertical = QuickInkSpacing.s3),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector        = Icons.Filled.Add,
+                        contentDescription = null,
+                        tint               = colors.textOnAccent,
+                        modifier           = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text  = "Add location",
+                        style = type.label.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.textOnAccent,
+                    )
+                }
+            }
+
+            if (locations.isEmpty()) {
+                Text(
+                    text  = "No locations yet. Add one to get started.",
+                    style = type.meta,
+                    color = colors.muted,
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+                    locations.forEach { loc ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(QuickInkRadius.md))
+                                .background(colors.surface)
+                                .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
+                                .clickable { onEditRow(loc) }
+                                .padding(
+                                    horizontal = QuickInkSpacing.s3,
+                                    vertical   = QuickInkSpacing.s2,
+                                ),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector        = Icons.Filled.LocationOn,
+                                contentDescription = null,
+                                tint               = colors.accent,
+                                modifier           = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(QuickInkSpacing.s2))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text  = loc.name,
+                                    style = type.body,
+                                    color = colors.ink,
+                                )
+                                val addr = loc.address
+                                if (!addr.isNullOrBlank()) {
+                                    Text(
+                                        text     = addr,
+                                        style    = type.caption.copy(fontSize = 11.sp),
+                                        color    = colors.muted,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector        = Icons.Filled.Delete,
+                                contentDescription = "Delete ${loc.name}",
+                                tint               = colors.muted,
+                                modifier           = Modifier
+                                    .size(20.dp)
+                                    .clickable { onDelete(loc.id) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

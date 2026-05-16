@@ -14,13 +14,14 @@
  *   - Firebase / GMS plugins (out of band, gated on the brand pass)
  *
  * Why this isn't a copy of `:apps:releaf`'s build file: Releaf's deps
- * pull in voice (sherpa-onnx + commons-compress + mlkit-genai-speech),
- * reminders (natty), markdown rendering (m3 markdown lib), Firebase
- * Crashlytics, the Room schema compiler, GoogleSignIn, etc. — none of
- * which QuickInk's MVP needs. The scaffold takes the minimum set
- * (Compose + activity-compose + lifecycle + coroutines + the seven
- * `:shared:*` modules) so the build is fast and the dep graph stays
- * honest.
+ * pull in reminders (natty), markdown rendering (m3 markdown lib),
+ * Firebase Crashlytics, the Room schema compiler, GoogleSignIn, etc. —
+ * none of which QuickInk's MVP needs. QuickInk's scaffold takes the
+ * minimum Compose + activity-compose + lifecycle + coroutines + the
+ * seven `:shared:*` modules so the build is fast and the dep graph
+ * stays honest. The voice-notes feature on the document detail screen
+ * pulls in sherpa-onnx + commons-compress + mlkit-genai-speech for
+ * on-device transcription; those land at the bottom of the deps block.
  */
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -327,6 +328,29 @@ dependencies {
     // on the per-day panchanga card. Same dep Releaf carries; the
     // version pin lives in `libs.versions.toml`.
     implementation(libs.commons.suncalc)
+
+    // ── Voice-notes transcription stack ───────────────────────────
+    //
+    // Document-attached voice notes (Document detail → Voice notes
+    // section) record up to two minutes of audio per clip and offer
+    // an on-device "Transcribe" affordance. The transcription path
+    // tries sherpa-onnx (whisper-tiny.en) first, falling back to ML
+    // Kit GenAI on AICore-capable devices when sherpa fails.
+    //
+    //   - sherpa-onnx        — whisper-tiny.en int8 (~98MB model
+    //                          downloaded on first transcribe) +
+    //                          ~34MB native libs per ABI. Works on
+    //                          API 26+ regardless of AICore.
+    //   - mlkit-genai-speech — Gemini Nano via AICore. Smaller
+    //                          footprint, but requires API 31+ and
+    //                          AICore-capable hardware.
+    //   - commons-compress   — bz2 + tar reader for the sherpa
+    //                          model bundle.
+    //
+    // Same three pins Releaf uses; versions live in libs.versions.toml.
+    implementation(libs.sherpa.onnx)
+    implementation(libs.commons.compress)
+    implementation(libs.mlkit.genai.speech)
 
     // Phase 4 Slice 4.4 — unit-test toolchain. Keeps the test
     // dep set minimal (junit + kotlinx-serialization for the

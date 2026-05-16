@@ -64,6 +64,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Search
@@ -92,9 +93,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.capturelocation.LocationCount
 import app.quickink.mobile.data.capturetag.TagCount
 import app.quickink.mobile.data.folder.FolderEntity
 import app.quickink.mobile.data.folder.FolderRepository
+import app.quickink.mobile.data.location.LocationEntity
 import app.quickink.mobile.data.smartcollection.RuleClause
 import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
 import app.quickink.mobile.data.smartcollection.SmartCollectionRule
@@ -102,8 +105,6 @@ import app.quickink.mobile.data.smartcollection.SmartCollectionRuleInput
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import app.quickink.mobile.data.tag.TagEntity
-import app.quickink.mobile.features.nav.NavTab
-import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
@@ -121,9 +122,6 @@ fun WorkspaceHomeScreen(
     onOpenTag: (TagEntity) -> Unit,
     onOpenSmartCollection: (SmartCollectionEntity) -> Unit,
     onBrowseTags: () -> Unit,
-    onHome: () -> Unit,
-    onScan: () -> Unit,
-    onSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors  = LocalQuickInkColors.current
@@ -194,12 +192,39 @@ fun WorkspaceHomeScreen(
             .collect { value = it }
     }
 
-    val continueCandidate by produceState<CaptureEntity?>(
-        initialValue = null,
+    // Locations + per-location attached-capture counts. Drives the
+    // Locations section below the Tags cloud. Counts are computed
+    // by [CaptureLocationDao.observeLocationCounts] which joins the
+    // capture_locations rows against the user's active captures.
+    val locations by produceState(
+        initialValue = emptyList<LocationEntity>(),
+        key1         = userId,
+    ) {
+        app.database.locationDao()
+            .observeActive(userId)
+            .collect { value = it }
+    }
+
+    val locationCounts by produceState(
+        initialValue = emptyList<LocationCount>(),
+        key1         = userId,
+    ) {
+        app.database.captureLocationDao()
+            .observeLocationCounts(userId)
+            .collect { value = it }
+    }
+
+    // Editor dialog state — null `existing` opens the dialog in
+    // create mode; a non-null row opens it in edit mode.
+    var locationEditorOpen by remember { mutableStateOf(false) }
+    var locationEditorExisting by remember { mutableStateOf<LocationEntity?>(null) }
+
+    val recentlyOpened by produceState<List<CaptureEntity>>(
+        initialValue = emptyList(),
         key1         = userId,
     ) {
         app.database.captureDao()
-            .observeContinueCandidate(userId)
+            .observeRecentlyOpened(userId, RECENTLY_OPENED_LIMIT)
             .collect { value = it }
     }
 
@@ -258,10 +283,13 @@ fun WorkspaceHomeScreen(
 
             Spacer(Modifier.height(QuickInkSpacing.s3))
 
-            continueCandidate?.let { capture ->
-                ContinueCard(
-                    capture = capture,
-                    onClick = { onOpenContinue(capture) },
+            val hero = recentlyOpened.firstOrNull()
+            val rest = if (recentlyOpened.size > 1) recentlyOpened.drop(1) else emptyList()
+            if (hero != null) {
+                RecentsCarousel(
+                    hero    = hero,
+                    rest    = rest,
+                    onOpen  = onOpenContinue,
                 )
                 Spacer(Modifier.height(QuickInkSpacing.s4))
             }
@@ -292,17 +320,36 @@ fun WorkspaceHomeScreen(
                 onBrowseAll = onBrowseTags,
             )
 
+            Spacer(Modifier.height(QuickInkSpacing.s4))
+
+            LocationsSection(
+                locations      = locations,
+                locationCounts = locationCounts,
+                onOpenLocation = { loc ->
+                    locationEditorExisting = loc
+                    locationEditorOpen     = true
+                },
+                onNewLocation  = {
+                    locationEditorExisting = null
+                    locationEditorOpen     = true
+                },
+            )
+
             Spacer(Modifier.height(QuickInkSpacing.s6))
         }
 
-        QuickInkBottomNavBar(
-            activeTab  = NavTab.Workspace,
-            onHome     = onHome,
-            onWorkspace = { /* current tab — no-op */ },
-            onScan     = onScan,
-            onSearch   = onOpenSearch,
-            onSettings = onSettings,
-            modifier   = Modifier.align(Alignment.BottomCenter),
+    }
+
+    // Locations editor — create / edit a single row. Owns its own
+    // DAO writes; we only feed it the userId + the row being edited
+    // (null for create). The list refreshes through the observer
+    // above when the editor commits.
+    if (locationEditorOpen) {
+        LocationEditorDialog(
+            userId    = userId,
+            existing  = locationEditorExisting,
+            onDismiss = { locationEditorOpen = false },
+            onSaved   = { locationEditorOpen = false },
         )
     }
 
@@ -706,8 +753,8 @@ private fun ContinueCard(
 
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = QuickInkSpacing.s4)
+            .width(280.dp)
+            .height(RecentsCarouselHeight)
             .clip(shape)
             .background(colors.ink, shape)
             .clickable(onClick = onClick)
@@ -798,6 +845,128 @@ private fun ContinueCard(
         }
     }
 }
+
+// ─── Recently-opened strip ───────────────────────────────────
+
+/** Hero + carousel cap. The first item is the [ContinueCard], the
+ *  rest feed in as [RecentDocCard]s — all in a single horizontally
+ *  scrollable [RecentsCarousel]. */
+private const val RECENTLY_OPENED_LIMIT = 6
+
+/**
+ * Single horizontal carousel that combines the Continue hero with
+ * the recents thumbnails so the user can swipe horizontally instead
+ * of scrolling the page to reach older items. The hero stays wider
+ * (~280 dp) so it still reads as the "primary" pick on first paint;
+ * the rest are 100 dp thumbnail cards.
+ */
+@Composable
+private fun RecentsCarousel(
+    hero: CaptureEntity,
+    rest: List<CaptureEntity>,
+    onOpen: (CaptureEntity) -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = QuickInkSpacing.s4),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        item(key = "continue-${hero.id}") {
+            ContinueCard(
+                capture = hero,
+                onClick = { onOpen(hero) },
+            )
+        }
+        items(rest, key = { it.id }) { capture ->
+            RecentDocCard(
+                capture = capture,
+                onClick = { onOpen(capture) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecentDocCard(
+    capture: CaptureEntity,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val shape  = RoundedCornerShape(8.dp)
+
+    val title = capture.title?.takeIf { it.isNotBlank() } ?: "Untitled scan"
+    val page  = capture.lastOpenedPage ?: 1
+    val total = capture.pageCount.coerceAtLeast(1)
+    val progressFraction = (page.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+
+    Column(
+        modifier = Modifier
+            .width(100.dp)
+            .height(RecentsCarouselHeight)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp)
+                .clip(shape)
+                .background(colors.surface)
+                .border(1.dp, colors.borderSoft, shape),
+        ) {
+            val previewUri = capture.previewUri?.takeIf { it.isNotBlank() }
+            if (previewUri != null) {
+                coil.compose.AsyncImage(
+                    model = coil.request.ImageRequest.Builder(LocalContext.current)
+                        .data(android.net.Uri.parse(previewUri))
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(colors.borderSoft),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(progressFraction)
+                    .height(3.dp)
+                    .background(colors.accent),
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text     = title,
+            style    = type.body.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium),
+            color    = colors.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text  = "p. $page / $total",
+            style = type.meta.copy(fontSize = 10.5.sp),
+            color = colors.muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Shared height for every card in [RecentsCarousel] so the hero
+ *  and the thumbnail cards align as a single row regardless of how
+ *  much content each holds. Matches the Continue card's natural
+ *  height (thumb 70 + s3 padding × 2). */
+private val RecentsCarouselHeight = 94.dp
 
 // ─── Smart collections strip ─────────────────────────────────
 
@@ -1153,6 +1322,153 @@ private fun TagChip(
                 color = colors.muted,
             )
         }
+    }
+}
+
+// ─── Locations section ───────────────────────────────────────────
+
+/**
+ * Locations section — one row per user-defined place ("Home",
+ * "Work", custom search/GPS-pinned rows). Mirrors the FoldersSection
+ * shape (header + list of rows) since each location has both a name
+ * and an optional address that benefit from the wider row layout.
+ *
+ * Tapping a row routes back into [LocationEditorDialog] in edit
+ * mode; "NEW LOCATION" in the header opens it in create mode.
+ * Counts are sourced from the `capture_locations` join, so a row's
+ * "N items" badge reflects active attachments only.
+ */
+@Composable
+private fun LocationsSection(
+    locations: List<LocationEntity>,
+    locationCounts: List<LocationCount>,
+    onOpenLocation: (LocationEntity) -> Unit,
+    onNewLocation: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    val countById = remember(locationCounts) {
+        locationCounts.associate { it.locationId to it.docCount }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text  = "Locations",
+            style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
+            color = colors.ink,
+        )
+        Text(
+            text     = "NEW LOCATION",
+            style    = type.label.copy(
+                letterSpacing = 1.2.sp,
+                fontSize      = 10.5.sp,
+                fontWeight    = FontWeight.SemiBold,
+            ),
+            color    = colors.accent,
+            modifier = Modifier.clickable(onClick = onNewLocation),
+        )
+    }
+
+    Spacer(Modifier.height(QuickInkSpacing.s2))
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4),
+    ) {
+        if (locations.isEmpty()) {
+            Text(
+                text     = "No locations yet.",
+                style    = type.meta,
+                color    = colors.muted,
+                modifier = Modifier.padding(vertical = QuickInkSpacing.s3),
+            )
+        } else {
+            locations.forEach { loc ->
+                LocationRow(
+                    location     = loc,
+                    captureCount = countById[loc.id] ?: 0,
+                    onClick      = { onOpenLocation(loc) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocationRow(
+    location: LocationEntity,
+    captureCount: Int,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Location glyph in an accent-soft square — same footprint
+        // as FolderRow's color chip so the rows align vertically
+        // when stacked under the Folders section.
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(colors.accentSoft.copy(alpha = 0.7f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.LocationOn,
+                contentDescription = null,
+                tint               = colors.accent,
+                modifier           = Modifier.size(14.dp),
+            )
+        }
+
+        Spacer(Modifier.width(QuickInkSpacing.s3))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text  = location.name,
+                style = type.body.copy(fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
+                color = colors.ink,
+            )
+            val addr = location.address
+            if (!addr.isNullOrBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text     = addr,
+                    style    = type.meta.copy(fontSize = 11.5.sp),
+                    color    = colors.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text  = "$captureCount ${if (captureCount == 1) "item" else "items"}",
+                style = type.meta.copy(fontSize = 11.5.sp),
+                color = colors.muted,
+            )
+        }
+
+        Icon(
+            imageVector        = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint               = colors.muted,
+            modifier           = Modifier.size(18.dp),
+        )
     }
 }
 

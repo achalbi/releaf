@@ -114,8 +114,6 @@ import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capture.displayTitle
-import app.quickink.mobile.features.nav.NavTab
-import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
 import app.quickink.mobile.ui.components.DateRangePickerSheet
 import app.quickink.mobile.ui.components.isWithinPickedDateRange
@@ -151,23 +149,6 @@ private enum class ViewMode { Grid, List }
 fun NotesListScreen(
     userId: String,
     onOpenScan: (captureId: String) -> Unit,
-    /// Tab navigation callbacks for the floating bottom nav. The
-    /// Library tab paints itself active; tapping it is a no-op
-    /// (we're already here). The other callbacks switch tabs at
-    /// the route level — see QuickInkRoot's
-    /// `popUpTo(HOME) { saveState=true }` wiring.
-    ///
-    /// `onBack` was removed when the Library header swapped from a
-    /// back chevron to the calendar / view-mode control pill;
-    /// Library is a tab destination, so back-stack pops happen via
-    /// the system back gesture and the Home tab callback, not an
-    /// in-header arrow. `onHome` defaults to a no-op here for the
-    /// same reason — callers are expected to wire it explicitly.
-    onHome: () -> Unit = {},
-    onWorkspace: () -> Unit = {},
-    onScan: () -> Unit = {},
-    onSearch: () -> Unit = {},
-    onSettings: () -> Unit = {},
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
@@ -447,19 +428,6 @@ fun NotesListScreen(
             }
         }
         }
-
-        // Floating bottom nav — Library tab is active; tapping it is
-        // a no-op (we're already here). The other callbacks switch
-        // tabs; the FAB launches the scanner.
-        QuickInkBottomNavBar(
-            activeTab  = NavTab.Workspace,
-            onHome     = onHome,
-            onWorkspace  = onWorkspace,
-            onScan     = onScan,
-            onSearch   = onSearch,
-            onSettings = onSettings,
-            modifier   = Modifier.align(Alignment.BottomCenter),
-        )
     }
 }
 

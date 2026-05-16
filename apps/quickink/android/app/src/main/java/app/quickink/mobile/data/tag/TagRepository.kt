@@ -149,15 +149,59 @@ class TagRepository(
     }
 
     /**
+     * One-shot migration that renames the legacy capitalized seed
+     * names ("Ideas", "Projects", "Meetings", "Todo", "Business
+     * Card", "Journal") to their kebab-case form so existing users
+     * land on the same canonical form as fresh seeds and the AI
+     * suggester chips. `capture_tags` rows reference the tag by id
+     * so the rename propagates without touching the join.
+     *
+     * Guarded by a SharedPreferences flag so it only runs once per
+     * install. Body is defensive — if the kebab target already
+     * exists we soft-delete the capitalized row instead of trying
+     * to rename. Mirror of iOS
+     * `migrateLegacySeedNamesToKebabIfNeeded`.
+     */
+    suspend fun migrateLegacySeedNamesToKebabIfNeeded(
+        context: Context,
+        userId: String,
+    ) {
+        val prefs = context.applicationContext
+            .getSharedPreferences("quickink_migrations", Context.MODE_PRIVATE)
+        val flagKey = "seed-kebab-v1"
+        if (prefs.getBoolean(flagKey, false)) return
+
+        val renames = listOf(
+            "Ideas"         to "ideas",
+            "Projects"      to "projects",
+            "Meetings"      to "meetings",
+            "Todo"          to "todo",
+            "Business Card" to "business-card",
+            "Journal"       to "journal",
+        )
+        val active = tagDao.listActive(userId).associateBy { it.name }
+        val now = IsoClock.nowIso()
+        renames.forEach { (old, new) ->
+            val oldRow = active[old] ?: return@forEach
+            if (active[new] == null) {
+                tagDao.rename(oldRow.id, new, now)
+            } else {
+                tagDao.softDelete(oldRow.id, now)
+            }
+        }
+        prefs.edit().putBoolean(flagKey, true).apply()
+    }
+
+    /**
      * One-shot migration for users who were on a previous default
      * seed that included "Study" (which has since been replaced by
-     * "Business Card"). Renames Study → Business Card. Post-A.3c
+     * "business-card"). Renames Study → business-card. Post-A.3c
      * the rename propagates automatically through `capture_tags`
      * (the join row FKs the tag id, not its name), so the
      * historical per-capture retag pass is gone.
      *
      * Guarded by a SharedPreferences flag so it only runs once per
-     * install. Body is defensive — if Business Card already exists
+     * install. Body is defensive — if business-card already exists
      * we soft-delete Study instead of trying to rename. Mirror of
      * iOS `migrateLegacyStudyToBusinessCardIfNeeded`.
      */
@@ -172,11 +216,11 @@ class TagRepository(
 
         val active       = tagDao.listActive(userId)
         val study        = active.firstOrNull { it.name == "Study" }
-        val businessCard = active.firstOrNull { it.name == "Business Card" }
+        val businessCard = active.firstOrNull { it.name == "business-card" }
         val now          = IsoClock.nowIso()
 
         if (study != null && businessCard == null) {
-            tagDao.rename(study.id, "Business Card", now)
+            tagDao.rename(study.id, "business-card", now)
         } else if (study != null && businessCard != null) {
             tagDao.softDelete(study.id, now)
         }
@@ -195,7 +239,7 @@ class TagRepository(
          * review" smart collection (Workspace v1; see brief §3).
          */
         val DEFAULT_SEED: List<String> = listOf(
-            "Ideas", "Projects", "Meetings", "Todo", "Business Card", "Journal",
+            "ideas", "projects", "meetings", "todo", "business-card", "journal",
             "needs-review",
         )
 

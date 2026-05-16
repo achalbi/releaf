@@ -83,10 +83,9 @@ fun CategoryEntriesScreen(
     val type = LocalQuickInkTypography.current
 
     // Same DAO Flow the home Recent rail and Library use. We filter
-    // client-side by primary-tag name (the pre-A.3c
-    // `captures.category` replacement) — dataset is small enough
-    // that a single observed Flow + client filter beats threading a
-    // tag arg through the DAO.
+    // client-side by the set of capture ids that carry the supplied
+    // tag — not only docs where it's the primary tag, so secondary
+    // tag attachments also surface this view.
     val captureDao = remember(app) { app.database.captureDao() }
     val captureTagDao = remember(app) { app.database.captureTagDao() }
     val allCaptures by captureDao.observeActive(userId).collectAsState(initial = emptyList())
@@ -95,10 +94,12 @@ fun CategoryEntriesScreen(
     val primaryTagByCapture: Map<String, String> = remember(primaryTagRows) {
         primaryTagRows.associate { it.captureId to it.tagName }
     }
-
-    val needle = categoryName.lowercase()
-    val capturesInCategory = remember(needle, allCaptures, primaryTagByCapture) {
-        allCaptures.filter { (primaryTagByCapture[it.id] ?: "").lowercase() == needle }
+    val captureIdsWithTag by captureTagDao
+        .observeCaptureIdsForTagName(userId, categoryName)
+        .collectAsState(initial = emptyList())
+    val captureIdSet: Set<String> = remember(captureIdsWithTag) { captureIdsWithTag.toSet() }
+    val capturesInCategory = remember(allCaptures, captureIdSet) {
+        allCaptures.filter { it.id in captureIdSet }
     }
 
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()

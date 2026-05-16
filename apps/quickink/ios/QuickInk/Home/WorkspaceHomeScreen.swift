@@ -44,9 +44,6 @@ public struct WorkspaceHomeScreen: View {
     public let onOpenTag: (TagEntity) -> Void
     public let onOpenSmartCollection: (SmartCollectionEntity) -> Void
     public let onBrowseTags: () -> Void
-    public let onHome: () -> Void
-    public let onScan: () -> Void
-    public let onSettings: () -> Void
 
     @StateObject private var viewModel: WorkspaceHomeViewModel
     @State private var folderEditorMode: FolderEditorMode? = nil
@@ -65,10 +62,7 @@ public struct WorkspaceHomeScreen: View {
         onOpenProfile: @escaping () -> Void,
         onOpenTag: @escaping (TagEntity) -> Void,
         onOpenSmartCollection: @escaping (SmartCollectionEntity) -> Void,
-        onBrowseTags: @escaping () -> Void,
-        onHome: @escaping () -> Void,
-        onScan: @escaping () -> Void,
-        onSettings: @escaping () -> Void
+        onBrowseTags: @escaping () -> Void
     ) {
         self.userId = userId
         self.onOpenSearch = onOpenSearch
@@ -78,9 +72,6 @@ public struct WorkspaceHomeScreen: View {
         self.onOpenTag = onOpenTag
         self.onOpenSmartCollection = onOpenSmartCollection
         self.onBrowseTags = onBrowseTags
-        self.onHome = onHome
-        self.onScan = onScan
-        self.onSettings = onSettings
         _viewModel = StateObject(wrappedValue: WorkspaceHomeViewModel(userId: userId))
     }
 
@@ -93,9 +84,9 @@ public struct WorkspaceHomeScreen: View {
                 searchBar
                     .padding(.horizontal, AppSpacing.s4)
 
-                if let cap = viewModel.continueCandidate {
-                    continueCard(cap)
-                        .padding(.horizontal, AppSpacing.s4)
+                if let hero = viewModel.recentlyOpened.first {
+                    let rest = Array(viewModel.recentlyOpened.dropFirst())
+                    recentsCarousel(hero: hero, rest: rest)
                 }
 
                 smartCollectionsStrip
@@ -111,16 +102,6 @@ public struct WorkspaceHomeScreen: View {
             .padding(.top, AppSpacing.s3)
         }
         .background(QuickInkColors.bg)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            QuickInkBottomNavBar(
-                activeTab:   .workspace,
-                onHome:      onHome,
-                onWorkspace: { /* current tab */ },
-                onScan:      onScan,
-                onSearch:    onOpenSearch,
-                onSettings:  onSettings
-            )
-        }
         .onAppear { viewModel.start() }
         .sheet(item: $folderActionsTarget) { folder in
             FolderActionSheet(
@@ -479,7 +460,70 @@ public struct WorkspaceHomeScreen: View {
                     )
             }
             .padding(AppSpacing.s3)
+            .frame(width: 280, height: recentsCarouselHeight)
             .background(QuickInkColors.ink, in: RoundedRectangle(cornerRadius: 18))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Shared height for every card in the Recents carousel so the
+    /// hero and the thumbnail cards align as a single row regardless
+    /// of content. Matches the Continue card's natural height
+    /// (thumbnail 70 + AppSpacing.s3 padding × 2).
+    private var recentsCarouselHeight: CGFloat { 94 }
+
+    // MARK: - Recently-opened strip
+
+    /// Single horizontal carousel that combines the Continue hero
+    /// with recents thumbnails so the user can swipe horizontally
+    /// instead of scrolling the page to reach older items. The hero
+    /// stays wider (~280pt) so it still reads as the "primary" pick
+    /// on first paint; the rest are 100pt thumbnail cards.
+    private func recentsCarousel(hero: CaptureSummary, rest: [CaptureSummary]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .center, spacing: 10) {
+                continueCard(hero)
+                ForEach(rest) { cap in
+                    recentDocCard(cap)
+                }
+            }
+            .padding(.horizontal, AppSpacing.s4)
+        }
+    }
+
+    private func recentDocCard(_ capture: CaptureSummary) -> some View {
+        let title = capture.title?.isEmpty == false ? capture.title! : "Untitled scan"
+        let page  = capture.lastOpenedPage ?? 1
+        let total = max(capture.pageCount, 1)
+        let frac  = min(max(Double(page) / Double(total), 0), 1)
+
+        return Button(action: { onOpenContinue(capture) }) {
+            VStack(alignment: .leading, spacing: 4) {
+                RecentDocThumbnail(previewUri: capture.previewUri)
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(QuickInkColors.borderSoft)
+                        .frame(height: 3)
+                    GeometryReader { geo in
+                        Capsule()
+                            .fill(QuickInkColors.accent)
+                            .frame(width: geo.size.width * frac, height: 3)
+                    }
+                    .frame(height: 3)
+                }
+                .frame(width: 100, height: 3)
+
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(QuickInkColors.ink)
+                    .lineLimit(1)
+                Text("p. \(page) / \(total)")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(QuickInkColors.muted)
+                    .lineLimit(1)
+            }
+            .frame(width: 100, height: recentsCarouselHeight, alignment: .topLeading)
         }
         .buttonStyle(.plain)
     }

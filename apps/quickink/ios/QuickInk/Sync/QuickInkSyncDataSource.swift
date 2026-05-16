@@ -119,6 +119,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                     locality:           row["locality"] as String?,
                     subLocality:        row["sub_locality"] as String?,
                     address:            row["address"] as String?,
+                    notes:              row["notes"] as String?,
                     createdAt:          row["created_at"],
                     updatedAt:          row["updated_at"]
                 )
@@ -240,6 +241,43 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                     id: row.id,
                     kind: DrivePath.kindSmartCollection,
                     drivePath: DrivePath.smartCollection(id: row.id),
+                    updatedAt: row.updatedAt,
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
+            // ---- voice_notes (typed via GRDB) ----
+            let voiceNoteRows = try VoiceNoteEntity
+                .filter(Column("user_id") == userId)
+                .filter(Column("deleted_at") == nil)
+                .fetchAll(db)
+            let dirtyVoiceNoteIds = try Set(VoiceNoteEntity
+                .filter(Column("user_id") == userId)
+                .filter(Column("dirty") == true)
+                .fetchAll(db)
+                .map(\.id))
+            let voiceNotesToPush = voiceNoteRows.filter { dirtyVoiceNoteIds.contains($0.id) }
+            for row in voiceNotesToPush {
+                let payload = VoiceNotePayloadV1(
+                    id:                  row.id,
+                    captureId:           row.captureId,
+                    userId:              row.userId,
+                    audioUri:            row.audioUri,
+                    durationMs:          row.durationMs,
+                    transcription:       row.transcription,
+                    transcriptionSource: row.transcriptionSource,
+                    audioDriveFileId:    row.audioDriveFileId,
+                    createdAt:           row.createdAt,
+                    updatedAt:           row.updatedAt
+                )
+                if let entry = try Self.makeEntry(
+                    id: row.id,
+                    kind: DrivePath.kindVoiceNote,
+                    drivePath: DrivePath.quickInkVoiceNote(
+                        createdAt: row.createdAt,
+                        captureId: row.captureId,
+                        id:        row.id
+                    ),
                     updatedAt: row.updatedAt,
                     encodable: payload
                 ) { out.append(entry) }
@@ -367,6 +405,19 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 ))
             }
 
+            // voice_notes — user-scoped.
+            let voiceTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM voice_notes
+                WHERE user_id = ? AND deleted_at IS NOT NULL AND dirty = 1
+                """, arguments: [userId])
+            for row in voiceTombstones {
+                out.append(PendingTombstone(
+                    kind: DrivePath.kindVoiceNote,
+                    id: row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+
             // ocr_results — not user-scoped at the row level.
             let ocrRows = try Row.fetchAll(db, sql: """
                 SELECT id, deleted_at, updated_at FROM ocr_results
@@ -423,6 +474,10 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             case DrivePath.kindSmartCollection:
                 let p = try decoder.decode(SmartCollectionPayloadV1.self, from: change.payload)
                 try Self.upsertSmartCollectionRow(db, payload: p, driveFileId: driveFileId)
+
+            case DrivePath.kindVoiceNote:
+                let p = try decoder.decode(VoiceNotePayloadV1.self, from: change.payload)
+                try Self.upsertVoiceNoteRow(db, payload: p, driveFileId: driveFileId)
 
             default:
                 // Forward-compat: unknown kind, skip.
@@ -531,6 +586,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
         case DrivePath.kindFolder:          return "folders"
         case DrivePath.kindCaptureTag:      return "capture_tags"
         case DrivePath.kindSmartCollection: return "smart_collections"
+        case DrivePath.kindVoiceNote:       return "voice_notes"
         default: return ""
         }
     }
@@ -698,9 +754,9 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             INSERT INTO captures (
                 id, user_id, title, pdf_uri, preview_uri, page_count,
                 source, paper_size, drive_file_id, pdf_drive_file_id, preview_drive_file_id,
-                latitude, longitude, locality, sub_locality, address,
+                latitude, longitude, locality, sub_locality, address, notes,
                 created_at, updated_at, dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ON CONFLICT(id) DO UPDATE SET
                 user_id               = excluded.user_id,
                 title                 = excluded.title,
@@ -717,6 +773,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 locality              = excluded.locality,
                 sub_locality          = excluded.sub_locality,
                 address               = excluded.address,
+                notes                 = excluded.notes,
                 updated_at            = excluded.updated_at,
                 dirty                 = 0
             WHERE captures.updated_at < excluded.updated_at
@@ -727,6 +784,63 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 payload.pdfDriveFileId, payload.previewDriveFileId,
                 payload.latitude, payload.longitude,
                 payload.locality, payload.subLocality, payload.address,
+                payload.notes,
+                payload.createdAt, payload.updatedAt,
+            ])
+    }
+
+    /// Upsert a voice_notes row from a remote payload. Reconciles
+    /// `audio_uri` the same way [upsertCaptureRow] reconciles
+    /// `pdf_uri`: keep the local path if the file is here, otherwise
+    /// blank it out and wait for the binary-restore pass to fill in
+    /// from `audio_drive_file_id`.
+    private static func upsertVoiceNoteRow(_ db: Database, payload: VoiceNotePayloadV1, driveFileId: String?) throws {
+        // Defensive parent-existence check — voice_notes has a FK to
+        // captures with ON DELETE CASCADE; applying a payload whose
+        // parent isn't local yet would raise SQLITE_CONSTRAINT.
+        let parentExists = try Bool.fetchOne(
+            db,
+            sql: "SELECT EXISTS(SELECT 1 FROM captures WHERE id = ? AND deleted_at IS NULL)",
+            arguments: [payload.captureId]
+        ) ?? false
+        guard parentExists else { return }
+
+        let existingAudioUri: String? = try Row.fetchOne(
+            db,
+            sql: "SELECT audio_uri FROM voice_notes WHERE id = ? LIMIT 1",
+            arguments: [payload.id]
+        ).map { $0["audio_uri"] as String? } ?? nil
+
+        let resolvedAudioUri: String = {
+            if let cur = existingAudioUri, Self.fileExistsAt(cur) { return cur }
+            if payload.audioDriveFileId != nil { return "" }
+            return payload.audioUri
+        }()
+
+        try db.execute(sql: """
+            INSERT INTO voice_notes (
+                id, capture_id, user_id, audio_uri, duration_ms,
+                transcription, transcription_source,
+                drive_file_id, audio_drive_file_id,
+                created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                capture_id           = excluded.capture_id,
+                user_id              = excluded.user_id,
+                audio_uri            = excluded.audio_uri,
+                duration_ms          = excluded.duration_ms,
+                transcription        = excluded.transcription,
+                transcription_source = excluded.transcription_source,
+                drive_file_id        = excluded.drive_file_id,
+                audio_drive_file_id  = excluded.audio_drive_file_id,
+                updated_at           = excluded.updated_at,
+                dirty                = 0
+            WHERE voice_notes.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.captureId, payload.userId,
+                resolvedAudioUri, payload.durationMs,
+                payload.transcription, payload.transcriptionSource,
+                driveFileId, payload.audioDriveFileId,
                 payload.createdAt, payload.updatedAt,
             ])
     }

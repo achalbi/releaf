@@ -69,8 +69,6 @@ import app.quickink.mobile.data.smartcollection.RuleClause
 import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
 import app.quickink.mobile.data.smartcollection.SmartCollectionRepository
 import app.quickink.mobile.data.smartcollection.SmartCollectionRule
-import app.quickink.mobile.features.nav.NavTab
-import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
@@ -84,10 +82,6 @@ fun SmartCollectionScreen(
     onBack: () -> Unit,
     onOpenCapture: (CaptureEntity) -> Unit,
     onOpenSearch: () -> Unit,
-    onHome: () -> Unit,
-    onWorkspace: () -> Unit,
-    onScan: () -> Unit,
-    onSettings: () -> Unit,
 ) {
     val colors  = LocalQuickInkColors.current
     val context = LocalContext.current
@@ -161,16 +155,6 @@ fun SmartCollectionScreen(
                 }
             }
         }
-
-        QuickInkBottomNavBar(
-            activeTab   = NavTab.Workspace,
-            onHome      = onHome,
-            onWorkspace = onWorkspace,
-            onScan      = onScan,
-            onSearch    = onOpenSearch,
-            onSettings  = onSettings,
-            modifier    = Modifier.align(Alignment.BottomCenter),
-        )
     }
 }
 

@@ -187,6 +187,53 @@ public final class CaptureRepository: @unchecked Sendable {
         }
     }
 
+    /// Overwrite `captures.notes` outright. Used by the notes editor
+    /// on the detail screen when the user explicitly edits the whole
+    /// notes blob. Empty / whitespace input is stored as nil so the
+    /// detail card falls back to the "Add notes" empty state.
+    public func setNotes(captureId: String, notes: String?) async throws {
+        let trimmed = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next: String? = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        let now = IsoClock.nowIso()
+        try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE captures
+                SET notes = ?, updated_at = ?, dirty = 1
+                WHERE id = ?
+                """, arguments: [next, now, captureId])
+        }
+    }
+
+    /// Append `text` to `captures.notes` as a new paragraph (separated
+    /// by a blank line). Used by the voice-note transcript editor:
+    /// after recording + transcribing, the edited text is saved both
+    /// onto the voice note's `transcription` field AND appended here
+    /// so the document carries the running notes across all clips.
+    /// Empty / whitespace input is a no-op; the existing notes value
+    /// is preserved.
+    public func appendNote(captureId: String, text: String) async throws {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let now = IsoClock.nowIso()
+        try await dbQueue.write { db in
+            let existing: String? = try String.fetchOne(
+                db,
+                sql: "SELECT notes FROM captures WHERE id = ? LIMIT 1",
+                arguments: [captureId]
+            )
+            let next: String = {
+                guard let cur = existing?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !cur.isEmpty else { return trimmed }
+                return cur + "\n\n" + trimmed
+            }()
+            try db.execute(sql: """
+                UPDATE captures
+                SET notes = ?, updated_at = ?, dirty = 1
+                WHERE id = ?
+                """, arguments: [next, now, captureId])
+        }
+    }
+
     /// Update the `paper_size` bucket on an existing capture. Called
     /// from `ScanReviewScreen`'s paper-size chip when the user
     /// disambiguates the auto-detection (typically A4 vs A5, where

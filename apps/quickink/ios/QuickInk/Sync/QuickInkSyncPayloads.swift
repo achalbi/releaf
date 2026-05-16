@@ -293,6 +293,11 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
     /// verbatim — we don't re-format on receive so the receiver
     /// sees exactly what the capturing device's locale produced.
     public let address: String?
+    /// Free-form document-level notes. Currently append-only via the
+    /// voice-note transcript editor (Document detail → record a voice
+    /// note → edit transcript → save appends here). Nullable; absent
+    /// on payloads from pre-v15 / pre-v13 clients.
+    public let notes: String?
     public let createdAt: String
     public let updatedAt: String
 
@@ -313,6 +318,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         locality: String? = nil,
         subLocality: String? = nil,
         address: String? = nil,
+        notes: String? = nil,
         createdAt: String,
         updatedAt: String
     ) {
@@ -332,6 +338,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         self.locality = locality
         self.subLocality = subLocality
         self.address = address
+        self.notes = notes
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -367,6 +374,9 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         self.locality           = try c.decodeIfPresent(String.self, forKey: .locality)
         self.subLocality        = try c.decodeIfPresent(String.self, forKey: .subLocality)
         self.address            = try c.decodeIfPresent(String.self, forKey: .address)
+        // `notes` landed in v13 (iOS) / Room v15 (Android). Tolerate
+        // its absence on older payloads — they read back as nil.
+        self.notes              = try c.decodeIfPresent(String.self, forKey: .notes)
         self.createdAt          = try c.decode(String.self, forKey: .createdAt)
         self.updatedAt          = try c.decode(String.self, forKey: .updatedAt)
     }
@@ -388,6 +398,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         case locality
         case subLocality        = "sub_locality"
         case address
+        case notes
         case createdAt          = "created_at"
         case updatedAt          = "updated_at"
     }
@@ -582,5 +593,81 @@ public struct OcrResultPayloadV2: Codable, Equatable, Sendable {
         case engineVersion = "engine_version"
         case createdAt     = "created_at"
         case updatedAt     = "updated_at"
+    }
+}
+
+// =====================================================================
+// voice_notes — QuickInk-only. One row per voice note attached to a
+// capture. JSON carries the metadata + `audio_drive_file_id`; the
+// .m4a binary itself travels via `QuickInkBinarySync`, mirroring how
+// captures' PDFs travel separately from the capture JSON.
+// =====================================================================
+
+public struct VoiceNotePayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let captureId: String
+    public let userId: String
+    /// Source device's local file:// URI. Same caveat as
+    /// `captures.pdf_uri`: meaningless on a different device. The
+    /// receive side keeps the local URI when the file already exists
+    /// here, otherwise blanks it out and waits for the binary-restore
+    /// pass to fill it in from `audioDriveFileId`.
+    public let audioUri: String
+    public let durationMs: Int
+    public let transcription: String?
+    public let transcriptionSource: String?
+    public let audioDriveFileId: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    public init(
+        id: String,
+        captureId: String,
+        userId: String,
+        audioUri: String,
+        durationMs: Int,
+        transcription: String? = nil,
+        transcriptionSource: String? = nil,
+        audioDriveFileId: String? = nil,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id                  = id
+        self.captureId           = captureId
+        self.userId              = userId
+        self.audioUri            = audioUri
+        self.durationMs          = durationMs
+        self.transcription       = transcription
+        self.transcriptionSource = transcriptionSource
+        self.audioDriveFileId    = audioDriveFileId
+        self.createdAt           = createdAt
+        self.updatedAt           = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id                  = try c.decode(String.self, forKey: .id)
+        self.captureId           = try c.decode(String.self, forKey: .captureId)
+        self.userId              = try c.decode(String.self, forKey: .userId)
+        self.audioUri            = try c.decode(String.self, forKey: .audioUri)
+        self.durationMs          = try c.decode(Int.self,    forKey: .durationMs)
+        self.transcription       = try c.decodeIfPresent(String.self, forKey: .transcription)
+        self.transcriptionSource = try c.decodeIfPresent(String.self, forKey: .transcriptionSource)
+        self.audioDriveFileId    = try c.decodeIfPresent(String.self, forKey: .audioDriveFileId)
+        self.createdAt           = try c.decode(String.self, forKey: .createdAt)
+        self.updatedAt           = try c.decode(String.self, forKey: .updatedAt)
+    }
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case captureId           = "capture_id"
+        case userId              = "user_id"
+        case audioUri            = "audio_uri"
+        case durationMs          = "duration_ms"
+        case transcription
+        case transcriptionSource = "transcription_source"
+        case audioDriveFileId    = "audio_drive_file_id"
+        case createdAt           = "created_at"
+        case updatedAt           = "updated_at"
     }
 }

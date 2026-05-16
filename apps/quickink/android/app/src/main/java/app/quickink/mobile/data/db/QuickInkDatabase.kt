@@ -35,10 +35,14 @@ import app.quickink.mobile.data.analytics.AnalyticsOutboxDao
 import app.quickink.mobile.data.analytics.AnalyticsOutboxEntity
 import app.quickink.mobile.data.capture.CaptureDao
 import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.capturelocation.CaptureLocationDao
+import app.quickink.mobile.data.capturelocation.CaptureLocationEntity
 import app.quickink.mobile.data.capturetag.CaptureTagDao
 import app.quickink.mobile.data.capturetag.CaptureTagEntity
 import app.quickink.mobile.data.folder.FolderDao
 import app.quickink.mobile.data.folder.FolderEntity
+import app.quickink.mobile.data.location.LocationDao
+import app.quickink.mobile.data.location.LocationEntity
 import app.quickink.mobile.data.ocr.OcrResultDao
 import app.quickink.mobile.data.ocr.OcrResultEntity
 import app.quickink.mobile.data.panchanga.PanchangaDao
@@ -49,6 +53,8 @@ import app.quickink.mobile.data.smartcollection.SmartCollectionDao
 import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
 import app.quickink.mobile.data.tag.TagDao
 import app.quickink.mobile.data.tag.TagEntity
+import app.quickink.mobile.data.voicenote.VoiceNoteDao
+import app.quickink.mobile.data.voicenote.VoiceNoteEntity
 import app.releaf.mobile.data.notepad.NotepadDao
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.mobile.data.sync.SyncStateDao
@@ -74,7 +80,23 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         // seeded on first launch from `assets/panchanga_2026_27.csv`
         // via `PanchangaRepository.ensureLoaded()`.
         PanchangaEntity::class,
+        // Document-attached voice notes. One row per recorded clip;
+        // the .m4a lives in AttachmentStorage and the row points at
+        // it through `audio_uri`. Foreign key to `captures` cascades
+        // delete so removing a scan also removes its voice notes.
+        VoiceNoteEntity::class,
+        // User-defined locations ("Home", "Work", etc.) plus the
+        // many-to-many `capture_locations` join. Seeded with "Home"
+        // and "Work" on first launch (LocationRepository.seedDefaultsIfEmpty).
+        LocationEntity::class,
+        CaptureLocationEntity::class,
     ],
+    // v14 — Voice notes. Adds the `voice_notes` table that the
+    // Document detail screen's "Voice notes" section persists into.
+    // Mirror of iOS GRDB v12_voice_notes migration. Room rebuilds
+    // destructively under `fallbackToDestructiveMigration` until
+    // real users have data.
+    //
     // v13 — Sustainability hero size-weighted score. Adds
     // `captures.paper_size` so each capture row carries its page-size
     // class (card / a4 / small), which the home screen's tree-points
@@ -132,7 +154,29 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // captures.category column. `fallbackToDestructiveMigration`
     // below handles the rebuild; when real users have data we'll
     // register real Migration objects.
-    version       = 13,
+    // v17 — Adds `latitude`, `longitude`, `address` to `locations`
+    // so each user-defined place can carry a real GPS / reverse-
+    // geocoded address. Populated by the location editor's "Use
+    // current location" and "Search address" affordances. All three
+    // are nullable so the "Home" / "Work" seed and manual-typed
+    // rows stay valid until the user sets a place.
+    //
+    // v16 — Locations. Adds `locations` and `capture_locations`
+    // tables for the Home-screen location chip rail. Mirror of the
+    // tag / capture_tags shape: many-to-many between captures and
+    // user-defined places, each row syncs independently, seeded
+    // with "Home" and "Work" on first launch.
+    //
+    // v15 — Document-level notes column on `captures` (mirror of iOS
+    // GRDB v13_capture_notes). Append target for the voice-note
+    // transcript editor: after a clip is recorded and the editor
+    // saves, the edited text lands both on the voice note's
+    // `transcription` field AND is appended here as a new paragraph
+    // so the capture carries the running notes across all clips.
+    // Free-form TEXT, nullable, no index — read pattern is "load the
+    // whole field for the detail screen" so a full-text index isn't
+    // useful yet.
+    version       = 17,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {
@@ -152,6 +196,13 @@ abstract class QuickInkDatabase : RoomDatabase() {
 
     // ─── Calendar (panchanga) ────────────────────────────────────
     abstract fun panchangaDao():         PanchangaDao
+
+    // ─── Voice notes ─────────────────────────────────────────────
+    abstract fun voiceNoteDao():         VoiceNoteDao
+
+    // ─── Locations ───────────────────────────────────────────────
+    abstract fun locationDao():          LocationDao
+    abstract fun captureLocationDao():   CaptureLocationDao
 
     companion object {
         @Volatile

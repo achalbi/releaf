@@ -1,23 +1,23 @@
 /*
  * DaylightLocationStore.swift
  *
- * Tiny @ObservableObject the `DaylightStatusBar` reads its lat/long
- * from. Sits in front of `LocationService.captureCurrent()` so the
- * status bar doesn't have to know about CoreLocation, permission
+ * Tiny @ObservableObject the Home `DaylightHero` card reads its
+ * lat/long from. Sits in front of `LocationService.captureCurrent()`
+ * so the hero doesn't have to know about CoreLocation, permission
  * states, or the scan-flow capture path.
  *
  * Strategy:
  *   - Persist the last successful fix in `UserDefaults` so every
- *     launch after the first shows the bar instantly (sunrise/sunset
- *     drift by <1 minute over ~100km — the persisted coords stay
- *     good for weeks even if the user travels). Solar math is
+ *     launch after the first paints the hero instantly (sunrise/
+ *     sunset drift by <1 minute over ~100km — the persisted coords
+ *     stay good for weeks even if the user travels). Solar math is
  *     latitude-dominant; longitude only matters for the time-zone
  *     shift, which is independent of this cache.
  *
  *   - On `refreshIfNeeded`, kick off one async `captureCurrent`
  *     and overwrite the cache. Skipped when permission isn't
- *     granted (this isn't a prompt path; the status bar shouldn't
- *     trigger a system dialog).
+ *     granted (this isn't a prompt path; the hero shouldn't trigger
+ *     a system dialog).
  *
  *   - In-flight de-dup: a single `fetchTask` slot prevents two
  *     overlapping calls when `refreshIfNeeded` is invoked from

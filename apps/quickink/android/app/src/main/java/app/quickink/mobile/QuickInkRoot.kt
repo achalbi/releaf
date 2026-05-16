@@ -23,6 +23,12 @@ import android.Manifest
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,8 +40,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import app.quickink.mobile.features.nav.NavTab
+import app.quickink.mobile.features.nav.QuickInkBottomNavBar
+import app.quickink.mobile.features.nav.QuickInkTimeBar
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -47,8 +57,8 @@ import app.quickink.mobile.data.analytics.AnalyticsRepository
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.features.calendar.CalendarScreen
 import app.quickink.mobile.features.daylight.DaylightLocationStore
-import app.quickink.mobile.features.daylight.DaylightStatusBar
 import app.quickink.mobile.data.folder.FolderRepository
+import app.quickink.mobile.data.location.LocationRepository
 import app.quickink.mobile.data.tag.TagRepository
 import app.quickink.mobile.data.smartcollection.SmartCollectionRepository
 import app.quickink.mobile.features.workspace.FolderDetailScreen
@@ -70,6 +80,7 @@ import app.quickink.mobile.features.scan.PendingShare
 import app.quickink.mobile.features.scan.QuickCaptureScreen
 import app.quickink.mobile.features.scan.ScanDetailScreen
 import app.quickink.mobile.features.scan.ScanFlowController
+import app.quickink.mobile.features.scan.ScanCaptureSurface
 import app.quickink.mobile.features.scan.ScanReviewScreen
 import app.quickink.mobile.features.scan.buildImportArtifacts
 import app.quickink.mobile.features.scan.buildPdfImportArtifact
@@ -293,6 +304,7 @@ private fun MainShell(
             pipeline       = OcrPipeline(MlKitTextRecognizer(app)),
             notepadDao     = app.database.notepadDao(),
             scope          = scope,
+            folderDao      = app.database.folderDao(),
             // Application context drives the per-scan location
             // fetch + reverse-geocode (gated by the
             // `locationForScansEnabled` Settings toggle and the
@@ -366,6 +378,10 @@ private fun MainShell(
             // that included "Study". Idempotent + flag-guarded;
             // safe to call on every launch.
             tagRepo.migrateLegacyStudyToBusinessCardIfNeeded(context, userId)
+            // One-shot migration that lowercases + kebab-cases the
+            // legacy capitalized seed names so existing users align
+            // with the new canonical form. Idempotent + flag-guarded.
+            tagRepo.migrateLegacySeedNamesToKebabIfNeeded(context, userId)
 
             // Workspace v1 Phase A.3 — seed Unfiled folder + backfill
             // every capture's folder_id. The legacy
@@ -388,6 +404,13 @@ private fun MainShell(
                 captureTagDao      = app.database.captureTagDao(),
                 tagDao             = app.database.tagDao(),
             ).seedDefaultsIfNeeded(userId)
+
+            // Seed "Home" + "Work" placeholder locations on first
+            // sign-in. Idempotent — short-circuits when the user
+            // already has any active rows.
+            LocationRepository(
+                locationDao = app.database.locationDao(),
+            ).seedDefaultsIfEmpty(userId)
         } catch (_: Exception) { /* best-effort */ }
     }
 
@@ -429,7 +452,7 @@ private fun MainShell(
 
     val scanState by controller.state.collectAsState()
     if (scanState !is ScanFlowController.State.Idle) {
-        ScanReviewScreen(controller, userId = userId)
+        ScanCaptureSurface(controller, userId = userId)
         return
     }
 
@@ -485,6 +508,13 @@ private fun MainShell(
     // return below renders QuickCaptureScreen above the NavHost.
     var showQuickCapture by remember { mutableStateOf(false) }
     if (showQuickCapture) {
+        // Intercept back so it dismisses the capture sheet instead
+        // of falling through to the OS default (which would finish
+        // the activity, because we early-return above the NavHost
+        // and its root-level exit handler never gets composed).
+        androidx.activity.compose.BackHandler {
+            showQuickCapture = false
+        }
         QuickCaptureScreen(
             controller = controller,
             onDismiss  = { showQuickCapture = false },
@@ -501,13 +531,24 @@ private fun MainShell(
     /// switches, the back stack stays shallow (one entry), and back
     /// from any tab returns to Home.
     val navToTab: (String) -> Unit = { route ->
-        navController.navigate(route) {
-            popUpTo(Routes.HOME) {
-                saveState = true
-                inclusive = false
+        if (route == Routes.HOME) {
+            // HOME is the start destination, always at the back-stack root.
+            // navigate(HOME) with restoreState=true restores HOME's saved
+            // nested chain (left over from popUpTo HOME saveState=true on
+            // earlier tab-switches), which can drop the user back onto the
+            // saved Workspace/Search/Settings child instead of HOME itself.
+            // Pop back to HOME instead — same visual result, no state to
+            // restore.
+            navController.popBackStack(Routes.HOME, inclusive = false)
+        } else {
+            navController.navigate(route) {
+                popUpTo(Routes.HOME) {
+                    saveState = true
+                    inclusive = false
+                }
+                launchSingleTop = true
+                restoreState    = true
             }
-            launchSingleTop = true
-            restoreState    = true
         }
     }
 
@@ -520,29 +561,11 @@ private fun MainShell(
     // here now.
     val workspaceTabRoute = Routes.WORKSPACE_HOME
 
-    /// Variant of [navToTab] used by ScanDetailScreen's bottom nav.
-    /// Skips `restoreState` so tapping Library / Search from the
-    /// detail screen lands on a fresh tab view (top of list, no
-    /// retained search query) rather than the saved state. Matches
-    /// iOS where the same callback path resets the navigation stack.
-    val navToTabFresh: (String) -> Unit = { route ->
-        navController.navigate(route) {
-            popUpTo(Routes.HOME) {
-                inclusive = false
-            }
-            launchSingleTop = true
-        }
-    }
-
-    // Daylight status bar that sits above the NavHost. Hosts a small
-    // location cache (`DaylightLocationStore`) seeded from
-    // SharedPreferences on construction so the bar paints on cold
-    // launch; the LaunchedEffect below refreshes the cache after
-    // the location-permission flow above has settled. The bar
-    // intentionally wraps only the NavHost — full-screen task
-    // surfaces (ScanReviewScreen + QuickCaptureScreen) early-return
-    // before this code runs, so they take the whole screen as on
-    // iOS.
+    // Location cache (`DaylightLocationStore`) that the Home tab's
+    // `DaylightHero` reads for its sunrise/sunset numbers. The store
+    // is seeded from SharedPreferences on construction so the hero
+    // paints on cold launch; the LaunchedEffect below refreshes the
+    // cache after the location-permission flow above has settled.
     val daylightStore = remember(context.applicationContext) {
         DaylightLocationStore(context.applicationContext)
     }
@@ -550,26 +573,102 @@ private fun MainShell(
         daylightStore.refreshIfNeeded()
     }
 
-    // Daylight bar hides on Home — the DaylightHero card already
-    // shows the same sunrise/sunset, so the bar would be a
-    // redundant duplicate at the top of the Home tab. Other routes
-    // (Settings, Workspace, Calendar, etc.) keep the bar since they
-    // have no daylight context of their own.
+    // Drive both the top time-bar visibility and the bottom-nav active
+    // tab from the current NavHost destination. Reading via
+    // `currentBackStackEntryAsState()` re-triggers recomposition on
+    // every nav transition so both pieces stay in sync without per-
+    // screen plumbing.
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
-    val onHome = currentBackStackEntry?.destination?.route == Routes.HOME
+    val currentRoute = currentBackStackEntry?.destination?.route
+    val onHome = currentRoute == Routes.HOME
+    // Hide the global time bar on the scan-detail viewer — that
+    // screen renders its own auto-hide-on-scroll variant so the
+    // preview surface stays dominant. Route template carries the
+    // {captureId} placeholder.
+    val onScanDetail = currentRoute?.startsWith("scan_detail") == true
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        if (!onHome) {
-            DaylightStatusBar(
-                latitude  = daylightStore.latitude,
-                longitude = daylightStore.longitude,
-            )
-        }
-        NavHost(
-            navController     = navController,
-            startDestination  = Routes.HOME,
-            modifier          = Modifier.weight(1f).fillMaxWidth(),
-        ) {
+    // App-exit confirmation. Fires whenever a back-press would leave
+    // QuickInk altogether — i.e., the NavHost has nothing left to
+    // pop. The handler is disabled while the scan flow is active
+    // (ScanCaptureSurface owns back via controller.dismiss) and
+    // while we're not signed in (the gate handles its own back).
+    var showExitDialog by remember { mutableStateOf(false) }
+    val canExitTriggerDialog =
+        scanState is ScanFlowController.State.Idle &&
+        navController.previousBackStackEntry == null
+    androidx.activity.compose.BackHandler(enabled = canExitTriggerDialog) {
+        showExitDialog = true
+    }
+    if (showExitDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showExitDialog = false },
+            title = { androidx.compose.material3.Text("Exit QuickInk?") },
+            text  = {
+                androidx.compose.material3.Text(
+                    "You'll leave the app. Captures already saved remain on this device."
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    showExitDialog = false
+                    (context as? android.app.Activity)?.finish()
+                }) {
+                    androidx.compose.material3.Text("Exit")
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    showExitDialog = false
+                }) {
+                    androidx.compose.material3.Text("Cancel")
+                }
+            },
+        )
+    }
+
+    // Map the route to the bottom-nav slot. `null` hides the bar
+    // entirely (Calendar, Profile, Categories, NoteEditor,
+    // CategoryEntries — modal-ish surfaces that own the whole canvas).
+    // `NavTab.None` keeps the bar visible without painting any active
+    // pill (ScanDetail — a pushed surface that still wants the global
+    // chrome). The pushed Workspace children (Folder / Smart /
+    // TagLibrary) keep the Workspace pill active so the user knows
+    // they're inside that tab's tree.
+    val activeTab: NavTab? = when (currentRoute) {
+        Routes.HOME              -> NavTab.Home
+        Routes.WORKSPACE_HOME,
+        Routes.NOTES_LIST,
+        Routes.FOLDER_DETAIL,
+        Routes.SMART_COLLECTION,
+        Routes.TAG_LIBRARY       -> NavTab.Workspace
+        Routes.SEARCH            -> NavTab.Search
+        Routes.SETTINGS          -> NavTab.Settings
+        Routes.SCAN_DETAIL       -> NavTab.None
+        else                     -> null
+    }
+
+    // Root is a Box so the bottom nav can hover above the NavHost
+    // surface as a sibling layer — moved out of every per-screen
+    // composable so a tab transition no longer crossfades two bars
+    // (which used to produce the "masked footer" during a switch).
+    // The Column inside still owns the time bar + NavHost stack;
+    // AnimatedVisibility on the bar replaces the instant insert/
+    // remove that previously jumped vertical space at the moment
+    // screens were already mid-crossfade.
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            AnimatedVisibility(
+                visible = !onHome && !onScanDetail,
+                enter   = fadeIn() + expandVertically(),
+                exit    = fadeOut() + shrinkVertically(),
+            ) {
+                QuickInkTimeBar()
+            }
+            NavHost(
+                navController     = navController,
+                startDestination  = Routes.HOME,
+                modifier          = Modifier.weight(1f).fillMaxWidth(),
+            ) {
         composable(Routes.HOME) {
             HomeScreen(
                 controller     = controller,
@@ -615,11 +714,6 @@ private fun MainShell(
                     navController.popBackStack()
                     navController.navigate(Routes.scanDetail(captureId))
                 },
-                onHome     = { navToTab(Routes.HOME) },
-                onWorkspace  = { navToTab(workspaceTabRoute) },
-                onScan     = { showQuickCapture = true },
-                onSearch   = { /* current tab — no-op */ },
-                onSettings = { navToTab(Routes.SETTINGS) },
             )
         }
         composable(Routes.NOTES_LIST) {
@@ -628,11 +722,6 @@ private fun MainShell(
                 onOpenScan = { captureId ->
                     navController.navigate(Routes.scanDetail(captureId))
                 },
-                onHome     = { navToTab(Routes.HOME) },
-                onWorkspace  = { /* current tab — no-op */ },
-                onScan     = { showQuickCapture = true },
-                onSearch   = { navToTab(Routes.SEARCH) },
-                onSettings = { navToTab(Routes.SETTINGS) },
             )
         }
         composable(Routes.WORKSPACE_HOME) {
@@ -656,9 +745,6 @@ private fun MainShell(
                     navController.navigate(Routes.smartCollection(collection.id))
                 },
                 onBrowseTags = { navController.navigate(Routes.TAG_LIBRARY) },
-                onHome     = { navToTab(Routes.HOME) },
-                onScan     = { showQuickCapture = true },
-                onSettings = { navToTab(Routes.SETTINGS) },
             )
         }
         composable(
@@ -674,10 +760,6 @@ private fun MainShell(
                     navController.navigate(Routes.scanDetail(capture.id))
                 },
                 onOpenSearch  = { navToTab(Routes.SEARCH) },
-                onHome        = { navToTab(Routes.HOME) },
-                onWorkspace   = { navToTab(workspaceTabRoute) },
-                onScan        = { showQuickCapture = true },
-                onSettings    = { navToTab(Routes.SETTINGS) },
             )
         }
         composable(
@@ -693,10 +775,6 @@ private fun MainShell(
                     navController.navigate(Routes.scanDetail(capture.id))
                 },
                 onOpenSearch  = { navToTab(Routes.SEARCH) },
-                onHome        = { navToTab(Routes.HOME) },
-                onWorkspace   = { navToTab(workspaceTabRoute) },
-                onScan        = { showQuickCapture = true },
-                onSettings    = { navToTab(Routes.SETTINGS) },
             )
         }
         composable(Routes.TAG_LIBRARY) {
@@ -707,10 +785,6 @@ private fun MainShell(
                     navController.navigate(Routes.categoryEntries(tag.name))
                 },
                 onOpenSearch = { navToTab(Routes.SEARCH) },
-                onHome       = { navToTab(Routes.HOME) },
-                onWorkspace  = { navToTab(workspaceTabRoute) },
-                onScan       = { showQuickCapture = true },
-                onSettings   = { navToTab(Routes.SETTINGS) },
             )
         }
         composable(
@@ -734,11 +808,6 @@ private fun MainShell(
                 themeMode                  = currentThemeMode,
                 onPrimaryColorChange       = onPrimaryColorChange,
                 onThemeModeChange          = onThemeModeChange,
-                onHome                     = { navToTab(Routes.HOME) },
-                onWorkspace                  = { navToTab(workspaceTabRoute) },
-                onScan                     = { showQuickCapture = true },
-                onSearch                   = { navToTab(Routes.SEARCH) },
-                onSettings                 = { /* current tab — no-op */ },
             )
         }
         composable(Routes.PROFILE) {
@@ -760,18 +829,9 @@ private fun MainShell(
         ) { backStackEntry ->
             val captureId = backStackEntry.arguments?.getString("captureId").orEmpty()
             ScanDetailScreen(
-                captureId  = captureId,
-                userId     = userId,
-                onBack     = { navController.popBackStack() },
-                // Use the fresh-state variant — tapping Library or
-                // Search from a scan detail should land on the
-                // tab's default view, not the saved state from
-                // before the user opened the detail.
-                onHome     = { navToTabFresh(Routes.HOME) },
-                onWorkspace  = { navToTabFresh(workspaceTabRoute) },
-                onScan     = { showQuickCapture = true },
-                onSearch   = { navToTabFresh(Routes.SEARCH) },
-                onSettings = { navToTabFresh(Routes.SETTINGS) },
+                captureId = captureId,
+                userId    = userId,
+                onBack    = { navController.popBackStack() },
             )
         }
         composable(
@@ -788,6 +848,22 @@ private fun MainShell(
                 },
             )
         }
-    }
-    }   // closes Column opened before the NavHost
+        }   // closes NavHost
+        }   // closes inner Column
+        // Bottom nav sits as a sibling layer over the Column, anchored
+        // to the bottom. Painted once at the root so it stays put
+        // through every NavHost transition — the crossfade beneath
+        // only swaps screen content, not the chrome.
+        activeTab?.let { tab ->
+            QuickInkBottomNavBar(
+                activeTab   = tab,
+                onHome      = { navToTab(Routes.HOME) },
+                onWorkspace = { navToTab(workspaceTabRoute) },
+                onScan      = { showQuickCapture = true },
+                onSearch    = { navToTab(Routes.SEARCH) },
+                onSettings  = { navToTab(Routes.SETTINGS) },
+                modifier    = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+    }   // closes outer Box
 }

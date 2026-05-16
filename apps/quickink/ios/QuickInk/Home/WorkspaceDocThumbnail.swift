@@ -49,6 +49,34 @@ private func workspaceLoadPreview(from uri: String) -> UIImage? {
     return UIImage(contentsOfFile: resolved.path)
 }
 
+/// 100×54 thumbnail tile used by the Workspace home "Recently
+/// opened" carousel — the row of compact cards that share a row
+/// with the Continue hero. Same loader as the sibling thumbnails.
+/// Height tuned so the whole recent card matches the hero's 94pt
+/// row height (thumb + 4 gap + 3 progress + 4 gap + title + page
+/// text). Width stays 100pt for the existing card footprint.
+struct RecentDocThumbnail: View {
+    let previewUri: String?
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 8)
+        return shape
+            .fill(QuickInkColors.surface)
+            .frame(width: 100, height: 54)
+            .overlay(
+                Group {
+                    if let uri = previewUri, !uri.isEmpty,
+                       let image = workspaceLoadPreview(from: uri) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    }
+                }
+            )
+            .clipShape(shape)
+            .overlay(shape.stroke(QuickInkColors.borderSoft, lineWidth: 1))
+    }
+}
+
 struct WorkspaceDocThumbnail: View {
     let previewUri: String?
 

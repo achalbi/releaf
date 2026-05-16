@@ -125,6 +125,9 @@ class QuickInkRestoreWorker(
             folderDao          = app.database.folderDao(),
             captureTagDao      = app.database.captureTagDao(),
             smartCollectionDao = app.database.smartCollectionDao(),
+            voiceNoteDao       = app.database.voiceNoteDao(),
+            locationDao        = app.database.locationDao(),
+            captureLocationDao = app.database.captureLocationDao(),
             userId             = session.userId,
         )
         val syncRepository = SyncRepository(
@@ -212,6 +215,7 @@ class QuickInkRestoreWorker(
                 context            = applicationContext,
                 captureDao         = app.database.captureDao(),
                 profileSettingsDao = app.database.profileSettingsDao(),
+                voiceNoteDao       = app.database.voiceNoteDao(),
                 driveClient        = app.driveClient,
             )
             Log.i(TAG, "restore: starting binary restore pass")
@@ -224,6 +228,12 @@ class QuickInkRestoreWorker(
             Log.i(TAG, "restore: binary restore pass done — " +
                 "completed=${binaryResult.completed}/${binaryResult.attempted} " +
                 "failed=${binaryResult.failed}")
+            // Voice-note audio binaries — runs after captures so the
+            // foreign-key parent is present locally before we try to
+            // resolve `audio_uri`. Best-effort; per-row failures log
+            // and the rest of the pass continues.
+            runCatching { binarySync.restorePendingVoiceNotes(session.userId, session.accessToken) }
+                .onFailure { Log.w(TAG, "restore: voice-note binary pass threw", it) }
             val binaryLabel = if (binaryResult.attempted > 0) {
                 "Downloaded ${binaryResult.completed} of ${binaryResult.attempted} files."
             } else {

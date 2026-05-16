@@ -27,34 +27,17 @@ struct SettingsScreen: View {
     /// `app.quickink.mobile.QuickInkRoot.MainShell.settingsPrefs`.
     @ObservedObject var settings: SettingsState
     let onManageCategories: (() -> Void)?
-    /// Tab navigation callbacks for the floating bottom nav. Settings
-    /// paints itself active; tapping it is a no-op.
-    let onHome: () -> Void
-    let onWorkspace: () -> Void
-    let onScan: () -> Void
-    let onSearch: () -> Void
-    let onSettings: () -> Void
 
     init(
         onBack: @escaping () -> Void,
         authStore: AuthStore,
         settings: SettingsState,
-        onManageCategories: (() -> Void)? = nil,
-        onHome: @escaping () -> Void = {},
-        onWorkspace: @escaping () -> Void = {},
-        onScan: @escaping () -> Void = {},
-        onSearch: @escaping () -> Void = {},
-        onSettings: @escaping () -> Void = {}
+        onManageCategories: (() -> Void)? = nil
     ) {
         self.onBack = onBack
         self.authStore = authStore
         self.settings = settings
         self.onManageCategories = onManageCategories
-        self.onHome = onHome
-        self.onWorkspace = onWorkspace
-        self.onScan = onScan
-        self.onSearch = onSearch
-        self.onSettings = onSettings
     }
 
     /// Slice 4.2b — observes `SyncStateStore.shared` for the
@@ -183,16 +166,6 @@ struct SettingsScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(QuickInkColors.bg.ignoresSafeArea())
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            QuickInkBottomNavBar(
-                activeTab:  .settings,
-                onHome:     onHome,
-                onWorkspace:  onWorkspace,
-                onScan:     onScan,
-                onSearch:   onSearch,
-                onSettings: { /* current tab */ }
-            )
-        }
     }
 
     /// Inline TextField for the user's preferred display name. Edits

@@ -19,6 +19,12 @@
                under one `RequestMultiplePermissions` call from
                the onboarding "Where in the world?" step and gated
                by the Settings "Attach location to scans" toggle.
+   - RECORD_AUDIO: voice notes attached to a document. The recorder
+               on the document detail screen records up to two minutes
+               per clip into an AAC .m4a in AttachmentStorage. The
+               runtime prompt fires the first time the user taps
+               Record; declined → recorder shows a system-rationale
+               state and the call site no-ops.
   Sync runs as a WorkManager periodic worker, not a foreground
   service, so POST_NOTIFICATIONS is not required.
 -->
@@ -29,6 +35,7 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!--
       Camera is required for the in-app Business Card surface AND

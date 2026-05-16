@@ -6,20 +6,16 @@
  *   1. Big category-button grid  — the user picks a category
  *      (or none) for the in-flight capture. Tap-to-toggle
  *      persists immediately via `controller.setCategory(name)`.
- *   2. Saved page preview        — the first-page JPEG the
- *      scanner produced, so the user can confirm what was saved
- *      while still on this surface.
- *   3. Status indicator          — small progress / saved /
+ *   2. Status indicator          — small progress / saved /
  *      failed badge. The hero used to be the progress UI; now
  *      it sits beneath the actionable affordances.
- *   4. Done button                — terminal-state-only.
+ *   3. Done button                — terminal-state-only.
  *
  * Mirror of iOS `ScanReviewScreen.swift`.
  */
 
 package app.quickink.mobile.features.scan
 
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,6 +24,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.FlowRowOverflow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
@@ -46,8 +43,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -59,7 +58,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -69,8 +67,12 @@ import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.folder.FolderEntity
 import app.quickink.mobile.data.folder.FolderRepository
+import app.quickink.mobile.data.tag.TagEntity
 import app.quickink.mobile.data.tag.TagRepository
+import app.quickink.mobile.data.voicenote.VoiceNoteEntity
+import app.quickink.mobile.data.voicenote.VoiceNoteRepository
 import app.quickink.mobile.features.workspace.AutoTagSuggester
+import app.quickink.mobile.features.workspace.normalizeTagName
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import app.quickink.mobile.features.onboarding.OnboardingPrimaryButton
@@ -81,8 +83,6 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import app.releaf.mobile.ui.theme.AppColors
 import app.releaf.mobile.ui.theme.AppSpacing
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import kotlinx.coroutines.launch
 import app.quickink.mobile.ui.theme.QuickInkFonts
 
@@ -90,12 +90,13 @@ import app.quickink.mobile.ui.theme.QuickInkFonts
 fun ScanReviewScreen(
     controller: ScanFlowController,
     userId: String,
+    onBack: (() -> Unit)? = null,
 ) {
     val state by controller.state.collectAsState()
     val selectedFolderId by controller.selectedFolderId.collectAsState()
-    val previewImageUri by controller.previewImageUri.collectAsState()
     val selectedPaperSize by controller.selectedPaperSize.collectAsState()
     val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
 
     val context = LocalContext.current
     val app = context.applicationContext as QuickInkApp
@@ -126,24 +127,126 @@ fun ScanReviewScreen(
         else                                    -> null
     }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val suggestedTags = androidx.compose.runtime.remember(captureId, categories) {
+    // Every name the suggester has emitted for the in-flight
+    // capture, in emit order. The visible "SUGGESTED FROM THIS
+    // SCAN" strip is computed below as this list minus
+    // `acceptedTagNames`, so unselecting a tag in the TAGS section
+    // immediately puts it back without waiting for the suggester to
+    // re-emit it (which can fail when other suggestions filled the
+    // 4-slot budget). Reset on captureId change.
+    val proposedNames = androidx.compose.runtime.remember(captureId) {
         androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
     }
+    // Tags the user has accepted from the suggestions strip during
+    // this review session, ordered by accept time. Backs the "TAGS"
+    // section below the paper-size row.
     val acceptedTagNames = androidx.compose.runtime.remember(captureId) {
+        androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
+    }
+    // Names the user has explicitly detached this session. Guards
+    // auto-attach: a suggestion that matches an existing tag is
+    // auto-attached only if the user hasn't already removed it. Set
+    // is independent of `proposedNames` so a name that landed
+    // unmatched on an early refresh (when `categories` was still
+    // loading) can still auto-attach once the categories flow
+    // catches up.
+    val dismissedNames = androidx.compose.runtime.remember(captureId) {
         androidx.compose.runtime.mutableStateOf<Set<String>>(emptySet())
     }
-    androidx.compose.runtime.LaunchedEffect(captureId, state, categories) {
+    // Add-tag dialog state — opened from the TAGS section's "+ ADD
+    // TAG" affordance. Resets the draft on dismiss/confirm.
+    val showAddTagDialog = androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
+    val newTagDraft = androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf("")
+    }
+    // Voice notes for the in-flight capture. Re-running the suggester
+    // when this list changes folds dictation transcripts into the
+    // input alongside the first-page OCR text — clips the user
+    // recorded on the pre-review pane drive the chip strip once
+    // `setTranscription` lands.
+    val voiceRepo = remember(app) { VoiceNoteRepository(app.database.voiceNoteDao()) }
+    val voiceNotesFlow: kotlinx.coroutines.flow.Flow<List<VoiceNoteEntity>> =
+        remember(captureId, voiceRepo) {
+            if (captureId != null) voiceRepo.observeForCapture(captureId)
+            else kotlinx.coroutines.flow.flowOf(emptyList())
+        }
+    val voiceNotes by voiceNotesFlow.collectAsState(
+        initial = emptyList<VoiceNoteEntity>(),
+    )
+
+    androidx.compose.runtime.LaunchedEffect(captureId, state, categories, voiceNotes) {
         val id = captureId ?: return@LaunchedEffect
         // Wait for at least one page to finish OCR so suggestions
         // have something to fire on.
         val capture = app.database.captureDao().findById(id) ?: return@LaunchedEffect
         val ocrText = app.database.ocrResultDao().findFirstTextForCapture(id)
-        suggestedTags.value = AutoTagSuggester.suggest(
-            ocrText           = ocrText,
+        // Pre-review voice notes contribute their transcript to the
+        // suggester input so dictation drives the chips alongside
+        // the OCR text. Concatenated with a newline so the keyword
+        // fallback treats both pools as one bag of tokens.
+        val voiceText: String = voiceNotes
+            .mapNotNull { row -> row.transcription?.takeIf { it.isNotBlank() } }
+            .joinToString(separator = "\n")
+        val parts: List<String> = listOfNotNull(
+            ocrText?.takeIf { it.isNotBlank() },
+            voiceText.ifBlank { null },
+        )
+        val combinedText: String? = if (parts.isEmpty()) null
+            else parts.joinToString(separator = "\n")
+        val raw = AutoTagSuggester.suggest(
+            ocrText           = combinedText,
             existingTagNames  = categories.map { it.name }.toSet(),
-            currentlyAttached = acceptedTagNames.value,
+            currentlyAttached = acceptedTagNames.value.toSet(),
             captureDateIso    = capture.createdAt,
         )
+        // Walk new suggester output:
+        //   - Any name that matches an existing tag, isn't already
+        //     attached, and the user hasn't explicitly detached this
+        //     session → auto-attach silently so the user sees it in
+        //     the TAGS section pre-selected. Gating on
+        //     `dismissedNames` (rather than "have we seen this name
+        //     before?") lets late-arriving categories trigger an
+        //     auto-attach on a subsequent refresh: a suggestion that
+        //     landed unmatched while `categories` was still loading
+        //     can still be promoted later.
+        //   - Add every emitted name to `proposedNames` so the
+        //     derived strip surfaces it whenever it's not currently
+        //     attached. This makes detach light up the chip in the
+        //     strip immediately without depending on the suggester
+        //     re-emitting it.
+        val existingByName = categories.associateBy { it.name }
+        val known = proposedNames.value.toSet()
+        val updatedProposals = proposedNames.value.toMutableList()
+        for (name in raw) {
+            if (name !in known) updatedProposals += name
+            val tag = existingByName[name]
+            if (tag != null &&
+                name !in acceptedTagNames.value &&
+                name !in dismissedNames.value) {
+                app.database.captureTagDao().attachTag(
+                    joinId    = Uuidv7.generate(),
+                    captureId = id,
+                    tagId     = tag.id,
+                    source    = "ai-suggested",
+                    timestamp = IsoClock.nowIso(),
+                )
+                acceptedTagNames.value = acceptedTagNames.value + name
+            }
+        }
+        if (updatedProposals.size != proposedNames.value.size) {
+            proposedNames.value = updatedProposals
+        }
+    }
+
+    // Derived strip — anything proposed that isn't currently
+    // attached. Updates automatically when the user (de)selects.
+    val suggestedTags = androidx.compose.runtime.remember {
+        androidx.compose.runtime.derivedStateOf {
+            val attached = acceptedTagNames.value.toSet()
+            proposedNames.value.filter { it !in attached }
+        }
     }
 
     // Lift the content past the system status bar + add visual
@@ -156,6 +259,39 @@ fun ScanReviewScreen(
             .fillMaxSize()
             .quickInkDotGridBackground(),
     ) {
+        if (onBack != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = QuickInkSpacing.s4,
+                        end   = QuickInkSpacing.s4,
+                        top   = statusBarTop + QuickInkSpacing.s4,
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable(onClick = onBack)
+                        .padding(horizontal = QuickInkSpacing.s2, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector       = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back to voice note",
+                        tint              = colors.accentDeep,
+                        modifier          = Modifier.size(18.dp),
+                    )
+                    Text(
+                        text  = "Back",
+                        style = type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
+                        color = colors.accentDeep,
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -164,7 +300,7 @@ fun ScanReviewScreen(
                 .padding(
                     start  = QuickInkSpacing.s5,
                     end    = QuickInkSpacing.s5,
-                    top    = statusBarTop + QuickInkSpacing.s7,
+                    top    = if (onBack != null) QuickInkSpacing.s3 else statusBarTop + QuickInkSpacing.s7,
                     bottom = QuickInkSpacing.s5,
                 ),
             verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s5),
@@ -188,14 +324,19 @@ fun ScanReviewScreen(
                                 source    = "ai-suggested",
                                 timestamp = now,
                             )
-                            acceptedTagNames.value = acceptedTagNames.value + name
-                            // Drop the accepted chip immediately
-                            // so the strip shows what's left to act
-                            // on. Re-running the suggester would
-                            // re-emit nothing because the new
-                            // currentlyAttached set excludes this
-                            // tag.
-                            suggestedTags.value = suggestions.filter { it != name }
+                            if (name !in acceptedTagNames.value) {
+                                acceptedTagNames.value = acceptedTagNames.value + name
+                            }
+                            // Re-attach by deliberate user action
+                            // clears any previous dismissal so future
+                            // auto-attach runs (transcript landing,
+                            // etc.) treat the name as freshly
+                            // desired. Strip self-updates — it's a
+                            // derived view over `proposedNames -
+                            // acceptedTagNames`, so adding to
+                            // acceptedTagNames is enough to make
+                            // the chip move to the TAGS section.
+                            dismissedNames.value = dismissedNames.value - name
                         }
                     },
                 )
@@ -216,8 +357,42 @@ fun ScanReviewScreen(
                 )
             }
 
-            if (!isFailed) {
-                SavedImagePreview(previewImageUri = previewImageUri)
+            val attached = acceptedTagNames.value
+            if (!isFailed && categories.isNotEmpty() && cid != null) {
+                TagsSection(
+                    tags          = categories,
+                    selectedNames = attached.toSet(),
+                    onToggle      = { name ->
+                        scope.launch {
+                            if (name in attached) {
+                                val tag = categories.first { it.name == name }
+                                app.database.captureTagDao().detachTag(
+                                    captureId = cid,
+                                    tagId     = tag.id,
+                                    timestamp = IsoClock.nowIso(),
+                                )
+                                acceptedTagNames.value = attached.filter { it != name }
+                                // Remember the explicit dismissal so
+                                // subsequent suggester runs don't re-
+                                // auto-attach behind the user's back.
+                                dismissedNames.value = dismissedNames.value + name
+                            } else {
+                                val tag = categoryRepo.findOrCreate(userId, name)
+                                val now = IsoClock.nowIso()
+                                app.database.captureTagDao().attachTag(
+                                    joinId    = Uuidv7.generate(),
+                                    captureId = cid,
+                                    tagId     = tag.id,
+                                    source    = "manual",
+                                    timestamp = now,
+                                )
+                                acceptedTagNames.value = attached + name
+                                dismissedNames.value = dismissedNames.value - name
+                            }
+                        }
+                    },
+                    onAddTag      = { showAddTagDialog.value = true },
+                )
             }
 
             StatusIndicator(state = state)
@@ -230,6 +405,67 @@ fun ScanReviewScreen(
             )
             Spacer(Modifier.size(AppSpacing.s5))
         }
+    }
+
+    if (showAddTagDialog.value && captureId != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = {
+                showAddTagDialog.value = false
+                newTagDraft.value = ""
+            },
+            title = { Text("New tag") },
+            text = {
+                Column {
+                    androidx.compose.material3.OutlinedTextField(
+                        value         = newTagDraft.value,
+                        onValueChange = { newTagDraft.value = it },
+                        singleLine    = true,
+                        label         = { Text("Tag name") },
+                        placeholder   = { Text("e.g. meeting-notes") },
+                    )
+                    Spacer(Modifier.size(4.dp))
+                    Text(
+                        text  = "Lowercase, hyphens for spaces.",
+                        style = type.meta.copy(fontSize = 11.sp),
+                        color = colors.muted,
+                    )
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    val raw = newTagDraft.value
+                    showAddTagDialog.value = false
+                    newTagDraft.value = ""
+                    scope.launch {
+                        val normalized = normalizeTagName(raw)
+                        if (normalized.isEmpty()) return@launch
+                        val tag = categoryRepo.findOrCreate(userId, normalized)
+                        val now = IsoClock.nowIso()
+                        app.database.captureTagDao().attachTag(
+                            joinId    = Uuidv7.generate(),
+                            captureId = captureId,
+                            tagId     = tag.id,
+                            source    = "manual",
+                            timestamp = now,
+                        )
+                        if (normalized !in acceptedTagNames.value) {
+                            acceptedTagNames.value = acceptedTagNames.value + normalized
+                        }
+                        dismissedNames.value = dismissedNames.value - normalized
+                    }
+                }) {
+                    Text("Add")
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    showAddTagDialog.value = false
+                    newTagDraft.value = ""
+                }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
 
@@ -353,6 +589,7 @@ private fun PaperSizeChipRow(
         PaperSize.A4     to "A4",
         PaperSize.A5     to "A5",
         PaperSize.Letter to "Letter",
+        PaperSize.Card   to "Card",
         PaperSize.Custom to "Custom",
     )
     Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
@@ -408,42 +645,110 @@ private fun PaperSizeChip(
 
 private val PaperSizeChipShape = RoundedCornerShape(percent = 50)
 
+/**
+ * All tags in the user's namespace, rendered as toggle chips.
+ * Selected (attached) chips paint accent-filled; unselected chips
+ * paint outlined. Tap toggles attach/detach against the in-flight
+ * capture. Lives below the paper-size chip row so it complements
+ * the AI suggestions strip above the folder grid — suggestions
+ * surface tags the user might not have thought of, this section
+ * lets them pick from their own set.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SavedImagePreview(previewImageUri: String?) {
+private fun TagsSection(
+    tags: List<TagEntity>,
+    selectedNames: Set<String>,
+    onToggle: (String) -> Unit,
+    onAddTag: () -> Unit,
+) {
     val colors = LocalQuickInkColors.current
-    val context = LocalContext.current
-
-    if (previewImageUri.isNullOrBlank()) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(240.dp)
-                .clip(RoundedCornerShape(QuickInkRadius.md))
-                .background(colors.borderSoft),
-            contentAlignment = Alignment.Center,
+    val type   = LocalQuickInkTypography.current
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector       = Icons.Filled.Description,
-                contentDescription = null,
-                tint              = colors.muted,
-                modifier          = Modifier.size(48.dp),
+            Text(
+                text       = "TAGS",
+                style      = type.eyebrow,
+                color      = colors.muted,
+                fontFamily = QuickInkFonts.ui,
             )
+            Spacer(modifier = Modifier.weight(1f))
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .clickable(onClick = onAddTag)
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text  = "+",
+                    style = type.label.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                    color = colors.accentDeep,
+                )
+                Spacer(modifier = Modifier.size(3.dp))
+                Text(
+                    text  = "ADD TAG",
+                    style = type.label.copy(
+                        fontSize      = 10.sp,
+                        fontWeight    = FontWeight.SemiBold,
+                        letterSpacing = 1.2.sp,
+                    ),
+                    color = colors.accentDeep,
+                )
+            }
         }
-    } else {
-        AsyncImage(
-            model = ImageRequest.Builder(context)
-                .data(Uri.parse(previewImageUri))
-                .crossfade(true)
-                .build(),
-            contentDescription = "Saved scan preview",
-            contentScale       = ContentScale.Fit,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 360.dp)
-                .clip(RoundedCornerShape(QuickInkRadius.md))
-                .background(colors.surface)
-                .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md)),
-        )
+        // Selected (currently-attached) chips render first so the
+        // user can see which tags this capture has at a glance.
+        // Order within each partition matches the underlying
+        // creation order so the strip stays stable frame-to-frame.
+        val ordered = remember(tags, selectedNames) {
+            val selected   = tags.filter { it.name in selectedNames }
+            val unselected = tags.filter { it.name !in selectedNames }
+            selected + unselected
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement   = Arrangement.spacedBy(6.dp),
+        ) {
+            ordered.forEach { tag ->
+                val selected = tag.name in selectedNames
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(
+                            if (selected) colors.accent else Color.White.copy(alpha = 0.85f),
+                            RoundedCornerShape(999.dp),
+                        )
+                        .border(
+                            1.dp,
+                            if (selected) colors.accent else colors.accent.copy(alpha = 0.25f),
+                            RoundedCornerShape(999.dp),
+                        )
+                        .clickable { onToggle(tag.name) }
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text  = "#",
+                        style = type.label.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Bold),
+                        color = if (selected) {
+                            Color.White.copy(alpha = 0.7f)
+                        } else {
+                            colors.accent.copy(alpha = 0.7f)
+                        },
+                    )
+                    Text(
+                        text  = tag.name,
+                        style = type.label.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Medium),
+                        color = if (selected) colors.textOnAccent else colors.ink,
+                        modifier = Modifier.padding(start = 1.dp),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -526,7 +831,14 @@ private fun StatusIndicator(state: ScanFlowController.State) {
  * tap "+#name" to attach immediately (writes to capture_tags with
  * source = "ai-suggested"); rejecting is implicit — chips not
  * tapped are simply discarded when the user leaves the screen.
+ *
+ * Wraps to multiple rows. By default clipped to 2 rows with a
+ * chevron indicator on overflow; tapping the indicator expands to
+ * show every chip, tapping again collapses back. The indicator is
+ * rendered inline by Compose's [FlowRowOverflow] at the position
+ * where the cap kicks in.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ScanReviewSuggestions(
     names: List<String>,
@@ -535,6 +847,15 @@ private fun ScanReviewSuggestions(
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
     val cardShape = RoundedCornerShape(QuickInkRadius.md)
+    val expanded = androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
+    androidx.compose.runtime.LaunchedEffect(names) {
+        // Auto-collapse when the list shrinks back below the
+        // 2-row cap so the chevron doesn't leave the strip stuck
+        // in "expanded" mode after the user accepts everything.
+        if (names.size <= 4) expanded.value = false
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -553,6 +874,24 @@ private fun ScanReviewSuggestions(
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement   = Arrangement.spacedBy(6.dp),
+            maxLines = if (expanded.value) Int.MAX_VALUE else 2,
+            overflow = FlowRowOverflow.expandOrCollapseIndicator(
+                expandIndicator   = {
+                    SuggestionsChevron(
+                        label   = "Show all (${names.size})",
+                        icon    = Icons.Filled.ExpandMore,
+                        onClick = { expanded.value = true },
+                    )
+                },
+                collapseIndicator = {
+                    SuggestionsChevron(
+                        label   = "Show less",
+                        icon    = Icons.Filled.ExpandLess,
+                        onClick = { expanded.value = false },
+                    )
+                },
+                minRowsToShowCollapse = 3,
+            ),
         ) {
             names.forEach { name ->
                 Row(
@@ -591,5 +930,35 @@ private fun ScanReviewSuggestions(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SuggestionsChevron(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector       = icon,
+            contentDescription = label,
+            tint              = colors.accentDeep,
+            modifier          = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(3.dp))
+        Text(
+            text  = label,
+            style = type.label.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+            color = colors.accentDeep,
+        )
     }
 }

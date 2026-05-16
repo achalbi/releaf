@@ -110,8 +110,6 @@ import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.capture.SearchHit
 import app.quickink.mobile.data.capture.displayTitle
-import app.quickink.mobile.features.nav.NavTab
-import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
 import app.quickink.mobile.features.settings.SettingsPreferences
 import app.quickink.mobile.ui.components.DateRangePickerSheet
@@ -135,16 +133,6 @@ import java.time.format.DateTimeFormatter
 fun SearchScreen(
     userId: String,
     onOpenScan: (captureId: String) -> Unit,
-    /// Tab navigation callbacks for the floating bottom nav. The
-    /// Search tab paints itself active; tapping it is a no-op (we're
-    /// already here). `onHome` previously defaulted to `onBack`,
-    /// but now that the back arrow is replaced by the date-range
-    /// filter, callers must wire the Home callback explicitly.
-    onHome: () -> Unit = {},
-    onWorkspace: () -> Unit = {},
-    onScan: () -> Unit = {},
-    onSearch: () -> Unit = {},
-    onSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as QuickInkApp
@@ -385,17 +373,6 @@ fun SearchScreen(
             )
         }
         }
-
-        // Floating bottom nav — Search tab is active.
-        QuickInkBottomNavBar(
-            activeTab  = NavTab.Search,
-            onHome     = onHome,
-            onWorkspace  = onWorkspace,
-            onScan     = onScan,
-            onSearch   = onSearch,
-            onSettings = onSettings,
-            modifier   = Modifier.align(Alignment.BottomCenter),
-        )
     }
 }
 

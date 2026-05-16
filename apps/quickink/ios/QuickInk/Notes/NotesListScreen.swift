@@ -37,15 +37,6 @@ struct NotesListScreen: View {
     let userId: String
     let onBack: () -> Void
     let onOpenScan: (_ captureId: String) -> Void
-    /// Tab navigation callbacks for the floating bottom nav. The
-    /// Library tab paints itself active; tapping it is a no-op
-    /// (we're already here). The other callbacks switch tabs at the
-    /// route level — see QuickInkRoot's tab wiring.
-    let onHome: () -> Void
-    let onWorkspace: () -> Void
-    let onScan: () -> Void
-    let onSearch: () -> Void
-    let onSettings: () -> Void
 
     @StateObject private var capturesVM:   CaptureListViewModel
     @StateObject private var categoriesVM: TagListViewModel
@@ -74,21 +65,11 @@ struct NotesListScreen: View {
     init(
         userId: String,
         onBack: @escaping () -> Void,
-        onOpenScan: @escaping (_ captureId: String) -> Void,
-        onHome: @escaping () -> Void = {},
-        onWorkspace: @escaping () -> Void = {},
-        onScan: @escaping () -> Void = {},
-        onSearch: @escaping () -> Void = {},
-        onSettings: @escaping () -> Void = {}
+        onOpenScan: @escaping (_ captureId: String) -> Void
     ) {
         self.userId = userId
         self.onBack = onBack
         self.onOpenScan = onOpenScan
-        self.onHome = onHome
-        self.onWorkspace = onWorkspace
-        self.onScan = onScan
-        self.onSearch = onSearch
-        self.onSettings = onSettings
 
         _capturesVM   = StateObject(wrappedValue: CaptureListViewModel(userId: userId))
         _categoriesVM = StateObject(wrappedValue: TagListViewModel(userId: userId))
@@ -123,19 +104,6 @@ struct NotesListScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(QuickInkColors.bg.ignoresSafeArea())
-        // `.safeAreaInset` hosts the floating bar without manual
-        // bottom padding — the inset extends the screen's safe area
-        // automatically so scroll content never sits behind the bar.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            QuickInkBottomNavBar(
-                activeTab:  .workspace,
-                onHome:     onHome,
-                onWorkspace:  { /* current tab */ },
-                onScan:     onScan,
-                onSearch:   onSearch,
-                onSettings: onSettings
-            )
-        }
         .task {
             capturesVM.start()
             categoriesVM.start()

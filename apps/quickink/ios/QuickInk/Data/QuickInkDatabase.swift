@@ -676,6 +676,63 @@ public final class QuickInkDatabase: @unchecked Sendable {
             try db.execute(sql: "ALTER TABLE captures ADD COLUMN paper_size TEXT NOT NULL DEFAULT 'a4'")
         }
 
+        // ─── v12_voice_notes ────────────────────────────────────
+        //
+        // Document-attached voice notes. One row per recorded clip;
+        // the clip itself lives in AttachmentStorage as an .m4a and
+        // the row points at it through `audio_uri`. A capture can
+        // have any number of notes; deleting the capture cascades to
+        // its notes via the foreign key, the same way `ocr_results`
+        // attach.
+        //
+        // Two drive-id columns instead of one:
+        //   - `drive_file_id`        — the JSON metadata row on Drive
+        //                              (mirror of `captures.drive_
+        //                              file_id`).
+        //   - `audio_drive_file_id`  — the uploaded .m4a binary
+        //                              (mirror of `captures.pdf_drive_
+        //                              file_id`).
+        // Splitting them lets the sync worker update the transcript
+        // without re-uploading the audio binary, which is the common
+        // case after first sync.
+        //
+        // Mirror of Android's Room v14 schema bump.
+        migrator.registerMigration("v12_voice_notes") { db in
+            try db.execute(sql: """
+                CREATE TABLE voice_notes (
+                    id                      TEXT PRIMARY KEY NOT NULL,
+                    capture_id              TEXT NOT NULL REFERENCES captures(id) ON DELETE CASCADE,
+                    user_id                 TEXT NOT NULL,
+                    audio_uri               TEXT NOT NULL,
+                    duration_ms             INTEGER NOT NULL DEFAULT 0,
+                    transcription           TEXT,
+                    transcription_source    TEXT,
+                    drive_file_id           TEXT,
+                    audio_drive_file_id     TEXT,
+                    created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty                   INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at              TEXT
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_voice_notes_capture   ON voice_notes (capture_id, created_at)")
+            try db.execute(sql: "CREATE INDEX idx_voice_notes_user      ON voice_notes (user_id, created_at)")
+            try db.execute(sql: "CREATE INDEX idx_voice_notes_dirty     ON voice_notes (dirty)      WHERE dirty = 1")
+            try db.execute(sql: "CREATE INDEX idx_voice_notes_tombstone ON voice_notes (deleted_at) WHERE deleted_at IS NOT NULL")
+        }
+
+        // ─── v13_capture_notes ──────────────────────────────────
+        //
+        // Free-form notes column on `captures`. Append-only in the
+        // current UX: after a voice note is recorded and the
+        // transcript editor saves, the edited text is appended here
+        // as a new paragraph. Nullable; older rows + rows synced
+        // from pre-v13 clients read back as NULL. Round-trips
+        // through Drive via `CapturePayloadV2.notes`.
+        migrator.registerMigration("v13_capture_notes") { db in
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN notes TEXT")
+        }
+
         return migrator
     }
 }

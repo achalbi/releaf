@@ -51,7 +51,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import android.view.WindowManager
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -125,24 +124,20 @@ class MainActivity : ComponentActivity() {
         // are the AndroidX shims, so this works back to minSdk 26
         // without API-level branching.
         //
-        // Belt-and-suspenders: the legacy `FLAG_FULLSCREEN` is also
-        // set on the activity's window. Some OEM skins (MIUI /
-        // HyperOS, certain ColorOS builds) silently ignore the
-        // modern InsetsController hide() call — the older window
-        // flag is what those ROMs actually honor.
-        //
-        // The Sustainability Tree-points modal re-applies the same
-        // pair on its own Dialog window (Compose Dialogs get a
-        // separate Window from the activity, so the activity's
-        // flags don't propagate). See `SustainabilityBreakdownSheet`
-        // in `HomeScreen.kt`.
+        // DO NOT add the legacy `FLAG_FULLSCREEN` window flag here —
+        // it suppresses IME-inset dispatch and breaks soft-keyboard
+        // input on `BasicTextField` (e.g. the Search bar) and locks
+        // up Compose `ModalBottomSheet` touches (e.g. the Manage-tags
+        // sheet on the Scan Detail screen). Modals that genuinely
+        // need to repaint over the status bar should apply the flag
+        // to their own Dialog window only — see
+        // `SustainabilityBreakdownSheet` in `HomeScreen.kt`.
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.statusBars())
             systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
 
         // Restore the launch-intent latch first. On config-change
         // recreation `savedInstanceState` is non-null and carries

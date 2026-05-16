@@ -17,11 +17,10 @@
  * uses the closest visual analogs delivered via Compose's
  * downloadable Google Fonts:
  *
- *   - Roboto Serif → New York stand-in. Variable serif Google ships
- *     for product UI; reads as a modern, slightly less didone
- *     editorial face. Holds up at 28sp Light (App Name greeting)
- *     and 16sp Medium (eco card) without the fragility Cormorant
- *     Garamond suffered at the same scales.
+ *   - Cormorant Garamond → New York stand-in. Bundled in
+ *     `res/font/cormorant_garamond_*.ttf`. Editorial face with a
+ *     warm, slightly hand-cut character; renders the App Name,
+ *     sustainability campaigns, empty states, and onboarding hero.
  *   - Inter → SF Pro stand-in. The standard product-UI sans, with
  *     proportions tuned for screen rendering. Replaces the previous
  *     `FontFamily.SansSerif` (Roboto) for a tighter, more refined
@@ -30,12 +29,12 @@
  * Caveat (handwritten) stays bundled — only used for note-thumbnail
  * OCR snippets and the editor's handwritten-title affordance.
  *
- * Loading: Compose downloads the Roboto Serif and Inter weights it
- * needs the first time the app paints. Subsequent launches resolve
- * from disk cache. While the download is in flight the system
- * fallback (FontFamily.Serif / FontFamily.SansSerif) renders, so the
- * UI never blocks. Cert hashes for the Play Services font provider
- * live in `res/values/font_certs.xml`.
+ * Loading: Cormorant Garamond is bundled so editorial type paints on
+ * first frame. Compose downloads the Inter weights it needs the first
+ * time the app paints; subsequent launches resolve from disk cache.
+ * While the Inter download is in flight the system fallback
+ * (FontFamily.SansSerif) renders, so the UI never blocks. Cert hashes
+ * for the Play Services font provider live in `res/values/font_certs.xml`.
  *
  * Mirror of iOS `QuickInkText` styles in `QuickInkTheme.swift`.
  */
@@ -69,48 +68,46 @@ private val googleFontsProvider: GoogleFont.Provider = GoogleFont.Provider(
     certificates      = R.array.com_google_android_gms_fonts_certs,
 )
 
-/** Roboto Serif — Android's New York stand-in (variable serif). */
-private val robotoSerifFont = GoogleFont("Roboto Serif")
-
 /** Inter — Android's SF Pro stand-in (modern product-UI sans). */
 private val interFont = GoogleFont("Inter")
 
 /**
  * Font families QuickInk uses.
  *
- * - `serif` → Roboto Serif via downloadable Google Fonts. Used for
+ * - `serif` → Cormorant Garamond, bundled in `res/font/`. Used for
  *   App Name (`Display`), Sustainability Campaigns (`Editorial`),
- *   Empty States (`BodyItalic`), and onboarding hero copy.
+ *   Empty States (`BodyItalic`), and onboarding hero copy. Bundled
+ *   rather than downloaded so the editorial type renders without a
+ *   first-launch Google Fonts roundtrip.
  * - `ui` → Inter via downloadable Google Fonts. App body, labels,
  *   section headings, card titles, captions, AI summaries.
  * - `handwritten` → Caveat (Medium only). Bundled.
  *
  * Spec deviation: the original spec mapped Notebook Titles
- * (CardTitle) to New York Medium. On screen Roboto Serif Medium
- * 14sp read as too literary for what is functionally a file-name
- * list, so CardTitle is sans now. App Name, Sustainability
- * Campaigns, Empty States, and onboarding still follow the spec.
- *
- * The bundled `cormorant_garamond_*.ttf` files in `res/font/` are
- * no longer referenced and can be removed in a follow-up cleanup
- * (kept on disk for now so a hot-revert is one line).
+ * (CardTitle) to New York Medium. On screen the serif Medium 14sp
+ * read as too literary for what is functionally a file-name list,
+ * so CardTitle is sans now. App Name, Sustainability Campaigns,
+ * Empty States, and onboarding still follow the spec.
  */
 object QuickInkFonts {
     /**
-     * Editorial serif — Roboto Serif via downloadable Google Fonts.
-     * Powers App Name (`Display`), Sustainability Campaigns
-     * (`Editorial`), Empty States (`BodyItalic`), and the onboarding
-     * hero. Six weights including Light (for `Display`) plus
-     * italic, which covers every active token plus headroom.
+     * Editorial serif — Cormorant Garamond bundled in
+     * `res/font/cormorant_garamond_*.ttf`. Powers App Name
+     * (`Display`), Sustainability Campaigns (`Editorial`), Empty
+     * States (`BodyItalic`), and the onboarding hero. Five upright
+     * weights (Light → Bold) plus Normal and Medium italics — covers
+     * every active token plus headroom. Light + Light Italic +
+     * SemiBold Italic + Bold Italic are also on disk if a future
+     * style needs them.
      */
     val serif: FontFamily = FontFamily(
-        GoogleFontFont(robotoSerifFont, googleFontsProvider, FontWeight.Light),
-        GoogleFontFont(robotoSerifFont, googleFontsProvider, FontWeight.Normal),
-        GoogleFontFont(robotoSerifFont, googleFontsProvider, FontWeight.Medium),
-        GoogleFontFont(robotoSerifFont, googleFontsProvider, FontWeight.SemiBold),
-        GoogleFontFont(robotoSerifFont, googleFontsProvider, FontWeight.Bold),
-        GoogleFontFont(robotoSerifFont, googleFontsProvider, FontWeight.Normal, FontStyle.Italic),
-        GoogleFontFont(robotoSerifFont, googleFontsProvider, FontWeight.Medium, FontStyle.Italic),
+        Font(R.font.cormorant_garamond_light,         FontWeight.Light),
+        Font(R.font.cormorant_garamond_regular,       FontWeight.Normal),
+        Font(R.font.cormorant_garamond_medium,        FontWeight.Medium),
+        Font(R.font.cormorant_garamond_semibold,      FontWeight.SemiBold),
+        Font(R.font.cormorant_garamond_bold,          FontWeight.Bold),
+        Font(R.font.cormorant_garamond_italic,        FontWeight.Normal, FontStyle.Italic),
+        Font(R.font.cormorant_garamond_medium_italic, FontWeight.Medium, FontStyle.Italic),
     )
 
     /**
@@ -172,7 +169,7 @@ object QuickInkTextStyle {
     val Display: TextStyle = TextStyle(
         fontFamily    = QuickInkFonts.serif,
         fontSize      = 28.sp,
-        fontWeight    = FontWeight.Light,
+        fontWeight    = FontWeight.Bold,
         lineHeight    = 34.sp,
         letterSpacing = 0.sp,
     )

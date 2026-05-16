@@ -162,6 +162,35 @@ class CaptureRepository(
     }
 
     /**
+     * Append `text` to `captures.notes` as a new paragraph (blank
+     * line separator). Used by the voice-note transcript editor —
+     * after recording + transcribing, the edited text lands both on
+     * the voice note's `transcription` field AND is appended here so
+     * the document carries the running notes across clips. Empty /
+     * whitespace input is a no-op; the existing value is preserved.
+     */
+    suspend fun appendNote(captureId: String, text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        val existing = captureDao.getNotes(captureId)?.trim().orEmpty()
+        val next = if (existing.isEmpty()) trimmed else "$existing\n\n$trimmed"
+        captureDao.setNotes(captureId, next, IsoClock.nowIso())
+    }
+
+    /**
+     * Overwrite `captures.notes` outright (distinct from
+     * [appendNote] which appends as a new paragraph). Used by the
+     * scan-detail Notes editor when the user edits the whole notes
+     * blob directly. Empty / whitespace input clears the column to
+     * null so the card's empty-state branch reads correctly.
+     */
+    suspend fun setNotes(captureId: String, notes: String?) {
+        val trimmed = notes?.trim()
+        val next = if (trimmed.isNullOrEmpty()) null else trimmed
+        captureDao.setNotes(captureId, next, IsoClock.nowIso())
+    }
+
+    /**
      * Move a single capture into a folder. Bumps `updated_at` +
      * `dirty` so the change rides the next sync push. Used by the
      * scan-review folder picker (`ScanFlowController.setFolder`)
@@ -179,6 +208,37 @@ class CaptureRepository(
      */
     suspend fun setPaperSize(captureId: String, paperSize: PaperSize) {
         captureDao.setPaperSize(captureId, paperSize.raw, IsoClock.nowIso())
+    }
+
+    /**
+     * Stamp a fresh [CapturedLocation] onto an existing capture row
+     * — both the locality / sub-locality / address fields and the
+     * lat / lon pair, in two DAO writes. Used by
+     * `ScanFlowController.onScanComplete` to fill in the geo
+     * columns AFTER the row has been inserted; we insert eagerly
+     * (so the voice-note pane can mount on a real row) and then
+     * patch in the location once the GPS + reverse-geocode lands.
+     *
+     * No-op when the resolved location is null (toggle off,
+     * permission denied, or fetch failed) — caller doesn't need to
+     * pre-check.
+     */
+    suspend fun setLocation(captureId: String, location: CapturedLocation?) {
+        if (location == null) return
+        val now = IsoClock.nowIso()
+        captureDao.setLocation(
+            id          = captureId,
+            locality    = location.locality,
+            subLocality = location.subLocality,
+            address     = location.address,
+            timestamp   = now,
+        )
+        captureDao.setCoordinates(
+            id        = captureId,
+            latitude  = location.latitude,
+            longitude = location.longitude,
+            timestamp = now,
+        )
     }
 
     /**

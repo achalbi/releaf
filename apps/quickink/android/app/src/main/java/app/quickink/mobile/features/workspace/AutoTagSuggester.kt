@@ -132,7 +132,11 @@ object AutoTagSuggester {
      * Run rules over [ocrText] and return suggested tag names.
      * Auto-quarterly tags fire only when [existingTagNames]
      * already contains the matching `#q{N}-{YYYY}` — we don't
-     * auto-create generic time tags unprompted (brief §5).
+     * auto-create generic time tags unprompted (brief §5). When the
+     * rule pass yields fewer than [TARGET_SUGGESTIONS] hits we top
+     * up with the most frequent meaningful words from the OCR text
+     * so generic scans (no invoice/receipt/contract keywords) still
+     * surface chips.
      */
     fun suggest(
         ocrText: String?,
@@ -165,10 +169,66 @@ object AutoTagSuggester {
             if (quarterTag in existingTagNames) hits += quarterTag
         }
 
+        if (hits.size < TARGET_SUGGESTIONS) {
+            val exclude = hits + currentlyAttached
+            topKeywords(text, TARGET_SUGGESTIONS - hits.size, exclude).forEach {
+                hits += it
+            }
+        }
+
         // Subtract anything already attached so the chip strip
         // doesn't surface noise.
         return hits.filter { it !in currentlyAttached }
     }
+
+    private const val TARGET_SUGGESTIONS = 12
+
+    /**
+     * Top-frequency words from [lowerText] minus stopwords, short
+     * tokens (< 4 chars), pure digits, and anything already in
+     * [exclude]. Ties broken alphabetically so the order is stable.
+     */
+    private fun topKeywords(
+        lowerText: String,
+        limit: Int,
+        exclude: Set<String>,
+    ): List<String> {
+        if (limit <= 0) return emptyList()
+        val counts = HashMap<String, Int>()
+        lowerText.split(LETTER_SPLIT).forEach { token ->
+            if (token.length >= 4 && token !in stopwords && token !in exclude) {
+                counts[token] = (counts[token] ?: 0) + 1
+            }
+        }
+        return counts.entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .take(limit)
+            .map { it.key }
+    }
+
+    private val LETTER_SPLIT = kotlin.text.Regex("[^a-z]+")
+
+    /**
+     * Common English words plus document-scaffolding noise we never
+     * want to surface as tag suggestions. Kept inline rather than a
+     * resource file because the list is short and rarely changes.
+     */
+    private val stopwords: Set<String> = setOf(
+        "about","across","after","again","against","all","also","although","always","another",
+        "any","anyone","anything","anywhere","are","around","because","been","before","behind",
+        "being","below","beside","between","both","each","either","ever","every","everyone",
+        "everything","everywhere","from","have","having","here","hers","herself","himself",
+        "into","its","itself","just","like","made","make","makes","many","more","most","much",
+        "must","myself","never","next","none","nothing","once","only","other","others","ours",
+        "ourselves","over","said","same","several","should","since","some","someone","something",
+        "somewhere","still","such","take","taken","than","that","them","themselves","then",
+        "there","these","they","this","those","through","thus","under","until","upon","very",
+        "was","were","what","when","where","whether","which","while","whilst","who","whom",
+        "whose","with","within","without","would","your","yours","yourself","yourselves",
+        // Document scaffolding noise — never useful as tags.
+        "page","pages","copy","copies","document","documents","file","files","scan","scans",
+        "scanned","date","time","name","dear","sincerely","regards","subject","subjects",
+    )
 
     private fun matches(rule: Rule, lowerText: String): Boolean = when (rule) {
         is Rule.Keyword -> rule.word.lowercase() in lowerText

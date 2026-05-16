@@ -290,11 +290,11 @@ private struct MainShell: View {
     /// re-renders the Home greeting reactively without round-tripping
     /// through UserDefaults observers.
     @StateObject private var settings = SettingsState()
-    /// Lat/long cache for the DaylightStatusBar that sits above every
-    /// main-shell screen. Seeded from UserDefaults so the bar paints
-    /// on cold launch; refreshed once permission is granted via a
-    /// non-prompting `refreshIfNeeded` call on `.task` + on every
-    /// `scenePhase == .active` transition. See
+    /// Lat/long cache the Home `DaylightHero` reads its sunrise/
+    /// sunset numbers from. Seeded from UserDefaults so the hero
+    /// paints on cold launch; refreshed once permission is granted
+    /// via a non-prompting `refreshIfNeeded` call on `.task` + on
+    /// every `scenePhase == .active` transition. See
     /// `Calendar/DaylightLocationStore.swift` for the caching rules.
     @StateObject private var daylightLocation = DaylightLocationStore()
     @State private var path: [Route] = []
@@ -314,6 +314,37 @@ private struct MainShell: View {
     /// circuits to `{ }`).
     private func navToTab(_ route: Route) {
         path = [route]
+    }
+
+    /// Bottom-nav slot derived from the current path. `nil` hides the
+    /// bar entirely (Calendar, Profile, ManageCategories, NoteEditor,
+    /// CategoryEntries — modal-ish surfaces that own the canvas).
+    /// `.none` keeps the bar painted with no active pill on pushed
+    /// detail screens (ScanDetail). The pushed Workspace children
+    /// (FolderDetail / SmartCollection / TagLibrary / NotesList) keep
+    /// the Workspace pill so the user knows which tree they're in.
+    private var activeTab: NavTab? {
+        guard let last = path.last else { return NavTab.home }
+        switch last {
+        case .workspaceHome, .notesList, .folderDetail, .smartCollection, .tagLibrary:
+            return NavTab.workspace
+        case .search:                                                return NavTab.search
+        case .settings:                                              return NavTab.settings
+        case .scanDetail:                                            return NavTab.none
+        case .calendar, .profile, .manageCategories,
+             .noteEditor, .categoryEntries:                          return nil
+        }
+    }
+
+    /// Whether the global time bar at the top of the screen should
+    /// be visible. Hidden on Home (which already has its own status
+    /// strip) and on the ScanDetail viewer (which renders its own
+    /// auto-hide-on-scroll variant so the preview surface stays
+    /// dominant).
+    private var showsTimeBar: Bool {
+        guard let last = path.last else { return false }
+        if case .scanDetail = last { return false }
+        return true
     }
 
     /// Settings override > Google session displayName > nil.
@@ -380,29 +411,34 @@ private struct MainShell: View {
         // user dismisses, `path` is preserved (still @State on
         // MainShell), so they return to wherever they were.
         //
-        // The daylight status bar wraps only the .idle navigation
-        // surfaces — full-screen task surfaces (ScanReviewScreen,
-        // the QuickCaptureScreen fullScreenCover below) intentionally
+        // The time bar wraps only the .idle navigation surfaces —
+        // full-screen task surfaces (ScanReviewScreen, the
+        // QuickCaptureScreen fullScreenCover below) intentionally
         // take over the whole screen, including the bar's slot, so
         // OCR review + capture remain immersive.
         Group {
             switch controller.state {
             case .recognizing, .complete, .failed:
-                ScanReviewScreen(controller: controller, userId: userId)
+                ScanCaptureSurface(controller: controller, userId: userId)
             case .idle:
                 VStack(spacing: 0) {
-                    // Daylight bar hides on Home — the DaylightHero
-                    // card already shows the same sunrise/sunset, so
-                    // the bar would be a redundant duplicate at the
-                    // top of the Home tab. Pushed routes (Settings,
-                    // Workspace, Calendar, etc.) keep the bar since
-                    // they have no daylight context of their own.
-                    if !path.isEmpty {
-                        DaylightStatusBar(
-                            latitude:  daylightLocation.latitude,
-                            longitude: daylightLocation.longitude
-                        )
+                    // Time bar hides on Home (which has its own
+                    // status strip) and on ScanDetail (which renders
+                    // its own auto-hide-on-scroll variant inline).
+                    //
+                    // Wrap the conditional in a Group with its own
+                    // `.animation(_, value:)` so the bar slides in/out
+                    // independently of the NavigationStack's screen
+                    // transitions. An outer-VStack animation modifier
+                    // was getting overridden by NavigationStack's own
+                    // animation context and the bar popped abruptly.
+                    Group {
+                        if showsTimeBar {
+                            QuickInkTimeBar()
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
                     }
+                    .animation(.easeInOut(duration: 0.22), value: showsTimeBar)
                     NavigationStack(path: $path) {
                     HomeScreen(
                         controller:     controller,
@@ -430,6 +466,25 @@ private struct MainShell: View {
                         destination(for: route)
                     }
                 }
+                // Bottom nav attaches to the NavigationStack via
+                // `safeAreaInset`, not to each screen's body — so a
+                // push / pop slides the screen content underneath
+                // while the bar stays stationary. Eliminates the
+                // double-footer crossfade the per-screen attachment
+                // used to produce, and reserves a stable safe-area
+                // for scroll content inside every destination.
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if let tab = activeTab {
+                        QuickInkBottomNavBar(
+                            activeTab:   tab,
+                            onHome:      { path.removeAll() },
+                            onWorkspace: { navToTab(workspaceTabRoute) },
+                            onScan:      { showQuickCapture = true },
+                            onSearch:    { navToTab(.search) },
+                            onSettings:  { navToTab(.settings) }
+                        )
+                    }
+                }
                 }   // closes VStack opened at the top of `case .idle:`
             }
         }
@@ -446,6 +501,10 @@ private struct MainShell: View {
             // that included "Study". Idempotent + flag-guarded;
             // safe to call on every launch.
             try? await categoryRepo.migrateLegacyStudyToBusinessCardIfNeeded(userId: userId)
+            // One-shot migration that lowercases + kebab-cases the
+            // legacy capitalized seed names so existing users align
+            // with the new canonical form. Idempotent + flag-guarded.
+            try? await categoryRepo.migrateLegacySeedNamesToKebabIfNeeded(userId: userId)
 
             // Workspace v1 first-launch migration — seed Unfiled
             // folder + backfill every capture's folder_id. The
@@ -599,12 +658,7 @@ private struct MainShell: View {
             NotesListScreen(
                 userId:     userId,
                 onBack:     { path.removeLast() },
-                onOpenScan: { captureId in path.append(.scanDetail(captureId: captureId)) },
-                onHome:     { path.removeAll() },
-                onWorkspace:  { /* current tab — no-op */ },
-                onScan:     { showQuickCapture = true },
-                onSearch:   { navToTab(.search) },
-                onSettings: { navToTab(.settings) }
+                onOpenScan: { captureId in path.append(.scanDetail(captureId: captureId)) }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -623,12 +677,7 @@ private struct MainShell: View {
                 onBack:    { path.removeLast() },
                 authStore: authStore,
                 settings:  settings,
-                onManageCategories: { path.append(.manageCategories) },
-                onHome:     { path.removeAll() },
-                onWorkspace:  { navToTab(workspaceTabRoute) },
-                onScan:     { showQuickCapture = true },
-                onSearch:   { navToTab(.search) },
-                onSettings: { /* current tab — no-op */ }
+                onManageCategories: { path.append(.manageCategories) }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -652,14 +701,9 @@ private struct MainShell: View {
 
         case .scanDetail(let captureId):
             ScanDetailScreen(
-                captureId:  captureId,
-                userId:     userId,
-                onBack:     { path.removeLast() },
-                onHome:     { path.removeAll() },
-                onWorkspace:  { navToTab(workspaceTabRoute) },
-                onScan:     { showQuickCapture = true },
-                onSearch:   { navToTab(.search) },
-                onSettings: { navToTab(.settings) }
+                captureId: captureId,
+                userId:    userId,
+                onBack:    { path.removeLast() }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -676,12 +720,7 @@ private struct MainShell: View {
                     path.removeLast()
                     path.append(.scanDetail(captureId: captureId))
                 },
-                settings: settings,
-                onHome:     { path.removeAll() },
-                onWorkspace:  { navToTab(workspaceTabRoute) },
-                onScan:     { showQuickCapture = true },
-                onSearch:   { /* current tab — no-op */ },
-                onSettings: { navToTab(.settings) }
+                settings: settings
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -716,10 +755,7 @@ private struct MainShell: View {
                 onOpenSmartCollection: { sc in
                     path.append(.smartCollection(collectionId: sc.id))
                 },
-                onBrowseTags:          { path.append(.tagLibrary) },
-                onHome:                { path.removeAll() },
-                onScan:                { showQuickCapture = true },
-                onSettings:            { navToTab(.settings) }
+                onBrowseTags:          { path.append(.tagLibrary) }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -732,11 +768,7 @@ private struct MainShell: View {
                 onOpenCapture: { capture in
                     path.append(.scanDetail(captureId: capture.id))
                 },
-                onOpenSearch:  { navToTab(.search) },
-                onHome:        { path.removeAll() },
-                onWorkspace:   { navToTab(workspaceTabRoute) },
-                onScan:        { showQuickCapture = true },
-                onSettings:    { navToTab(.settings) }
+                onOpenSearch:  { navToTab(.search) }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -749,11 +781,7 @@ private struct MainShell: View {
                 onOpenCapture: { capture in
                     path.append(.scanDetail(captureId: capture.id))
                 },
-                onOpenSearch: { navToTab(.search) },
-                onHome:       { path.removeAll() },
-                onWorkspace:  { navToTab(workspaceTabRoute) },
-                onScan:       { showQuickCapture = true },
-                onSettings:   { navToTab(.settings) }
+                onOpenSearch: { navToTab(.search) }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -765,11 +793,7 @@ private struct MainShell: View {
                 onOpenTag:   { tag in
                     path.append(.categoryEntries(name: tag.name))
                 },
-                onOpenSearch: { navToTab(.search) },
-                onHome:       { path.removeAll() },
-                onWorkspace:  { navToTab(workspaceTabRoute) },
-                onScan:       { showQuickCapture = true },
-                onSettings:   { navToTab(.settings) }
+                onOpenSearch: { navToTab(.search) }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)

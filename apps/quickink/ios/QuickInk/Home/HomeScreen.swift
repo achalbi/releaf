@@ -74,13 +74,12 @@ struct HomeScreen: View {
     /// avatar without a UserDefaults observer.
     var profilePhotoUri: String = ""
     /// User's location, threaded down from `DaylightLocationStore`
-    /// in `QuickInkRoot` so the `DaylightHero` card uses the same
-    /// sunrise/sunset times as the `DaylightStatusBar` above. `nil`
-    /// for either falls back to Mysuru — the panchanga anchor.
+    /// in `QuickInkRoot` so the `DaylightHero` card resolves sunrise
+    /// and sunset against the user's actual position. `nil` for
+    /// either falls back to Mysuru — the panchanga anchor.
     var daylightLatitude:  Double? = nil
     var daylightLongitude: Double? = nil
 
-    @State private var showQuickCapture = false
     /// Side-panel drawer that slides in from the leading edge when
     /// the avatar is tapped — mirror of Releaf's home drawer
     /// (apps/releaf/ios/Releaf/Features/Home/HomeScreen.swift).
@@ -323,16 +322,6 @@ struct HomeScreen: View {
             .padding(.bottom, QuickInkSpacing.s5)
         }
         .background(QuickInkColors.bg.ignoresSafeArea())
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            QuickInkBottomNavBar(
-                activeTab:  .home,
-                onHome:     { /* current screen */ },
-                onWorkspace:  onOpenNotes,
-                onScan:     { showQuickCapture = true },
-                onSearch:   { onOpenSearch?() },
-                onSettings: onOpenSettings
-            )
-        }
         .task {
             // Live captures observation backing the recent rail.
             capturesVM.start()
@@ -349,17 +338,6 @@ struct HomeScreen: View {
                     )
             }
         }
-        .fullScreenCover(isPresented: $showQuickCapture) {
-            // Mode-picker surface (the dark, branded scan UI).
-            // QuickCapture's Zap shutter presents VisionKit's
-            // DocumentScannerView internally; the result flows
-            // back through controller.onScanComplete the same way
-            // a direct scanner presentation would.
-            QuickCaptureScreen(
-                controller: controller,
-                onDismiss:  { showQuickCapture = false }
-            )
-        }
     }
 
     // MARK: - Header
@@ -368,9 +346,21 @@ struct HomeScreen: View {
     private var headerBlock: some View {
         HStack(alignment: .top, spacing: QuickInkSpacing.s3) {
             VStack(alignment: .leading, spacing: QuickInkSpacing.s1) {
-                Text(greeting)
-                    .font(QuickInkText.body)
-                    .foregroundStyle(QuickInkColors.muted)
+                // Daylight cue next to the greeting — sun during the
+                // day, moon-with-stars after 18:00 (and before 05:00).
+                // Mirrors the Android header (glyph moved off the
+                // date/time strip).
+                HStack(spacing: 4) {
+                    Image(systemName: isEvening ? "moon.stars.fill" : "sun.max.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(isEvening ? QuickInkColors.inkSoft : QuickInkColors.leafYellowDeep)
+                    Text(greeting)
+                        .font(QuickInkText.body)
+                        // Deep taupe (`#5F5245`) — the `inkSoft`
+                        // light-mode value, pinned as a fixed tone for
+                        // the greeting in both light and dark.
+                        .foregroundStyle(Color(hex: 0x5F5245))
+                }
                 // Replaces the static "Quickink" title — shows the
                 // user's name (Settings override > Google session
                 // displayName > "QuickInk" fallback). Editable on
@@ -491,6 +481,14 @@ struct HomeScreen: View {
         case 12..<18: return "Good afternoon"
         default:      return "Good evening"
         }
+    }
+
+    /// True when the greeting reads "Good evening" — drives the
+    /// moon glyph (vs. sun) in `headerBlock`. Same window as the
+    /// `default` branch of `greeting`: hour ≥ 18 or hour < 5.
+    private var isEvening: Bool {
+        let hour = Calendar.current.component(.hour, from: Date())
+        return hour < 5 || hour >= 18
     }
 
     // MARK: - Date/time strip helpers

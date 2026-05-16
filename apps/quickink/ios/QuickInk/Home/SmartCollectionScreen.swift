@@ -21,10 +21,6 @@ public struct SmartCollectionScreen: View {
     public let onBack: () -> Void
     public let onOpenCapture: (CaptureSummary) -> Void
     public let onOpenSearch: () -> Void
-    public let onHome: () -> Void
-    public let onWorkspace: () -> Void
-    public let onScan: () -> Void
-    public let onSettings: () -> Void
 
     @State private var collection: SmartCollectionEntity? = nil
     @State private var captures: [CaptureSummary] = []
@@ -38,21 +34,13 @@ public struct SmartCollectionScreen: View {
         userId: String,
         onBack: @escaping () -> Void,
         onOpenCapture: @escaping (CaptureSummary) -> Void,
-        onOpenSearch: @escaping () -> Void,
-        onHome: @escaping () -> Void,
-        onWorkspace: @escaping () -> Void,
-        onScan: @escaping () -> Void,
-        onSettings: @escaping () -> Void
+        onOpenSearch: @escaping () -> Void
     ) {
         self.collectionId = collectionId
         self.userId = userId
         self.onBack = onBack
         self.onOpenCapture = onOpenCapture
         self.onOpenSearch = onOpenSearch
-        self.onHome = onHome
-        self.onWorkspace = onWorkspace
-        self.onScan = onScan
-        self.onSettings = onSettings
     }
 
     public var body: some View {
@@ -90,16 +78,6 @@ public struct SmartCollectionScreen: View {
             }
         }
         .background(QuickInkColors.bg)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            QuickInkBottomNavBar(
-                activeTab:   .workspace,
-                onHome:      onHome,
-                onWorkspace: onWorkspace,
-                onScan:      onScan,
-                onSearch:    onOpenSearch,
-                onSettings:  onSettings
-            )
-        }
         .task { await initialLoad() }
     }
 

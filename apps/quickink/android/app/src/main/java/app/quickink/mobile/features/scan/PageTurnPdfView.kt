@@ -54,6 +54,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -108,6 +109,13 @@ fun PageTurnPdfView(
     pdfUri: Uri,
     modifier: Modifier = Modifier,
     onFullscreenClick: (() -> Unit)? = null,
+    /// When non-null, renders an additional ellipsis chip beside
+    /// the fullscreen chip at TopEnd. `moreMenuContent` is rendered
+    /// inside the chip's Box so a DropdownMenu anchored there opens
+    /// next to it. Both default to null so existing call sites
+    /// (single fullscreen chip, no menu) keep their behavior.
+    onMoreClick: (() -> Unit)? = null,
+    moreMenuContent: (@Composable () -> Unit)? = null,
     /// Externally-controlled current page (0-based). Lets the caller
     /// drive the pager from a sibling UI like the thumbnails strip.
     /// Defaults to 0 — first page on initial render.
@@ -156,6 +164,8 @@ fun PageTurnPdfView(
                 PageTurnPager(
                     pages               = pages!!,
                     onFullscreenClick   = onFullscreenClick,
+                    onMoreClick         = onMoreClick,
+                    moreMenuContent     = moreMenuContent,
                     currentPage         = currentPage,
                     onCurrentPageChange = onCurrentPageChange,
                     interactionsEnabled = interactionsEnabled,
@@ -169,6 +179,8 @@ fun PageTurnPdfView(
 private fun PageTurnPager(
     pages: List<Bitmap>,
     onFullscreenClick: (() -> Unit)? = null,
+    onMoreClick: (() -> Unit)? = null,
+    moreMenuContent: (@Composable () -> Unit)? = null,
     currentPage: Int = 0,
     onCurrentPageChange: (Int) -> Unit = {},
     interactionsEnabled: Boolean = true,
@@ -379,23 +391,31 @@ private fun PageTurnPager(
         // dark `ink` fill at ~80% alpha keeps the page readable
         // through the chip while the icon stays unmistakeably
         // tappable.
-        if (onFullscreenClick != null) {
-            Box(
+        if (onFullscreenClick != null || onMoreClick != null) {
+            androidx.compose.foundation.layout.Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(QuickInkSpacing.s3)
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(colors.ink.copy(alpha = 0.55f))
-                    .clickable(onClick = onFullscreenClick),
-                contentAlignment = Alignment.Center,
+                    .padding(QuickInkSpacing.s3),
+                horizontalArrangement =
+                    androidx.compose.foundation.layout.Arrangement.spacedBy(QuickInkSpacing.s2),
             ) {
-                Icon(
-                    imageVector        = Icons.Outlined.Fullscreen,
-                    contentDescription = "View fullscreen",
-                    tint               = colors.textOnAccent,
-                    modifier           = Modifier.size(28.dp),
-                )
+                if (onFullscreenClick != null) {
+                    OverlayChip(
+                        icon        = Icons.Outlined.Fullscreen,
+                        contentDesc = "View fullscreen",
+                        onClick     = onFullscreenClick,
+                    )
+                }
+                if (onMoreClick != null) {
+                    Box {
+                        OverlayChip(
+                            icon        = Icons.Filled.MoreVert,
+                            contentDesc = "More actions",
+                            onClick     = onMoreClick,
+                        )
+                        moreMenuContent?.invoke()
+                    }
+                }
             }
         }
     }

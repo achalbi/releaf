@@ -22,7 +22,13 @@ public final class WorkspaceHomeViewModel: ObservableObject {
     @Published public private(set) var tags: [TagEntity] = []
     @Published public private(set) var tagCounts: [TagCount] = []
     @Published public private(set) var smartCollections: [SmartCollectionEntity] = []
-    @Published public private(set) var continueCandidate: CaptureSummary? = nil
+    /// Most-recently-opened captures (newest first), capped at
+    /// [recentlyOpenedLimit]. Row 0 renders as the Continue hero;
+    /// rows 1..N feed the compact strip below it.
+    @Published public private(set) var recentlyOpened: [CaptureSummary] = []
+
+    /// Hero + carousel cap. Matches Android's `RECENTLY_OPENED_LIMIT`.
+    public static let recentlyOpenedLimit: Int = 6
     @Published public private(set) var folderCaptureCounts: [String: Int] = [:]
     /// Per-folder count of captures created in the last 7 days.
     /// Drives the Workspace home folder list's "N new" badge.
@@ -104,9 +110,10 @@ public final class WorkspaceHomeViewModel: ObservableObject {
             self?.smartCollections = $0
         })
 
+        let limit = Self.recentlyOpenedLimit
         continueCancellable = ValueObservation.tracking { [userId] db in
-            try CaptureSummary.fetchOne(db, sql: """
-                SELECT id, title, preview_uri, pdf_uri, category, page_count, created_at, source,
+            try CaptureSummary.fetchAll(db, sql: """
+                SELECT id, title, preview_uri, pdf_uri, page_count, created_at, source,
                        latitude, longitude, locality, sub_locality, address,
                        folder_id, last_opened_at, last_opened_page, last_opened_device
                 FROM captures
@@ -114,13 +121,13 @@ public final class WorkspaceHomeViewModel: ObservableObject {
                   AND last_opened_at IS NOT NULL
                   AND deleted_at IS NULL
                 ORDER BY last_opened_at DESC
-                LIMIT 1
-                """, arguments: [userId])
+                LIMIT ?
+                """, arguments: [userId, limit])
         }
         .publisher(in: dbQueue)
         .receive(on: DispatchQueue.main)
         .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] in
-            self?.continueCandidate = $0
+            self?.recentlyOpened = $0
         })
 
         // "N new" — captures created in the last 7 days, grouped

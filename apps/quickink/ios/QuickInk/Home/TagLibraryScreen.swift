@@ -20,10 +20,6 @@ public struct TagLibraryScreen: View {
     public let onBack: () -> Void
     public let onOpenTag: (TagEntity) -> Void
     public let onOpenSearch: () -> Void
-    public let onHome: () -> Void
-    public let onWorkspace: () -> Void
-    public let onScan: () -> Void
-    public let onSettings: () -> Void
 
     @StateObject private var viewModel: TagLibraryViewModel
     @State private var query: String = ""
@@ -46,20 +42,12 @@ public struct TagLibraryScreen: View {
         userId: String,
         onBack: @escaping () -> Void,
         onOpenTag: @escaping (TagEntity) -> Void,
-        onOpenSearch: @escaping () -> Void,
-        onHome: @escaping () -> Void,
-        onWorkspace: @escaping () -> Void,
-        onScan: @escaping () -> Void,
-        onSettings: @escaping () -> Void
+        onOpenSearch: @escaping () -> Void
     ) {
         self.userId = userId
         self.onBack = onBack
         self.onOpenTag = onOpenTag
         self.onOpenSearch = onOpenSearch
-        self.onHome = onHome
-        self.onWorkspace = onWorkspace
-        self.onScan = onScan
-        self.onSettings = onSettings
         _viewModel = StateObject(wrappedValue: TagLibraryViewModel(userId: userId))
     }
 
@@ -76,16 +64,6 @@ public struct TagLibraryScreen: View {
             .padding(.top, QuickInkSpacing.s2)
         }
         .background(QuickInkColors.bg)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            QuickInkBottomNavBar(
-                activeTab:   .workspace,
-                onHome:      onHome,
-                onWorkspace: onWorkspace,
-                onScan:      onScan,
-                onSearch:    onOpenSearch,
-                onSettings:  onSettings
-            )
-        }
         .onAppear { viewModel.start() }
         .onChange(of: picked) { _ in
             viewModel.updateIntersect(picked: picked)

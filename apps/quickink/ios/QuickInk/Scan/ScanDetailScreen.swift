@@ -22,16 +22,6 @@ struct ScanDetailScreen: View {
     let captureId: String
     let userId: String
     let onBack: () -> Void
-    /// Bottom-nav callbacks. Optional so we keep the current
-    /// "navigate to detail and only allow back" path working from
-    /// places that don't host a tab bar (e.g. share-extension entry
-    /// points). When all five are supplied, the floating bottom nav
-    /// renders below the content; otherwise it stays hidden.
-    let onHome: (() -> Void)?
-    let onWorkspace: (() -> Void)?
-    let onScan: (() -> Void)?
-    let onSearch: (() -> Void)?
-    let onSettings: (() -> Void)?
 
     @StateObject private var categoriesVM: TagListViewModel
 
@@ -51,6 +41,11 @@ struct ScanDetailScreen: View {
     /// [CaptureRepository.setTitle]; Cancel discards it.
     @State private var showTitleEditor = false
     @State private var titleDraft = ""
+    /// Notes editor — opens a full-sheet text editor on the
+    /// detail screen's Notes card. Save persists via
+    /// [CaptureRepository.setNotes]; Cancel discards `notesDraft`.
+    @State private var showNotesEditor = false
+    @State private var notesDraft = ""
     /// Drives the fullscreen flipbook viewer (`FullscreenPdfViewer`).
     /// Set true by the overlay button on the inline preview; cleared
     /// by the cover's close affordance or a system back-swipe.
@@ -82,6 +77,12 @@ struct ScanDetailScreen: View {
     /// the row's label ("Preparing…") and disables further taps so
     /// a double-tap doesn't queue two renders.
     @State private var isPreparingImageShare = false
+    /// Identifiable wrapper around the rasterised pages handed to
+    /// the WhatsApp-style editor before the share sheet opens.
+    /// Wrapping (instead of holding `[UIImage]?` directly) gives
+    /// `.fullScreenCover(item:)` a stable identity so it doesn't
+    /// re-present on every state read.
+    @State private var pendingEditorBundle: EditorPagesBundle? = nil
 
     /// Workspace v1 — folder picker presentation. Tapping the
     /// Actions card's "Move to folder" row flips this.
@@ -98,25 +99,21 @@ struct ScanDetailScreen: View {
     /// PDF reader writes last_opened_* 500ms after the user lands
     /// on a page so a quick flip-through doesn't pollute Home.
     @State private var lastOpenedDebounceTask: Task<Void, Never>? = nil
+    /// True once the outer ScrollView's content offset moves past
+    /// the top. Drives the auto-hide animation on
+    /// [QuickInkTimeBar] so the preview chrome doesn't crowd the
+    /// page on scroll. Resets when the user scrolls back to the
+    /// very top.
+    @State private var isScrolledPastTop: Bool = false
 
     init(
         captureId: String,
         userId: String,
-        onBack: @escaping () -> Void,
-        onHome: (() -> Void)? = nil,
-        onWorkspace: (() -> Void)? = nil,
-        onScan: (() -> Void)? = nil,
-        onSearch: (() -> Void)? = nil,
-        onSettings: (() -> Void)? = nil
+        onBack: @escaping () -> Void
     ) {
         self.captureId = captureId
         self.userId = userId
         self.onBack = onBack
-        self.onHome = onHome
-        self.onWorkspace = onWorkspace
-        self.onScan = onScan
-        self.onSearch = onSearch
-        self.onSettings = onSettings
         _categoriesVM = StateObject(
             wrappedValue: TagListViewModel(userId: userId)
         )
@@ -124,7 +121,23 @@ struct ScanDetailScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !isScrolledPastTop {
+                QuickInkTimeBar()
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
             ScrollView {
+                // Invisible 0-height tracker emits the scroll-view's
+                // current content offset via PreferenceKey so the
+                // time bar can hide on any non-zero scroll without
+                // pulling in iOS 18's onScrollGeometryChange.
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key:   ScanDetailScrollOffsetKey.self,
+                        value: proxy.frame(in: .named("scanDetailScroll")).minY
+                    )
+                }
+                .frame(height: 0)
+
                 VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
                     if let capture {
                         // Title block — large, prominent, with breadcrumb
@@ -140,42 +153,60 @@ struct ScanDetailScreen: View {
                             pageThumbnailsStrip(for: capture)
                         }
 
-                        // Details + Actions cards — side by side, matching
-                        // the Drive-style mockup. Both cards stretch to
-                        // equal width; on very narrow screens (iPhone SE
-                        // 1st gen) the row still fits because the rows
-                        // inside each card wrap on long values.
-                        HStack(alignment: .top, spacing: QuickInkSpacing.s3) {
-                            detailsCard(for: capture)
-                                .frame(maxWidth: .infinity, alignment: .topLeading)
-                            actionsCard(for: capture)
-                                .frame(maxWidth: .infinity, alignment: .topLeading)
-                        }
-                        .padding(.horizontal, QuickInkSpacing.s5)
+                        // Details card — full width now that the
+                        // Actions card has moved to the more-menu
+                        // dropdown anchored next to the fullscreen
+                        // chip on the preview.
+                        detailsCard(for: capture)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(.horizontal, QuickInkSpacing.s5)
+
+                        // Document notes — free-form text the user
+                        // can type directly into the scan. Tapping
+                        // the card opens a full editor sheet; the
+                        // voice-note transcript editor also appends
+                        // here, so notes accumulate from both
+                        // surfaces.
+                        notesCard(for: capture)
+                            .padding(.horizontal, QuickInkSpacing.s5)
+
+                        // Voice notes — full-width section below the
+                        // Details row. Owns its own list +
+                        // recorder sheet; persists rows through
+                        // `voice_notes` with a foreign key to this
+                        // capture, so deletes cascade with the scan.
+                        // The `onNotesChanged` callback fires after
+                        // Copy-to-notes or the transcript editor's
+                        // append so the Notes card above refreshes
+                        // without waiting for a screen revisit.
+                        VoiceNoteSection(
+                            captureId:      captureId,
+                            userId:         userId,
+                            onNotesChanged: { Task { await loadCapture() } }
+                        )
+                            .padding(.horizontal, QuickInkSpacing.s5)
                     } else {
                         loadingSkeleton
                             .padding(.horizontal, QuickInkSpacing.s5)
                     }
                 }
-                .padding(.top, QuickInkSpacing.s4)
-                .padding(.bottom, hasBottomNav ? QuickInkBottomNavReservedHeight : QuickInkSpacing.s8)
+            }
+            .coordinateSpace(name: "scanDetailScroll")
+            .onPreferenceChange(ScanDetailScrollOffsetKey.self) { minY in
+                // minY is positive at the top (content starts at the
+                // ScrollView's origin); scrolling down drives it
+                // negative. Threshold of -4 absorbs jitter on the
+                // bounce and stretches.
+                let scrolled = minY < -4
+                if scrolled != isScrolledPastTop {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        isScrolledPastTop = scrolled
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(QuickInkColors.bg.ignoresSafeArea())
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if hasBottomNav,
-               let onHome, let onWorkspace, let onScan, let onSearch, let onSettings {
-                QuickInkBottomNavBar(
-                    activeTab:  .none,
-                    onHome:     onHome,
-                    onWorkspace:  onWorkspace,
-                    onScan:     onScan,
-                    onSearch:   onSearch,
-                    onSettings: onSettings
-                )
-            }
-        }
         .task {
             // Start the categories observation first (synchronous,
             // returns immediately) so it's already emitting by the
@@ -293,6 +324,54 @@ struct ScanDetailScreen: View {
                 .font(.caption)
                 .foregroundStyle(QuickInkColors.inkSoft)
         }
+        // Notes editor — full sheet with a multi-line TextEditor so
+        // long notes (and pasted blocks from the voice-transcript
+        // editor) have room to breathe. Save persists via
+        // `CaptureRepository.setNotes(...)`; Cancel drops the draft.
+        .sheet(isPresented: $showNotesEditor) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+                    Text("Capture notes about this scan. Voice-note transcripts also get appended here.")
+                        .font(QuickInkText.caption)
+                        .foregroundStyle(QuickInkColors.muted)
+                        .padding(.horizontal, QuickInkSpacing.s4)
+                        .padding(.top, QuickInkSpacing.s3)
+
+                    TextEditor(text: $notesDraft)
+                        .font(QuickInkText.body)
+                        .scrollContentBackground(.hidden)
+                        .padding(QuickInkSpacing.s2)
+                        .background(QuickInkColors.borderSoft.opacity(0.4))
+                        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                                .stroke(QuickInkColors.border, lineWidth: 1)
+                        )
+                        .padding(.horizontal, QuickInkSpacing.s4)
+                        .padding(.bottom, QuickInkSpacing.s4)
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
+                .background(QuickInkColors.bg.ignoresSafeArea())
+                .navigationTitle("Notes")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { showNotesEditor = false }
+                            .foregroundStyle(QuickInkColors.inkSoft)
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            let draft = notesDraft
+                            showNotesEditor = false
+                            Task { await applyNotes(draft) }
+                        }
+                        .foregroundStyle(QuickInkColors.accent)
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
         // Business Card review sheet — opens when extraction lands
         // (businessCardExtraction != nil). Shows every extracted
         // field as an editable form so the user can fix any
@@ -333,13 +412,35 @@ struct ScanDetailScreen: View {
             )
             .ignoresSafeArea()
         }
-        // Share-as-Image sheet — opens once [prepareImageShare]
-        // finishes rasterising the scan's pages to temp JPEGs. The
-        // wrapper struct's `id` cycles every render so a second
-        // share-as-image tap re-presents the sheet rather than no-
-        // opping on identical state.
+        // Share-as-Image sheet — opens once the editor commits the
+        // (possibly cropped / annotated) pages and we've written
+        // them to temp JPEGs. The wrapper struct's `id` cycles every
+        // render so a second share-as-image tap re-presents the
+        // sheet rather than no-opping on identical state.
         .sheet(item: $imageShareItems) { wrapper in
             ActivityView(activityItems: wrapper.urls)
+        }
+        // WhatsApp-style image editor — fullscreen cover the user
+        // walks through before the share sheet. Crop + pencil per
+        // page; Done writes the edited images to temp files and
+        // hands them to the share sheet above.
+        .fullScreenCover(item: $pendingEditorBundle) { bundle in
+            ImageEditorScreen(
+                pages: bundle.pages,
+                onCancel: { pendingEditorBundle = nil },
+                onDone: { edited in
+                    pendingEditorBundle = nil
+                    let id = captureId
+                    Task.detached(priority: .userInitiated) {
+                        let urls = ScanDetailScreen.writeJpegsToTemp(edited, base: id)
+                        await MainActor.run {
+                            if !urls.isEmpty {
+                                imageShareItems = IdentifiedURLs(urls: urls)
+                            }
+                        }
+                    }
+                }
+            )
         }
         // Fullscreen flipbook viewer — opens when the user taps the
         // overlay fullscreen button on the inline preview. Only
@@ -365,15 +466,6 @@ struct ScanDetailScreen: View {
         }
     }
 
-    /// True when all five bottom-nav callbacks are wired, so the
-    /// floating QuickInkBottomNavBar should render. Lets the screen
-    /// support both nav-aware (open from Library/Home) and minimal
-    /// (open from a share extension) hosts without a separate flag.
-    private var hasBottomNav: Bool {
-        onHome != nil && onWorkspace != nil && onScan != nil &&
-        onSearch != nil && onSettings != nil
-    }
-
     // MARK: - Preview
 
     /// Picks the best available preview surface for the capture:
@@ -391,7 +483,7 @@ struct ScanDetailScreen: View {
                 pageTurnViewer(for: pdfURL, capture: capture)
                     .contentShape(Rectangle())
                     .onTapGesture { showFullscreenViewer = true }
-                    .overlay(alignment: .topTrailing) { fullscreenChip }
+                    .overlay(alignment: .topTrailing) { topRightChips(for: capture) }
             } else {
                 PDFKitView(
                     url: pdfURL,
@@ -404,7 +496,7 @@ struct ScanDetailScreen: View {
                     .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
                     .contentShape(Rectangle())
                     .onTapGesture { showFullscreenViewer = true }
-                    .overlay(alignment: .topTrailing) { fullscreenChip }
+                    .overlay(alignment: .topTrailing) { topRightChips(for: capture) }
             }
         } else if let image = loadedPreviewImage(for: capture) {
             Image(uiImage: image)
@@ -443,26 +535,111 @@ struct ScanDetailScreen: View {
         }
     }
 
-    /// Top-trailing pill button that opens [showFullscreenViewer]
-    /// against the current capture's PDF. Mirror of Android's
+    /// Top-trailing chip cluster overlaid on the preview block —
+    /// fullscreen viewer on the left and a more-actions ellipsis
+    /// menu on the right. The menu holds every per-capture action
+    /// (Add to contact, Share as Image, Export as PDF, Move to
+    /// folder, Manage tags, Delete) so the body doesn't need a
+    /// separate Actions card.
+    @ViewBuilder
+    private func topRightChips(for capture: CaptureSummary) -> some View {
+        HStack(spacing: QuickInkSpacing.s2) {
+            fullscreenChip
+            moreActionsMenu(for: capture)
+        }
+        .padding(QuickInkSpacing.s3)
+    }
+
+    /// Pill button that opens [showFullscreenViewer] against the
+    /// current capture's PDF. Mirror of Android's
     /// `Icons.Filled.Fullscreen` chip on `PageTurnPdfView` /
     /// `PdfPagesView` — same dark-on-light contrast (ink @ 55% with
     /// a white icon) so the chip stays unmistakeable on top of the
-    /// white scan surface.
+    /// white scan surface. Sized to match Releaf's overflow buttons:
+    /// 40pt container, 16pt icon — compact enough to leave the
+    /// preview dominant.
     @ViewBuilder
     private var fullscreenChip: some View {
         Button(action: { showFullscreenViewer = true }) {
             Image(systemName: "arrow.up.left.and.arrow.down.right")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(QuickInkColors.textOnAccent)
-                .frame(width: 48, height: 48)
+                .frame(width: 32, height: 32)
                 .background(QuickInkColors.ink.opacity(0.55))
                 .clipShape(Circle())
         }
         .buttonStyle(.plain)
-        .padding(QuickInkSpacing.s3)
         .accessibilityLabel("View fullscreen")
         .accessibilityHint("Expands the scan to fill the screen")
+    }
+
+    /// Ellipsis chip that surfaces the actions previously housed in
+    /// the inline Actions card. Built on SwiftUI's `Menu` so the
+    /// dropdown lives in the platform overlay and dismisses on
+    /// outside-tap automatically. Items are split into three
+    /// sections — business-card extraction, share/export, and
+    /// destination — so the native menu shows separators between
+    /// related groups. Delete sits in its own destructive section
+    /// at the bottom.
+    @ViewBuilder
+    private func moreActionsMenu(for capture: CaptureSummary) -> some View {
+        Menu {
+            if isBusinessCard(capture) {
+                Section {
+                    Button {
+                        Task { await openAddContactSheet() }
+                    } label: {
+                        Label("Add to contact", systemImage: "person.crop.circle.badge.plus")
+                    }
+                }
+            }
+
+            Section {
+                if canShareAsImage(capture) {
+                    Button {
+                        Task { await prepareImageShare() }
+                    } label: {
+                        Label(
+                            isPreparingImageShare ? "Preparing…" : "Share as Image",
+                            systemImage: "photo"
+                        )
+                    }
+                    .disabled(isPreparingImageShare)
+                }
+                if let pdfURL = shareablePdfURL(from: capture) {
+                    ShareLink(item: pdfURL) {
+                        Label("Export as PDF", systemImage: "arrow.down.doc")
+                    }
+                }
+            }
+
+            Section {
+                Button { showFolderPicker = true } label: {
+                    Label("Move to folder", systemImage: "folder")
+                }
+                Button { showTagPicker = true } label: {
+                    Label("Manage tags", systemImage: "tag")
+                }
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(QuickInkColors.textOnAccent)
+                .frame(width: 32, height: 32)
+                .background(QuickInkColors.ink.opacity(0.55))
+                .clipShape(Circle())
+        }
+        .menuOrder(.fixed)
+        .accessibilityLabel("More actions")
+        .accessibilityHint("Open the actions menu for this scan")
     }
 
     /// Heuristic height for the embedded PDFView. Single-page scans
@@ -724,13 +901,79 @@ struct ScanDetailScreen: View {
 
     // MARK: - Details card
 
+    /// Free-form document notes card. Renders the existing notes
+    /// when present (preserving line breaks); shows an empty-state
+    /// prompt otherwise. Tap anywhere on the card to open the
+    /// editor sheet. The same `captures.notes` column is appended
+    /// to by the voice-note transcript editor, so this card
+    /// accumulates content from both surfaces.
+    @ViewBuilder
+    private func notesCard(for capture: CaptureSummary) -> some View {
+        let trimmed = capture.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let hasNotes = !trimmed.isEmpty
+
+        Button {
+            notesDraft = capture.notes ?? ""
+            showNotesEditor = true
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                // Heading on a soft grey strip — matches the
+                // Details and Voice notes cards.
+                HStack(spacing: QuickInkSpacing.s2) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(QuickInkColors.inkSoft)
+                    Text("Notes")
+                        .font(QuickInkFont.ui(13, weight: .semibold))
+                        .foregroundStyle(QuickInkColors.ink)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, QuickInkSpacing.s3)
+                .padding(.vertical, QuickInkSpacing.s2)
+                .background(QuickInkColors.borderSoft)
+
+                VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+                    if hasNotes {
+                        Text(trimmed)
+                            .font(QuickInkFont.ui(11, weight: .regular))
+                            .foregroundStyle(QuickInkColors.ink)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(8)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Text("Tap to add notes for this scan. Voice-note transcripts also land here.")
+                            .font(QuickInkText.caption)
+                            .foregroundStyle(QuickInkColors.muted)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(QuickInkSpacing.s3)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(QuickInkColors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                    .stroke(QuickInkColors.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(hasNotes ? "Edit notes" : "Add notes")
+    }
+
     /// Structured details card matching the mockup: rows for File
     /// type / Size / Created / Location / Tags, each with a label on
     /// the left and value on the right. Header has a small
     /// document.text icon + "Details" label per the mockup.
     @ViewBuilder
     private func detailsCard(for capture: CaptureSummary) -> some View {
-        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+        VStack(alignment: .leading, spacing: 0) {
+            // Heading sits on a soft grey strip that spans the
+            // card's full inner width. Padding is local to the strip
+            // so the rows below keep their existing inset.
             HStack(spacing: QuickInkSpacing.s2) {
                 Image(systemName: "doc.text")
                     .font(.system(size: 16, weight: .medium))
@@ -739,6 +982,10 @@ struct ScanDetailScreen: View {
                     .font(QuickInkFont.ui(13, weight: .semibold))
                     .foregroundStyle(QuickInkColors.ink)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, QuickInkSpacing.s3)
+            .padding(.vertical, QuickInkSpacing.s2)
+            .background(QuickInkColors.borderSoft)
 
             VStack(spacing: QuickInkSpacing.s2) {
                 detailRow(label: "File type", value: fileTypeLabel(for: capture))
@@ -773,8 +1020,8 @@ struct ScanDetailScreen: View {
                 }
                 tagsRow(for: capture)
             }
+            .padding(QuickInkSpacing.s3)
         }
-        .padding(QuickInkSpacing.s3)
         .background(QuickInkColors.surface)
         .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
         .overlay(
@@ -786,6 +1033,8 @@ struct ScanDetailScreen: View {
     /// One label/value row inside [detailsCard]. Label is muted,
     /// left-aligned; value is ink, right-aligned. `valueColor` lets
     /// callers override (e.g. accent color for the Location link).
+    /// Sized at 13pt so the card reads at body comfort rather than
+    /// the 10pt caption used for confidence badges elsewhere.
     @ViewBuilder
     private func detailRow(
         label: String,
@@ -794,11 +1043,11 @@ struct ScanDetailScreen: View {
     ) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(label)
-                .font(QuickInkText.caption)
+                .font(QuickInkFont.ui(11, weight: .medium))
                 .foregroundStyle(QuickInkColors.inkSoft)
             Spacer()
             Text(value)
-                .font(QuickInkText.caption)
+                .font(QuickInkFont.ui(11, weight: .medium))
                 .foregroundStyle(valueColor)
                 .multilineTextAlignment(.trailing)
                 .lineLimit(2)
@@ -812,7 +1061,7 @@ struct ScanDetailScreen: View {
     private func tagsRow(for capture: CaptureSummary) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text("Tags")
-                .font(QuickInkText.caption)
+                .font(QuickInkFont.ui(11, weight: .medium))
                 .foregroundStyle(QuickInkColors.inkSoft)
             Spacer()
             HStack(spacing: QuickInkSpacing.s1) {
@@ -821,7 +1070,7 @@ struct ScanDetailScreen: View {
                         showRetagSheet = true
                     } label: {
                         Text(tag)
-                            .font(QuickInkText.caption)
+                            .font(QuickInkFont.ui(11, weight: .medium))
                             .foregroundStyle(QuickInkColors.accent)
                             .padding(.horizontal, QuickInkSpacing.s2)
                             .padding(.vertical, 4)
@@ -1016,13 +1265,13 @@ struct ScanDetailScreen: View {
         return formatter.string(fromByteCount: bytes)
     }
 
-    /// True for scans whose primary tag is "Business Card". Drives
+    /// True for scans whose primary tag is "business-card". Drives
     /// the conditional "Add to contact" action row. Case-insensitive
-    /// so "business card" / "Business Card" / "BUSINESS CARD" all
+    /// so "business-card" / "Business-Card" / "BUSINESS-CARD" all
     /// trip the gate. Reads through `primaryTagName` (the post-A.3c
     /// replacement for `captures.category`).
     private func isBusinessCard(_ capture: CaptureSummary) -> Bool {
-        (primaryTagName ?? "").lowercased() == "business card"
+        (primaryTagName ?? "").lowercased() == "business-card"
     }
 
     /// Run the bbox-aware [BusinessCardExtractor] over the capture's
@@ -1094,37 +1343,34 @@ struct ScanDetailScreen: View {
         return loadedPreviewImage(for: capture) != nil
     }
 
-    /// Render the capture into one JPEG per page and present the
-    /// system share sheet against those files. Guarded by
-    /// [isPreparingImageShare] so a double-tap doesn't queue a second
-    /// render in parallel.
+    /// Rasterise the capture's pages to in-memory UIImages and hand
+    /// them to the WhatsApp-style editor. The editor's onDone
+    /// callback writes the final (cropped / annotated) images to
+    /// temp JPEGs and presents the system share sheet. Guarded by
+    /// [isPreparingImageShare] so a double-tap doesn't queue a
+    /// second render in parallel.
     private func prepareImageShare() async {
         guard !isPreparingImageShare else { return }
         isPreparingImageShare = true
         defer { isPreparingImageShare = false }
-        let urls = await renderImageURLs()
-        guard !urls.isEmpty else { return }
-        imageShareItems = IdentifiedURLs(urls: urls)
+        let images = await renderImages()
+        guard !images.isEmpty else { return }
+        pendingEditorBundle = EditorPagesBundle(pages: images)
     }
 
-    /// Rasterise the capture to one JPEG per page in the temp dir
-    /// and return the resulting file URLs. Falls back to the preview
-    /// JPEG for image-only (PDF-less) captures. Returns an empty
-    /// array when neither path is available — the caller bails before
-    /// presenting the share sheet.
-    private func renderImageURLs() async -> [URL] {
-        let id = captureId
+    /// Rasterise the capture's pages into UIImages held in memory.
+    /// Multi-page PDFs return one image per page; image-only
+    /// (PDF-less) captures fall back to the preview JPEG. Empty
+    /// array means "nothing to share" — caller bails.
+    private func renderImages() async -> [UIImage] {
         if let pdfURL = pdfURL(from: capture) {
             return await Task.detached(priority: .userInitiated) {
                 guard let doc = PDFDocument(url: pdfURL) else { return [] }
-                let images = doc.renderPageImages(scale: 2.0)
-                return ScanDetailScreen.writeJpegsToTemp(images, base: id)
+                return doc.renderPageImages(scale: 2.0)
             }.value
         }
         if let cap = capture, let img = loadedPreviewImage(for: cap) {
-            return await Task.detached(priority: .userInitiated) { [img] in
-                ScanDetailScreen.writeJpegsToTemp([img], base: id)
-            }.value
+            return [img]
         }
         return []
     }
@@ -1208,14 +1454,30 @@ struct ScanDetailScreen: View {
         }
     }
 
+    /// Persist a notes edit. The repository trims + collapses empty
+    /// input to nil so the card's empty-state branch reads correctly
+    /// after a "clear all" edit. Refreshes `capture` so the card
+    /// updates without a manual reload.
+    private func applyNotes(_ raw: String) async {
+        do {
+            try await CaptureRepository().setNotes(
+                captureId: captureId,
+                notes:     raw
+            )
+            await loadCapture()
+        } catch {
+            print("ScanDetailScreen.applyNotes failed: \(error)")
+        }
+    }
+
     private func loadCapture() async {
         let dbQueue = QuickInkDatabase.shared.dbQueue
         do {
             let result = try await dbQueue.read { db -> CaptureSummary? in
                 try CaptureSummary.fetchOne(db, sql: """
-                    SELECT id, title, preview_uri, pdf_uri, category, page_count,
+                    SELECT id, title, preview_uri, pdf_uri, page_count,
                            created_at, source, latitude, longitude,
-                           locality, sub_locality, address,
+                           locality, sub_locality, address, notes,
                            folder_id, last_opened_at, last_opened_page,
                            last_opened_device
                     FROM captures
@@ -1375,6 +1637,15 @@ private struct IdentifiedURLs: Identifiable {
     let urls: [URL]
 }
 
+/// Identifiable wrapper around the rasterised pages so the
+/// `.fullScreenCover(item:)` modifier can detect a fresh editor
+/// session even when the underlying `[UIImage]` array shape is the
+/// same as a previous render.
+private struct EditorPagesBundle: Identifiable {
+    let id = UUID()
+    let pages: [UIImage]
+}
+
 /// Lightweight UIKit bridge for UIActivityViewController. SwiftUI's
 /// ShareLink only takes statically-resolvable items, but the
 /// Share-as-Image flow renders pages on demand — so we drive it via
@@ -1397,5 +1668,17 @@ private func splitCsv(_ s: String) -> [String] {
     s.split(whereSeparator: { $0 == "," || $0 == "\n" })
         .map { $0.trimmingCharacters(in: .whitespaces) }
         .filter { !$0.isEmpty }
+}
+
+/// PreferenceKey that carries the scroll-view's content-origin
+/// offset out to the parent. The parent compares it against a
+/// small threshold to decide whether the [QuickInkTimeBar] should
+/// be visible. Living at file scope (rather than inside the view
+/// struct) keeps the key's identity stable across body rebuilds.
+struct ScanDetailScrollOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
 }
 

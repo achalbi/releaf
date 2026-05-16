@@ -8,14 +8,14 @@
  * to [CaptureMode.BusinessCard].
  *
  * Behavior is the same as the previous all-in-one QuickCaptureScreen
- * body: page-mode pill (Single/Multi-page/Auto) + tilted lined-
+ * body: page-mode pill (Single/Multi-page) + tilted lined-
  * paper page mock + shutter that launches the system scanner +
  * Import button that opens the system photo picker. The scanner
  * result flows through `ScanFlowController.onScanComplete` exactly
  * as before — no detector swap, no overlay, no in-app camera.
  *
  * Renamed from the original private `CaptureMode` (Single /
- * MultiPage / Auto) to [ScanPageMode] so the new top-level
+ * MultiPage) to [ScanPageMode] so the new top-level
  * [CaptureMode] can take the canonical name. The pill labels and
  * `pageLimit` plumbing are unchanged.
  *
@@ -57,9 +57,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -99,8 +97,6 @@ internal enum class ScanPageMode(val label: String) {
     Single("Single"),
     /** Multi-page — no `pageLimit`, in-scanner Add-page visible. */
     MultiPage("Multi-page"),
-    /** Auto — same scanner config as Multi-page today. */
-    Auto("Auto"),
 }
 
 @Composable
@@ -113,17 +109,9 @@ internal fun DocumentCaptureSurface(
     val type = LocalQuickInkTypography.current
 
     var pageMode by remember { mutableStateOf(ScanPageMode.Single) }
-    // Page-count badge in Multi-page — reflects the LAST scanner
-    // session's page count, reset on mode change.
-    var pageCount by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(pageMode) {
-        pageCount = 0
-    }
 
     val scannerLauncher = rememberDocumentScannerLauncher(
         onResult = { result ->
-            pageCount = result.pageUris.size
             // Document surface fires a manual capture event whenever
             // the shutter actually returns a result. Auto-capture
             // doesn't apply here — that's a Business Card-only
@@ -147,7 +135,6 @@ internal fun DocumentCaptureSurface(
             val result = withContext(Dispatchers.IO) {
                 buildImportArtifacts(context, uris)
             } ?: return@launch
-            pageCount = result.pageUris.size
             controller.onScanComplete(result, source = "import")
             onDismiss()
         }
@@ -233,7 +220,7 @@ internal fun DocumentCaptureSurface(
 
         Spacer(Modifier.weight(1f))
 
-        // Shutter row — page badge / shutter / import.
+        // Shutter row — spacer / shutter / import.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -241,22 +228,7 @@ internal fun DocumentCaptureSurface(
             verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Box(modifier = Modifier.size(width = 64.dp, height = 64.dp), contentAlignment = Alignment.Center) {
-                if (pageMode == ScanPageMode.MultiPage) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text  = "$pageCount",
-                            style = type.heading,
-                            color = Color.White,
-                        )
-                        Text(
-                            text  = if (pageCount == 1) "page" else "pages",
-                            style = type.caption,
-                            color = Color.White.copy(alpha = 0.7f),
-                        )
-                    }
-                }
-            }
+            Box(modifier = Modifier.size(width = 64.dp, height = 64.dp))
 
             DocumentShutterButton(onClick = scannerLauncher::launch)
 
@@ -276,7 +248,7 @@ internal fun DocumentCaptureSurface(
             }
         }
 
-        // Page-mode pill (Single / Multi-page / Auto). Lives below
+        // Page-mode pill (Single / Multi-page). Lives below
         // the shutter row, unchanged from the pre-refactor layout.
         Row(
             modifier = Modifier

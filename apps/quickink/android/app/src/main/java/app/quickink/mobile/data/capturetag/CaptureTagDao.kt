@@ -157,6 +157,25 @@ interface CaptureTagDao {
     suspend fun captureIdsForTag(tagId: String): List<String>
 
     /**
+     * Live list of capture ids tagged with a given tag NAME (in the
+     * supplied user's namespace). Drives the per-tag drill on
+     * Workspace home: tap a tag chip → list every doc that carries
+     * that tag, not only docs where it's the primary attachment.
+     */
+    @Query("""
+        SELECT capture_tags.capture_id FROM capture_tags
+        JOIN tags     ON tags.id     = capture_tags.tag_id
+        JOIN captures ON captures.id = capture_tags.capture_id
+        WHERE captures.user_id      = :userId
+          AND captures.deleted_at   IS NULL
+          AND capture_tags.deleted_at IS NULL
+          AND tags.deleted_at       IS NULL
+          AND tags.name             = :tagName
+        ORDER BY capture_tags.created_at DESC
+    """)
+    fun observeCaptureIdsForTagName(userId: String, tagName: String): Flow<List<String>>
+
+    /**
      * Active-tag count per tag for the user. Used by the tag
      * cloud on Workspace home and the tag library's "31 documents"
      * subtitle. Excludes tombstoned join rows and tombstoned

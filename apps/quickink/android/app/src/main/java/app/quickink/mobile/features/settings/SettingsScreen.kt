@@ -64,8 +64,6 @@ import app.quickink.mobile.data.sync.QuickInkRestoreWorker
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.data.sync.QuickInkSyncWorker
 import app.quickink.mobile.features.auth.rememberQuickInkSignInAction
-import app.quickink.mobile.features.nav.NavTab
-import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
@@ -102,14 +100,6 @@ fun SettingsScreen(
         app.quickink.mobile.ui.theme.ThemeMode.System,
     onPrimaryColorChange: (app.quickink.mobile.ui.theme.PrimaryColor) -> Unit = {},
     onThemeModeChange: (app.quickink.mobile.ui.theme.ThemeMode) -> Unit = {},
-    /// Tab navigation callbacks for the floating bottom nav. The
-    /// Settings tab paints itself active; tapping it is a no-op
-    /// (we're already here).
-    onHome: () -> Unit = onBack,
-    onWorkspace: () -> Unit = {},
-    onScan: () -> Unit = {},
-    onSearch: () -> Unit = {},
-    onSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val preferences = remember { SettingsPreferences(context) }
@@ -516,17 +506,6 @@ fun SettingsScreen(
             }
         }
         }
-
-        // Floating bottom nav — Settings tab is active.
-        QuickInkBottomNavBar(
-            activeTab  = NavTab.Settings,
-            onHome     = onHome,
-            onWorkspace  = onWorkspace,
-            onScan     = onScan,
-            onSearch   = onSearch,
-            onSettings = onSettings,
-            modifier   = Modifier.align(Alignment.BottomCenter),
-        )
     }
 }
 

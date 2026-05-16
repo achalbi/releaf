@@ -377,6 +377,16 @@ public final class QuickInkSyncEnvironment {
                     deviceId:    DeviceIdentity.get(),
                     accessToken: activeSession.accessToken
                 )
+                // Voice-note audio binaries — runs after the
+                // metadata restore so the foreign-key parent
+                // (captures) is in place locally before we resolve
+                // `audio_uri`. Best-effort: per-row failures log
+                // and the rest of the pass continues.
+                let binarySync = await QuickInkBinarySync(driveClient: self.driveClient)
+                try? await binarySync.restorePendingVoiceNotes(
+                    userId:      activeSession.userId,
+                    accessToken: activeSession.accessToken
+                )
             } catch {
                 // Settings → "Restore from Drive" doesn't have a
                 // dedicated error surface yet; logging keeps the

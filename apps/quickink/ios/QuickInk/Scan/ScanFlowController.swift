@@ -237,6 +237,20 @@ public final class ScanFlowController: ObservableObject {
                         name:      raw
                     )
                 }
+                // Default-folder assignment — file the capture into
+                // the seeded "Unfiled" folder so the review screen
+                // lands on a definite selection and the row never
+                // lives orphaned outside any folder. The user can
+                // re-file via the folder buttons. Best-effort: a
+                // failure here leaves `folder_id` NULL, which the
+                // rest of the app already renders as Unfiled.
+                if let unfiled = try? await FolderRepository().findDefault(userId: userId) {
+                    try? await repository.setFolder(
+                        captureId: captureId,
+                        folderId:  unfiled.id
+                    )
+                    self?.selectedFolderId = unfiled.id
+                }
             } catch {
                 self?.state = .failed(message: "Couldn't save scan: \(error.localizedDescription)")
                 return

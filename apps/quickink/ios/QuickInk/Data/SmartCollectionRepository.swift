@@ -59,7 +59,7 @@ public final class SmartCollectionRepository: @unchecked Sendable {
         }
         return ValueObservation.tracking { [userId, clauses] db -> [CaptureSummary] in
             let captures = try CaptureSummary.fetchAll(db, sql: """
-                SELECT id, title, preview_uri, pdf_uri, category, page_count, created_at, source,
+                SELECT id, title, preview_uri, pdf_uri, page_count, created_at, source,
                        latitude, longitude, locality, sub_locality, address,
                        folder_id, last_opened_at, last_opened_page, last_opened_device
                 FROM captures

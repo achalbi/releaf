@@ -9,14 +9,14 @@
  *
  * Behavior is the same as the previous all-in-one
  * QuickCaptureScreen body: page-mode pill (Single /
- * Multi-page / Auto) + tilted lined-paper page mock + shutter
+ * Multi-page) + tilted lined-paper page mock + shutter
  * that presents the system scanner + Import button that opens
  * PhotosPicker. The scanner result flows through
  * `ScanFlowController.onScanComplete` exactly as before — no
  * detector swap, no overlay, no in-app camera.
  *
  * Renamed from the original nested `enum CaptureMode`
- * (Single / Multi-page / Auto) to [ScanPageMode] so the new
+ * (Single / Multi-page) to [ScanPageMode] so the new
  * top-level `CaptureMode` can take the canonical name. The
  * pill labels and `pageLimit` plumbing are unchanged.
  *
@@ -28,13 +28,12 @@ import PhotosUI
 import ReleafCoreScan
 
 enum ScanPageMode: String, CaseIterable {
-    case single, multiPage, auto
+    case single, multiPage
 
     var label: String {
         switch self {
         case .single:    return "Single"
         case .multiPage: return "Multi-page"
-        case .auto:      return "Auto"
         }
     }
 }
@@ -44,7 +43,6 @@ struct DocumentCaptureSurface: View {
     let onDismiss: () -> Void
 
     @State private var pageMode: ScanPageMode = .single
-    @State private var pageCount: Int = 0
     @State private var sweepOffset: CGFloat = -50
     @State private var showSystemScanner = false
     @State private var pickedItems: [PhotosPickerItem] = []
@@ -58,7 +56,6 @@ struct DocumentCaptureSurface: View {
             pageModeSelector
                 .padding(.bottom, QuickInkSpacing.s7)
         }
-        .onChange(of: pageMode) { _ in pageCount = 0 }
         .onChange(of: pickedItems) { newItems in
             guard !newItems.isEmpty else { return }
             Task { await loadPickedItems(newItems) }
@@ -67,7 +64,6 @@ struct DocumentCaptureSurface: View {
             DocumentScannerView(
                 onComplete: { pdfURL, previewURL, pageURLs in
                     showSystemScanner = false
-                    pageCount = pageURLs.count
                     CaptureAnalytics.manualFired(mode: .document)
                     controller.onScanComplete(
                         pdfURL:     pdfURL,
@@ -149,11 +145,7 @@ struct DocumentCaptureSurface: View {
     @ViewBuilder
     private var shutterRow: some View {
         HStack(alignment: .center) {
-            if pageMode == .multiPage {
-                pageBadge.frame(width: 64)
-            } else {
-                Spacer().frame(width: 64)
-            }
+            Spacer().frame(width: 64)
             Spacer()
             documentShutterButton
             Spacer()
@@ -200,18 +192,6 @@ struct DocumentCaptureSurface: View {
         .accessibilityLabel("Import photos")
     }
 
-    @ViewBuilder
-    private var pageBadge: some View {
-        VStack(spacing: 2) {
-            Text("\(pageCount)")
-                .font(QuickInkText.heading)
-                .foregroundStyle(.white)
-            Text(pageCount == 1 ? "page" : "pages")
-                .font(QuickInkText.caption)
-                .foregroundStyle(Color.white.opacity(0.7))
-        }
-    }
-
     // MARK: - Page-mode selector
 
     @ViewBuilder
@@ -255,7 +235,6 @@ struct DocumentCaptureSurface: View {
             return
         }
         await MainActor.run {
-            pageCount = result.pageURLs.count
             controller.onScanComplete(
                 pdfURL:     result.pdfURL,
                 previewURL: result.previewURL,

@@ -13,6 +13,7 @@ import SwiftUI
 import GoogleSignIn
 import QuickInkFeatures
 import ReleafCoreAuth
+import ReleafCoreData
 
 @main
 struct AppMain: App {
@@ -24,6 +25,15 @@ struct AppMain: App {
         // to the real family instead of falling back to system serif —
         // see the comment block in `QuickInkTheme.swift`.
         QuickInkFont.registerAll()
+
+        // Point the shared AttachmentStorage helper at QuickInk's app
+        // folder so voice-note .m4a files land under
+        // `<Application Support>/QuickInk/attachments/` instead of the
+        // default `Releaf/` subdirectory the helper falls back to. Must
+        // run before any AttachmentStorage.directory() call — i.e. before
+        // the recorder opens the mic. Setting it once at @main covers
+        // every entry point.
+        AttachmentStorage.appFolderName = "QuickInk"
 
         // Wire the sync stack + register the BGAppRefreshTask
         // handler once per process. `BGTaskScheduler.register(...)`

@@ -25,10 +25,18 @@ struct CategoryEntriesScreen: View {
     let onOpenScan: (_ captureId: String) -> Void
 
     @StateObject private var vm: CaptureListViewModel
-    /// Per-capture primary-tag-name lookup — replaces the pre-A.3c
-    /// `captures.category` read used to filter this screen.
+    /// Per-capture primary-tag-name lookup — kept for the timeline
+    /// chips that still want to surface a "primary" badge per
+    /// capture. The screen's filter no longer uses it; see
+    /// `captureIdsWithTag` below.
     @State private var primaryTagByCapture: [String: String] = [:]
     @State private var primaryTagCancellable: AnyCancellable? = nil
+    /// Live set of capture ids that carry the requested tag in
+    /// `capture_tags`. Filtering by this instead of the per-capture
+    /// primary lets the screen show every doc tagged with the
+    /// supplied name, not only docs where it's the first attached.
+    @State private var captureIdsWithTag: Set<String> = []
+    @State private var captureIdsCancellable: AnyCancellable? = nil
 
     init(
         userId: String,
@@ -43,14 +51,11 @@ struct CategoryEntriesScreen: View {
         _vm = StateObject(wrappedValue: CaptureListViewModel(userId: userId))
     }
 
-    /// Captures scoped to this category. Filter is case-insensitive
-    /// because predefined categories arrive canonical-cased ("Ideas")
-    /// while user-typed customs may not.
+    /// Captures scoped to this category — every capture that has
+    /// the supplied tag attached in `capture_tags`, not just docs
+    /// where it happens to be the primary tag.
     private var capturesInCategory: [CaptureSummary] {
-        let needle = categoryName.lowercased()
-        return vm.captures.filter {
-            (primaryTagByCapture[$0.id] ?? "").lowercased() == needle
-        }
+        vm.captures.filter { captureIdsWithTag.contains($0.id) }
     }
 
     var body: some View {
@@ -75,6 +80,15 @@ struct CategoryEntriesScreen: View {
                     .sink(
                         receiveCompletion: { _ in },
                         receiveValue: { map in primaryTagByCapture = map }
+                    )
+            }
+            if captureIdsCancellable == nil {
+                captureIdsCancellable = CaptureTagRepository()
+                    .observeCaptureIdsForTagName(userId: userId, tagName: categoryName)
+                    .receive(on: DispatchQueue.main)
+                    .sink(
+                        receiveCompletion: { _ in },
+                        receiveValue: { ids in captureIdsWithTag = ids }
                     )
             }
         }

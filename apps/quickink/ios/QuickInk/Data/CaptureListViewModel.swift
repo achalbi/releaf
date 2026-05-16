@@ -58,6 +58,12 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
     /// "Address" row on the Details card. Nil when the geocode
     /// failed or the location toggle was off.
     public let address: String?
+    /// Free-form document-level notes (v13). Surfaced as the "Notes"
+    /// card on `ScanDetailScreen`; appended to by the voice-note
+    /// transcript editor and editable directly from the detail
+    /// screen's notes editor. Nullable for back-compat; SELECTs that
+    /// don't request the column read back as nil.
+    public let notes: String?
     /// Workspace v1 — folder this capture lives in. Nullable
     /// at the column level so v8_workspace can backfill in a
     /// second pass; after the first-launch migration runs every
@@ -87,6 +93,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         locality: String? = nil,
         subLocality: String? = nil,
         address: String? = nil,
+        notes: String? = nil,
         folderId: String? = nil,
         lastOpenedAt: String? = nil,
         lastOpenedPage: Int? = nil,
@@ -105,6 +112,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         self.locality    = locality
         self.subLocality = subLocality
         self.address     = address
+        self.notes       = notes
         self.folderId         = folderId
         self.lastOpenedAt     = lastOpenedAt
         self.lastOpenedPage   = lastOpenedPage
@@ -136,6 +144,9 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         self.locality    = try c.decodeIfPresent(String.self, forKey: .locality)
         self.subLocality = try c.decodeIfPresent(String.self, forKey: .subLocality)
         self.address     = try c.decodeIfPresent(String.self, forKey: .address)
+        // `notes` landed in v13. Tolerate SELECTs that don't pull
+        // the column — they read back as nil.
+        self.notes       = try c.decodeIfPresent(String.self, forKey: .notes)
         // Workspace v1 columns landed in v8; older SELECTs that
         // don't request them — or rows synced from a pre-v8 client
         // — read back as nil here.
@@ -159,6 +170,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         case locality
         case subLocality = "sub_locality"
         case address
+        case notes
         case folderId         = "folder_id"
         case lastOpenedAt     = "last_opened_at"
         case lastOpenedPage   = "last_opened_page"

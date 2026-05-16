@@ -16,7 +16,7 @@
  *   3. Builds a [DocumentScanResult] with the warped JPEG as
  *      the single page + preview, and routes it through
  *      [ScanFlowController.onScanComplete] with
- *      `category = "Business Card"` so the existing scan-detail
+ *      `category = "business-card"` so the existing scan-detail
  *      screen picks up the BusinessCardExtractor flow.
  *
  * Manual capture (user tapped the shutter without a valid
@@ -104,7 +104,7 @@ object BusinessCardPostProcessor {
         )
         controller.onScanComplete(
             result    = result,
-            category  = "Business Card",
+            category  = "business-card",
             paperSize = PaperSize.Card,
         )
         return jpegUri

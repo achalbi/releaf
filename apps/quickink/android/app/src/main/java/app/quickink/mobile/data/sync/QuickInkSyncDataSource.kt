@@ -30,11 +30,14 @@
 package app.quickink.mobile.data.sync
 
 import app.quickink.mobile.data.capture.CaptureDao
+import app.quickink.mobile.data.capturelocation.CaptureLocationDao
 import app.quickink.mobile.data.capturetag.CaptureTagDao
 import app.quickink.mobile.data.folder.FolderDao
+import app.quickink.mobile.data.location.LocationDao
 import app.quickink.mobile.data.tag.TagDao
 import app.quickink.mobile.data.ocr.OcrResultDao
 import app.quickink.mobile.data.smartcollection.SmartCollectionDao
+import app.quickink.mobile.data.voicenote.VoiceNoteDao
 import app.releaf.mobile.data.notepad.NotepadDao
 import app.releaf.mobile.data.sync.CanonicalJson
 import app.releaf.mobile.data.sync.sha256Hex
@@ -64,6 +67,10 @@ class QuickInkSyncDataSource(
     private val folderDao: FolderDao,
     private val captureTagDao: CaptureTagDao,
     private val smartCollectionDao: SmartCollectionDao,
+    private val voiceNoteDao: VoiceNoteDao,
+    // ─── Locations (v16) ────────────────────────────────────────
+    private val locationDao: LocationDao,
+    private val captureLocationDao: CaptureLocationDao,
     private val userId: String,
     private val json: Json = SyncJson,
 ) : SyncDataSource {
@@ -242,6 +249,61 @@ class QuickInkSyncDataSource(
             )
         }
 
+        // ---- locations (user-scoped) ----
+        for (row in locationDao.dirtyRows()
+            .filter { it.deletedAt == null && it.userId == userId }) {
+            val payload = row.toV1Payload()
+            val elem = json.encodeToJsonElement(LocationPayloadV1.serializer(), payload)
+            val bytes = CanonicalJson.encodeToBytes(elem)
+            entries += DirtyEntry(
+                kind          = DrivePath.KIND_LOCATION,
+                id            = row.id,
+                drivePath     = DrivePath.location(row.id),
+                payload       = bytes,
+                payloadSha256 = sha256Hex(bytes),
+                updatedAt     = row.updatedAt,
+            )
+        }
+
+        // ---- capture_locations (no user_id column; FK to captures
+        //      handles ownership). ----
+        for (row in captureLocationDao.dirtyRows()
+            .filter { it.deletedAt == null }) {
+            val payload = row.toV1Payload()
+            val elem = json.encodeToJsonElement(CaptureLocationPayloadV1.serializer(), payload)
+            val bytes = CanonicalJson.encodeToBytes(elem)
+            entries += DirtyEntry(
+                kind          = DrivePath.KIND_CAPTURE_LOCATION,
+                id            = row.id,
+                drivePath     = DrivePath.captureLocation(row.id),
+                payload       = bytes,
+                payloadSha256 = sha256Hex(bytes),
+                updatedAt     = row.updatedAt,
+            )
+        }
+
+        // ---- voice_notes (user-scoped) ----
+        val voiceRows = (voiceNoteDao.activeRows(userId) + voiceNoteDao.dirtyRows()
+            .filter { it.deletedAt == null && it.userId == userId })
+            .distinctBy { it.id }
+        for (row in voiceRows) {
+            val payload = row.toV1Payload()
+            val elem = json.encodeToJsonElement(VoiceNotePayloadV1.serializer(), payload)
+            val bytes = CanonicalJson.encodeToBytes(elem)
+            entries += DirtyEntry(
+                kind          = DrivePath.KIND_VOICE_NOTE,
+                id            = row.id,
+                drivePath     = DrivePath.quickInkVoiceNote(
+                    createdAt = row.createdAt,
+                    captureId = row.captureId,
+                    id        = row.id,
+                ),
+                payload       = bytes,
+                payloadSha256 = sha256Hex(bytes),
+                updatedAt     = row.updatedAt,
+            )
+        }
+
         return DirtyBatch(entries, nextCursor = null)
     }
 
@@ -302,6 +364,27 @@ class QuickInkSyncDataSource(
         for (row in smartCollectionDao.dirtyRows().filter { it.deletedAt != null && it.userId == userId }) {
             entries += PendingTombstone(
                 kind      = DrivePath.KIND_SMART_COLLECTION,
+                id        = row.id,
+                deletedAt = row.deletedAt ?: row.updatedAt,
+            )
+        }
+        for (row in voiceNoteDao.dirtyRows().filter { it.deletedAt != null && it.userId == userId }) {
+            entries += PendingTombstone(
+                kind      = DrivePath.KIND_VOICE_NOTE,
+                id        = row.id,
+                deletedAt = row.deletedAt ?: row.updatedAt,
+            )
+        }
+        for (row in locationDao.dirtyRows().filter { it.deletedAt != null && it.userId == userId }) {
+            entries += PendingTombstone(
+                kind      = DrivePath.KIND_LOCATION,
+                id        = row.id,
+                deletedAt = row.deletedAt ?: row.updatedAt,
+            )
+        }
+        for (row in captureLocationDao.dirtyRows().filter { it.deletedAt != null }) {
+            entries += PendingTombstone(
+                kind      = DrivePath.KIND_CAPTURE_LOCATION,
                 id        = row.id,
                 deletedAt = row.deletedAt ?: row.updatedAt,
             )
@@ -437,6 +520,46 @@ class QuickInkSyncDataSource(
                 val p = json.decodeFromString(SmartCollectionPayloadV1.serializer(), text)
                 smartCollectionDao.upsertFromRemote(p.toEntity(driveFileId = driveFileId))
             }
+            DrivePath.KIND_LOCATION -> {
+                val p = json.decodeFromString(LocationPayloadV1.serializer(), text)
+                locationDao.upsertFromRemote(p.toEntity(driveFileId = driveFileId))
+            }
+            DrivePath.KIND_CAPTURE_LOCATION -> {
+                val p = json.decodeFromString(CaptureLocationPayloadV1.serializer(), text)
+                captureLocationDao.upsertFromRemote(p.toEntity(driveFileId = driveFileId))
+            }
+            DrivePath.KIND_VOICE_NOTE -> {
+                val p = json.decodeFromString(VoiceNotePayloadV1.serializer(), text)
+                // Same defensive parent-existence check as
+                // KIND_OCR_RESULT — voice_notes has a FK to captures
+                // with ON DELETE CASCADE, so applying a payload whose
+                // parent capture isn't here yet would raise
+                // SQLITE_CONSTRAINT and log a false-alarm "applyFailed".
+                val parentExists = captureDao.findById(p.captureId) != null
+                if (!parentExists) {
+                    android.util.Log.w(
+                        "QuickInkSync",
+                        "applyRemoteUpsert: skipping orphan voice_note " +
+                            "id=${p.id} capture_id=${p.captureId} (parent " +
+                            "capture not in local DB)."
+                    )
+                    return
+                }
+                // Reconcile `audio_uri` the same way the KIND_CAPTURE
+                // branch reconciles `pdf_uri`: if we already have the
+                // file locally, keep our path. Otherwise blank it out
+                // so the next binary-restore pass downloads from
+                // `audio_drive_file_id` and rewrites the URI.
+                val existing = voiceNoteDao.findById(p.id)
+                val resolvedAudioUri: String = when {
+                    existing != null && fileExistsAt(existing.audioUri) -> existing.audioUri
+                    p.audioDriveFileId != null -> ""
+                    else -> p.audioUri
+                }
+                voiceNoteDao.upsertFromRemote(
+                    p.toEntity(driveFileId = driveFileId).copy(audioUri = resolvedAudioUri)
+                )
+            }
             else -> {
                 // Forward-compat: kind we don't recognize, skip.
             }
@@ -489,6 +612,9 @@ class QuickInkSyncDataSource(
             DrivePath.KIND_FOLDER -> folderDao.softDelete(tombstone.id, nowIso)
             DrivePath.KIND_CAPTURE_TAG -> captureTagDao.softDeleteById(tombstone.id, nowIso)
             DrivePath.KIND_SMART_COLLECTION -> smartCollectionDao.softDelete(tombstone.id, nowIso)
+            DrivePath.KIND_VOICE_NOTE -> voiceNoteDao.softDelete(tombstone.id, nowIso)
+            DrivePath.KIND_LOCATION -> locationDao.softDelete(tombstone.id, nowIso)
+            DrivePath.KIND_CAPTURE_LOCATION -> captureLocationDao.softDeleteById(tombstone.id, nowIso)
         }
     }
 
@@ -531,6 +657,18 @@ class QuickInkSyncDataSource(
                 DrivePath.KIND_SMART_COLLECTION -> {
                     smartCollectionDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
                     smartCollectionDao.markTombstoneSynced(ack.id)
+                }
+                DrivePath.KIND_VOICE_NOTE -> {
+                    voiceNoteDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
+                    voiceNoteDao.markTombstoneSynced(ack.id)
+                }
+                DrivePath.KIND_LOCATION -> {
+                    locationDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
+                    locationDao.markTombstoneSynced(ack.id)
+                }
+                DrivePath.KIND_CAPTURE_LOCATION -> {
+                    captureLocationDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
+                    captureLocationDao.markTombstoneSynced(ack.id)
                 }
                 // else: forward-compat — unknown kind, skip silently.
             }

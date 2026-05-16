@@ -23,6 +23,7 @@ package app.quickink.mobile.features.scan
 
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.capture.CapturedLocation
+import app.quickink.mobile.data.folder.FolderDao
 import app.quickink.mobile.data.tag.TagDao
 import app.quickink.mobile.features.settings.SettingsPreferences
 import android.graphics.BitmapFactory
@@ -63,6 +64,14 @@ class ScanFlowController(
      * silently no-ops when the DAO isn't supplied.
      */
     private val tagDao: TagDao? = null,
+    /**
+     * DAO used to look up the user's seeded "Unfiled" folder so each
+     * fresh capture defaults to a definite folder selection on the
+     * review screen rather than NULL. Optional with a null default so
+     * existing test / preview construction sites keep compiling — the
+     * default-folder seed silently no-ops when the DAO isn't supplied.
+     */
+    private val folderDao: FolderDao? = null,
     /**
      * Slice 4.2c — fired when a scan pass finishes and at least
      * one row has been written. Wired by `QuickInkRoot.MainShell`
@@ -252,26 +261,21 @@ class ScanFlowController(
         _selectedCategory.value  = category
         _previewImageUri.value   = result.previewUri?.toString()
         _selectedPaperSize.value = resolvedPaperSize
-        _state.value = State.Recognizing(
-            captureId      = captureId,
-            totalPages     = totalPages,
-            completedPages = 0,
-        )
+        // State.Recognizing is published AFTER the capture row is
+        // in Room (below) so the voice-note pane mounts on a real
+        // FK target. Previously this fired first and the row write
+        // was gated behind a 5–10s location lookup, which let a
+        // fast voice-note save race ahead of the parent row and
+        // silently drop the clip onto a FOREIGN KEY constraint.
 
         activeJob = scope.launch {
-            // 0. Best-effort location fetch — gated by the
-            //    `locationForScansEnabled` setting and the system
-            //    permission grant. Runs before the insert so the
-            //    row writes in one shot; LocationService's internal
-            //    timeout (5s for the fix, 5s for the geocode)
-            //    bounds the wait so a stuck provider never blocks
-            //    the scan path. Any failure surfaces as `null`,
-            //    which writes NULL location columns and quietly
-            //    hides the Area / City rows in the Details card.
-            val location = captureLocationIfEnabled()
-
-            // 1. Persist the parent capture so OCR row foreign
-            //    keys have something to reference.
+            // 1. Persist the parent capture FIRST, with a null
+            //    location placeholder. The voice-note pane (and OCR
+            //    rows) FK against this id, so blocking the pane on
+            //    a slow GPS fix used to drop clips when the user
+            //    tapped stop before the row had landed. The
+            //    location columns are filled in by the parallel
+            //    update launched below once the fetch finishes.
             try {
                 repository.insertCapture(
                     id         = captureId,
@@ -282,7 +286,7 @@ class ScanFlowController(
                     pageCount  = totalPages,
                     source     = source,
                     paperSize  = resolvedPaperSize,
-                    location   = location,
+                    location   = null,
                 )
                 // Pre-attach the seeded `category` (post-A.3c: a
                 // tag attach into `capture_tags`) when the caller
@@ -301,9 +305,49 @@ class ScanFlowController(
                         )
                     } catch (_: Exception) { /* best-effort */ }
                 }
+                // Default-folder assignment — file the capture into
+                // the seeded "Unfiled" folder so the review screen
+                // lands on a definite selection and the row never
+                // lives orphaned outside any folder. The user can
+                // re-file via the folder buttons. Best-effort: a
+                // failure here leaves `folder_id` NULL, which the
+                // rest of the app already renders as Unfiled.
+                val unfiled = try {
+                    folderDao?.findDefault(userId)
+                } catch (_: Exception) { null }
+                if (unfiled != null) {
+                    try {
+                        repository.setFolder(
+                            captureId = captureId,
+                            folderId  = unfiled.id,
+                        )
+                        _selectedFolderId.value = unfiled.id
+                    } catch (_: Exception) { /* best-effort */ }
+                }
             } catch (e: Exception) {
                 _state.value = State.Failed("Couldn't save scan: ${e.message.orEmpty()}")
                 return@launch
+            }
+
+            // 2. Capture row exists — publish State so the voice-
+            //    note pane mounts on a row that's already there.
+            _state.value = State.Recognizing(
+                captureId      = captureId,
+                totalPages     = totalPages,
+                completedPages = 0,
+            )
+
+            // 3. Location lookup runs in parallel with the OCR pass
+            //    below. Same gating as before (`locationForScans-
+            //    Enabled` + permission), same LocationService 5+5s
+            //    timeout. The row is updated in two writes —
+            //    locality fields and lat/lon — via [CaptureRepository
+            //    .setLocation] (no-op when fetch returns null).
+            launch {
+                val location = captureLocationIfEnabled() ?: return@launch
+                try {
+                    repository.setLocation(captureId, location)
+                } catch (_: Exception) { /* best-effort */ }
             }
 
             // 2. Stream OCR results, persisting each one as it

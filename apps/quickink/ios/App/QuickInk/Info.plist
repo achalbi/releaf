@@ -49,6 +49,22 @@
 	<key>NSCameraUsageDescription</key>
 	<string>QuickInk uses the camera to scan business cards in-frame and to let you take a fresh profile photo without leaving the app.</string>
 	<!--
+	  Microphone-permission rationale. Shown the first time the
+	  recorder on a document's Voice notes section asks for mic
+	  access. Voice notes record up to two minutes per clip into
+	  AAC .m4a stored under QuickInk's AttachmentStorage folder.
+	-->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>QuickInk records voice notes you attach to a scan so you can talk through context for a document. Up to two minutes per note.</string>
+	<!--
+	  Speech-recognition rationale. Shown after the user finishes a
+	  voice note and taps Transcribe. Recognition runs on-device
+	  when the locale's model is downloaded; iOS routes the rest
+	  through Apple's cloud recognizer.
+	-->
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>QuickInk turns voice notes into searchable text on demand so you can find what you said about a scan later.</string>
+	<!--
 	  Location-permission rationale. Shown the first time the app
 	  asks for "When in Use" location, which happens (a) during
 	  onboarding's Location step and (b) lazily at first scan if the

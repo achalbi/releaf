@@ -20,10 +20,6 @@ public struct FolderDetailScreen: View {
     public let onBack: () -> Void
     public let onOpenCapture: (CaptureSummary) -> Void
     public let onOpenSearch: () -> Void
-    public let onHome: () -> Void
-    public let onWorkspace: () -> Void
-    public let onScan: () -> Void
-    public let onSettings: () -> Void
 
     @StateObject private var viewModel: FolderDetailViewModel
     @State private var selectedTagId: String? = nil
@@ -33,21 +29,13 @@ public struct FolderDetailScreen: View {
         userId: String,
         onBack: @escaping () -> Void,
         onOpenCapture: @escaping (CaptureSummary) -> Void,
-        onOpenSearch: @escaping () -> Void,
-        onHome: @escaping () -> Void,
-        onWorkspace: @escaping () -> Void,
-        onScan: @escaping () -> Void,
-        onSettings: @escaping () -> Void
+        onOpenSearch: @escaping () -> Void
     ) {
         self.folderId = folderId
         self.userId = userId
         self.onBack = onBack
         self.onOpenCapture = onOpenCapture
         self.onOpenSearch = onOpenSearch
-        self.onHome = onHome
-        self.onWorkspace = onWorkspace
-        self.onScan = onScan
-        self.onSettings = onSettings
         _viewModel = StateObject(wrappedValue: FolderDetailViewModel(folderId: folderId, userId: userId))
     }
 
@@ -86,16 +74,6 @@ public struct FolderDetailScreen: View {
             }
         }
         .background(QuickInkColors.bg)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            QuickInkBottomNavBar(
-                activeTab:   .workspace,
-                onHome:      onHome,
-                onWorkspace: onWorkspace,
-                onScan:      onScan,
-                onSearch:    onOpenSearch,
-                onSettings:  onSettings
-            )
-        }
         .onAppear { viewModel.start() }
     }
 
@@ -305,7 +283,7 @@ final class FolderDetailViewModel: ObservableObject {
         // Captures in folder
         ValueObservation.tracking { [folderId] db in
             try CaptureSummary.fetchAll(db, sql: """
-                SELECT id, title, preview_uri, pdf_uri, category, page_count, created_at, source,
+                SELECT id, title, preview_uri, pdf_uri, page_count, created_at, source,
                        latitude, longitude, locality, sub_locality, address,
                        folder_id, last_opened_at, last_opened_page, last_opened_device
                 FROM captures

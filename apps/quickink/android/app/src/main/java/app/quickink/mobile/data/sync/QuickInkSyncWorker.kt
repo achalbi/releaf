@@ -215,6 +215,9 @@ class QuickInkSyncWorker(
             folderDao          = app.database.folderDao(),
             captureTagDao      = app.database.captureTagDao(),
             smartCollectionDao = app.database.smartCollectionDao(),
+            voiceNoteDao       = app.database.voiceNoteDao(),
+            locationDao        = app.database.locationDao(),
+            captureLocationDao = app.database.captureLocationDao(),
             userId             = session.userId,
         )
         val syncRepository = SyncRepository(
@@ -235,6 +238,7 @@ class QuickInkSyncWorker(
                 context            = applicationContext,
                 captureDao         = app.database.captureDao(),
                 profileSettingsDao = app.database.profileSettingsDao(),
+                voiceNoteDao       = app.database.voiceNoteDao(),
                 driveClient        = app.driveClient,
             )
             Log.i(TAG, "sync: starting binary upload pass")

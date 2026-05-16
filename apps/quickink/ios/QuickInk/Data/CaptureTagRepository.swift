@@ -187,6 +187,34 @@ public final class CaptureTagRepository: @unchecked Sendable {
     /// row per capture deterministically; SQLite 3.25+ is bundled
     /// with iOS so this is always safe.
     ///
+    /// Live set of capture ids whose attached tags include the
+    /// supplied tag NAME. Drives the per-tag drill on Workspace
+    /// (tap a tag chip → list every doc that carries that tag, not
+    /// just the docs where it's the primary tag). Case-sensitive on
+    /// the tag name since the rest of the app stores tags in
+    /// canonical kebab form via [normalizeTagName].
+    public func observeCaptureIdsForTagName(
+        userId: String,
+        tagName: String
+    ) -> AnyPublisher<Set<String>, Error> {
+        ValueObservation.tracking { [userId, tagName] db -> Set<String> in
+            let ids = try String.fetchAll(db, sql: """
+                SELECT capture_tags.capture_id
+                FROM capture_tags
+                JOIN tags     ON tags.id     = capture_tags.tag_id
+                JOIN captures ON captures.id = capture_tags.capture_id
+                WHERE captures.user_id      = ?
+                  AND captures.deleted_at   IS NULL
+                  AND capture_tags.deleted_at IS NULL
+                  AND tags.deleted_at       IS NULL
+                  AND tags.name             = ?
+                """, arguments: [userId, tagName])
+            return Set(ids)
+        }
+        .publisher(in: dbQueue)
+        .eraseToAnyPublisher()
+    }
+
     /// Mirror of Android's `CaptureTagDao.observePrimaryTagNames`.
     public func observePrimaryTagNames(
         userId: String

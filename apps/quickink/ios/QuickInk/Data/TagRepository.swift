@@ -39,7 +39,7 @@ public final class TagRepository: @unchecked Sendable {
     /// seeded "Needs review" smart collection has a tag to
     /// reference.
     public static let defaultSeed: [String] = [
-        "Ideas", "Projects", "Meetings", "Todo", "Business Card", "Journal",
+        "ideas", "projects", "meetings", "todo", "business-card", "journal",
         "needs-review",
     ]
 
@@ -173,18 +173,19 @@ public final class TagRepository: @unchecked Sendable {
         }
     }
 
-    /// Rename a category and propagate the change to every capture
-    /// row that references it by name. `captures.category` stores
-    /// the value (not an FK), so a plain UPDATE on `categories.name`
-    /// would orphan the historical tags otherwise. Both writes
-    /// run in a single transaction; both rows are marked dirty for
-    /// sync.
+    /// Rename a tag. Post-A.3c the per-capture primary label lives
+    /// in `capture_tags` (which FKs the tag by id), so a rename
+    /// propagates to every attached capture for free — no
+    /// per-capture write needed. `oldName` and `userId` are now
+    /// unused, retained only to preserve the signature for callers.
     public func renameAndPropagate(
         id: String,
         oldName: String,
         newName: String,
         userId: String
     ) async throws {
+        _ = oldName
+        _ = userId
         let now = IsoClock.nowIso()
         try await dbQueue.write { db in
             try db.execute(sql: """
@@ -192,19 +193,13 @@ public final class TagRepository: @unchecked Sendable {
                 SET name = ?, updated_at = ?, dirty = 1
                 WHERE id = ?
                 """, arguments: [newName, now, id])
-
-            try db.execute(sql: """
-                UPDATE captures
-                SET category = ?, updated_at = ?, dirty = 1
-                WHERE user_id = ? AND category = ?
-                """, arguments: [newName, now, userId, oldName])
         }
     }
 
     /// Soft-delete: stamp `deleted_at` so the sync worker mirrors
-    /// the tombstone to Drive on its next pass. Already-assigned
-    /// `captures.category` strings keep working — captures.category
-    /// is a value, not an FK.
+    /// the tombstone to Drive on its next pass. `capture_tags` rows
+    /// referencing the tag stay intact (tombstoned tags still resolve
+    /// by id); the tag just disappears from the active-tag list.
     public func softDelete(id: String) async throws {
         let now = IsoClock.nowIso()
         try await dbQueue.write { db in
@@ -241,15 +236,76 @@ public final class TagRepository: @unchecked Sendable {
         }
     }
 
-    /// One-shot migration for users who were on a previous default
-    /// seed that included "Study" (which has since been replaced by
-    /// "Business Card"). Renames Study → Business Card in the
-    /// categories table and retags any captures that referenced
-    /// "Study" so the user's existing scans still group correctly.
+    /// One-shot migration that renames the legacy capitalized seed
+    /// names ("Ideas", "Projects", "Meetings", "Todo", "Business
+    /// Card", "Journal") to their kebab-case form so existing users
+    /// land on the same canonical form as fresh seeds and the AI
+    /// suggester chips. `capture_tags` rows reference the tag by id
+    /// so the rename propagates without touching the join. The
+    /// legacy `captures.category` column gets a matching update so
+    /// any code still reading the dropped-but-present column groups
+    /// captures consistently.
     ///
     /// Guarded by a UserDefaults flag so it only runs once per
-    /// install. The body itself is also idempotent — if Business
-    /// Card already exists we soft-delete Study instead of trying to
+    /// install. Body is defensive — if the kebab target already
+    /// exists we soft-delete the capitalized row instead of trying
+    /// to rename (the (user_id, name) UNIQUE constraint would
+    /// refuse the rename otherwise).
+    public func migrateLegacySeedNamesToKebabIfNeeded(userId: String) async throws {
+        let flagKey = "quickink.migrations.seed-kebab-v1"
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: flagKey) else { return }
+
+        let renames: [(old: String, new: String)] = [
+            ("Ideas",         "ideas"),
+            ("Projects",      "projects"),
+            ("Meetings",      "meetings"),
+            ("Todo",          "todo"),
+            ("Business Card", "business-card"),
+            ("Journal",       "journal"),
+        ]
+        let now = IsoClock.nowIso()
+        try await dbQueue.write { db in
+            for (old, new) in renames {
+                let oldExists = (try Int.fetchOne(db, sql: """
+                    SELECT COUNT(*) FROM tags
+                    WHERE user_id = ? AND name = ? AND deleted_at IS NULL
+                    """, arguments: [userId, old]) ?? 0) > 0
+                guard oldExists else { continue }
+                let newExists = (try Int.fetchOne(db, sql: """
+                    SELECT COUNT(*) FROM tags
+                    WHERE user_id = ? AND name = ? AND deleted_at IS NULL
+                    """, arguments: [userId, new]) ?? 0) > 0
+                if !newExists {
+                    try db.execute(sql: """
+                        UPDATE tags
+                        SET name = ?, updated_at = ?, dirty = 1
+                        WHERE user_id = ? AND name = ? AND deleted_at IS NULL
+                        """, arguments: [new, now, userId, old])
+                } else {
+                    try db.execute(sql: """
+                        UPDATE tags
+                        SET deleted_at = ?, updated_at = ?, dirty = 1
+                        WHERE user_id = ? AND name = ? AND deleted_at IS NULL
+                        """, arguments: [now, now, userId, old])
+                }
+                // Post-A.3c: capture_tags rows FK the tag by id, so
+                // the tag rename above propagates without touching
+                // any capture row.
+            }
+        }
+        defaults.set(true, forKey: flagKey)
+    }
+
+    /// One-shot migration for users who were on a previous default
+    /// seed that included "Study" (which has since been replaced by
+    /// "business-card"). Renames Study → business-card in the tags
+    /// table and retags any captures that referenced "Study" so the
+    /// user's existing scans still group correctly.
+    ///
+    /// Guarded by a UserDefaults flag so it only runs once per
+    /// install. The body itself is also idempotent — if business-card
+    /// already exists we soft-delete Study instead of trying to
     /// rename (the (user_id, name) UNIQUE constraint would refuse
     /// the rename otherwise).
     public func migrateLegacyStudyToBusinessCardIfNeeded(userId: String) async throws {
@@ -265,13 +321,13 @@ public final class TagRepository: @unchecked Sendable {
                 """, arguments: [userId]) ?? 0) > 0
             let businessCardExists = (try Int.fetchOne(db, sql: """
                 SELECT COUNT(*) FROM tags
-                WHERE user_id = ? AND name = 'Business Card' AND deleted_at IS NULL
+                WHERE user_id = ? AND name = 'business-card' AND deleted_at IS NULL
                 """, arguments: [userId]) ?? 0) > 0
 
             if studyExists && !businessCardExists {
                 try db.execute(sql: """
                     UPDATE tags
-                    SET name = 'Business Card', updated_at = ?, dirty = 1
+                    SET name = 'business-card', updated_at = ?, dirty = 1
                     WHERE user_id = ? AND name = 'Study' AND deleted_at IS NULL
                     """, arguments: [now, userId])
             } else if studyExists && businessCardExists {
@@ -281,17 +337,9 @@ public final class TagRepository: @unchecked Sendable {
                     WHERE user_id = ? AND name = 'Study' AND deleted_at IS NULL
                     """, arguments: [now, now, userId])
             }
-
-            // Retag any captures still pointing at "Study" so they
-            // continue to group with the renamed category. Runs even
-            // when no category row was touched (covers the case
-            // where the user deleted "Study" earlier but still has
-            // older captures with that string in their `category`).
-            try db.execute(sql: """
-                UPDATE captures
-                SET category = 'Business Card', updated_at = ?, dirty = 1
-                WHERE user_id = ? AND category = 'Study' AND deleted_at IS NULL
-                """, arguments: [now, userId])
+            // Post-A.3c: capture_tags rows FK the tag by id, so the
+            // rename above propagates to every attached capture for
+            // free — no per-capture write needed.
         }
         defaults.set(true, forKey: flagKey)
     }

@@ -44,6 +44,12 @@ public enum DrivePath {
     /// QuickInk rule-based saved view.
     public static let kindSmartCollection  = "smart_collection"
 
+    /// QuickInk-only — voice note attached to a capture. The audio
+    /// binary travels via `QuickInkBinarySync`; this JSON kind
+    /// carries the metadata (duration, transcript,
+    /// audio_drive_file_id).
+    public static let kindVoiceNote        = "voice_note"
+
     // ---- folder names ----
     public static let folderNotebooks       = "notebooks"
     public static let folderChapters        = "chapters"
@@ -68,6 +74,9 @@ public enum DrivePath {
     public static let folderCaptureTags     = "capture_tags"
     /// QuickInk smart collections — `smart_collections/{id}.json`.
     public static let folderSmartCollections = "smart_collections"
+    /// QuickInk voice notes — `{yyyy}/{mm}/{dd}/{captureId}/voice-{id}.json`,
+    /// co-located with the parent capture's day folder like ocr_results.
+    public static let folderVoiceNotes       = "voice_notes"
     public static let folderTasks           = "tasks"
     public static let folderTombstones      = "tombstones"
 
@@ -151,6 +160,14 @@ public enum DrivePath {
 
     /// QuickInk smart-collection payload — `smart_collections/{id}.json`.
     public static func smartCollection(id: String) -> String { "\(folderSmartCollections)/\(id).json" }
+
+    /// Date-bucketed QuickInk voice-note path —
+    /// `{yyyy}/{mm}/{dd}/{captureId}/voice-{id}.json`. Co-locates voice
+    /// notes under their parent capture's day folder, same pattern as
+    /// `quickInkOcrResult`.
+    public static func quickInkVoiceNote(createdAt: String, captureId: String, id: String) -> String {
+        "\(quickInkDateBucket(from: createdAt))/\(captureId)/voice-\(id).json"
+    }
 
     public static func tombstone(id: String) -> String { "\(folderTombstones)/\(id).json" }
 

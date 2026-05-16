@@ -31,8 +31,10 @@
 package app.quickink.mobile.data.sync
 
 import app.quickink.mobile.data.capture.CaptureEntity
+import app.quickink.mobile.data.capturelocation.CaptureLocationEntity
 import app.quickink.mobile.data.capturetag.CaptureTagEntity
 import app.quickink.mobile.data.folder.FolderEntity
+import app.quickink.mobile.data.location.LocationEntity
 import app.quickink.mobile.data.ocr.OcrResultEntity
 import app.quickink.mobile.data.profile.ProfileSettingsEntity
 import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
@@ -186,6 +188,12 @@ data class CapturePayloadV2(
      * device's locale produced.
      */
     @SerialName("address")               val address: String? = null,
+    /**
+     * Free-form document-level notes. Currently append-only via the
+     * voice-note transcript editor. Nullable; absent on payloads
+     * from pre-v15 clients.
+     */
+    @SerialName("notes")                 val notes: String? = null,
     @SerialName("created_at")            val createdAt: String,
     @SerialName("updated_at")            val updatedAt: String,
 )
@@ -209,6 +217,7 @@ fun CaptureEntity.toV2Payload(): CapturePayloadV2 = CapturePayloadV2(
     locality           = locality,
     subLocality        = subLocality,
     address            = address,
+    notes              = notes,
     createdAt          = createdAt,
     updatedAt          = updatedAt,
 )
@@ -217,6 +226,7 @@ fun CapturePayloadV2.toEntity(driveFileId: String?): CaptureEntity = CaptureEnti
     id                 = id,
     userId             = userId,
     title              = title,
+    notes              = notes,
     pdfUri             = pdfUri,
     previewUri         = previewUri,
     pageCount          = pageCount,
@@ -559,3 +569,151 @@ fun SmartCollectionPayloadV1.toEntity(driveFileId: String?): SmartCollectionEnti
     dirty       = false,
     deletedAt   = null,
 )
+
+// =====================================================================
+// voice_notes — QuickInk-only. One row per recorded clip attached to
+// a capture. JSON carries the metadata + `audio_drive_file_id`; the
+// .m4a binary itself goes through `QuickInkBinarySync`, mirroring how
+// captures' PDFs travel separately from the capture JSON.
+// =====================================================================
+
+@kotlinx.serialization.Serializable
+data class VoiceNotePayloadV1(
+    @kotlinx.serialization.SerialName("id")                   val id: String,
+    @kotlinx.serialization.SerialName("capture_id")           val captureId: String,
+    @kotlinx.serialization.SerialName("user_id")              val userId: String,
+    /**
+     * Source device's local file:// URI. Same caveat as
+     * `captures.pdf_uri`: meaningless on a different device. The
+     * receive side keeps the local URI when the file already exists
+     * here, otherwise blanks it out and waits for the binary-restore
+     * pass to fill it in from `audio_drive_file_id`.
+     */
+    @kotlinx.serialization.SerialName("audio_uri")            val audioUri: String,
+    @kotlinx.serialization.SerialName("duration_ms")          val durationMs: Long,
+    @kotlinx.serialization.SerialName("transcription")        val transcription: String? = null,
+    @kotlinx.serialization.SerialName("transcription_source") val transcriptionSource: String? = null,
+    /** Drive id of the .m4a binary upload. `null` until first push. */
+    @kotlinx.serialization.SerialName("audio_drive_file_id")  val audioDriveFileId: String? = null,
+    @kotlinx.serialization.SerialName("created_at")           val createdAt: String,
+    @kotlinx.serialization.SerialName("updated_at")           val updatedAt: String,
+)
+
+fun app.quickink.mobile.data.voicenote.VoiceNoteEntity.toV1Payload(): VoiceNotePayloadV1 =
+    VoiceNotePayloadV1(
+        id                  = id,
+        captureId           = captureId,
+        userId              = userId,
+        audioUri            = audioUri,
+        durationMs          = durationMs,
+        transcription       = transcription,
+        transcriptionSource = transcriptionSource,
+        audioDriveFileId    = audioDriveFileId,
+        createdAt           = createdAt,
+        updatedAt           = updatedAt,
+    )
+
+fun VoiceNotePayloadV1.toEntity(driveFileId: String?): app.quickink.mobile.data.voicenote.VoiceNoteEntity =
+    app.quickink.mobile.data.voicenote.VoiceNoteEntity(
+        id                  = id,
+        captureId           = captureId,
+        userId              = userId,
+        audioUri            = audioUri,
+        durationMs          = durationMs,
+        transcription       = transcription,
+        transcriptionSource = transcriptionSource,
+        driveFileId         = driveFileId,
+        audioDriveFileId    = audioDriveFileId,
+        createdAt           = createdAt,
+        updatedAt           = updatedAt,
+        dirty               = false,
+        deletedAt           = null,
+    )
+
+// =====================================================================
+// locations — QuickInk-only. User-defined places ("Home", "Work", …)
+// surfaced as the Home-screen chip rail. Mirror of `tags` on the
+// wire; lives under `locations/` per DrivePath.
+// =====================================================================
+
+@Serializable
+data class LocationPayloadV1(
+    @SerialName("id")           val id: String,
+    @SerialName("user_id")      val userId: String,
+    @SerialName("name")         val name: String,
+    @SerialName("position")     val position: Int,
+    @SerialName("color")        val color: String? = null,
+    @SerialName("latitude")     val latitude: Double? = null,
+    @SerialName("longitude")    val longitude: Double? = null,
+    @SerialName("address")      val address: String? = null,
+    @SerialName("created_at")   val createdAt: String,
+    @SerialName("updated_at")   val updatedAt: String,
+)
+
+fun LocationEntity.toV1Payload(): LocationPayloadV1 = LocationPayloadV1(
+    id        = id,
+    userId    = userId,
+    name      = name,
+    position  = position,
+    color     = color,
+    latitude  = latitude,
+    longitude = longitude,
+    address   = address,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
+fun LocationPayloadV1.toEntity(driveFileId: String?): LocationEntity = LocationEntity(
+    id           = id,
+    userId       = userId,
+    name         = name,
+    position     = position,
+    color        = color,
+    latitude     = latitude,
+    longitude    = longitude,
+    address      = address,
+    driveFileId  = driveFileId,
+    createdAt    = createdAt,
+    updatedAt    = updatedAt,
+    dirty        = false,
+    deletedAt    = null,
+)
+
+// =====================================================================
+// capture_locations — QuickInk-only. Many-to-many join between
+// captures and user-defined locations. Each row syncs independently
+// so a location added on phone A reaches phone B without re-syncing
+// the entire capture. Mirror of `capture_tags`.
+// =====================================================================
+
+@Serializable
+data class CaptureLocationPayloadV1(
+    @SerialName("id")           val id: String,
+    @SerialName("capture_id")   val captureId: String,
+    @SerialName("location_id")  val locationId: String,
+    @SerialName("source")       val source: String = "manual",
+    @SerialName("created_at")   val createdAt: String,
+    @SerialName("updated_at")   val updatedAt: String,
+)
+
+fun CaptureLocationEntity.toV1Payload(): CaptureLocationPayloadV1 = CaptureLocationPayloadV1(
+    id         = id,
+    captureId  = captureId,
+    locationId = locationId,
+    source     = source,
+    createdAt  = createdAt,
+    updatedAt  = updatedAt,
+)
+
+fun CaptureLocationPayloadV1.toEntity(driveFileId: String?): CaptureLocationEntity =
+    CaptureLocationEntity(
+        id          = id,
+        captureId   = captureId,
+        locationId  = locationId,
+        source      = source,
+        driveFileId = driveFileId,
+        createdAt   = createdAt,
+        updatedAt   = updatedAt,
+        dirty       = false,
+        deletedAt   = null,
+    )

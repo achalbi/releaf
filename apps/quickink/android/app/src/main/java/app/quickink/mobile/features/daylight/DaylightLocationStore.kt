@@ -1,22 +1,22 @@
 /*
  * DaylightLocationStore.kt
  *
- * Tiny Compose-friendly store the `DaylightStatusBar` reads its
- * lat/long from. Sits in front of `LocationService.captureCurrent`
- * so the status bar doesn't have to know about Android location
- * APIs, permission states, or the scan-flow capture path.
+ * Tiny Compose-friendly store the Home `DaylightHero` card reads
+ * its lat/long from. Sits in front of `LocationService.captureCurrent`
+ * so the hero doesn't have to know about Android location APIs,
+ * permission states, or the scan-flow capture path.
  *
  * Mirror of iOS `DaylightLocationStore.swift`.
  *
  * Strategy:
- *   - Persist the last successful fix in SharedPreferences so
- *     every launch after the first paints the bar instantly.
- *     Sunrise/sunset drift by <1 minute over ~100km — persisted
- *     coords stay good for weeks even if the user travels.
+ *   - Persist the last successful fix in SharedPreferences so every
+ *     launch after the first paints the hero instantly. Sunrise/
+ *     sunset drift by <1 minute over ~100km — persisted coords stay
+ *     good for weeks even if the user travels.
  *
  *   - On `refreshIfNeeded`, kick off one suspend `captureCurrent`
  *     and overwrite the cache. Skipped when permission isn't
- *     granted (the bar is not a prompt path; it must not surface
+ *     granted (the hero is not a prompt path; it must not surface
  *     the system dialog).
  *
  *   - In-flight de-dup: a single `isFetching` flag prevents two

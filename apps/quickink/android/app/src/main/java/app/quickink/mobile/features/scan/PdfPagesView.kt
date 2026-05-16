@@ -44,6 +44,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -77,6 +78,13 @@ fun PdfPagesView(
     pdfUri: Uri,
     modifier: Modifier = Modifier,
     onFullscreenClick: (() -> Unit)? = null,
+    /// When non-null, renders an additional ellipsis chip beside
+    /// the fullscreen chip at TopEnd. `moreMenuContent` is rendered
+    /// inside the chip's Box so a DropdownMenu anchored there opens
+    /// next to it. Both default to null so existing call sites
+    /// (single fullscreen chip, no menu) keep their behavior.
+    onMoreClick: (() -> Unit)? = null,
+    moreMenuContent: (@Composable () -> Unit)? = null,
     /// When false, per-page pinch / pan / double-tap gesture
     /// detectors are skipped so vertical drags pass through to a
     /// parent `verticalScroll` instead of being captured. The inline
@@ -162,23 +170,33 @@ fun PdfPagesView(
         // (ink @ 55% alpha) so the chip is readable on top of the
         // white page surface — see [PageTurnPdfView] for the same
         // rationale.
-        if (onFullscreenClick != null && pages != null && error == null) {
-            Box(
+        val showChips = pages != null && error == null &&
+            (onFullscreenClick != null || onMoreClick != null)
+        if (showChips) {
+            androidx.compose.foundation.layout.Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(QuickInkSpacing.s3)
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(colors.ink.copy(alpha = 0.55f))
-                    .clickable(onClick = onFullscreenClick),
-                contentAlignment = Alignment.Center,
+                    .padding(QuickInkSpacing.s3),
+                horizontalArrangement =
+                    androidx.compose.foundation.layout.Arrangement.spacedBy(QuickInkSpacing.s2),
             ) {
-                Icon(
-                    imageVector        = Icons.Outlined.Fullscreen,
-                    contentDescription = "View fullscreen",
-                    tint               = colors.textOnAccent,
-                    modifier           = Modifier.size(28.dp),
-                )
+                if (onFullscreenClick != null) {
+                    OverlayChip(
+                        icon            = Icons.Outlined.Fullscreen,
+                        contentDesc     = "View fullscreen",
+                        onClick         = onFullscreenClick,
+                    )
+                }
+                if (onMoreClick != null) {
+                    Box {
+                        OverlayChip(
+                            icon            = Icons.Filled.MoreVert,
+                            contentDesc     = "More actions",
+                            onClick         = onMoreClick,
+                        )
+                        moreMenuContent?.invoke()
+                    }
+                }
             }
         }
     }
@@ -260,4 +278,33 @@ internal fun renderPdfPages(context: Context, uri: Uri): List<Bitmap> {
             }
         }
     }.also { pfd.close() }
+}
+
+/// Dark-on-light pill button overlaid on the preview surface. Used
+/// for the fullscreen and more-actions affordances. `internal` so
+/// `PageTurnPdfView` can share the same widget. Sized to match
+/// Releaf's overflow buttons — compact enough to leave the preview
+/// surface dominant, large enough to clear the 40dp tap-target floor.
+@Composable
+internal fun OverlayChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDesc: String,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(colors.ink.copy(alpha = 0.55f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector        = icon,
+            contentDescription = contentDesc,
+            tint               = colors.textOnAccent,
+            modifier           = Modifier.size(16.dp),
+        )
+    }
 }

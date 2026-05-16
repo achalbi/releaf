@@ -42,13 +42,6 @@ struct SearchScreen: View {
     let onBack: () -> Void
     let onOpenScan: (_ captureId: String) -> Void
     @ObservedObject var settings: SettingsState
-    /// Tab navigation callbacks for the floating bottom nav. Search
-    /// paints itself active; tapping it is a no-op.
-    let onHome: () -> Void
-    let onWorkspace: () -> Void
-    let onScan: () -> Void
-    let onSearch: () -> Void
-    let onSettings: () -> Void
 
     @StateObject private var capturesVM: CaptureListViewModel
     @StateObject private var tagsVM: TagListViewModel
@@ -69,22 +62,12 @@ struct SearchScreen: View {
         userId: String,
         onBack: @escaping () -> Void,
         onOpenScan: @escaping (_ captureId: String) -> Void,
-        settings: SettingsState,
-        onHome: @escaping () -> Void = {},
-        onWorkspace: @escaping () -> Void = {},
-        onScan: @escaping () -> Void = {},
-        onSearch: @escaping () -> Void = {},
-        onSettings: @escaping () -> Void = {}
+        settings: SettingsState
     ) {
         self.userId = userId
         self.onBack = onBack
         self.onOpenScan = onOpenScan
         self.settings = settings
-        self.onHome = onHome
-        self.onWorkspace = onWorkspace
-        self.onScan = onScan
-        self.onSearch = onSearch
-        self.onSettings = onSettings
         _capturesVM = StateObject(wrappedValue: CaptureListViewModel(userId: userId))
         _tagsVM     = StateObject(wrappedValue: TagListViewModel(userId: userId))
     }
@@ -111,16 +94,6 @@ struct SearchScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(QuickInkColors.bg.ignoresSafeArea())
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            QuickInkBottomNavBar(
-                activeTab:  .search,
-                onHome:     onHome,
-                onWorkspace:  onWorkspace,
-                onScan:     onScan,
-                onSearch:   { /* current tab */ },
-                onSettings: onSettings
-            )
-        }
         .task {
             capturesVM.start()
             tagsVM.start()

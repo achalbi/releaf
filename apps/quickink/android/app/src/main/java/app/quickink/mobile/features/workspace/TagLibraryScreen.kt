@@ -88,8 +88,6 @@ import app.quickink.mobile.data.tag.TagRepository
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import kotlinx.coroutines.launch
-import app.quickink.mobile.features.nav.NavTab
-import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
@@ -103,10 +101,6 @@ fun TagLibraryScreen(
     onBack: () -> Unit,
     onOpenTag: (TagEntity) -> Unit,
     onOpenSearch: () -> Unit,
-    onHome: () -> Unit,
-    onWorkspace: () -> Unit,
-    onScan: () -> Unit,
-    onSettings: () -> Unit,
 ) {
     val colors  = LocalQuickInkColors.current
     val type    = LocalQuickInkTypography.current
@@ -222,16 +216,6 @@ fun TagLibraryScreen(
 
             Spacer(Modifier.height(QuickInkSpacing.s6))
         }
-
-        QuickInkBottomNavBar(
-            activeTab   = NavTab.Workspace,
-            onHome      = onHome,
-            onWorkspace = onWorkspace,
-            onScan      = onScan,
-            onSearch    = onOpenSearch,
-            onSettings  = onSettings,
-            modifier    = Modifier.align(Alignment.BottomCenter),
-        )
     }
 
     // ─── Tag CRUD modals ────────────────────────────────────────

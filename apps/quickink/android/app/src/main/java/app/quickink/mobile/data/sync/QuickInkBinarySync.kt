@@ -34,6 +34,8 @@ import android.util.Log
 import app.quickink.mobile.data.capture.CaptureDao
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.profile.ProfileSettingsDao
+import app.quickink.mobile.data.voicenote.VoiceNoteDao
+import app.quickink.mobile.data.voicenote.VoiceNoteEntity
 import app.releaf.mobile.data.common.AttachmentStorage
 import app.releaf.mobile.data.common.Uuidv7
 import app.releaf.mobile.data.drive.DriveClient
@@ -68,6 +70,7 @@ class QuickInkBinarySync(
     private val context: Context,
     private val captureDao: CaptureDao,
     private val profileSettingsDao: ProfileSettingsDao,
+    private val voiceNoteDao: VoiceNoteDao,
     private val driveClient: DriveClient,
     private val driveRootFolderName: String = "Thoughtbasics/QuickInk",
 ) {
@@ -106,6 +109,107 @@ class QuickInkBinarySync(
             uploadProfilePhotoIfNeeded(profile.id, profile, root.id, accessToken, stats)
         }
 
+        // Voice notes — mirror the capture/PDF upload pattern. The
+        // .m4a lands at
+        // `<root>/<yyyy>/<mm>/<dd>/<captureId>/voice-<noteId>.m4a`,
+        // beside the metadata JSON `QuickInkSyncDataSource` pushes.
+        // Tombstoned rows trash their audio binary the same way
+        // tombstoned captures trash their PDF.
+        val pendingAudio = voiceNoteDao.rowsMissingAudioUpload(userId) +
+            voiceNoteDao.dirtyRows().filter { it.userId == userId && it.deletedAt != null && it.audioDriveFileId != null }
+        for (row in pendingAudio.distinctBy { it.id }) {
+            if (row.deletedAt != null) {
+                cascadeVoiceTombstone(row, accessToken, stats)
+            } else {
+                uploadLiveVoice(row, root.id, accessToken, stats)
+            }
+        }
+
+        return stats.toResult()
+    }
+
+    private suspend fun uploadLiveVoice(
+        row: VoiceNoteEntity,
+        rootFolderId: String,
+        accessToken: String,
+        stats: MutableBinaryStats,
+    ) {
+        if (row.audioDriveFileId != null) return
+        val bytes = readLocalBytes(row.audioUri)
+        if (bytes == null) {
+            Log.w(TAG, "binary.upload.voice skipped — local file missing (row=${row.id.take(8)}…)")
+            return
+        }
+        val bucket = dateBucket(row.createdAt)
+        uploadBinary(
+            label = "voice row=${row.id.take(8)}…",
+            stats = stats,
+        ) {
+            driveClient.uploadBinaryAtPath(
+                data         = bytes,
+                contentType  = "audio/mp4",
+                relativePath = "$bucket/${row.captureId}/voice-${row.id}.m4a",
+                rootFolderId = rootFolderId,
+                accessToken  = accessToken,
+            )
+        }?.let { driveFile ->
+            voiceNoteDao.markAudioSynced(row.id, driveFile.id)
+        }
+    }
+
+    private suspend fun cascadeVoiceTombstone(
+        row: VoiceNoteEntity,
+        accessToken: String,
+        stats: MutableBinaryStats,
+    ) {
+        row.audioDriveFileId?.let { id ->
+            trashBinary(
+                driveFileId = id,
+                label = "voice tombstone row=${row.id.take(8)}…",
+                stats = stats,
+                clearLocalId = { voiceNoteDao.markAudioSynced(row.id, "") },
+            ) { driveClient.trash(id, accessToken) }
+        }
+    }
+
+    /**
+     * Pull voice-note audio binaries from Drive for any active row
+     * whose `audio_drive_file_id` is set but whose local file is
+     * missing. Mirror of the PDF / preview restore loop above.
+     */
+    suspend fun restorePendingVoiceNotes(userId: String, accessToken: String): QuickInkBinarySyncResult {
+        val stats = MutableBinaryStats()
+        val rows = voiceNoteDao.rowsWithRemoteAudio(userId)
+        if (rows.isEmpty()) return stats.toResult()
+        Log.i(TAG, "restorePendingVoiceNotes: scanning ${rows.size} rows")
+
+        for (row in rows) {
+            if (localFileExists(row.audioUri)) continue
+            val driveId = row.audioDriveFileId ?: continue
+            stats.attempted++
+            val rowTag = "row=${row.id.take(8)}… audioDriveId=${driveId.take(12)}…"
+            try {
+                val bytes = driveClient.downloadBytes(driveId, accessToken)
+                val newUri = writeBytes(bytes, "m4a")
+                if (newUri != null) {
+                    voiceNoteDao.setAudioUri(row.id, newUri.toString())
+                    stats.completed++
+                    Log.i(TAG, "restorePendingVoiceNotes.audio ok ($rowTag, ${bytes.size}B)")
+                } else {
+                    stats.failed++
+                    Log.w(TAG, "restorePendingVoiceNotes.audio write-failed ($rowTag)")
+                }
+            } catch (e: DriveError.Unauthenticated) {
+                Log.w(TAG, "restorePendingVoiceNotes.audio auth rejected ($rowTag) — rethrowing")
+                throw e
+            } catch (e: DriveError.RateLimited) {
+                Log.w(TAG, "restorePendingVoiceNotes.audio rate limited ($rowTag) — rethrowing")
+                throw e
+            } catch (e: Exception) {
+                stats.failed++
+                Log.w(TAG, "restorePendingVoiceNotes.audio failed ($rowTag): $e")
+            }
+        }
         return stats.toResult()
     }
 

@@ -62,6 +62,19 @@ object DrivePath {
     /** QuickInk-only — rule-based saved view. */
     const val KIND_SMART_COLLECTION = "smart_collection"
 
+    /** QuickInk-only — user-defined place ("Home", "Work", etc.).
+     *  Optional axis attached to captures via the [KIND_CAPTURE_LOCATION]
+     *  join. Seeded with "Home" and "Work" on first launch. */
+    const val KIND_LOCATION         = "location"
+    /** QuickInk-only — capture↔location many-to-many join row. */
+    const val KIND_CAPTURE_LOCATION = "capture_location"
+
+    /** QuickInk-only — voice note attached to a capture. Audio
+     *  binary lives at the binary side via `QuickInkBinarySync`;
+     *  this JSON kind carries the metadata (duration, transcript,
+     *  audio_drive_file_id). */
+    const val KIND_VOICE_NOTE       = "voice_note"
+
     // ---- folder names (no trailing slash; join with `/`) ----
     const val FOLDER_NOTEBOOKS       = "notebooks"
     const val FOLDER_CHAPTERS        = "chapters"
@@ -91,6 +104,13 @@ object DrivePath {
     const val FOLDER_CAPTURE_TAGS      = "capture_tags"
     /** QuickInk smart collections — `smart_collections/{id}.json`. */
     const val FOLDER_SMART_COLLECTIONS = "smart_collections"
+    /** QuickInk locations — `locations/{id}.json`. */
+    const val FOLDER_LOCATIONS         = "locations"
+    /** QuickInk capture↔location joins — `capture_locations/{id}.json`. */
+    const val FOLDER_CAPTURE_LOCATIONS = "capture_locations"
+    /** QuickInk voice notes — `{yyyy}/{mm}/{dd}/{captureId}/voice-{id}.json`,
+     *  co-located with the parent capture's day folder like ocr_results. */
+    const val FOLDER_VOICE_NOTES       = "voice_notes"
     const val FOLDER_TASKS           = "tasks"
     const val FOLDER_TOMBSTONES      = "tombstones"
 
@@ -163,6 +183,21 @@ object DrivePath {
 
     /** QuickInk smart-collection payload — `smart_collections/{id}.json`. */
     fun smartCollection(id: String): String = "$FOLDER_SMART_COLLECTIONS/$id.json"
+
+    /** QuickInk's per-location file — `locations/{id}.json`. */
+    fun location(id: String): String = "$FOLDER_LOCATIONS/$id.json"
+
+    /** QuickInk capture↔location join payload — `capture_locations/{id}.json`. */
+    fun captureLocation(id: String): String = "$FOLDER_CAPTURE_LOCATIONS/$id.json"
+
+    /**
+     * Date-bucketed QuickInk voice-note path —
+     * `{yyyy}/{mm}/{dd}/{captureId}/voice-{id}.json`. Co-locates voice
+     * notes under their parent capture's day folder, same pattern as
+     * [quickInkOcrResult].
+     */
+    fun quickInkVoiceNote(createdAt: String, captureId: String, id: String): String =
+        "${quickInkDateBucket(createdAt)}/$captureId/voice-$id.json"
 
     /**
      * QuickInk's per-user profile-settings file —

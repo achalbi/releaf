@@ -43,6 +43,15 @@ data class CaptureEntity(
     @ColumnInfo(name = "title")
     val title: String?,
 
+    /**
+     * Free-form document-level notes. Currently append-only via the
+     * voice-note transcript editor (Document detail → record a voice
+     * note → edit transcript → save appends here). Nullable for
+     * back-compat with rows synced from pre-v15 clients.
+     */
+    @ColumnInfo(name = "notes")
+    val notes: String? = null,
+
     /** file:// or content:// pointing at the scanner-produced PDF. */
     @ColumnInfo(name = "pdf_uri")
     val pdfUri: String,

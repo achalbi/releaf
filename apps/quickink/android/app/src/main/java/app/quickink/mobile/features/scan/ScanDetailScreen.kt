@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -53,6 +54,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.LocalOffer
+import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.PictureAsPdf
 import app.quickink.mobile.features.scan.businesscard.AddContactReviewSheet
@@ -83,6 +85,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -91,17 +94,16 @@ import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.sync.QuickInkBinarySync
-import app.quickink.mobile.features.nav.NavTab
-import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
+import app.quickink.mobile.features.nav.QuickInkTimeBar
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
-import app.quickink.mobile.ui.theme.quickInkDotGridBackground
 import androidx.core.content.FileProvider
 import app.releaf.mobile.auth.AuthState
 import app.quickink.mobile.features.workspace.FolderPickerSheet
+import app.quickink.mobile.features.workspace.LocationPickerSheet
 import app.quickink.mobile.features.workspace.TagPickerSheet
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.sync.DeviceIdentity
@@ -121,15 +123,6 @@ fun ScanDetailScreen(
     captureId: String,
     userId: String,
     onBack: () -> Unit,
-    // Bottom-nav callbacks. Optional so we keep the legacy "navigate
-    // to detail and only allow back" path working from places that
-    // don't host a tab bar. When all five are supplied, the floating
-    // QuickInkBottomNavBar renders below the content.
-    onHome: (() -> Unit)? = null,
-    onWorkspace: (() -> Unit)? = null,
-    onScan: (() -> Unit)? = null,
-    onSearch: (() -> Unit)? = null,
-    onSettings: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as QuickInkApp
@@ -151,6 +144,10 @@ fun ScanDetailScreen(
     // Workspace v1 tag picker — Manage tags row opens it. Manual
     // entry only in Phase C.2; AI-suggested chips ship in Phase E.
     var showTagPicker by remember(captureId) { mutableStateOf(false) }
+    // Locations picker — Manage locations row in the more-menu opens
+    // it. Mirrors the tag-picker contract; commits diffs against
+    // `capture_locations` on Save.
+    var showLocationPicker by remember(captureId) { mutableStateOf(false) }
     val folders by remember(userId, folderDao) {
         folderDao.observeActive(userId)
     }.collectAsState(initial = emptyList())
@@ -166,10 +163,20 @@ fun ScanDetailScreen(
     // Save and discarded on Cancel.
     var showTitleEditor by remember { mutableStateOf(false) }
     var titleDraft by remember { mutableStateOf("") }
+    // Notes editor — full-screen sheet on tap of the Notes card.
+    // Save persists via [CaptureRepository.setNotes]; Cancel drops
+    // the draft. The same column is appended-to by the voice-note
+    // transcript editor, so notes accumulate from both surfaces.
+    var showNotesEditor by remember { mutableStateOf(false) }
+    var notesDraft by remember { mutableStateOf("") }
     // Fullscreen viewer toggle. Set true by the fullscreen button on
     // the inline preview; cleared by the dialog's close affordance or
     // the back press.
     var showFullscreenViewer by remember(captureId) { mutableStateOf(false) }
+    // More-actions dropdown anchored to the ellipsis chip beside the
+    // fullscreen chip on the preview. Holds the actions that used to
+    // live in the inline Actions card.
+    var moreMenuExpanded by remember(captureId) { mutableStateOf(false) }
     // Selected page index for the thumbnails strip (0-based). Visual-
     // only highlight today; tap-to-jump is a follow-up that requires
     // surfacing a `currentPage` state through PageTurnPdfView.
@@ -190,6 +197,9 @@ fun ScanDetailScreen(
     // JPEGs. Drives the row's label ("Preparing…") and the disabled
     // tap-state so a double-tap doesn't queue a second render.
     var isPreparingImageShare by remember(captureId) { mutableStateOf(false) }
+    // In-memory rasterised pages handed to the WhatsApp-style image
+    // editor before the share sheet opens. Non-null = editor is up.
+    var pendingEditorPages by remember(captureId) { mutableStateOf<List<Bitmap>?>(null) }
 
     // Live category list — populated from the same DAO the home
     // grid + review screen read, scoped to the current user. The
@@ -208,6 +218,22 @@ fun ScanDetailScreen(
     val primaryTagName: String? = remember(attachedTagIds, categories) {
         val byId = categories.associateBy { it.id }
         attachedTagIds.firstNotNullOfOrNull { byId[it]?.name }
+    }
+
+    // Live attached-locations names — joined from the user's active
+    // location list. Drives the read-only chip strip on the Details
+    // card; the picker writes the underlying join rows.
+    val captureLocationDao = remember(app) { app.database.captureLocationDao() }
+    val locationDao        = remember(app) { app.database.locationDao() }
+    val allLocations by remember(userId, locationDao) {
+        locationDao.observeActive(userId)
+    }.collectAsState(initial = emptyList())
+    val attachedLocationIds by remember(captureId, captureLocationDao) {
+        captureLocationDao.observeLocationIdsForCapture(captureId)
+    }.collectAsState(initial = emptyList())
+    val attachedLocationNames: List<String> = remember(attachedLocationIds, allLocations) {
+        val byId = allLocations.associateBy { it.id }
+        attachedLocationIds.mapNotNull { byId[it]?.name }
     }
     val captureRepository = remember(app) {
         CaptureRepository(
@@ -376,6 +402,7 @@ fun ScanDetailScreen(
                     context            = context,
                     captureDao         = captureDao,
                     profileSettingsDao = app.database.profileSettingsDao(),
+                    voiceNoteDao       = app.database.voiceNoteDao(),
                     driveClient        = app.driveClient,
                 )
                 binarySync.restorePending(row.userId, accessToken)
@@ -386,19 +413,35 @@ fun ScanDetailScreen(
     }
 
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val hasBottomNav = onHome != null && onWorkspace != null && onScan != null &&
-        onSearch != null && onSettings != null
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .quickInkDotGridBackground(),
+            .background(colors.bg),
     ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = statusBarTop + QuickInkSpacing.s4),
+            .padding(top = statusBarTop + 4.dp),
     ) {
+
+        val scrollState = rememberScrollState()
+
+        // Reuse the global `QuickInkTimeBar`, but auto-hide it as
+        // soon as the user starts scrolling so the preview chrome
+        // doesn't crowd the page; reappears when the scroll returns
+        // to the very top. The global bar in `QuickInkRoot` is
+        // suppressed on this route, so this is the only time-chip
+        // surface on the scan-detail screen.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = scrollState.value == 0,
+            enter   = androidx.compose.animation.fadeIn() +
+                androidx.compose.animation.expandVertically(),
+            exit    = androidx.compose.animation.fadeOut() +
+                androidx.compose.animation.shrinkVertically(),
+        ) {
+            QuickInkTimeBar()
+        }
 
         if (showDeleteConfirm) {
             AlertDialog(
@@ -436,11 +479,8 @@ fun ScanDetailScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(
-                    top    = QuickInkSpacing.s4,
-                    bottom = if (hasBottomNav) QuickInkBottomNavReservedHeight else QuickInkSpacing.s8,
-                ),
+                .verticalScroll(scrollState)
+                .padding(bottom = QuickInkBottomNavReservedHeight),
             verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s5),
         ) {
             val current = capture
@@ -461,11 +501,78 @@ fun ScanDetailScreen(
 
                 // Preview block — full-bleed within margins. The
                 // selectedPageIndex two-way bind keeps the thumbnails
-                // strip and the swipeable pager in sync (tap a chip to
-                // jump; swipe the pager to advance the chip).
+                // strip and the swipeable pager in sync (tap a chip
+                // to jump; swipe the pager to advance the chip).
+                val isBusinessCard = primaryTagName
+                    ?.equals("business-card", ignoreCase = true) == true
                 PreviewImage(
                     capture             = current,
                     onFullscreenClick   = { showFullscreenViewer = true },
+                    onMoreClick         = { moreMenuExpanded = true },
+                    moreMenuContent     = {
+                        ScanActionsDropdown(
+                            expanded              = moreMenuExpanded,
+                            onDismiss             = { moreMenuExpanded = false },
+                            isBusinessCard        = isBusinessCard,
+                            isPreparingImageShare = isPreparingImageShare,
+                            onAddToContact        = {
+                                moreMenuExpanded = false
+                                scope.launch {
+                                    businessCardExtraction = runCatching {
+                                        runBusinessCardExtraction(captureId, ocrDao)
+                                    }.getOrDefault(ExtractedContact.empty)
+                                }
+                            },
+                            onShareAsImage        = {
+                                moreMenuExpanded = false
+                                if (!isPreparingImageShare) {
+                                    scope.launch {
+                                        isPreparingImageShare = true
+                                        try {
+                                            val bitmaps = withContext(Dispatchers.IO) {
+                                                rasterisePagesForEditor(
+                                                    context    = context,
+                                                    pdfUri     = current.pdfUri,
+                                                    previewUri = current.previewUri,
+                                                )
+                                            }
+                                            if (bitmaps.isEmpty()) {
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "Nothing to share for this scan",
+                                                    android.widget.Toast.LENGTH_SHORT,
+                                                ).show()
+                                            } else {
+                                                pendingEditorPages = bitmaps
+                                            }
+                                        } finally {
+                                            isPreparingImageShare = false
+                                        }
+                                    }
+                                }
+                            },
+                            onExportPdf           = {
+                                moreMenuExpanded = false
+                                exportAsPdf(context, current.pdfUri)
+                            },
+                            onMoveToFolder        = {
+                                moreMenuExpanded = false
+                                showFolderPicker = true
+                            },
+                            onManageTags          = {
+                                moreMenuExpanded = false
+                                showTagPicker = true
+                            },
+                            onManageLocations     = {
+                                moreMenuExpanded = false
+                                showLocationPicker = true
+                            },
+                            onDelete              = {
+                                moreMenuExpanded = false
+                                showDeleteConfirm = true
+                            },
+                        )
+                    },
                     currentPage         = selectedPageIndex,
                     onCurrentPageChange = { selectedPageIndex = it },
                     modifier            = Modifier.padding(horizontal = QuickInkSpacing.s5),
@@ -481,91 +588,152 @@ fun ScanDetailScreen(
                     )
                 }
 
-                // Details + Actions cards — side by side, matching the
-                // Drive-style mockup. Both cards stretch to equal width
-                // via Modifier.weight(1f); on narrow screens the rows
-                // inside each card wrap rather than overflow.
-                Row(
-                    modifier              = Modifier
+                // Details card — full width now that the Actions
+                // card has moved to the more-menu dropdown anchored
+                // beside the fullscreen chip on the preview.
+                DetailsCard(
+                    capture                = current,
+                    primaryTagName         = primaryTagName,
+                    pdfFileSize            = pdfFileSize,
+                    onAddTag               = { showRetagSheet = true },
+                    attachedLocationNames  = attachedLocationNames,
+                    onAddLocation          = { showLocationPicker = true },
+                    modifier               = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = QuickInkSpacing.s5),
-                    horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
-                ) {
-                    DetailsCard(
-                        capture        = current,
-                        primaryTagName = primaryTagName,
-                        pdfFileSize    = pdfFileSize,
-                        onAddTag       = { showRetagSheet = true },
-                        modifier       = Modifier.weight(1f),
-                    )
-                    val isBusinessCard = primaryTagName
-                        ?.equals("Business Card", ignoreCase = true) == true
-                    ActionsCard(
-                        capture               = current,
-                        onShareAsImage        = {
-                            if (!isPreparingImageShare) {
-                                scope.launch {
-                                    isPreparingImageShare = true
-                                    try {
-                                        shareAsImage(
-                                            context    = context,
-                                            pdfUri     = current.pdfUri,
-                                            previewUri = current.previewUri,
-                                        )
-                                    } finally {
-                                        isPreparingImageShare = false
-                                    }
-                                }
-                            }
-                        },
-                        isPreparingImageShare = isPreparingImageShare,
-                        onExportPdf           = {
-                            exportAsPdf(context, current.pdfUri)
-                        },
-                        onMoveToFolder        = { showFolderPicker = true },
-                        onManageTags          = { showTagPicker = true },
-                        onDelete              = { showDeleteConfirm = true },
-                        // Business-card-only Add-to-contact row.
-                        // Runs the full bbox-aware extraction
-                        // pipeline over the capture's stored OCR
-                        // blocks, then opens an editable review
-                        // sheet so the user can fix any
-                        // mis-classifications before the final
-                        // contact intent fires.
-                        onAddToContact        = if (isBusinessCard) {
-                            {
-                                scope.launch {
-                                    businessCardExtraction = runCatching {
-                                        runBusinessCardExtraction(captureId, ocrDao)
-                                    }.getOrDefault(ExtractedContact.empty)
-                                }
-                            }
-                        } else null,
-                        modifier              = Modifier.weight(1f),
-                    )
-                }
+                )
+
+                // Document notes — free-form text the user can type
+                // directly into the scan. Tapping the card opens a
+                // full-screen editor; the voice-note transcript
+                // editor also appends here, so notes accumulate from
+                // both surfaces.
+                NotesCard(
+                    notes    = current.notes,
+                    onTap    = {
+                        notesDraft = current.notes.orEmpty()
+                        showNotesEditor = true
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = QuickInkSpacing.s5),
+                )
+
+                // Voice notes — full-width section below the
+                // Details + Actions row. Owns its own list +
+                // recorder sheet; persists rows in `voice_notes`
+                // with a foreign key to this capture so deletes
+                // cascade with the scan. `onNotesChanged` fires
+                // after Copy-to-notes or the transcript editor
+                // append so the Notes card above refreshes without
+                // waiting for a screen revisit.
+                VoiceNoteSection(
+                    captureId      = captureId,
+                    userId         = userId,
+                    onNotesChanged = {
+                        scope.launch {
+                            capture = captureDao.findById(captureId)
+                        }
+                    },
+                    modifier       = Modifier.padding(horizontal = QuickInkSpacing.s5),
+                )
             }
         }
     } // end inner Column
-
-    // Floating bottom nav, anchored to the bottom of the surrounding
-    // Box. Mirrors the iOS `safeAreaInset(.bottom)` layer — the
-    // ScrollView above reserves QuickInkBottomNavReservedHeight at
-    // the bottom of its content padding so the last card isn't hidden
-    // behind the bar.
-    if (onHome != null && onWorkspace != null && onScan != null &&
-        onSearch != null && onSettings != null) {
-        QuickInkBottomNavBar(
-            activeTab  = NavTab.None,
-            onHome     = onHome,
-            onWorkspace  = onWorkspace,
-            onScan     = onScan,
-            onSearch   = onSearch,
-            onSettings = onSettings,
-            modifier   = Modifier.align(Alignment.BottomCenter),
-        )
-    }
     } // end outer Box
+
+    // WhatsApp-style image editor — overlays the detail screen
+    // entirely when the user picks "Share as Image". Crop + pencil
+    // per page; Done writes the edited images to cache JPEGs and
+    // hands them to the system share intent that used to fire
+    // directly from the menu.
+    //
+    // Rendered inside a [Dialog] with `usePlatformDefaultWidth =
+    // false` and `decorFitsSystemWindows = false` so it covers the
+    // whole activity — including the QuickInk bottom-nav bar that
+    // lives at the MainShell root above this composable. Without
+    // the Dialog the editor would only fill the NavHost slot and
+    // the footer chips would still hover on top.
+    pendingEditorPages?.let { bitmaps ->
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { pendingEditorPages = null },
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows  = false,
+                dismissOnBackPress      = true,
+                dismissOnClickOutside   = false,
+            ),
+        ) {
+            // Edge-to-edge + system bars hidden: tell the Dialog's
+            // window to draw behind the status + nav bars, paint
+            // them transparent, then actively HIDE them while the
+            // editor is up. Restored on dispose so the rest of the
+            // app gets its normal chrome back.
+            val view = androidx.compose.ui.platform.LocalView.current
+            val dialogWindow = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+            androidx.compose.runtime.DisposableEffect(dialogWindow) {
+                if (dialogWindow != null) {
+                    androidx.core.view.WindowCompat.setDecorFitsSystemWindows(dialogWindow, false)
+                    @Suppress("DEPRECATION")
+                    dialogWindow.statusBarColor      = android.graphics.Color.TRANSPARENT
+                    @Suppress("DEPRECATION")
+                    dialogWindow.navigationBarColor  = android.graphics.Color.TRANSPARENT
+                    val controller = androidx.core.view.WindowInsetsControllerCompat(
+                        dialogWindow,
+                        dialogWindow.decorView,
+                    )
+                    controller.systemBarsBehavior =
+                        androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    controller.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                }
+                onDispose {
+                    if (dialogWindow != null) {
+                        val controller = androidx.core.view.WindowInsetsControllerCompat(
+                            dialogWindow,
+                            dialogWindow.decorView,
+                        )
+                        controller.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                    }
+                }
+            }
+            ImageEditorScreen(
+                pages    = bitmaps,
+                onCancel = { pendingEditorPages = null },
+                onDone   = { edited ->
+                    pendingEditorPages = null
+                    scope.launch {
+                        val files = withContext(Dispatchers.IO) {
+                            writeEditedJpegs(context, edited)
+                        }
+                        if (files.isEmpty()) {
+                            android.widget.Toast.makeText(
+                                context,
+                                "Couldn't prepare scan for sharing",
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                            return@launch
+                        }
+                        val authority = "${context.packageName}.fileprovider"
+                        val uris = files.mapNotNull {
+                            runCatching { FileProvider.getUriForFile(context, authority, it) }
+                                .getOrNull()
+                        }
+                        if (uris.isEmpty()) return@launch
+                        val intent = buildImageShareIntent(uris)
+                        try {
+                            context.startActivity(Intent.createChooser(intent, "Share scan"))
+                        } catch (_: Exception) {
+                            android.widget.Toast.makeText(
+                                context,
+                                "Couldn't open the share sheet for this scan",
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    }
+                },
+            )
+        }
+    }
 
     // Retag bottom sheet — tapping the primary-tag pill (or the
     // untagged "Tag scan" affordance) opens this. One row per
@@ -591,6 +759,56 @@ fun ScanDetailScreen(
                     } catch (_: Exception) { /* best-effort */ }
                 }
             },
+        )
+    }
+
+    // Notes editor — modal AlertDialog with a multi-line text
+    // field. Save commits via [CaptureRepository.setNotes] (dirty-bit
+    // picked up by the next sync); Cancel discards the draft. Blank
+    // input clears the column (stored as null) so the card's empty-
+    // state branch reads correctly afterward.
+    if (showNotesEditor) {
+        AlertDialog(
+            onDismissRequest = { showNotesEditor = false },
+            title            = { Text("Notes", style = type.body, color = colors.ink) },
+            text             = {
+                Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+                    Text(
+                        text = "Capture notes about this scan. Voice-note transcripts also get appended here.",
+                        style = type.caption,
+                        color = colors.muted,
+                    )
+                    OutlinedTextField(
+                        value         = notesDraft,
+                        onValueChange = { notesDraft = it },
+                        placeholder   = { Text("Add notes…", color = colors.muted) },
+                        minLines      = 6,
+                        modifier      = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton    = {
+                TextButton(
+                    onClick = {
+                        showNotesEditor = false
+                        val draft = notesDraft
+                        scope.launch {
+                            try {
+                                captureRepository.setNotes(captureId, draft)
+                                capture = captureDao.findById(captureId)
+                            } catch (_: Exception) { /* best-effort */ }
+                        }
+                    },
+                ) {
+                    Text("Save", color = colors.accent)
+                }
+            },
+            dismissButton    = {
+                TextButton(onClick = { showNotesEditor = false }) {
+                    Text("Cancel", color = colors.ink)
+                }
+            },
+            containerColor   = colors.surface,
         )
     }
 
@@ -648,6 +866,17 @@ fun ScanDetailScreen(
             captureId = captureId,
             userId    = userId,
             onDismiss = { showTagPicker = false },
+        )
+    }
+
+    // Locations picker — opened by the more-menu's "Manage
+    // locations" row. Writes diffs to `capture_locations` on Save;
+    // no work happens on Cancel.
+    if (showLocationPicker) {
+        LocationPickerSheet(
+            captureId = captureId,
+            userId    = userId,
+            onDismiss = { showLocationPicker = false },
         )
     }
 
@@ -735,6 +964,13 @@ fun ScanDetailScreen(
 private fun PreviewImage(
     capture: CaptureEntity,
     onFullscreenClick: (() -> Unit)? = null,
+    /// Optional secondary chip drawn beside the fullscreen affordance
+    /// in the TopEnd Row. `moreMenuContent` is rendered as a sibling
+    /// of the chip so a DropdownMenu anchored there opens next to
+    /// it. Used by `ScanDetailScreen` to host the per-capture
+    /// actions menu (Share / Export / Move / Delete / …).
+    onMoreClick: (() -> Unit)? = null,
+    moreMenuContent: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
     currentPage: Int = 0,
     onCurrentPageChange: (Int) -> Unit = {},
@@ -781,6 +1017,8 @@ private fun PreviewImage(
                 PageTurnPdfView(
                     pdfUri              = pdfUri!!,
                     onFullscreenClick   = onFullscreenClick,
+                    onMoreClick         = onMoreClick,
+                    moreMenuContent     = moreMenuContent,
                     currentPage         = currentPage,
                     onCurrentPageChange = onCurrentPageChange,
                     interactionsEnabled = false,
@@ -796,6 +1034,8 @@ private fun PreviewImage(
                 PdfPagesView(
                     pdfUri              = pdfUri,
                     onFullscreenClick   = onFullscreenClick,
+                    onMoreClick         = onMoreClick,
+                    moreMenuContent     = moreMenuContent,
                     interactionsEnabled = false,
                     modifier = modifier
                         .fillMaxWidth()
@@ -929,6 +1169,63 @@ private suspend fun shareAsImage(
  * names (`page-1.jpg` etc.) human-readable in the share-sheet
  * preview without clobbering a previous share's files.
  */
+/**
+ * Rasterise the capture's pages into in-memory [Bitmap]s for the
+ * image editor. Multi-page PDFs return one bitmap per page;
+ * image-only (PDF-less) captures fall back to decoding the preview
+ * JPEG. Empty list means there's nothing to edit — caller surfaces
+ * a Toast.
+ */
+private fun rasterisePagesForEditor(
+    context: android.content.Context,
+    pdfUri: String?,
+    previewUri: String?,
+): List<Bitmap> {
+    if (!pdfUri.isNullOrBlank() && localFileExists(pdfUri)) {
+        val bitmaps = runCatching {
+            renderPdfPages(context, Uri.parse(pdfUri))
+        }.getOrDefault(emptyList())
+        if (bitmaps.isNotEmpty()) return bitmaps
+    }
+    if (!previewUri.isNullOrBlank()) {
+        val parsed = runCatching { Uri.parse(previewUri) }.getOrNull()
+        val bm = runCatching {
+            val stream = when (parsed?.scheme) {
+                "file"    -> parsed.path?.let(::File)?.inputStream()
+                null      -> File(previewUri).inputStream()
+                "content" -> context.contentResolver.openInputStream(parsed)
+                else      -> null
+            }
+            stream?.use { android.graphics.BitmapFactory.decodeStream(it) }
+        }.getOrNull()
+        if (bm != null) return listOf(bm)
+    }
+    return emptyList()
+}
+
+/**
+ * Write edited bitmaps (post-crop / annotation) to JPEGs in the
+ * standard share-images cache subdir. Mirror of the writer used by
+ * [prepareShareImageFiles] but with the bitmaps already in hand.
+ */
+private fun writeEditedJpegs(
+    context: android.content.Context,
+    bitmaps: List<Bitmap>,
+): List<File> {
+    val callDir = "share-${java.util.UUID.randomUUID().toString().take(8)}"
+    val outDir = File(File(context.cacheDir, "share-images"), callDir)
+        .also { it.mkdirs() }
+    return bitmaps.mapIndexedNotNull { index, bm ->
+        val out = File(outDir, "page-${index + 1}.jpg")
+        runCatching {
+            java.io.FileOutputStream(out).use { os ->
+                bm.compress(Bitmap.CompressFormat.JPEG, 92, os)
+            }
+            out
+        }.getOrNull()
+    }
+}
+
 private fun prepareShareImageFiles(
     context: android.content.Context,
     pdfUri: String?,
@@ -1320,12 +1617,88 @@ private fun PageThumbnailsStrip(
  * label-left / value-right pair; the Tags row swaps the value for an
  * inline category chip plus a "+" affordance.
  */
+
+/**
+ * Free-form notes card. Renders the current `captures.notes` value
+ * preserving line breaks; falls back to an empty-state prompt when
+ * the column is null/blank. The whole card is tappable — tap opens
+ * the editor sheet. Voice-note transcripts also land in the same
+ * column (the transcript editor appends), so this card surfaces
+ * content from both surfaces.
+ */
+@Composable
+private fun NotesCard(
+    notes: String?,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val trimmed = notes?.trim().orEmpty()
+    val hasNotes = trimmed.isNotEmpty()
+
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
+            .clickable(onClick = onTap),
+    ) {
+        // Heading on a soft grey strip — matches Details / Voice notes.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier          = Modifier
+                .fillMaxWidth()
+                .background(colors.borderSoft)
+                .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Edit,
+                contentDescription = null,
+                tint = colors.inkSoft,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s2))
+            Text(
+                text = "Notes",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.ink,
+            )
+            Spacer(Modifier.weight(1f))
+        }
+
+        Column(
+            modifier            = Modifier.padding(QuickInkSpacing.s3),
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+        if (hasNotes) {
+            Text(
+                text = trimmed,
+                fontSize = 11.sp,
+                color = colors.ink,
+                maxLines = 8,
+                overflow = TextOverflow.Ellipsis,
+            )
+        } else {
+            Text(
+                text = "Tap to add notes for this scan. Voice-note transcripts also land here.",
+                style = type.caption,
+                color = colors.muted,
+            )
+        }
+        }
+    }
+}
+
 @Composable
 private fun DetailsCard(
     capture: CaptureEntity,
     primaryTagName: String?,
     pdfFileSize: Long?,
     onAddTag: () -> Unit,
+    attachedLocationNames: List<String>,
+    onAddLocation: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalQuickInkColors.current
@@ -1337,13 +1710,18 @@ private fun DetailsCard(
             .fillMaxWidth()
             .clip(RoundedCornerShape(QuickInkRadius.md))
             .background(colors.surface)
-            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
-            .padding(QuickInkSpacing.s3),
-        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md)),
     ) {
+        // Heading sits on a soft grey strip spanning the card's
+        // full inner width. Padding is local to the strip so the
+        // detail rows below keep their existing inset.
         Row(
             verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+            modifier              = Modifier
+                .fillMaxWidth()
+                .background(colors.borderSoft)
+                .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
         ) {
             Icon(
                 imageVector        = Icons.Outlined.Description,
@@ -1358,39 +1736,48 @@ private fun DetailsCard(
             )
         }
 
-        DetailRow(label = "File type", value = fileTypeLabel(capture))
-        DetailRow(
-            label = "Size",
-            value = pdfFileSize?.let { android.text.format.Formatter.formatFileSize(context, it) } ?: "—",
-        )
-        DetailRow(
-            label      = "Folder",
-            value      = primaryTagName ?: "Unsorted",
-            valueColor = if (primaryTagName != null) colors.accent else colors.inkSoft,
-        )
-        // Address / Area / City rows render only when the reverse-
-        // geocoded place name landed on the capture row. Captures
-        // taken before Phase 7, with the location toggle off, with
-        // the permission denied, or with a failed geocode lookup
-        // all omit these rows. Raw coordinates without a place
-        // name aren't surfaced — they'd read as opaque decimals.
-        // Dedupe at render time so existing rows where the geocoder
-        // fell back to the city for both fields don't show
-        // identical Area + City rows.
-        capture.address
-            ?.takeIf { it.isNotBlank() }
-            ?.let { DetailRow(label = "Address", value = it) }
-        val (locOut, subOut) = LocationService.dedupePlaceNames(
-            locality    = capture.locality,
-            subLocality = capture.subLocality,
-        )
-        subOut
-            ?.takeIf { it.isNotBlank() }
-            ?.let { DetailRow(label = "Area", value = it) }
-        locOut
-            ?.takeIf { it.isNotBlank() }
-            ?.let { DetailRow(label = "City", value = it) }
-        TagsRow(primaryTagName = primaryTagName, onAddTag = onAddTag)
+        Column(
+            modifier            = Modifier.padding(QuickInkSpacing.s3),
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+            DetailRow(label = "File type", value = fileTypeLabel(capture))
+            DetailRow(
+                label = "Size",
+                value = pdfFileSize?.let { android.text.format.Formatter.formatFileSize(context, it) } ?: "—",
+            )
+            DetailRow(
+                label      = "Folder",
+                value      = primaryTagName ?: "Unsorted",
+                valueColor = if (primaryTagName != null) colors.accent else colors.inkSoft,
+            )
+            // Address / Area / City rows render only when the reverse-
+            // geocoded place name landed on the capture row. Captures
+            // taken before Phase 7, with the location toggle off, with
+            // the permission denied, or with a failed geocode lookup
+            // all omit these rows. Raw coordinates without a place
+            // name aren't surfaced — they'd read as opaque decimals.
+            // Dedupe at render time so existing rows where the geocoder
+            // fell back to the city for both fields don't show
+            // identical Area + City rows.
+            capture.address
+                ?.takeIf { it.isNotBlank() }
+                ?.let { DetailRow(label = "Address", value = it) }
+            val (locOut, subOut) = LocationService.dedupePlaceNames(
+                locality    = capture.locality,
+                subLocality = capture.subLocality,
+            )
+            subOut
+                ?.takeIf { it.isNotBlank() }
+                ?.let { DetailRow(label = "Area", value = it) }
+            locOut
+                ?.takeIf { it.isNotBlank() }
+                ?.let { DetailRow(label = "City", value = it) }
+            TagsRow(primaryTagName = primaryTagName, onAddTag = onAddTag)
+            LocationsRow(
+                names         = attachedLocationNames,
+                onAddLocation = onAddLocation,
+            )
+        }
     }
 }
 
@@ -1402,19 +1789,24 @@ private fun DetailRow(
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
+    // Bump up from the 10sp `caption` token to 13sp so the rows
+    // read at body comfort. The card's a primary surface; the
+    // caption size belongs on confidence badges, not on labelled
+    // metadata the user actually reads.
+    val rowStyle = type.caption.copy(fontSize = 11.sp)
     Row(
         modifier          = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Top,
     ) {
         Text(
             text  = label,
-            style = type.caption,
+            style = rowStyle,
             color = colors.inkSoft,
         )
         Spacer(modifier = Modifier.weight(1f))
         Text(
             text     = value,
-            style    = type.caption,
+            style    = rowStyle,
             color    = valueColor,
             maxLines = 2,
             textAlign = TextAlign.End,
@@ -1427,11 +1819,12 @@ private fun DetailRow(
 private fun TagsRow(primaryTagName: String?, onAddTag: () -> Unit) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
+    val rowStyle = type.caption.copy(fontSize = 11.sp)
     Row(
         modifier          = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = "Tags", style = type.caption, color = colors.inkSoft)
+        Text(text = "Tags", style = rowStyle, color = colors.inkSoft)
         Spacer(modifier = Modifier.weight(1f))
         Row(
             verticalAlignment     = Alignment.CenterVertically,
@@ -1445,7 +1838,7 @@ private fun TagsRow(primaryTagName: String?, onAddTag: () -> Unit) {
                         .clickable(onClick = onAddTag)
                         .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
                 ) {
-                    Text(text = primaryTagName, style = type.caption, color = colors.accent)
+                    Text(text = primaryTagName, style = rowStyle, color = colors.accent)
                 }
             }
             Box(
@@ -1459,6 +1852,61 @@ private fun TagsRow(primaryTagName: String?, onAddTag: () -> Unit) {
                 Icon(
                     imageVector        = Icons.Outlined.Add,
                     contentDescription = "Add tag",
+                    tint               = colors.inkSoft,
+                    modifier           = Modifier.size(14.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Read-only chip strip showing every location currently attached to
+ * this capture, with a trailing "+" affordance that opens the
+ * [LocationPickerSheet]. Mirror of [TagsRow]'s layout — label on the
+ * left, chips + add button right-aligned. Falls back to just the "+"
+ * button when no locations are attached yet.
+ */
+@Composable
+private fun LocationsRow(
+    names: List<String>,
+    onAddLocation: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val rowStyle = type.caption.copy(fontSize = 11.sp)
+    Row(
+        modifier          = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = "Locations", style = rowStyle, color = colors.inkSoft)
+        Spacer(modifier = Modifier.weight(1f))
+        Row(
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1),
+        ) {
+            names.forEach { name ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(QuickInkRadius.pill))
+                        .background(colors.accentSoft)
+                        .clickable(onClick = onAddLocation)
+                        .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
+                ) {
+                    Text(text = name, style = rowStyle, color = colors.accent)
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(colors.borderSoft)
+                    .clickable(onClick = onAddLocation),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.Outlined.Add,
+                    contentDescription = "Add location",
                     tint               = colors.inkSoft,
                     modifier           = Modifier.size(14.dp),
                 )
@@ -1803,6 +2251,145 @@ private fun RetagRow(label: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
+/**
+ * Polished dropdown menu for the per-capture actions (Add to
+ * contact / Share as Image / Export as PDF / Move to folder /
+ * Manage tags / Delete). Each row has a leading icon for fast
+ * recognition and Delete is rendered in the destructive role so
+ * it reads as the highest-risk action. Sectioned with a divider
+ * between the non-destructive group and Delete.
+ *
+ * Anchored to the more-actions chip in the preview's TopEnd Row.
+ */
+@Composable
+private fun ScanActionsDropdown(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    isBusinessCard: Boolean,
+    isPreparingImageShare: Boolean,
+    onAddToContact: () -> Unit,
+    onShareAsImage: () -> Unit,
+    onExportPdf: () -> Unit,
+    onMoveToFolder: () -> Unit,
+    onManageTags: () -> Unit,
+    onManageLocations: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    androidx.compose.material3.DropdownMenu(
+        expanded         = expanded,
+        onDismissRequest = onDismiss,
+        modifier         = Modifier.background(colors.surface),
+    ) {
+        if (isBusinessCard) {
+            ScanActionRow(
+                label   = "Add to contact",
+                icon    = androidx.compose.material.icons.Icons.Outlined.PersonAdd,
+                onClick = onAddToContact,
+            )
+            ScanActionDivider()
+        }
+        ScanActionRow(
+            label   = if (isPreparingImageShare) "Preparing…" else "Share as Image",
+            icon    = androidx.compose.material.icons.Icons.Outlined.Image,
+            enabled = !isPreparingImageShare,
+            onClick = onShareAsImage,
+        )
+        ScanActionDivider()
+        ScanActionRow(
+            label   = "Export as PDF",
+            icon    = androidx.compose.material.icons.Icons.Outlined.PictureAsPdf,
+            onClick = onExportPdf,
+        )
+        ScanActionDivider()
+        ScanActionRow(
+            label   = "Move to folder",
+            icon    = androidx.compose.material.icons.Icons.Outlined.Folder,
+            onClick = onMoveToFolder,
+        )
+        ScanActionDivider()
+        ScanActionRow(
+            label   = "Manage tags",
+            icon    = androidx.compose.material.icons.Icons.Outlined.LocalOffer,
+            onClick = onManageTags,
+        )
+        ScanActionDivider()
+        ScanActionRow(
+            label   = "Manage locations",
+            icon    = androidx.compose.material.icons.Icons.Outlined.LocationOn,
+            onClick = onManageLocations,
+        )
+        ScanActionDivider()
+        ScanActionRow(
+            label       = "Delete",
+            icon        = androidx.compose.material.icons.Icons.Outlined.Delete,
+            destructive = true,
+            onClick     = onDelete,
+        )
+    }
+}
+
+/**
+ * Compact dropdown row — leading icon tinted with the accent (or
+ * danger for destructive), Releaf-style. Bypasses
+ * [DropdownMenuItem] because its 48dp `minHeight` is hard-coded;
+ * we go a notch denser so the menu trims to ~75% of the default
+ * Material3 row footprint (icon 18dp, label ~11sp, 6dp vertical
+ * padding ≈ 32dp row height).
+ */
+@Composable
+private fun ScanActionRow(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    destructive: Boolean = false,
+) {
+    val colors = LocalQuickInkColors.current
+    val iconTint = if (destructive) colors.danger
+        else if (enabled) colors.accent
+        else colors.muted
+    val textColor = if (destructive) colors.danger
+        else if (enabled) colors.ink
+        else colors.muted
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        androidx.compose.material3.Icon(
+            imageVector       = icon,
+            contentDescription = null,
+            tint              = iconTint,
+            modifier          = Modifier.size(18.dp),
+        )
+        androidx.compose.material3.Text(
+            text     = label,
+            color    = textColor,
+            fontSize = 11.sp,
+        )
+    }
+}
+
+/**
+ * 1dp inline divider between adjacent dropdown rows. Padded
+ * horizontally so it doesn't run edge-to-edge with the menu
+ * border — mirrors Releaf's `LeafDropdownDivider`.
+ */
+@Composable
+private fun ScanActionDivider() {
+    val colors = LocalQuickInkColors.current
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s3)
+            .height(1.dp)
+            .background(colors.borderSoft),
+    )
+}
 
 private fun friendlyDate(iso: String): String =
     try {

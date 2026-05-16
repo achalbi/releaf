@@ -8,7 +8,7 @@
  *
  *   [DocumentCaptureSurface]      → the existing ML Kit
  *                                   document scanner flow
- *                                   (Single/Multi-page/Auto
+ *                                   (Single/Multi-page
  *                                   pill + page-mock + shutter
  *                                   that launches Google's
  *                                   system scanner).

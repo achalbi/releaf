@@ -66,7 +66,10 @@ public enum AutoTagSuggester {
 
     /// Run rules over `ocrText` and return suggested tag names.
     /// Vendor and quarter heuristics only fire when the matching
-    /// tag already exists for the user.
+    /// tag already exists for the user. When the rule pass yields
+    /// fewer than `targetSuggestions` hits, we top up with the most
+    /// frequent meaningful words from the OCR text so generic scans
+    /// (no invoice/receipt/contract keywords) still surface chips.
     public static func suggest(
         ocrText: String?,
         existingTagNames: Set<String>,
@@ -93,6 +96,18 @@ public enum AutoTagSuggester {
             add(quarterTag)
         }
 
+        let targetSuggestions = 12
+        if hits.count < targetSuggestions {
+            let exclude = seen.union(currentlyAttached)
+            for word in topKeywords(
+                in:      text,
+                limit:   targetSuggestions - hits.count,
+                exclude: exclude
+            ) {
+                add(word)
+            }
+        }
+
         return hits.filter { !currentlyAttached.contains($0) }
     }
 
@@ -107,6 +122,52 @@ public enum AutoTagSuggester {
             return regex.firstMatch(in: lowerText, options: [], range: range) != nil
         }
     }
+
+    /// Top-frequency words from `lowerText` minus stopwords, short
+    /// tokens (< 4 chars), pure digits, and anything already in
+    /// `exclude`. Ties broken alphabetically so the order is stable.
+    private static func topKeywords(
+        in lowerText: String,
+        limit: Int,
+        exclude: Set<String>
+    ) -> [String] {
+        guard limit > 0 else { return [] }
+        var counts: [String: Int] = [:]
+        for piece in lowerText.split(whereSeparator: { !$0.isLetter }) {
+            let token = String(piece)
+            guard token.count >= 4,
+                  !stopwords.contains(token),
+                  !exclude.contains(token)
+            else { continue }
+            counts[token, default: 0] += 1
+        }
+        return counts
+            .sorted { lhs, rhs in
+                lhs.value != rhs.value ? lhs.value > rhs.value : lhs.key < rhs.key
+            }
+            .prefix(limit)
+            .map { $0.key }
+    }
+
+    /// Common English words plus document-scaffolding noise we never
+    /// want to surface as tag suggestions. Kept inline rather than a
+    /// resource file because the list is short and rarely changes.
+    private static let stopwords: Set<String> = [
+        "about","across","after","again","against","all","also","although","always","another",
+        "any","anyone","anything","anywhere","are","around","because","been","before","behind",
+        "being","below","beside","between","both","each","either","ever","every","everyone",
+        "everything","everywhere","from","have","having","here","hers","herself","himself",
+        "into","its","itself","just","like","made","make","makes","many","more","most","much",
+        "must","myself","never","next","none","nothing","once","only","other","others","ours",
+        "ourselves","over","said","same","several","should","since","some","someone","something",
+        "somewhere","still","such","take","taken","than","that","them","themselves","then",
+        "there","these","they","this","those","through","thus","under","until","upon","very",
+        "was","were","what","when","where","whether","which","while","whilst","who","whom",
+        "whose","with","within","without","would","your","yours","yourself","yourselves",
+        // Document scaffolding noise — never useful as tags.
+        "page","pages","copy","copies","document","documents","file","files","scan","scans",
+        "scanned","date","time","name","dear","sincerely","regards","subject","subjects",
+    ]
 
     private static func quarterTag(for iso: String) -> String? {
         let formatter = ISO8601DateFormatter()

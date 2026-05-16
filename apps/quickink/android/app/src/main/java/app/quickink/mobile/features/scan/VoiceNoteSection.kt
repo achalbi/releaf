@@ -1,0 +1,882 @@
+/*
+ * VoiceNoteSection.kt
+ *
+ * Voice notes panel for the document detail screen. Renders the list
+ * of voice notes attached to the current capture, a CTA that opens
+ * `VoicePageRecorder` in a modal bottom sheet, and per-card playback
+ * with a play button, deterministic waveform cursor, current/total
+ * timestamps, and a delete affordance. Transcription is offered per
+ * card; the recognized text shows inline under the waveform.
+ *
+ * Mirror of iOS `VoiceNoteSection.swift` — same shape, swapped for
+ * Compose primitives + the QuickInk CompositionLocal theme.
+ */
+
+package app.quickink.mobile.features.scan
+
+import android.content.Context
+import android.media.MediaPlayer
+import android.net.Uri
+import android.widget.Toast
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Subtitles
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextAlign
+import app.quickink.mobile.QuickInkApp
+import app.quickink.mobile.data.capture.CaptureRepository
+import app.quickink.mobile.data.voicenote.SpeechTranscriber
+import app.quickink.mobile.data.voicenote.TranscribeResult
+import app.quickink.mobile.data.voicenote.VoiceNoteEntity
+import app.quickink.mobile.data.voicenote.VoiceNoteRepository
+import app.quickink.mobile.data.voicenote.WaveformSamples
+import app.quickink.mobile.ui.theme.LocalQuickInkColors
+import app.quickink.mobile.ui.theme.LocalQuickInkTypography
+import app.quickink.mobile.ui.theme.QuickInkRadius
+import app.quickink.mobile.ui.theme.QuickInkSpacing
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextFieldDefaults
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlin.math.max
+import kotlin.math.min
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun VoiceNoteSection(
+    captureId: String,
+    userId: String,
+    /** Fires after a Copy-to-notes tap or the transcript editor's
+     *  save appends to `captures.notes`. The parent re-reads its
+     *  capture state so the Notes card refreshes — without this the
+     *  column updates but the in-screen Notes card keeps the stale
+     *  value until a screen revisit. */
+    onNotesChanged: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val app = context.applicationContext as QuickInkApp
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val scope = rememberCoroutineScope()
+
+    val voiceNoteDao = remember(app) { app.database.voiceNoteDao() }
+    val captureDao = remember(app) { app.database.captureDao() }
+    val repository = remember(voiceNoteDao) { VoiceNoteRepository(voiceNoteDao) }
+    val captureRepository = remember(captureDao, app) {
+        CaptureRepository(
+            captureDao    = captureDao,
+            ocrResultDao  = app.database.ocrResultDao(),
+            tagDao        = app.database.tagDao(),
+            captureTagDao = app.database.captureTagDao(),
+        )
+    }
+
+    val notes by remember(captureId, voiceNoteDao) {
+        voiceNoteDao.observeForCapture(captureId)
+    }.collectAsState(initial = emptyList())
+
+    var showRecorder by remember { mutableStateOf(false) }
+    // Per-card transcript editor — when non-null, the section
+    // renders an editor sheet pre-filled with this note's transcript.
+    // Tapping Edit on any card sets it; Save / Cancel clears it.
+    var editingNote by remember { mutableStateOf<VoiceNoteEntity?>(null) }
+    // Three-stage sheet lifecycle. `Recording` opens with the
+    // VoicePageRecorder. After the user saves the clip, the flow
+    // advances to `Transcribing` (spinner) and then either
+    // `Editing(text, noteId)` on success or back to dismiss on
+    // failure (matching the "skip the editor, just save the clip"
+    // preference for failure paths).
+    var stage by remember(showRecorder) { mutableStateOf<RecorderStage>(RecorderStage.Recording) }
+    val transcribingIds = remember { mutableStateMapOf<String, Boolean>() }
+    val unavailable = remember { mutableStateMapOf<String, String>() }
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md)),
+    ) {
+        // Heading on a soft grey strip — matches Details / Notes.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier          = Modifier
+                .fillMaxWidth()
+                .background(colors.borderSoft)
+                .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Mic,
+                contentDescription = null,
+                tint = colors.inkSoft,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s2))
+            Text(
+                text = "Voice notes",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.ink,
+            )
+            if (notes.isNotEmpty()) {
+                Spacer(Modifier.size(QuickInkSpacing.s1))
+                Text(
+                    text = "· ${notes.size}",
+                    style = type.caption,
+                    color = colors.muted,
+                )
+            }
+        }
+
+        Column(
+            modifier            = Modifier.padding(QuickInkSpacing.s3),
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+        notes.forEach { note ->
+            VoiceNoteCard(
+                note = note,
+                isTranscribing = transcribingIds[note.id] == true,
+                unavailableReason = unavailable[note.id],
+                onTranscribe = {
+                    scope.launch {
+                        runTranscribe(
+                            context     = context,
+                            repository  = repository,
+                            note        = note,
+                            transcribing = transcribingIds,
+                            unavailable = unavailable,
+                        )
+                    }
+                },
+                onCopyToNotes = {
+                    scope.launch {
+                        val text = note.transcription?.trim().orEmpty()
+                        if (text.isNotEmpty()) {
+                            runCatching { captureRepository.appendNote(captureId, text) }
+                                .onSuccess { onNotesChanged() }
+                        }
+                    }
+                },
+                onEditTranscript = { editingNote = note },
+                onDelete = {
+                    scope.launch {
+                        runCatching { repository.softDelete(note.id) }
+                    }
+                },
+            )
+        }
+
+        if (notes.isEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = QuickInkSpacing.s3),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+            ) {
+                Text(
+                    text = "No voice notes yet",
+                    style = type.caption,
+                    color = colors.inkSoft,
+                )
+                Text(
+                    text = "Tap Record to add audio context for this scan.",
+                    style = type.caption,
+                    color = colors.muted,
+                )
+            }
+        }
+
+        // Record CTA
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(QuickInkRadius.pill))
+                .background(colors.accent)
+                .clickable { showRecorder = true }
+                .padding(horizontal = QuickInkSpacing.s4, vertical = QuickInkSpacing.s2),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Filled.Mic,
+                    contentDescription = null,
+                    tint = colors.textOnAccent,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.size(QuickInkSpacing.s2))
+                Text(
+                    text = if (notes.isEmpty()) "Record a voice note" else "Record another",
+                    style = type.caption,
+                    color = colors.textOnAccent,
+                )
+            }
+        }
+        }
+    }
+
+    if (showRecorder) {
+        ModalBottomSheet(
+            onDismissRequest = { showRecorder = false },
+            sheetState = sheetState,
+            containerColor = colors.bg,
+        ) {
+            when (val s = stage) {
+                is RecorderStage.Recording -> {
+                    VoicePageRecorder(
+                        onSave = { clip ->
+                            scope.launch {
+                                val noteId = runCatching {
+                                    repository.insert(
+                                        captureId  = captureId,
+                                        userId     = userId,
+                                        audioUri   = clip.uri,
+                                        durationMs = clip.durationMs,
+                                    ).id
+                                }.getOrNull()
+                                if (noteId == null) {
+                                    showRecorder = false
+                                    return@launch
+                                }
+                                stage = RecorderStage.Transcribing
+                                val result = SpeechTranscriber.transcribe(context, clip.uri)
+                                when (result) {
+                                    is TranscribeResult.Success -> {
+                                        // Pre-save what the recognizer
+                                        // heard so the card has something
+                                        // to show if the user dismisses
+                                        // the editor without saving.
+                                        runCatching {
+                                            repository.setTranscription(
+                                                id     = noteId,
+                                                text   = result.text,
+                                                source = result.source,
+                                            )
+                                        }
+                                        stage = RecorderStage.Editing(
+                                            initialText = result.text,
+                                            noteId      = noteId,
+                                        )
+                                    }
+                                    is TranscribeResult.Failure -> {
+                                        // Skip the editor; the clip
+                                        // stays saved without a transcript.
+                                        showRecorder = false
+                                    }
+                                }
+                            }
+                        },
+                        onCancel = { showRecorder = false },
+                    )
+                }
+                is RecorderStage.Transcribing -> TranscribingStage()
+                is RecorderStage.Editing -> TranscriptEditor(
+                    initialText = s.initialText,
+                    onCancel    = { showRecorder = false },
+                    onSave      = { edited ->
+                        scope.launch {
+                            val trimmed = edited.trim()
+                            if (trimmed.isNotEmpty()) {
+                                runCatching {
+                                    repository.setTranscription(
+                                        id     = s.noteId,
+                                        text   = trimmed,
+                                        source = SpeechTranscriber.BACKEND_SHERPA,
+                                    )
+                                }
+                                runCatching {
+                                    captureRepository.appendNote(captureId, trimmed)
+                                }.onSuccess { onNotesChanged() }
+                            }
+                            showRecorder = false
+                        }
+                    },
+                )
+            }
+        }
+    }
+
+    // In-card "Edit" pill — overwrites `voice_notes.transcription`
+    // without touching the parent capture's notes (distinct from
+    // the post-recording editor which also appends to notes).
+    val editTarget = editingNote
+    if (editTarget != null) {
+        val editSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { editingNote = null },
+            sheetState       = editSheetState,
+            containerColor   = colors.bg,
+        ) {
+            TranscriptEditor(
+                initialText = editTarget.transcription.orEmpty(),
+                onCancel    = { editingNote = null },
+                onSave      = { edited ->
+                    scope.launch {
+                        val trimmed = edited.trim()
+                        runCatching {
+                            repository.setTranscription(
+                                id     = editTarget.id,
+                                text   = if (trimmed.isEmpty()) null else trimmed,
+                                source = if (trimmed.isEmpty()) null
+                                         else SpeechTranscriber.BACKEND_SHERPA,
+                            )
+                        }
+                    }
+                    editingNote = null
+                },
+            )
+        }
+    }
+}
+
+private sealed interface RecorderStage {
+    data object Recording    : RecorderStage
+    data object Transcribing : RecorderStage
+    data class Editing(val initialText: String, val noteId: String) : RecorderStage
+}
+
+@Composable
+private fun TranscribingStage() {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = QuickInkSpacing.s8, horizontal = QuickInkSpacing.s5),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        CircularProgressIndicator(
+            color = colors.accent,
+            strokeWidth = 3.dp,
+            modifier = Modifier.size(40.dp),
+        )
+        Text(
+            text = "Transcribing voice note…",
+            style = type.body,
+            color = colors.ink,
+        )
+        Text(
+            text = "This runs on-device. You can edit the text on the next screen.",
+            style = type.caption,
+            color = colors.muted,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun TranscriptEditor(
+    initialText: String,
+    onCancel: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    var text by remember(initialText) { mutableStateOf(initialText) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4, vertical = QuickInkSpacing.s3),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onCancel) {
+                Text(text = "Cancel", style = type.body, color = colors.inkSoft)
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = "Edit transcript",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.ink,
+            )
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { onSave(text) }) {
+                Text(
+                    text = "Save",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.accent,
+                )
+            }
+        }
+
+        Text(
+            text = "This will save with the voice note and add to the document's notes.",
+            style = type.caption,
+            color = colors.muted,
+        )
+
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(220.dp),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor    = colors.borderSoft.copy(alpha = 0.4f),
+                unfocusedContainerColor  = colors.borderSoft.copy(alpha = 0.4f),
+                focusedTextColor         = colors.ink,
+                unfocusedTextColor       = colors.ink,
+                focusedIndicatorColor    = colors.border,
+                unfocusedIndicatorColor  = colors.border,
+                cursorColor              = colors.accent,
+            ),
+        )
+    }
+}
+
+private suspend fun runTranscribe(
+    context: Context,
+    repository: VoiceNoteRepository,
+    note: VoiceNoteEntity,
+    transcribing: MutableMap<String, Boolean>,
+    unavailable: MutableMap<String, String>,
+) {
+    if (transcribing[note.id] == true) return
+    transcribing[note.id] = true
+    try {
+        val result = SpeechTranscriber.transcribe(context, note.audioUri)
+        when (result) {
+            is TranscribeResult.Success -> {
+                runCatching {
+                    repository.setTranscription(
+                        id     = note.id,
+                        text   = result.text,
+                        source = result.source,
+                    )
+                }
+                unavailable.remove(note.id)
+            }
+            is TranscribeResult.Failure -> {
+                unavailable[note.id] = result.reason
+            }
+        }
+    } finally {
+        transcribing[note.id] = false
+    }
+}
+
+@Composable
+private fun VoiceNoteCard(
+    note: VoiceNoteEntity,
+    isTranscribing: Boolean,
+    unavailableReason: String?,
+    onTranscribe: () -> Unit,
+    /** Append the current transcript to the parent capture's notes.
+     *  Only rendered when [note.transcription] is non-empty. */
+    onCopyToNotes: () -> Unit,
+    /** Open the transcript editor for this card. The section handles
+     *  the sheet + persistence so only one editor is alive at a time. */
+    onEditTranscript: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val context = LocalContext.current
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+
+    var player by remember(note.id) { mutableStateOf<MediaPlayer?>(null) }
+    var isPlaying by remember(note.id) { mutableStateOf(false) }
+    var positionMs by remember(note.id) { mutableLongStateOf(0L) }
+    var amplitudes by remember(note.audioUri) { mutableStateOf<FloatArray?>(null) }
+
+    LaunchedEffect(note.audioUri) {
+        amplitudes = WaveformSamples.extract(note.audioUri, barCount = 40)
+    }
+
+    DisposableEffect(note.id) {
+        onDispose {
+            runCatching { player?.stop() }
+            runCatching { player?.release() }
+            player = null
+        }
+    }
+
+    LaunchedEffect(isPlaying, player) {
+        val mp = player ?: return@LaunchedEffect
+        while (isActive && isPlaying) {
+            positionMs = runCatching { mp.currentPosition.toLong() }.getOrDefault(0L)
+            delay(100)
+        }
+    }
+
+    val totalMs = note.durationMs.coerceAtLeast(1L)
+
+    val togglePlay: () -> Unit = toggle@{
+        val existing = player
+        if (existing == null) {
+            val mp = MediaPlayer()
+            try {
+                mp.setDataSource(context, Uri.parse(note.audioUri))
+                mp.setOnCompletionListener {
+                    isPlaying = false
+                    positionMs = 0L
+                    runCatching { mp.seekTo(0) }
+                }
+                mp.prepare()
+                mp.start()
+            } catch (_: Exception) {
+                runCatching { mp.release() }
+                Toast.makeText(context, "Couldn't play this voice note.", Toast.LENGTH_SHORT).show()
+                return@toggle
+            }
+            player = mp
+            isPlaying = true
+        } else if (isPlaying) {
+            runCatching { existing.pause() }
+            isPlaying = false
+        } else {
+            runCatching { existing.start() }
+            isPlaying = true
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(colors.borderSoft.copy(alpha = 0.5f))
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
+            .padding(QuickInkSpacing.s3),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(colors.accent)
+                    .clickable(onClick = togglePlay),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    tint = colors.textOnAccent,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+
+            Spacer(Modifier.size(QuickInkSpacing.s3))
+
+            Column(
+                modifier = Modifier
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1),
+            ) {
+                VoiceWaveform(
+                    seed          = note.id,
+                    progress      = (positionMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f),
+                    playedColor   = colors.accent,
+                    unplayedColor = colors.muted,
+                    amplitudes    = amplitudes,
+                    modifier      = Modifier
+                        .fillMaxWidth()
+                        .height(24.dp),
+                )
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = formatDurationMs(positionMs),
+                        style = type.caption,
+                        color = colors.inkSoft,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = formatDurationMs(note.durationMs),
+                        style = type.caption,
+                        color = colors.inkSoft,
+                    )
+                }
+            }
+
+            Spacer(Modifier.size(QuickInkSpacing.s2))
+
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(QuickInkRadius.sm))
+                    .background(colors.borderSoft)
+                    .clickable(onClick = onDelete),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Delete,
+                    contentDescription = "Delete",
+                    tint = colors.inkSoft,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+
+        TranscriptStrip(
+            transcript        = note.transcription,
+            isPending         = isTranscribing,
+            unavailableReason = unavailableReason,
+            onTranscribe      = onTranscribe,
+            onCopyToNotes     = onCopyToNotes,
+            onEditTranscript  = onEditTranscript,
+        )
+    }
+}
+
+@Composable
+private fun TranscriptStrip(
+    transcript: String?,
+    isPending: Boolean,
+    unavailableReason: String?,
+    onTranscribe: () -> Unit,
+    onCopyToNotes: () -> Unit,
+    onEditTranscript: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val hasTranscript = !transcript.isNullOrBlank()
+    val hasReason = unavailableReason != null
+
+    // Flips the Copy-to-notes pill to "Copied" briefly after a tap
+    // so the action acknowledges without leaving a permanent badge.
+    var didCopyToNotes by remember(transcript) { mutableStateOf(false) }
+    LaunchedEffect(didCopyToNotes) {
+        if (didCopyToNotes) {
+            delay(1600)
+            didCopyToNotes = false
+        }
+    }
+
+    val eyebrow = when {
+        hasTranscript -> "TRANSCRIPT"
+        isPending     -> "TRANSCRIBING"
+        hasReason     -> "TRANSCRIPT UNAVAILABLE"
+        else          -> "TRANSCRIPT"
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1)) {
+        Text(text = eyebrow, style = type.eyebrow, color = colors.muted)
+
+        when {
+            hasTranscript -> {
+                Text(
+                    text = transcript!!,
+                    style = type.caption,
+                    color = colors.ink,
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(QuickInkRadius.pill))
+                            .background(colors.accentSoft)
+                            .clickable(enabled = !didCopyToNotes) {
+                                onCopyToNotes()
+                                didCopyToNotes = true
+                            }
+                            .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (didCopyToNotes) Icons.Filled.Check else Icons.Outlined.ContentCopy,
+                                contentDescription = null,
+                                tint = colors.accent,
+                                modifier = Modifier.size(12.dp),
+                            )
+                            Spacer(Modifier.size(QuickInkSpacing.s1))
+                            Text(
+                                text = if (didCopyToNotes) "Copied" else "Copy to notes",
+                                style = type.caption,
+                                color = colors.accent,
+                            )
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(QuickInkRadius.pill))
+                            .background(colors.accentSoft)
+                            .clickable(onClick = onEditTranscript)
+                            .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Outlined.Edit,
+                                contentDescription = null,
+                                tint = colors.accent,
+                                modifier = Modifier.size(12.dp),
+                            )
+                            Spacer(Modifier.size(QuickInkSpacing.s1))
+                            Text(
+                                text = "Edit",
+                                style = type.caption,
+                                color = colors.accent,
+                            )
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(QuickInkRadius.pill))
+                            .background(colors.accentSoft)
+                            .clickable(onClick = onTranscribe)
+                            .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
+                    ) {
+                        Text(
+                            text = "Try again",
+                            style = type.caption,
+                            color = colors.accent,
+                        )
+                    }
+                }
+            }
+            isPending -> Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    color = colors.accent,
+                    strokeWidth = 2.dp,
+                )
+                Spacer(Modifier.size(QuickInkSpacing.s2))
+                Text(text = "Transcribing…", style = type.caption, color = colors.inkSoft)
+            }
+            hasReason -> {
+                Text(text = unavailableReason!!, style = type.caption, color = colors.inkSoft)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(QuickInkRadius.pill))
+                        .background(colors.accentSoft)
+                        .clickable(onClick = onTranscribe)
+                        .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
+                ) {
+                    Text(text = "Retry", style = type.caption, color = colors.accent)
+                }
+            }
+            else -> {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(QuickInkRadius.pill))
+                        .background(colors.accentSoft)
+                        .clickable(onClick = onTranscribe)
+                        .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Outlined.Subtitles,
+                            contentDescription = null,
+                            tint = colors.accent,
+                            modifier = Modifier.size(12.dp),
+                        )
+                        Spacer(Modifier.size(QuickInkSpacing.s1))
+                        Text(text = "Transcribe", style = type.caption, color = colors.accent)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VoiceWaveform(
+    seed: String,
+    progress: Float,
+    playedColor: Color,
+    unplayedColor: Color,
+    amplitudes: FloatArray?,
+    modifier: Modifier = Modifier,
+) {
+    val barCount = 40
+    val heights = remember(seed, amplitudes) {
+        amplitudes ?: hashBasedHeights(seed, barCount)
+    }
+
+    Canvas(modifier = modifier) {
+        val gap = 3f
+        val barWidth = max(1f, (size.width - gap * (barCount - 1)) / barCount)
+        val centerY = size.height / 2
+        val progressX = size.width * progress
+        var x = barWidth / 2
+        for (i in 0 until barCount) {
+            val level = if (i < heights.size) heights[i] else 0.5f
+            val h = size.height * level
+            val color = if (x <= progressX) playedColor else unplayedColor
+            drawLine(
+                color = color,
+                start = Offset(x, centerY - h / 2),
+                end   = Offset(x, centerY + h / 2),
+                strokeWidth = barWidth,
+                cap = StrokeCap.Round,
+            )
+            x += barWidth + gap
+        }
+    }
+}
+
+private fun hashBasedHeights(seed: String, count: Int): FloatArray {
+    val base = seed.hashCode().toLong() and 0xFFFFFFFFL
+    val out = FloatArray(count)
+    for (i in 0 until count) {
+        val mixed = base * 2_654_435_761L + i * 1_779_033_703L
+        val unit = ((mixed and 0xFFFFFFFFL) % 10_000L) / 10_000.0f
+        out[i] = 0.2f + unit * 0.8f
+    }
+    return out
+}
+
+internal fun formatDurationMs(ms: Long): String {
+    val total = max(ms, 0L) / 1000L
+    val m = total / 60
+    val s = total % 60
+    return "%d:%02d".format(m, s)
+}

@@ -13,7 +13,7 @@
  *   2. Saves the result as a JPEG inside the AttachmentStorage
  *      directory.
  *   3. Calls `ScanFlowController.onScanComplete` with
- *      `category: "Business Card"` so the existing scan-detail
+ *      `category: "business-card"` so the existing scan-detail
  *      screen picks up the `BusinessCardExtractor` flow.
  *
  * Manual capture (user tapped the shutter without a valid
@@ -75,7 +75,7 @@ public enum BusinessCardPostProcessor {
             pdfURL:     nil,
             previewURL: warpedURL,
             pageURLs:   [warpedURL],
-            category:   "Business Card",
+            category:   "business-card",
             paperSize:  .card,
         )
         return warpedURL

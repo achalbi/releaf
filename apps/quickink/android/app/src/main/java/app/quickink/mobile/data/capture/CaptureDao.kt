@@ -253,6 +253,23 @@ interface CaptureDao {
     suspend fun setTitle(id: String, title: String?, timestamp: String)
 
     /**
+     * Set `captures.notes` directly. The append-paragraph behaviour
+     * lives in the repository so the read-then-write happens atomic
+     * to the same transaction-level expectations elsewhere. Same
+     * dirty + updated_at pattern as [setTitle] so the change syncs
+     * through Drive.
+     */
+    @Query("""
+        UPDATE captures
+        SET notes = :notes, updated_at = :timestamp, dirty = 1
+        WHERE id = :id
+    """)
+    suspend fun setNotes(id: String, notes: String?, timestamp: String)
+
+    @Query("SELECT notes FROM captures WHERE id = :id LIMIT 1")
+    suspend fun getNotes(id: String): String?
+
+    /**
      * Update the `paper_size` bucket on an existing capture. Called
      * from `ScanReviewScreen`'s paper-size chip when the user
      * disambiguates the auto-detection (typically A4 vs A5 — aspect
@@ -288,6 +305,28 @@ interface CaptureDao {
         locality: String?,
         subLocality: String?,
         address: String?,
+        timestamp: String,
+    )
+
+    /**
+     * Stamp lat/lon onto an existing capture row. Paired with
+     * [setLocation] (locality / sub-locality / address) by the
+     * scan-flow's post-insert location update path — the controller
+     * now inserts the capture row immediately so the voice-note
+     * pane can mount on a real row, then fills in the geo columns
+     * once the GPS fix + reverse-geocode lands. Bumps `updated_at`
+     * + `dirty` so the update propagates via sync.
+     */
+    @Query("""
+        UPDATE captures
+        SET latitude = :latitude, longitude = :longitude,
+            updated_at = :timestamp, dirty = 1
+        WHERE id = :id
+    """)
+    suspend fun setCoordinates(
+        id: String,
+        latitude: Double?,
+        longitude: Double?,
         timestamp: String,
     )
 
@@ -388,6 +427,22 @@ interface CaptureDao {
         LIMIT 1
     """)
     suspend fun findContinueCandidate(userId: String): CaptureEntity?
+
+    /**
+     * Recently-opened captures for this user, newest first. Powers
+     * the Workspace home Continue block — the first row renders as
+     * the hero card, rows 2..N as a horizontal strip of compact
+     * cards. Empty when the user has never opened a capture.
+     */
+    @Query("""
+        SELECT * FROM captures
+        WHERE user_id = :userId
+          AND last_opened_at IS NOT NULL
+          AND deleted_at IS NULL
+        ORDER BY last_opened_at DESC
+        LIMIT :limit
+    """)
+    fun observeRecentlyOpened(userId: String, limit: Int): Flow<List<CaptureEntity>>
 
     /**
      * Active-capture count per folder for the user. Drives the
