@@ -142,6 +142,15 @@ public final class QuickInkSyncEnvironment {
             ) ?? session
 
             let dataSource = QuickInkSyncDataSource(userId: activeSession.userId)
+
+            // Seed / refresh the profile_settings row from UserDefaults
+            // before every upload pass. This is both the first-sync
+            // bootstrap (inserts the row if absent) and the upload-on-
+            // edit hook (detects UserDefaults changes since the last
+            // pass and marks the row dirty so the metadata push below
+            // carries the updated values).
+            await dataSource.upsertProfileFromDefaults(defaults: .standard)
+
             let repo = SyncRepository(
                 dataSource:  dataSource,
                 driveClient: self.driveClient,
@@ -384,6 +393,13 @@ public final class QuickInkSyncEnvironment {
                 // and the rest of the pass continues.
                 let binarySync = await QuickInkBinarySync(driveClient: self.driveClient)
                 try? await binarySync.restorePendingVoiceNotes(
+                    userId:      activeSession.userId,
+                    accessToken: activeSession.accessToken
+                )
+                // Profile photo — restore after metadata so the row's
+                // photo_drive_file_id is present before we try to
+                // download the binary.
+                try? await binarySync.restorePendingProfilePhoto(
                     userId:      activeSession.userId,
                     accessToken: activeSession.accessToken
                 )

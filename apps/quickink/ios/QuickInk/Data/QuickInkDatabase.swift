@@ -733,6 +733,46 @@ public final class QuickInkDatabase: @unchecked Sendable {
             try db.execute(sql: "ALTER TABLE captures ADD COLUMN notes TEXT")
         }
 
+        // ─── v14_profile_settings ───────────────────────────────
+        //
+        // Per-user profile settings row. Carries the four identity
+        // fields editable from the Profile screen:
+        //   - display_name           (customDisplayName override)
+        //   - phone_number
+        //   - personality_punchline
+        //   - photo_local_uri        (device-local; never goes on wire)
+        //   - photo_drive_file_id    (Drive binary reference)
+        //   - photo_updated_at       (timestamp used for cross-device
+        //                             latest-wins on photo conflicts)
+        //
+        // Small text fields travel in the manifest JSON payload
+        // (ProfileSettingsPayloadV1). The photo binary travels via
+        // QuickInkBinarySync under `profile_settings/{id}.jpg`, same
+        // blob path that scan previews use — no base64 inline.
+        //
+        // Mirror of Android's Room v17 ProfileSettingsEntity.
+        migrator.registerMigration("v14_profile_settings") { db in
+            try db.execute(sql: """
+                CREATE TABLE profile_settings (
+                    id                      TEXT PRIMARY KEY NOT NULL,
+                    user_id                 TEXT NOT NULL UNIQUE,
+                    display_name            TEXT,
+                    phone_number            TEXT,
+                    personality_punchline   TEXT,
+                    photo_local_uri         TEXT,
+                    photo_drive_file_id     TEXT,
+                    photo_updated_at        TEXT,
+                    drive_file_id           TEXT,
+                    created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty                   INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at              TEXT
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_profile_settings_user  ON profile_settings (user_id)")
+            try db.execute(sql: "CREATE INDEX idx_profile_settings_dirty ON profile_settings (dirty) WHERE dirty = 1")
+        }
+
         return migrator
     }
 }

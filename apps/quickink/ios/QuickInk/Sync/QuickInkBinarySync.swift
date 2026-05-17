@@ -62,8 +62,17 @@ public final class QuickInkBinarySync: @unchecked Sendable {
         // all, neither captures nor voice).
         let voiceUploads = try await pendingVoiceUploads(userId: userId)
         let voiceTombstones = try await pendingVoiceTombstones(userId: userId)
+        let profilePhotoRow = try? await database.dbQueue.read { db in
+            try Row.fetchOne(db, sql: """
+                SELECT id, photo_local_uri, photo_drive_file_id
+                FROM profile_settings
+                WHERE user_id = ? AND deleted_at IS NULL
+                      AND photo_local_uri IS NOT NULL AND photo_drive_file_id IS NULL
+                """, arguments: [userId])
+        }
 
-        if pending.isEmpty && voiceUploads.isEmpty && voiceTombstones.isEmpty { return }
+        if pending.isEmpty && voiceUploads.isEmpty && voiceTombstones.isEmpty
+            && profilePhotoRow == nil { return }
 
         let root = try await driveClient.ensureRootFolder(
             named: driveRootFolderName,
@@ -89,6 +98,32 @@ public final class QuickInkBinarySync: @unchecked Sendable {
             if let audioId = row.audioDriveFileId {
                 try? await driveClient.trash(fileId: audioId, accessToken: accessToken)
                 try? await markVoiceAudioSynced(id: row.id, driveFileId: nil)
+            }
+        }
+
+        // Profile photo upload — single per-user binary at
+        // `profile_settings/{id}.jpg`. After uploading, stamp the
+        // Drive file id onto the row and mark dirty=1 so the next
+        // metadata sync pass carries the new photo_drive_file_id.
+        if let row = profilePhotoRow,
+           let photoUri = row["photo_local_uri"] as String?,
+           let bytes = readLocalFile(uri: photoUri) {
+            let profileId = row["id"] as String
+            let path = "profile_settings/\(profileId).jpg"
+            if let driveFile = try? await driveClient.uploadBinaryAtPath(
+                bytes,
+                contentType: "image/jpeg",
+                relativePath: path,
+                rootFolderId: root.id,
+                accessToken: accessToken
+            ) {
+                try? await database.dbQueue.write { db in
+                    try db.execute(sql: """
+                        UPDATE profile_settings
+                        SET photo_drive_file_id = ?, updated_at = ?, dirty = 1
+                        WHERE id = ?
+                        """, arguments: [driveFile.id, IsoClock.nowIso(), profileId])
+                }
             }
         }
 
@@ -202,6 +237,38 @@ public final class QuickInkBinarySync: @unchecked Sendable {
                         previewUri: url.absoluteString
                     )
                 }
+            }
+        }
+    }
+
+    /// Pull the profile photo from Drive when the restore pass applied
+    /// a `profile_settings` row with a `photo_drive_file_id` but no
+    /// readable local file. Mirrors the voice-note audio restore above.
+    public func restorePendingProfilePhoto(userId: String, accessToken: String) async throws {
+        let dbQueue = database.dbQueue
+        let profileRow = try await dbQueue.read { db in
+            try Row.fetchOne(db, sql: """
+                SELECT id, photo_local_uri, photo_drive_file_id
+                FROM profile_settings
+                WHERE user_id = ? AND deleted_at IS NULL
+                      AND photo_drive_file_id IS NOT NULL
+                """, arguments: [userId])
+        }
+        guard let profileRow = profileRow else { return }
+        let photoLocalUri    = profileRow["photo_local_uri"]     as String?
+        let photoDriveFileId = profileRow["photo_drive_file_id"] as String?
+        let profileId        = profileRow["id"]                  as String
+        guard !localFileExists(uri: photoLocalUri), let driveId = photoDriveFileId else { return }
+
+        if let bytes = try? await driveClient.downloadBytes(
+            fileId: driveId,
+            accessToken: accessToken
+        ),
+           let url = AttachmentStorage.write(bytes, ext: "jpg") {
+            try? await dbQueue.write { db in
+                try db.execute(sql: """
+                    UPDATE profile_settings SET photo_local_uri = ? WHERE id = ?
+                    """, arguments: [url.absoluteString, profileId])
             }
         }
     }

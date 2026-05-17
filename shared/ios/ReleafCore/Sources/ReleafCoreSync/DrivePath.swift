@@ -50,6 +50,11 @@ public enum DrivePath {
     /// audio_drive_file_id).
     public static let kindVoiceNote        = "voice_note"
 
+    /// QuickInk-only — per-user profile settings row (display name,
+    /// phone, personality punchline, photo Drive-file linkage). Mirror
+    /// of Android's `DrivePath.KIND_PROFILE_SETTINGS`.
+    public static let kindProfileSettings  = "profile_settings"
+
     // ---- folder names ----
     public static let folderNotebooks       = "notebooks"
     public static let folderChapters        = "chapters"
@@ -77,6 +82,8 @@ public enum DrivePath {
     /// QuickInk voice notes — `{yyyy}/{mm}/{dd}/{captureId}/voice-{id}.json`,
     /// co-located with the parent capture's day folder like ocr_results.
     public static let folderVoiceNotes       = "voice_notes"
+    /// QuickInk's profile-settings folder — `profile_settings/{id}.json`.
+    public static let folderProfileSettings  = "profile_settings"
     public static let folderTasks           = "tasks"
     public static let folderTombstones      = "tombstones"
 
@@ -167,6 +174,14 @@ public enum DrivePath {
     /// `quickInkOcrResult`.
     public static func quickInkVoiceNote(createdAt: String, captureId: String, id: String) -> String {
         "\(quickInkDateBucket(from: createdAt))/\(captureId)/voice-\(id).json"
+    }
+
+    /// QuickInk's per-user profile-settings file —
+    /// `profile_settings/{id}.json`. Single row per user; the filename
+    /// is the row's id (which equals the user id). Mirror of
+    /// Android's `DrivePath.profileSettings`.
+    public static func profileSettings(id: String) -> String {
+        "\(folderProfileSettings)/\(id).json"
     }
 
     public static func tombstone(id: String) -> String { "\(folderTombstones)/\(id).json" }
