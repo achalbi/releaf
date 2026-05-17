@@ -31,6 +31,11 @@ struct StoryEditorScreen: View {
     /// reader. Phase 2 shipped this stubbed; QuickInkRoot now wires
     /// it to the `.storyReader(storyId:)` route.
     var onPreview: () -> Void = {}
+    /// Launch the QuickCaptureScreen in the requested mode and call
+    /// the closure once the capture pipeline finishes (with the
+    /// newly-written `captures.id`). The editor inserts a story_item
+    /// pointing at that id, so the new scan or photo lands inline.
+    var onRequestCapture: (CaptureMode, @escaping (ScanFlowController.PassSummary) -> Void) -> Void = { _, _ in }
 
     @StateObject private var vm: StoryEditorViewModel
 
@@ -62,12 +67,14 @@ struct StoryEditorScreen: View {
         storyId: String,
         userId: String,
         onBack: @escaping () -> Void,
-        onPreview: @escaping () -> Void = {}
+        onPreview: @escaping () -> Void = {},
+        onRequestCapture: @escaping (CaptureMode, @escaping (ScanFlowController.PassSummary) -> Void) -> Void = { _, _ in }
     ) {
-        self.storyId   = storyId
-        self.userId    = userId
-        self.onBack    = onBack
-        self.onPreview = onPreview
+        self.storyId          = storyId
+        self.userId           = userId
+        self.onBack           = onBack
+        self.onPreview        = onPreview
+        self.onRequestCapture = onRequestCapture
         _vm = StateObject(wrappedValue: StoryEditorViewModel(storyId: storyId, userId: userId))
     }
 
@@ -137,6 +144,20 @@ struct StoryEditorScreen: View {
                             captureId: captureId,
                             kind:      kind
                         )
+                    }
+                },
+                onPickCaptureMode:    { mode in
+                    let precedingId = addSheetPrecedingId
+                    showingAddSheet = false
+                    onRequestCapture(mode) { summary in
+                        let kind: StoryItem.Kind = summary.source == "photo" ? .photo : .document
+                        Task {
+                            _ = await vm.insertCaptureItem(
+                                after:     precedingId,
+                                captureId: summary.captureId,
+                                kind:      kind
+                            )
+                        }
                     }
                 },
                 onPickStubbed:        {

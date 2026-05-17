@@ -86,6 +86,14 @@ fun StoryEditorScreen(
     onBack: () -> Unit,
     /** Phase 3 — tap the bottom Preview button to push the reader. */
     onPreview: () -> Unit = {},
+    /** Launch QuickCaptureScreen in the requested mode and call the
+     *  closure once the capture pipeline finishes (with the newly-
+     *  written `captures.id`). The editor inserts a story_item
+     *  pointing at that id, so the new scan or photo lands inline. */
+    onRequestCapture: (
+        mode: app.quickink.mobile.features.scan.CaptureMode,
+        onCompleted: (app.quickink.mobile.features.scan.ScanFlowController.PassSummary) -> Unit,
+    ) -> Unit = { _, _ -> },
 ) {
     val colors  = LocalQuickInkColors.current
     val type    = LocalQuickInkTypography.current
@@ -395,6 +403,17 @@ fun StoryEditorScreen(
                 val pre = addSheetPrecedingId
                 showingAddSheet = false
                 scope.launch { vm.insertCaptureItem(pre, captureId, kind) }
+            },
+            onPickCaptureMode    = { mode ->
+                val pre = addSheetPrecedingId
+                showingAddSheet = false
+                onRequestCapture(mode) { summary ->
+                    val kind = if (summary.source == "photo")
+                        StoryItemEntity.Kind.PHOTO
+                    else
+                        StoryItemEntity.Kind.DOCUMENT
+                    scope.launch { vm.insertCaptureItem(pre, summary.captureId, kind) }
+                }
             },
             onDismiss            = { showingAddSheet = false },
         )

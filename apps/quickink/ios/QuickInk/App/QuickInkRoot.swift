@@ -803,7 +803,12 @@ private struct MainShell: View {
                 storyId:    storyId,
                 userId:     userId,
                 onBack:     { path.removeLast() },
-                onPreview:  { path.append(.storyReader(storyId: storyId)) }
+                onPreview:  { path.append(.storyReader(storyId: storyId)) },
+                onRequestCapture: { mode, completion in
+                    controller.nextCompletionHandler = completion
+                    pendingInitialMode = mode
+                    showQuickCapture   = true
+                }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)

@@ -107,6 +107,14 @@ public final class ScanFlowController: ObservableObject {
     /// `AnalyticsRepository.enqueueCapture` needs, so the call
     /// site reads as a 1:1 forward.
     private let onPassComplete: (PassSummary) -> Void
+
+    /// One-shot hook fired AFTER `onPassComplete`. Used by the Story
+    /// editor to pick up the just-captured row and insert it as a
+    /// story_item. Cleared to nil after firing so a subsequent
+    /// unrelated capture from elsewhere doesn't accidentally land
+    /// in the wrong story.
+    public var nextCompletionHandler: ((PassSummary) -> Void)?
+
     private var activeTask: Task<Void, Never>?
 
     public init(
@@ -403,6 +411,10 @@ public final class ScanFlowController: ObservableObject {
                 capturedAt:     capturedAt
             )
             self?.onPassComplete(summary)
+            if let hook = self?.nextCompletionHandler {
+                self?.nextCompletionHandler = nil
+                hook(summary)
+            }
         }
     }
 

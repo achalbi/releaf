@@ -820,6 +820,15 @@ private fun MainShell(
                 userId     = userId,
                 onBack     = { navController.popBackStack() },
                 onPreview  = { navController.navigate(Routes.storyReader(storyId)) },
+                onRequestCapture = { _, onCompleted ->
+                    // Android currently has only Document scanning,
+                    // so we don't switch modes here; the user lands on
+                    // whatever their pill-saved last mode is. Set the
+                    // one-shot completion hook on the controller and
+                    // raise the root-level QuickCapture flag.
+                    controller.nextCompletionHandler = onCompleted
+                    showQuickCapture = true
+                },
             )
         }
         composable(

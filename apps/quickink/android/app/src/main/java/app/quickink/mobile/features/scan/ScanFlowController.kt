@@ -93,6 +93,16 @@ class ScanFlowController(
      */
     private val onPassComplete: (PassSummary) -> Unit = {},
 ) {
+
+    /**
+     * One-shot hook fired AFTER [onPassComplete]. Used by the Story
+     * editor to pick up the just-captured row and insert it as a
+     * story_item. Cleared to null after firing so a subsequent
+     * unrelated capture from elsewhere doesn't accidentally land in
+     * the wrong story.
+     */
+    var nextCompletionHandler: ((PassSummary) -> Unit)? = null
+
     /**
      * What [onPassComplete] receives. Mirrors the field set
      * `AnalyticsRepository.enqueueCapture` consumes — same field
@@ -502,17 +512,20 @@ class ScanFlowController(
             // only via the Settings → "Sync now" button (see the
             // QuickInkApp `auth: SignedIn` comment for rationale).
             val totalChars = pageTexts.values.sumOf { it.length }
-            onPassComplete(
-                PassSummary(
-                    captureId      = captureId,
-                    source         = source,
-                    pageCount      = totalPages,
-                    primaryTagName = _selectedCategory.value,
-                    hasOcr         = successCount > 0,
-                    ocrChars       = totalChars,
-                    capturedAt     = capturedAt,
-                )
+            val summary = PassSummary(
+                captureId      = captureId,
+                source         = source,
+                pageCount      = totalPages,
+                primaryTagName = _selectedCategory.value,
+                hasOcr         = successCount > 0,
+                ocrChars       = totalChars,
+                capturedAt     = capturedAt,
             )
+            onPassComplete(summary)
+            nextCompletionHandler?.let { hook ->
+                nextCompletionHandler = null
+                hook(summary)
+            }
         }
     }
 

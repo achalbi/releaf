@@ -70,6 +70,11 @@ fun StoryAddSheet(
     onPickVoiceClip: (audioUri: String, durationMs: Long) -> Unit,
     /** Phase 2 follow-up — capture-backed item insertion. */
     onPickCapture: (captureId: String, kind: StoryItemEntity.Kind) -> Unit,
+    /** Fires when the user taps "Scan a page" or "Take a photo". The
+     *  editor dismisses the sheet, asks the root shell to launch the
+     *  capture surface in the requested mode, and on completion
+     *  inserts a story_item pointing at the freshly-captured row. */
+    onPickCaptureMode: (mode: app.quickink.mobile.features.scan.CaptureMode) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
@@ -124,8 +129,11 @@ fun StoryAddSheet(
             )
 
             SectionHeader("CAPTURE NEW")
-            AddRow(icon = Icons.Outlined.CameraAlt,  label = "Scan a page",         hint = "camera",     onClick = { showStub("Scan a page coming soon") })
-            AddRow(icon = Icons.Outlined.Image,      label = "Take a photo",        hint = "camera",     onClick = { showStub("Take a photo coming soon") })
+            AddRow(icon = Icons.Outlined.CameraAlt,  label = "Scan a page",         hint = "camera",     onClick = { onPickCaptureMode(app.quickink.mobile.features.scan.CaptureMode.Document) })
+            // "Take a photo" on Android currently routes through the
+            // same document-scan surface — Android has no dedicated
+            // PhotoCaptureSurface yet (iOS does). Mark hint accordingly.
+            AddRow(icon = Icons.Outlined.Image,      label = "Take a photo",        hint = "scan",       onClick = { onPickCaptureMode(app.quickink.mobile.features.scan.CaptureMode.Document) })
             AddRow(icon = Icons.Outlined.Mic,        label = "Record a voice note", hint = "tap & hold", onClick = { showVoiceRecorder = true })
 
             SectionDivider()

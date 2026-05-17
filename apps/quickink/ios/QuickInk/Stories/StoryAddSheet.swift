@@ -35,6 +35,11 @@ struct StoryAddSheet: View {
     /// flow into the same story_item row but carry their semantic
     /// kind for renderer dispatch.
     var onPickCapture: (_ captureId: String, _ kind: StoryItem.Kind) -> Void
+    /// Fires when the user taps "Scan a page" or "Take a photo". The
+    /// editor dismisses the sheet, asks the root shell to launch the
+    /// capture surface in the requested mode, and on completion
+    /// inserts a story_item pointing at the freshly-captured row.
+    var onPickCaptureMode: (_ mode: CaptureMode) -> Void = { _ in }
     var onPickStubbed: () -> Void = {}
 
     @State private var showVoiceRecorder = false
@@ -49,8 +54,8 @@ struct StoryAddSheet: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
                     sectionHeader("CAPTURE NEW")
-                    row(icon: "camera",                 label: "Scan a page",          hint: "camera",       action: stub("Scan a page coming soon"))
-                    row(icon: "photo",                  label: "Take a photo",         hint: "camera",       action: stub("Take a photo coming soon"))
+                    row(icon: "camera",                 label: "Scan a page",          hint: "camera",       action: { onPickCaptureMode(.document) })
+                    row(icon: "photo",                  label: "Take a photo",         hint: "camera",       action: { onPickCaptureMode(.photo) })
                     row(icon: "mic",                    label: "Record a voice note",  hint: "tap & hold",   action: { showVoiceRecorder = true })
 
                     sectionDivider()
