@@ -877,19 +877,33 @@ struct RecentScanThumb: View {
             )
     }
 
-    /// Resolved (icon, label, fg, bg) for the source chip. Three-
-    /// way: "scan" (document scanner — neutral chip, the default),
-    /// "import" (gallery-picked photos — coral accent), "photo"
-    /// (in-app camera shot — neutral chip with a distinct "Photo"
-    /// label so the Library lists distinguish a one-shot photo
-    /// from a multi-page scan). Photo and Scan share the neutral
-    /// chrome on purpose — both came from the camera; only the
-    /// label disambiguates.
+    /// Resolved (icon, label, fg, bg) for the source chip. Four-
+    /// way:
+    ///   - "scan"   (document scanner — neutral chip, the default).
+    ///   - "import" (gallery-picked photos — coral accent).
+    ///   - "photo"  (in-app camera shot, no video) — neutral chip
+    ///              with a "Photo" label.
+    ///   - "photo" + `video_uri` / `video_drive_file_id` set
+    ///              (hold-to-record clip) — neutral chip with a
+    ///              "Video" label + `play.fill` icon so the home
+    ///              recents reads videos at a glance.
+    /// Photo/Video/Scan share the neutral chrome on purpose; only
+    /// the label + icon disambiguate.
     private var sourceChipInfo: (icon: String, label: String, fg: Color, bg: Color) {
         switch capture.source {
         case "import":
             return ("photo", "Import", QuickInkColors.textOnAccent, QuickInkColors.accent)
         case "photo":
+            // Photo-mode captures split into still-photo and
+            // hold-to-record video by the presence of a video
+            // artifact on the row (local URI OR a Drive id for a
+            // not-yet-downloaded clip — covers the cross-device
+            // restore window too).
+            let hasVideo = !(capture.videoUri ?? "").isEmpty
+                || !(capture.videoDriveFileId ?? "").isEmpty
+            if hasVideo {
+                return ("play.fill", "Video", QuickInkColors.ink.opacity(0.7), QuickInkColors.surface.opacity(0.9))
+            }
             return ("camera.fill", "Photo", QuickInkColors.ink.opacity(0.7), QuickInkColors.surface.opacity(0.9))
         default:
             return ("camera.fill", "Scan", QuickInkColors.ink.opacity(0.7), QuickInkColors.surface.opacity(0.9))

@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.Eco
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.CenterFocusWeak
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
@@ -1893,6 +1894,15 @@ private fun RecentScanThumb(
     )
     val isImport   = capture.source == "import"
     val isPhoto    = capture.source == "photo"
+    // Hold-to-record video — present when the row carries either a
+    // local URI (this device produced it / has restored it) or a
+    // Drive id (cross-device receive window before the binary-
+    // restore pass lands the .mp4). Either signal is enough to
+    // treat the row as a video for chip + badge purposes.
+    val isVideo    = isPhoto && (
+        !capture.videoUri.isNullOrBlank() ||
+            !capture.videoDriveFileId.isNullOrBlank()
+    )
 
     Column(
         modifier = Modifier
@@ -1940,18 +1950,22 @@ private fun RecentScanThumb(
                 )
             }
 
-            // Source badge — three-way: "scan" (document scanner —
+            // Source badge — four-way: "scan" (document scanner —
             // neutral chip, default), "import" (gallery-picked photos
-            // — coral accent), "photo" (in-app camera shot — neutral
-            // chip with a distinct "Photo" label so the Library lists
-            // distinguish a one-shot photo from a multi-page document
-            // scan). Photo and Scan share the neutral chrome on
-            // purpose; only the label disambiguates.
+            // — coral accent), "photo" (in-app camera shot, no video
+            // attached — neutral chip with a distinct "Photo" label
+            // so the Library lists distinguish a one-shot photo from
+            // a multi-page document scan), "video" (hold-to-record
+            // clip — same neutral chrome but a play icon + "Video"
+            // label). Photo / Video / Scan share the neutral chrome
+            // on purpose; only the label + icon disambiguate.
             val label = when {
                 isImport -> "Import"
+                isVideo  -> "Video"
                 isPhoto  -> "Photo"
                 else     -> "Scan"
             }
+            val chipIcon = if (isVideo) Icons.Filled.PlayCircle else Icons.Filled.CenterFocusWeak
             val chipBg = if (isImport) colors.accent else colors.surface.copy(alpha = 0.92f)
             val chipFg = if (isImport) colors.textOnAccent else colors.ink.copy(alpha = 0.75f)
             Row(
@@ -1967,7 +1981,7 @@ private fun RecentScanThumb(
                     .padding(horizontal = QuickInkSpacing.s2, vertical = 3.dp),
             ) {
                 Icon(
-                    imageVector        = Icons.Filled.CenterFocusWeak,
+                    imageVector        = chipIcon,
                     contentDescription = null,
                     tint               = chipFg,
                     modifier           = Modifier.size(12.dp),

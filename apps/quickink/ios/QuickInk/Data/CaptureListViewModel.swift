@@ -238,7 +238,8 @@ public final class CaptureListViewModel: ObservableObject {
     public func start() {
         cancellable = ValueObservation.tracking { [userId] db in
             try CaptureSummary.fetchAll(db, sql: """
-                SELECT id, title, preview_uri, pdf_uri, page_count, created_at, source, paper_size
+                SELECT id, title, preview_uri, pdf_uri, page_count, created_at,
+                       source, paper_size, video_uri, video_drive_file_id
                 FROM captures
                 WHERE user_id = ? AND deleted_at IS NULL
                 ORDER BY created_at DESC
