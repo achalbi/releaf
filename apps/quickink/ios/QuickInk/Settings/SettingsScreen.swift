@@ -153,6 +153,11 @@ struct SettingsScreen: View {
                             help:  "Adds an invisible OCR text layer to exported PDFs so PDF readers can search and copy the text. Off by default while we tune the layout.",
                             isOn:  $settings.searchablePdfExportEnabled
                         )
+                        toggleRow(
+                            label: "Public link sharing",
+                            help:  "Lets the share sheet publish a story as a public web page. The backend service is in development — TestFlight users see a stubbed slug; the real link goes live when the server ships.",
+                            isOn:  $settings.experimentalPublicLinksEnabled
+                        )
                     }
 
                     section(title: "About") {

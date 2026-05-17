@@ -37,6 +37,15 @@ public final class SettingsState: ObservableObject {
         didSet { UserDefaults.standard.set(searchablePdfExportEnabled, forKey: Keys.searchablePdfExport) }
     }
 
+    /// Stories Phase 6 — public-link publishing. When false, the
+    /// share sheet's Public link tile is grayed out + toasts to flip
+    /// this on; when true, the tile triggers the confirm dialog and
+    /// the (stubbed) publisher. Default off per STORIES_HANDOFF.md
+    /// §6 "default off in TestFlight, on for internal."
+    @Published public var experimentalPublicLinksEnabled: Bool {
+        didSet { UserDefaults.standard.set(experimentalPublicLinksEnabled, forKey: Keys.experimentalPublicLinks) }
+    }
+
     /// When true, the scan + import flows fetch the device's current
     /// location (with reverse-geocoded city / area) and attach it to
     /// the capture row. When false, the scan flow skips the fetch
@@ -153,6 +162,8 @@ public final class SettingsState: ObservableObject {
         // user toggles it — that gate isn't wired yet; this is a
         // pure runtime flag for Slice 5.
         self.searchablePdfExportEnabled = defaults.bool(forKey: Keys.searchablePdfExport)
+        // Public-link publishing defaults off — see the property doc.
+        self.experimentalPublicLinksEnabled = defaults.bool(forKey: Keys.experimentalPublicLinks)
         // Location-for-scans defaults to true so the onboarding step
         // can prompt for system permission and have the toggle
         // already "on" the first time the user opens Settings.
@@ -266,6 +277,7 @@ public final class SettingsState: ObservableObject {
     private enum Keys {
         static let driveBackup          = "quickink.settings.drive_backup_enabled"
         static let searchablePdfExport  = "quickink.settings.searchable_pdf_export_enabled"
+        static let experimentalPublicLinks = "quickink.settings.experimental_public_links_enabled"
         static let locationForScans     = "quickink.settings.location_for_scans_enabled"
         static let customDisplayName    = "quickink.settings.custom_display_name"
         static let phoneNumber          = "quickink.settings.phone_number"

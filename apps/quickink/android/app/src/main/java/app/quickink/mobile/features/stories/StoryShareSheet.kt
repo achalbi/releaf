@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.quickink.mobile.QuickInkApp
+import app.quickink.mobile.features.settings.SettingsPreferences
 import app.quickink.mobile.data.story.StoryEntity
 import app.quickink.mobile.data.story.StoryRepository
 import app.quickink.mobile.data.storyitem.StoryItemEntity
@@ -100,6 +101,8 @@ fun StoryShareSheet(
     }
 
     val app = remember(context) { context.applicationContext as QuickInkApp }
+    val settingsPrefs = remember(context) { SettingsPreferences(context) }
+    val publicLinksEnabled = remember(settingsPrefs) { settingsPrefs.experimentalPublicLinksEnabled }
     val repo = remember(app) {
         StoryRepository(
             storyDao          = app.database.storyDao(),
@@ -257,10 +260,13 @@ fun StoryShareSheet(
                             if (isPublicLinkActive) "A page anyone can open." else "Generate a public page.",
                             isPublicLinkActive,
                         ) {
-                            if (isPublicLinkActive) {
-                                toast = "Public link already live — see the box below."
-                            } else {
-                                showingPublishConfirm = true
+                            when {
+                                isPublicLinkActive ->
+                                    toast = "Public link already live — see the box below."
+                                !publicLinksEnabled ->
+                                    toast = "Turn on Experimental → Public link sharing in Settings."
+                                else ->
+                                    showingPublishConfirm = true
                             }
                         },
                     ),

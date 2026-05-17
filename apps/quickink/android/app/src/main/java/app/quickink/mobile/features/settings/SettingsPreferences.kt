@@ -54,6 +54,20 @@ class SettingsPreferences(context: Context) {
         }
 
     /**
+     * Stories Phase 6 — public-link publishing. When false, the
+     * share sheet's Public link tile is grayed out + toasts to flip
+     * this on; when true, the tile triggers the confirm dialog and
+     * the (stubbed) publisher. Default off per
+     * STORIES_HANDOFF.md §6 "default off in TestFlight, on for
+     * internal."
+     */
+    var experimentalPublicLinksEnabled: Boolean
+        get() = prefs.getBoolean(KEY_EXPERIMENTAL_PUBLIC_LINKS, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_EXPERIMENTAL_PUBLIC_LINKS, value).apply()
+        }
+
+    /**
      * When true, the scan + import flows fetch the device's current
      * location (with reverse-geocoded city / area) and attach it to
      * the capture row. When false, the scan flow skips the fetch
@@ -220,6 +234,7 @@ class SettingsPreferences(context: Context) {
         private const val PREFS_NAME              = "quickink.settings"
         private const val KEY_DRIVE_BACKUP        = "drive_backup_enabled"
         private const val KEY_SEARCHABLE_PDF      = "searchable_pdf_export_enabled"
+        private const val KEY_EXPERIMENTAL_PUBLIC_LINKS = "experimental_public_links_enabled"
         private const val KEY_LOCATION_FOR_SCANS  = "location_for_scans_enabled"
         private const val KEY_CUSTOM_DISPLAY_NAME = "custom_display_name"
         private const val KEY_PHONE_NUMBER        = "phone_number"

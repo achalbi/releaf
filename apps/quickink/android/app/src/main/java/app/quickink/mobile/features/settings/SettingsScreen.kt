@@ -108,6 +108,7 @@ fun SettingsScreen(
 
     var driveBackupEnabled by remember { mutableStateOf(preferences.driveBackupEnabled) }
     var searchablePdfExportEnabled by remember { mutableStateOf(preferences.searchablePdfExportEnabled) }
+    var experimentalPublicLinksEnabled by remember { mutableStateOf(preferences.experimentalPublicLinksEnabled) }
     var locationForScansEnabled by remember { mutableStateOf(preferences.locationForScansEnabled) }
     var customDisplayName by remember { mutableStateOf(preferences.customDisplayName) }
 
@@ -497,6 +498,15 @@ fun SettingsScreen(
                     onCheckedChange = { value ->
                         searchablePdfExportEnabled = value
                         preferences.searchablePdfExportEnabled = value
+                    },
+                )
+                ToggleRow(
+                    label   = "Public link sharing",
+                    help    = "Lets the share sheet publish a story as a public web page. The backend service is in development — TestFlight users see a stubbed slug; the real link goes live when the server ships.",
+                    checked = experimentalPublicLinksEnabled,
+                    onCheckedChange = { value ->
+                        experimentalPublicLinksEnabled = value
+                        preferences.experimentalPublicLinksEnabled = value
                     },
                 )
             }

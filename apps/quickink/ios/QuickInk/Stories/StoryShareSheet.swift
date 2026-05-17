@@ -43,6 +43,7 @@ struct StoryShareSheet: View {
     var onDismiss: () -> Void
 
     @StateObject private var vm: StoryEditorViewModel
+    @StateObject private var settings = SettingsState()
     @State private var presenting: URL? = nil
     @State private var rendering: Bool = false
     @State private var toast: String? = nil
@@ -180,6 +181,8 @@ struct StoryShareSheet: View {
             optionCard(icon: "link", title: "Public link", subtitle: isPublicLinkActive ? "A page anyone can open." : "Generate a public page.", active: isPublicLinkActive) {
                 if isPublicLinkActive {
                     flashToast("Public link already live — see the box below.")
+                } else if !settings.experimentalPublicLinksEnabled {
+                    flashToast("Turn on Experimental → Public link sharing in Settings.")
                 } else {
                     showingPublishConfirm = true
                 }
