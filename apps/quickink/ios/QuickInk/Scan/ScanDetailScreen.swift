@@ -447,10 +447,14 @@ struct ScanDetailScreen: View {
         // walks through before the share sheet. Crop + pencil per
         // page; Done writes the edited images to temp files and
         // hands them to the share sheet above.
-        // Photo-mode hold-to-record clip player. Renders a
-        // standard AVKit `VideoPlayer` in a sheet; closes via
-        // swipe-down or the system Done button.
-        .sheet(item: Binding(
+        // Photo-mode hold-to-record clip player. Mounted as a
+        // `.fullScreenCover` (not `.sheet`) so the player goes
+        // edge-to-edge — the sheet form factor inserts a drag
+        // handle + rounded top corners + a status-bar gap that
+        // visually bracket the video with top + bottom padding.
+        // Full-screen cover is the right presentation for an
+        // immersive video player.
+        .fullScreenCover(item: Binding(
             get: { videoPlayerURL.map { IdentifiedURL(url: $0) } },
             set: { videoPlayerURL = $0?.url }
         )) { wrapper in
@@ -1820,37 +1824,36 @@ private struct IdentifiedURL: Identifiable {
     let url: URL
 }
 
-/// Full-screen video player sheet for the hold-to-record Photo-mode
-/// clip. Wraps AVKit's `VideoPlayer` (iOS 14+) with a dark
-/// background and a system-style header so the player feels at
-/// home in the detail screen. AVKit handles play/pause/scrub
-/// controls automatically.
+/// Edge-to-edge video player for the hold-to-record Photo-mode
+/// clip. Wraps AVKit's `VideoPlayer` (iOS 14+) over a black
+/// background that ignores safe areas, with the close button as
+/// a top-trailing overlay rather than a sibling row above the
+/// player — keeps the video flush with the screen edges instead
+/// of sitting under a 50pt header row. AVKit handles
+/// play/pause/scrub controls automatically (tap-to-reveal).
 private struct CaptureVideoPlayerSheet: View {
     let url: URL
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topTrailing) {
             Color.black.ignoresSafeArea()
-            VStack(spacing: 0) {
-                HStack {
-                    Spacer()
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 36, height: 36)
-                            .background(Color.white.opacity(0.15))
-                            .clipShape(Circle())
-                    }
-                    .accessibilityLabel("Close video player")
-                    .padding(QuickInkSpacing.s4)
-                }
-                AVKit.VideoPlayer(player: AVPlayer(url: url))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            AVKit.VideoPlayer(player: AVPlayer(url: url))
+                .ignoresSafeArea()
+            Button(action: { dismiss() }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(Color.black.opacity(0.45))
+                    .clipShape(Circle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close video player")
+            .padding(QuickInkSpacing.s4)
         }
         .preferredColorScheme(.dark)
+        .statusBarHidden(true)
     }
 }
 

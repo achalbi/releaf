@@ -33,6 +33,8 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -1966,7 +1968,17 @@ private fun VideoPlayerDialog(videoUri: String, onDismiss: () -> Unit) {
     Dialog(
         onDismissRequest = onDismiss,
         properties       = DialogProperties(
+            // Full-bleed dialog with no inset chrome:
+            //   - `usePlatformDefaultWidth = false` lets us go
+            //     wider than the platform-default 280dp.
+            //   - `decorFitsSystemWindows = false` (Android 11+)
+            //     drops the system-bar inset that otherwise
+            //     bracketed the video with a top + bottom gap.
+            //     The close button overlay below uses
+            //     `WindowInsets.systemBars` padding so it still
+            //     clears the status bar / nav handle.
             usePlatformDefaultWidth = false,
+            decorFitsSystemWindows  = false,
             dismissOnBackPress      = true,
             dismissOnClickOutside   = false,
         ),
@@ -1991,14 +2003,17 @@ private fun VideoPlayerDialog(videoUri: String, onDismiss: () -> Unit) {
             )
             // Top-right close affordance — the MediaController has
             // its own pause/play but no exit, so render a small
-            // circular X over the player.
+            // circular X over the player. `WindowInsets.systemBars`
+            // padding clears the status bar / notch even though the
+            // dialog itself draws edge-to-edge under it.
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
+                    .windowInsetsPadding(WindowInsets.systemBars)
                     .padding(QuickInkSpacing.s4)
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.15f))
+                    .background(Color.Black.copy(alpha = 0.45f))
                     .clickable(onClick = onDismiss),
                 contentAlignment = Alignment.Center,
             ) {
