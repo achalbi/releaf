@@ -87,6 +87,7 @@ fun StoryReaderScreen(
     val vm: StoryEditorViewModel = viewModel(factory = StoryEditorViewModel.factory(storyId, userId))
     val story by vm.story.collectAsState()
     val items by vm.items.collectAsState()
+    val previewUris by vm.previewUris.collectAsState()
 
     var toastMessage by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(toastMessage) {
@@ -156,7 +157,10 @@ fun StoryReaderScreen(
                     item("marker-${storyItem.id}") { DayMarker(label = marker.label) }
                 }
                 item(storyItem.id) {
-                    ReaderRow(storyItem)
+                    ReaderRow(
+                        item       = storyItem,
+                        previewUri = storyItem.refId?.let { previewUris[it] },
+                    )
                     Spacer(modifier = Modifier.height(QuickInkSpacing.s2))
                 }
             }
@@ -321,7 +325,7 @@ private fun DayMarker(label: String) {
 }
 
 @Composable
-private fun ReaderRow(item: StoryItemEntity) {
+private fun ReaderRow(item: StoryItemEntity, previewUri: String? = null) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
     when (item.kind) {
@@ -431,7 +435,17 @@ private fun ReaderRow(item: StoryItemEntity) {
                             .height(photoHeight(item.layout))
                             .clip(RoundedCornerShape(8.dp))
                             .background(colors.paper1),
-                    )
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (!previewUri.isNullOrEmpty()) {
+                            coil.compose.AsyncImage(
+                                model              = previewUri,
+                                contentDescription = item.caption,
+                                contentScale       = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier           = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
                     val caption = item.caption.orEmpty()
                     if (caption.isNotEmpty()) {
                         Text(

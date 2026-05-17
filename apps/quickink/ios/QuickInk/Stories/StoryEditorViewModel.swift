@@ -27,6 +27,13 @@ public final class StoryEditorViewModel: ObservableObject {
     @Published public private(set) var story: Story? = nil
     @Published public private(set) var items: [StoryItem] = []
     @Published public private(set) var savedJustNow: Bool = false
+    /// `captures.preview_uri` keyed by `story_item.ref_id` for every
+    /// capture-backed item in the story. Populated after items load
+    /// and refreshed whenever the item list changes. The reader and
+    /// the share-sheet exporter both read from this so on-screen
+    /// capture rendering matches the exported PDF/PNG bitmap-for-
+    /// bitmap.
+    @Published public private(set) var previewUris: [String: String] = [:]
 
     private let repository: StoryRepository
     private let database: QuickInkDatabase
@@ -75,7 +82,51 @@ public final class StoryEditorViewModel: ObservableObject {
             }
             .publisher(in: queue)
             .receive(on: DispatchQueue.main)
-            .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] in self?.items = $0 })
+            .sink(
+                receiveCompletion: { _ in },
+                receiveValue: { [weak self] newItems in
+                    self?.items = newItems
+                    Task { await self?.refreshPreviewUris(for: newItems) }
+                }
+            )
+    }
+
+    /// One DB read keyed by all distinct capture refs the story
+    /// currently references. Cheap — the captures table is indexed
+    /// on `id`. Idempotent: rerunning with the same input produces
+    /// the same map.
+    private func refreshPreviewUris(for items: [StoryItem]) async {
+        let refIds = Set(items.compactMap { item -> String? in
+            switch item.kind {
+            case StoryItem.Kind.photo.rawValue,
+                 StoryItem.Kind.document.rawValue,
+                 StoryItem.Kind.note.rawValue:
+                return item.refId
+            default:
+                return nil
+            }
+        })
+        guard !refIds.isEmpty else {
+            await MainActor.run { self.previewUris = [:] }
+            return
+        }
+        let queue = database.dbQueue
+        let result: [String: String] = (try? await queue.read { db -> [String: String] in
+            let placeholders = Array(repeating: "?", count: refIds.count).joined(separator: ",")
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT id, preview_uri FROM captures WHERE id IN (\(placeholders)) AND deleted_at IS NULL",
+                arguments: StatementArguments(Array(refIds))
+            )
+            var out: [String: String] = [:]
+            for row in rows {
+                if let uri = row["preview_uri"] as String?, !uri.isEmpty {
+                    out[row["id"]] = uri
+                }
+            }
+            return out
+        }) ?? [:]
+        await MainActor.run { self.previewUris = result }
     }
 
     // MARK: - Story header edits

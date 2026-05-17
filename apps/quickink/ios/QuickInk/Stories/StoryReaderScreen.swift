@@ -305,9 +305,10 @@ struct StoryReaderScreen: View {
         default:
             readerCard {
                 VStack(alignment: .leading, spacing: 6) {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(QuickInkColors.paper1)
-                        .frame(height: photoHeight(for: item.layout))
+                    StoryCapturePreviewImage(
+                        uri:    item.refId.flatMap { vm.previewUris[$0] },
+                        height: photoHeight(for: item.layout)
+                    )
                     if let caption = item.caption, !caption.isEmpty {
                         Text(caption)
                             .font(QuickInkFont.serif(12, weight: .regular, italic: true))

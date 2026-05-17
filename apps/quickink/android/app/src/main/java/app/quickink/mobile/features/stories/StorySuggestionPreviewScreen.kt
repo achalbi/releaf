@@ -78,6 +78,11 @@ fun StorySuggestionPreviewScreen(
     var loadFailed by remember { mutableStateOf(false) }
     var creating   by remember { mutableStateOf(false) }
     var toast      by remember { mutableStateOf<String?>(null) }
+    /** `(previewUri, caption)` for the cluster's first capture.
+     *  Loaded once after the engine returns; the first-page card
+     *  renders this directly (or falls back to a cream placeholder
+     *  + canned italic when the capture has no preview on disk). */
+    var firstPreview by remember { mutableStateOf<Pair<String?, String?>?>(null) }
 
     LaunchedEffect(suggestionId) {
         val result = withContext(Dispatchers.Default) {
@@ -87,8 +92,19 @@ fun StorySuggestionPreviewScreen(
                 dismissed  = emptySet(),
             )
         }
-        if (result != null && result.id == suggestionId) suggestion = result
-        else loadFailed = true
+        if (result != null && result.id == suggestionId) {
+            suggestion = result
+            // Look up the first cluster capture's preview_uri so the
+            // first-page card renders an actual JPEG instead of the
+            // cream placeholder. Per STORIES_HANDOFF.md §8 don't-do
+            // list: "must render the actual first page using the same
+            // components the reader uses."
+            val firstId = result.candidateRefs.firstOrNull()
+            if (firstId != null) {
+                val row = withContext(Dispatchers.IO) { app.database.captureDao().findById(firstId) }
+                firstPreview = (row?.previewUri to row?.title?.takeIf { it.isNotEmpty() })
+            }
+        } else loadFailed = true
     }
     LaunchedEffect(toast) {
         if (toast != null) { delay(1_800); toast = null }
@@ -182,7 +198,13 @@ fun StorySuggestionPreviewScreen(
                                 .padding(11.dp),
                         )
                     }
-                    item("preview") { PreviewHero(suggestion = s, onSwapCover = { toast = "Swap cover ships in Phase 5.1." }) }
+                    item("preview") {
+                        PreviewHero(
+                            suggestion   = s,
+                            firstPreview = firstPreview,
+                            onSwapCover  = { toast = "Swap cover ships in Phase 5.1." },
+                        )
+                    }
                     item("inside-label") {
                         Text("What's inside, in order:",
                             style = type.bodyItalic, color = colors.inkSoft, fontSize = 11.sp)
@@ -253,7 +275,11 @@ fun StorySuggestionPreviewScreen(
 }
 
 @Composable
-private fun PreviewHero(suggestion: StorySuggestion, onSwapCover: () -> Unit) {
+private fun PreviewHero(
+    suggestion: StorySuggestion,
+    firstPreview: Pair<String?, String?>?,
+    onSwapCover: () -> Unit,
+) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
     val title  = deriveTitle(suggestion)
@@ -300,7 +326,10 @@ private fun PreviewHero(suggestion: StorySuggestion, onSwapCover: () -> Unit) {
                     fontSize = 14.sp, color = colors.inkSoft)
             }
         }
-        // First-page card
+        // First-page card — renders the cluster's first capture via
+        // the same kind of AsyncImage the reader uses. Falls back to
+        // a cream placeholder + canned italic when the capture has
+        // no preview on disk yet.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -308,16 +337,27 @@ private fun PreviewHero(suggestion: StorySuggestion, onSwapCover: () -> Unit) {
                 .background(colors.bg)
                 .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
+            val previewUri = firstPreview?.first
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(colors.paper1),
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                if (!previewUri.isNullOrEmpty()) {
+                    coil.compose.AsyncImage(
+                        model              = previewUri,
+                        contentDescription = firstPreview?.second,
+                        contentScale       = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier           = Modifier.fillMaxSize(),
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(5.dp))
             Text(
-                text     = "First capture, jet-lagged and curious.",
+                text     = firstPreview?.second ?: "First capture, jet-lagged and curious.",
                 style    = type.bodyItalic,
                 color    = colors.inkSoft,
                 fontSize = 11.sp,

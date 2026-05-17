@@ -37,6 +37,7 @@ class StoryEditorViewModel(
     val storyId: String,
     val userId: String,
     private val repository: StoryRepository,
+    private val captureDao: app.quickink.mobile.data.capture.CaptureDao,
 ) : ViewModel() {
 
     val items: StateFlow<List<StoryItemEntity>> =
@@ -49,12 +50,51 @@ class StoryEditorViewModel(
     private val _savedJustNow: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val savedJustNow: StateFlow<Boolean> = _savedJustNow.asStateFlow()
 
+    /** `captures.preview_uri` keyed by `story_item.ref_id`. Mirror
+     *  of iOS `StoryEditorViewModel.previewUris`. */
+    private val _previewUris: MutableStateFlow<Map<String, String>> = MutableStateFlow(emptyMap())
+    val previewUris: StateFlow<Map<String, String>> = _previewUris.asStateFlow()
+
     private var titleDebounce: Job? = null
     private val textDebounces: MutableMap<String, Job> = mutableMapOf()
     private var savedToastJob: Job? = null
+    private var previewUrisJob: Job? = null
 
     init {
         refreshStoryHeader()
+        observeItemsForPreviewUris()
+    }
+
+    private fun observeItemsForPreviewUris() {
+        viewModelScope.launch {
+            items.collect { newItems ->
+                previewUrisJob?.cancel()
+                previewUrisJob = viewModelScope.launch { refreshPreviewUris(newItems) }
+            }
+        }
+    }
+
+    private suspend fun refreshPreviewUris(items: List<StoryItemEntity>) {
+        val refIds = items.mapNotNullTo(mutableSetOf()) { item ->
+            when (item.kind) {
+                StoryItemEntity.Kind.PHOTO.raw,
+                StoryItemEntity.Kind.DOCUMENT.raw,
+                StoryItemEntity.Kind.NOTE.raw -> item.refId
+                else -> null
+            }
+        }
+        if (refIds.isEmpty()) {
+            _previewUris.value = emptyMap()
+            return
+        }
+        val rows = captureDao.activeRows(userId)
+        val out = mutableMapOf<String, String>()
+        for (row in rows) {
+            if (row.id in refIds && !row.previewUri.isNullOrEmpty()) {
+                out[row.id] = row.previewUri
+            }
+        }
+        _previewUris.value = out
     }
 
     private fun refreshStoryHeader() {
@@ -244,6 +284,11 @@ class StoryEditorViewModel(
         }
     }
 
+    /** Drops the existing `init` and re-init's the items
+     *  collection — purely there because the auto-init above can't
+     *  remove its previous side-effect (the observeItemsForPreviewUris
+     *  launch). Phase 5 follow-up: VM lifecycle owns its scope. */
+
     companion object {
         fun factory(storyId: String, userId: String): ViewModelProvider.Factory = viewModelFactory {
             initializer {
@@ -253,7 +298,12 @@ class StoryEditorViewModel(
                     storyItemDao      = app.database.storyItemDao(),
                     storyVoiceClipDao = app.database.storyVoiceClipDao(),
                 )
-                StoryEditorViewModel(storyId, userId, repo)
+                StoryEditorViewModel(
+                    storyId    = storyId,
+                    userId     = userId,
+                    repository = repo,
+                    captureDao = app.database.captureDao(),
+                )
             }
         }
     }

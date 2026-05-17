@@ -28,6 +28,7 @@
  * Mirror of Android `StorySuggestionPreviewScreen.kt`.
  */
 
+import GRDB
 import SwiftUI
 
 struct StorySuggestionPreviewScreen: View {
@@ -43,6 +44,11 @@ struct StorySuggestionPreviewScreen: View {
     @State private var loadFailed: Bool = false
     @State private var creating: Bool = false
     @State private var toast: String? = nil
+    /// `(previewUri, caption)` for the cluster's first capture.
+    /// Loaded once after the engine returns; the first-page card
+    /// renders this directly (or falls back to a cream placeholder
+    /// + canned italic when the capture has no preview on disk).
+    @State private var firstPreview: (uri: String?, caption: String?)? = nil
 
     private let repository = StoryRepository()
 
@@ -152,12 +158,17 @@ struct StorySuggestionPreviewScreen: View {
             .frame(height: 110)
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
-            // First-page card placeholder
+            // First-page card — renders the cluster's first capture
+            // via the same `StoryCapturePreviewImage` the reader
+            // uses. Falls back to a cream placeholder + canned
+            // italic when the capture has no preview on disk yet.
             VStack(alignment: .leading, spacing: 5) {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(QuickInkColors.paper1)
-                    .frame(height: 48)
-                Text("First capture, jet-lagged and curious.")
+                StoryCapturePreviewImage(
+                    uri:          firstPreview?.uri,
+                    height:       48,
+                    cornerRadius: 4
+                )
+                Text(firstPreview?.caption ?? "First capture, jet-lagged and curious.")
                     .font(QuickInkFont.serif(11, weight: .regular, italic: true))
                     .foregroundStyle(QuickInkColors.inkSoft)
                     .lineLimit(2)
@@ -267,11 +278,43 @@ struct StorySuggestionPreviewScreen: View {
             database:  .shared,
             dismissed: []
         )
-        if result?.id == suggestionId {
-            await MainActor.run { self.suggestion = result }
+        if result?.id == suggestionId, let s = result {
+            await MainActor.run { self.suggestion = s }
+            await loadFirstPreview(captureId: s.candidateRefs.first)
             return
         }
         await MainActor.run { self.loadFailed = true }
+    }
+
+    /// Look up the first cluster capture's preview_uri so the
+    /// first-page card renders an actual JPEG instead of the cream
+    /// placeholder. Per `STORIES_HANDOFF.md` §8 don't-do list:
+    /// "must render the actual first page using the same components
+    /// the reader uses."
+    private func loadFirstPreview(captureId: String?) async {
+        guard let captureId = captureId else { return }
+        struct Row: FetchableRecord {
+            let previewUri: String?
+            let title: String?
+            init(row: GRDB.Row) {
+                previewUri = row["preview_uri"] as String?
+                title      = row["title"]       as String?
+            }
+        }
+        let queue = QuickInkDatabase.shared.dbQueue
+        let row = (try? await queue.read { db -> Row? in
+            try Row.fetchOne(
+                db,
+                sql: "SELECT preview_uri, title FROM captures WHERE id = ? AND deleted_at IS NULL LIMIT 1",
+                arguments: [captureId]
+            )
+        }) ?? nil
+        await MainActor.run {
+            firstPreview = (
+                uri:     row?.previewUri,
+                caption: row?.title?.isEmpty == false ? row?.title : nil
+            )
+        }
     }
 
     private func makeStory(then action: NextAction) {
