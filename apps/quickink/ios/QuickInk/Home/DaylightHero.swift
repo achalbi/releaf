@@ -88,7 +88,7 @@ struct DaylightSnapshot: Equatable {
     let isNight: Bool
     /// "Since sunset 2h 18m" / "8h 49m in"
     let leadingLabel: String
-    /// "Until sunrise 8h 54m" / "4h 23m left"
+    /// "Sunrise in 8h 54m" / "4h 23m left"
     let trailingLabel: String
 }
 
@@ -140,7 +140,7 @@ func computeDaylight(
                 dayProgress:   progress,
                 isNight:       true,
                 leadingLabel:  "Since sunset \(formatDuration(sinceSunset))",
-                trailingLabel: "Until sunrise \(formatDuration(untilRise))"
+                trailingLabel: "Sunrise in \(formatDuration(untilRise))"
             )
         }
         // Polar fallback — yesterday's sunset unresolved. Fall back
@@ -153,7 +153,7 @@ func computeDaylight(
             now:           now,
             dayProgress:   0,
             isNight:       false,
-            leadingLabel:  "Until sunrise \(formatDuration(untilRise))",
+            leadingLabel:  "Sunrise in \(formatDuration(untilRise))",
             trailingLabel: "\(formatDuration(total)) today"
         )
     }
@@ -176,7 +176,7 @@ func computeDaylight(
                 dayProgress:   progress,
                 isNight:       true,
                 leadingLabel:  "Since sunset \(formatDuration(sinceSunset))",
-                trailingLabel: "Until sunrise \(formatDuration(untilSunrise))"
+                trailingLabel: "Sunrise in \(formatDuration(untilSunrise))"
             )
         }
         // Polar fallback — no resolvable next sunrise.

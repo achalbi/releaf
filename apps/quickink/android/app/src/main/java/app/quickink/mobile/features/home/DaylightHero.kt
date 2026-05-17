@@ -223,7 +223,7 @@ internal fun computeDaylight(
                     leadingValue    = formatDuration(sinceSunset),
                     leadingCaption  = "Since sunset",
                     trailingValue   = formatDuration(untilRise),
-                    trailingCaption = "Until sunrise",
+                    trailingCaption = "Sunrise in",
                 )
             } else {
                 // Polar fallback — yesterday's sunset unresolved.
@@ -239,7 +239,7 @@ internal fun computeDaylight(
                     dayProgress     = 0f,
                     isNight         = false,
                     leadingValue    = formatDuration(untilRise),
-                    leadingCaption  = "Until sunrise",
+                    leadingCaption  = "Sunrise in",
                     trailingValue   = formatDuration(totalDuration),
                     trailingCaption = "Today's daylight",
                 )
@@ -269,7 +269,7 @@ internal fun computeDaylight(
                     leadingValue    = formatDuration(sinceSunset),
                     leadingCaption  = "Since sunset",
                     trailingValue   = formatDuration(untilNextRise),
-                    trailingCaption = "Until sunrise",
+                    trailingCaption = "Sunrise in",
                 )
             } else {
                 // Polar fallback — no resolvable next sunrise. Keep
