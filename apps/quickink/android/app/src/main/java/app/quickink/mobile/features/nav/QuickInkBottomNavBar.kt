@@ -39,9 +39,11 @@
 
 package app.quickink.mobile.features.nav
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -110,6 +112,27 @@ fun QuickInkBottomNavBar(
     onStories: () -> Unit,
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Long-press on the ⚡ FAB — jumps the user directly into
+     * the Photo capture surface (QuickCaptureScreen with
+     * `initialMode = CaptureMode.Photo`). Tap still goes to
+     * [onScan], which opens whichever pill-selected mode the
+     * user last used. Defaults to a no-op so callers that
+     * don't care about the long-press path (legacy hosts,
+     * previews) keep working.
+     */
+    onLongPressScan: () -> Unit = {},
+    /**
+     * Discoverability hint above the ⚡ FAB — renders the
+     * floating "Hold ⚡ for a quick photo" chip when `true`.
+     * The caller (QuickInkRoot) reads this from a
+     * mutableStateOf mirror of [PhotoFabHint.isDismissed].
+     * Chip shows on every launch until the user long-presses
+     * the FAB once, after which it stays dismissed permanently
+     * across launches. Defaults to `false` so legacy hosts /
+     * previews opt in explicitly. Spec §3.1.
+     */
+    showPhotoHint: Boolean = false,
 ) {
     val colors = LocalQuickInkColors.current
     val navShape = RoundedCornerShape(QuickInkRadius.lg)
@@ -171,8 +194,10 @@ fun QuickInkBottomNavBar(
                 onClick           = onWorkspace,
             )
             BrandTab(
-                modifier = Modifier.weight(1f),
-                onClick  = onScan,
+                modifier        = Modifier.weight(1f),
+                onClick         = onScan,
+                onLongClick     = onLongPressScan,
+                showPhotoHint   = showPhotoHint,
             )
             RegularTabAsset(
                 drawableId = R.drawable.ic_story,
@@ -322,10 +347,13 @@ private fun RegularTabAsset(
 
 // ---------- Brand (centre Zap FAB) ----------
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BrandTab(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
+    showPhotoHint: Boolean = false,
 ) {
     val colors = LocalQuickInkColors.current
 
@@ -345,16 +373,15 @@ private fun BrandTab(
     )
 
     // No ripple — the circular shadow + gradient already read as
-    // pressable.
+    // pressable. `combinedClickable` is the documented Compose API
+    // for "tap OR long-press on the same view"; using it (rather
+    // than stacking `.clickable` + `Modifier.pointerInput`) lets
+    // the gesture system disambiguate cleanly: a short tap fires
+    // `onClick`, a long hold past the system long-press threshold
+    // fires `onLongClick`, never both.
     val interactionSource = remember { MutableInteractionSource() }
     Box(
-        modifier = modifier
-            .height(outerDiameter)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick,
-            ),
+        modifier         = modifier.height(outerDiameter),
         contentAlignment = Alignment.Center,
     ) {
         // Two stacked drop shadows — outer ring carries the bigger
@@ -408,7 +435,13 @@ private fun BrandTab(
                         center = Offset(cx, cy + 1.dp.toPx()),
                     )
                 }
-                .background(colors.bg, CircleShape),
+                .background(colors.bg, CircleShape)
+                .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication        = null,
+                    onClick           = onClick,
+                    onLongClick       = onLongClick,
+                ),
             contentAlignment = Alignment.Center,
         ) {
             Box(
@@ -425,5 +458,38 @@ private fun BrandTab(
                 )
             }
         }
+
+        // Floating "Hold ⚡ for a quick photo" chip — rendered as
+        // a peer of the FAB and pushed upward via `Modifier.offset`
+        // so it floats above the bar's top edge alongside the
+        // lifted ⚡ disc. Drawn AFTER the FAB so it stays on top of
+        // any overlap; sized to its content so the parent Box
+        // doesn't expand under it.
+        if (showPhotoHint) {
+            PhotoFabHintChip(
+                modifier = Modifier.offset(y = -(lift + outerDiameter / 2 + 24.dp)),
+            )
+        }
+    }
+}
+
+@Composable
+private fun PhotoFabHintChip(modifier: Modifier = Modifier) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Box(
+        modifier = modifier
+            .shadow(elevation = 6.dp, shape = RoundedCornerShape(QuickInkRadius.pill))
+            .background(colors.surface, RoundedCornerShape(QuickInkRadius.pill))
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.pill))
+            .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
+    ) {
+        Text(
+            text     = "Hold ⚡ for a quick photo",
+            style    = type.label.copy(fontSize = 12.sp),
+            color    = colors.ink,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }

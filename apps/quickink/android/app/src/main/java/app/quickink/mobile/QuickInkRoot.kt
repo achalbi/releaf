@@ -78,8 +78,10 @@ import app.quickink.mobile.features.onboarding.OnboardingFlow
 import app.quickink.mobile.features.onboarding.OnboardingPreferences
 import app.quickink.mobile.features.onboarding.OnboardingState
 import app.quickink.mobile.features.onboarding.SignInScreen
+import app.quickink.mobile.features.scan.CaptureMode
 import app.quickink.mobile.features.scan.LocationService
 import app.quickink.mobile.features.scan.PendingShare
+import app.quickink.mobile.features.scan.PhotoFabHint
 import app.quickink.mobile.features.scan.QuickCaptureScreen
 import app.quickink.mobile.features.scan.ScanDetailScreen
 import app.quickink.mobile.features.scan.ScanFlowController
@@ -562,6 +564,26 @@ private fun MainShell(
     // both routes set this same root-level flag, and the early-
     // return below renders QuickCaptureScreen above the NavHost.
     var showQuickCapture by remember { mutableStateOf(false) }
+    // Optional override for QuickCaptureScreen's starting mode.
+    // Tap on the FAB leaves this `null` so the screen reads its
+    // usual `quickink.capture.last_mode` default. Long-press on
+    // the FAB sets `CaptureMode.Photo`, which routes the user
+    // straight into the photo surface — the screen's no-op
+    // persist on the `.Photo` branch prevents this transient
+    // choice from overwriting the user's pill-selected last
+    // mode. Cleared back to `null` on dismiss so a subsequent
+    // tap-FAB doesn't inherit the override.
+    var pendingInitialMode by remember { mutableStateOf<CaptureMode?>(null) }
+    // Photo-FAB hint state. Mirror of iOS `PhotoFabHint`
+    // `@StateObject`: a simple `mutableStateOf` seeded from
+    // SharedPreferences so the chip's visibility re-renders on
+    // dismiss without polling. Spec §3.1 — chip shows on every
+    // launch until the user long-presses the FAB once, after
+    // which it stays dismissed permanently.
+    val photoFabHintContext = LocalContext.current
+    var photoFabHintDismissed by remember {
+        mutableStateOf(PhotoFabHint.isDismissed(photoFabHintContext))
+    }
     if (showQuickCapture) {
         // Intercept back so it dismisses the capture sheet instead
         // of falling through to the OS default (which would finish
@@ -569,10 +591,18 @@ private fun MainShell(
         // and its root-level exit handler never gets composed).
         androidx.activity.compose.BackHandler {
             showQuickCapture = false
+            pendingInitialMode = null
         }
         QuickCaptureScreen(
-            controller = controller,
-            onDismiss  = { showQuickCapture = false },
+            controller   = controller,
+            onDismiss    = {
+                showQuickCapture = false
+                // Reset to null on dismiss so a subsequent
+                // tap-FAB doesn't inherit the long-press
+                // override and land on Photo by accident.
+                pendingInitialMode = null
+            },
+            initialMode  = pendingInitialMode,
         )
         return
     }
@@ -1023,6 +1053,19 @@ private fun MainShell(
                 onStories   = { navToTab(Routes.STORIES) },
                 onSettings  = { navToTab(Routes.SETTINGS) },
                 modifier    = Modifier.align(Alignment.BottomCenter),
+                // Long-press jumps the FAB directly into the photo
+                // surface. Also marks the FAB hint dismissed — the
+                // user has discovered the gesture, no need to
+                // surface the chip ever again. Routed through both
+                // the persisted flag and the in-memory state so
+                // the chip's fade-out fires on the same render tick.
+                onLongPressScan = {
+                    PhotoFabHint.markDismissed(photoFabHintContext)
+                    photoFabHintDismissed = true
+                    pendingInitialMode = CaptureMode.Photo
+                    showQuickCapture = true
+                },
+                showPhotoHint = !photoFabHintDismissed,
             )
         }
     }   // closes outer Box

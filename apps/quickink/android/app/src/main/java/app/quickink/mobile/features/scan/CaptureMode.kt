@@ -1,8 +1,8 @@
 /*
  * CaptureMode.kt
  *
- * Which capture surface QuickInk shows behind the shutter. Two
- * surfaces, picked by an inline pill toggle on QuickCaptureScreen:
+ * Which capture surface QuickInk shows behind the shutter. Three
+ * surfaces:
  *
  *   - DOCUMENT       → ML Kit `GmsDocumentScanning` system intent
  *                      (unchanged behavior; runs in Google's UI).
@@ -10,15 +10,28 @@
  *                      guide overlay and a custom OpenCV-backed
  *                      detector that auto-captures on a stable
  *                      quad.
+ *   - PHOTO          → in-app CameraX preview with a plain manual
+ *                      shutter. No quad detection, no overlay —
+ *                      a single still that lands in the same scan
+ *                      pipeline tagged `source="photo"` /
+ *                      `paperSize=Custom`.
  *
- * The toggle is persisted under the SharedPreferences key
- * `quickink.capture.last_mode` (see [CaptureModePreference]) so
+ * Pill toggle on QuickCaptureScreen stays two-wide
+ * (Document / Business Card). `.Photo` is reachable through a
+ * transient entry only — long-press on the bottom-nav ⚡ FAB,
+ * or a Photo icon in the shutter row of the other two surfaces.
+ * That keeps the top bar uncluttered while still surfacing a
+ * one-tap shortcut from the FAB.
+ *
+ * The pill-selected mode is persisted under the SharedPreferences
+ * key `quickink.capture.last_mode` (see [SettingsPreferences]) so
  * the next session opens on whatever the user used last.
  * First-launch fallback is DOCUMENT — that's the established
- * capture path; landing card-first would surprise users who came
- * here for document scanning.
+ * capture path. The long-press → `.Photo` path deliberately does
+ * NOT persist (see `QuickCaptureScreen`): a transient photo
+ * shouldn't overwrite the user's last pill choice.
  *
- * Why not a single shared CameraController across both modes:
+ * Why not a single shared CameraController across all modes:
  * Document mode runs inside Google's system scanner activity,
  * which owns its own camera session in a separate process. We
  * can't reach into it from the host, so the mode toggle swaps
@@ -33,18 +46,21 @@ package app.quickink.mobile.features.scan
 
 enum class CaptureMode {
     Document,
-    BusinessCard;
+    BusinessCard,
+    Photo;
 
     val analyticsKey: String
         get() = when (this) {
             Document     -> "document"
             BusinessCard -> "business_card"
+            Photo        -> "photo"
         }
 
     val pillLabel: String
         get() = when (this) {
             Document     -> "Document"
             BusinessCard -> "Business Card"
+            Photo        -> "Photo"
         }
 
     /**
@@ -53,17 +69,23 @@ enum class CaptureMode {
      * weight each page (card +4, A4 +2, smaller +1). Document mode
      * covers ML Kit's standard rectangular-document path; we assume
      * A4 / Letter rather than trying to infer dimensions from the
-     * captured pixels.
+     * captured pixels. Photo mode passes [PaperSize.Custom] — an
+     * arbitrary phone-camera frame's aspect ratio is meaningless
+     * against the A4 / Letter / card ratio bands, and [Custom]
+     * shares A4's +0.2 pts/page weight so the sustainability hero
+     * still scores the page.
      */
     val paperSize: PaperSize
         get() = when (this) {
             Document     -> PaperSize.A4
             BusinessCard -> PaperSize.Card
+            Photo        -> PaperSize.Custom
         }
 
     companion object {
         fun fromAnalyticsKey(key: String?): CaptureMode = when (key) {
             "business_card" -> BusinessCard
+            "photo"         -> Photo
             else            -> Document
         }
     }

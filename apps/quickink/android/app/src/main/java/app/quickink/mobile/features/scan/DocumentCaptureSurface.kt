@@ -5,14 +5,19 @@
  * existing ML Kit `GmsDocumentScanning` flow verbatim. Owned by
  * [QuickCaptureScreen], which mounts this composable when
  * [CaptureMode.Document] is active and tears it down on a flip
- * to [CaptureMode.BusinessCard].
+ * to [CaptureMode.BusinessCard] (pill) or [CaptureMode.Photo]
+ * (shutter-row Photo icon → `onSelectPhoto` callback).
  *
  * Behavior is the same as the previous all-in-one QuickCaptureScreen
  * body: page-mode pill (Single/Multi-page) + tilted lined-
  * paper page mock + shutter that launches the system scanner +
- * Import button that opens the system photo picker. The scanner
- * result flows through `ScanFlowController.onScanComplete` exactly
- * as before — no detector swap, no overlay, no in-app camera.
+ * Import button that opens the system photo picker. The shutter
+ * row's left slot now hosts a Photo icon that fires
+ * `onSelectPhoto` so the user can jump into the Photo capture
+ * surface from inside the Document flow (a discoverability mirror
+ * of the FAB long-press shortcut). The scanner result flows
+ * through `ScanFlowController.onScanComplete` exactly as before —
+ * no detector swap, no overlay, no in-app camera.
  *
  * Renamed from the original private `CaptureMode` (Single /
  * MultiPage) to [ScanPageMode] so the new top-level
@@ -51,9 +56,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.view.HapticFeedbackConstants
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -74,6 +81,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -103,10 +111,21 @@ internal enum class ScanPageMode(val label: String) {
 internal fun DocumentCaptureSurface(
     controller: ScanFlowController,
     onDismiss: () -> Unit,
+    /**
+     * Callback fired when the user taps the Photo icon in the
+     * shutter row's left slot. Threaded up through the
+     * [QuickCaptureScreen] parent so the coordinator (which
+     * owns mode state) can flip to [CaptureMode.Photo] and
+     * Compose swaps in [PhotoCaptureSurface]. Defaults to a
+     * no-op so callers that don't host a coordinator (previews,
+     * tests) keep compiling.
+     */
+    onSelectPhoto: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
+    val view = LocalView.current
 
     var pageMode by remember { mutableStateOf(ScanPageMode.Single) }
 
@@ -220,7 +239,11 @@ internal fun DocumentCaptureSurface(
 
         Spacer(Modifier.weight(1f))
 
-        // Shutter row — spacer / shutter / import.
+        // Shutter row — Photo icon / shutter / import.
+        // Left slot now hosts the Photo icon (was a spacer
+        // pre-Photo capture). Same 48dp disc styling as the
+        // right-side import button so the row reads as a
+        // symmetric two-button frame around the shutter.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -228,7 +251,17 @@ internal fun DocumentCaptureSurface(
             verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Box(modifier = Modifier.size(width = 64.dp, height = 64.dp))
+            Box(
+                modifier = Modifier.size(width = 64.dp, height = 64.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                PhotoModeButton(
+                    onClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                        onSelectPhoto()
+                    },
+                )
+            }
 
             DocumentShutterButton(onClick = scannerLauncher::launch)
 
@@ -332,6 +365,25 @@ private fun DocumentImportButton(onClick: () -> Unit) {
             contentDescription = "Import photo",
             tint              = Color.White.copy(alpha = 0.85f),
             modifier          = Modifier.size(22.dp),
+        )
+    }
+}
+
+@Composable
+private fun PhotoModeButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.10f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector        = Icons.Filled.PhotoCamera,
+            contentDescription = "Take a photo",
+            tint               = Color.White.copy(alpha = 0.85f),
+            modifier           = Modifier.size(22.dp),
         )
     }
 }

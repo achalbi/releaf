@@ -36,7 +36,11 @@
  *      surface. Tap fires `takePicture` immediately,
  *      regardless of detection state; the post-processor
  *      falls back to the guide rect as the quad when no
- *      valid detection is in flight.
+ *      valid detection is in flight. The shutter row's
+ *      left slot also hosts a Photo icon that fires
+ *      `onSelectPhoto` so the user can jump into the Photo
+ *      capture surface from inside the card flow (matches
+ *      the same affordance Document mode exposes).
  *
  * Threading: ImageAnalysis runs on a single-thread executor
  * (`STRATEGY_KEEP_ONLY_LATEST` backpressure), the detector
@@ -130,6 +134,15 @@ private const val IDLE_HINT_THRESHOLD_MS = 8_000L
 internal fun BusinessCardCaptureSurface(
     controller: ScanFlowController,
     onDismiss: () -> Unit,
+    /**
+     * Callback fired when the user taps the Photo icon in the
+     * shutter row. Threaded up through [QuickCaptureScreen] so
+     * the coordinator can flip `mode = Photo` and Compose swaps
+     * in [PhotoCaptureSurface]. Defaults to a no-op so callers
+     * that don't host a coordinator (previews, tests) keep
+     * compiling.
+     */
+    onSelectPhoto: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -156,8 +169,9 @@ internal fun BusinessCardCaptureSurface(
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         if (hasCameraPermission) {
             ActiveBusinessCardSurface(
-                controller = controller,
-                onDismiss  = onDismiss,
+                controller    = controller,
+                onDismiss     = onDismiss,
+                onSelectPhoto = onSelectPhoto,
             )
         } else {
             PermissionRationale(
@@ -171,6 +185,7 @@ internal fun BusinessCardCaptureSurface(
 private fun ActiveBusinessCardSurface(
     controller: ScanFlowController,
     onDismiss: () -> Unit,
+    onSelectPhoto: () -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -338,14 +353,30 @@ private fun ActiveBusinessCardSurface(
 
         // Shutter row. Manual fallback — taps fire immediately
         // even when stability isn't met (post-processor falls
-        // back to the guide rect as the quad).
+        // back to the guide rect as the quad). Left slot hosts
+        // the Photo icon so the user can jump into the Photo
+        // capture surface from inside the card flow (matches
+        // the same affordance Document mode exposes). A trailing
+        // 64dp spacer keeps the centre shutter centred against
+        // the leading button.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = QuickInkSpacing.s5, vertical = QuickInkSpacing.s4),
             verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
+            Box(
+                modifier         = Modifier.size(width = 64.dp, height = 64.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                BusinessCardPhotoModeButton(
+                    onClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                        onSelectPhoto()
+                    },
+                )
+            }
             BusinessCardShutterButton(
                 onClick = {
                     view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
@@ -374,6 +405,9 @@ private fun ActiveBusinessCardSurface(
                     }
                 },
             )
+            // Trailing spacer mirrors the leading Photo button slot
+            // so the centre shutter stays geometrically centred.
+            Box(modifier = Modifier.size(width = 64.dp, height = 64.dp))
         }
 
         Spacer(Modifier.size(QuickInkSpacing.s7))
@@ -669,6 +703,25 @@ private fun DetectedQuad.scaled(sx: Float, sy: Float): DetectedQuad = DetectedQu
     br = Point2f(br.x * sx, br.y * sy),
     bl = Point2f(bl.x * sx, bl.y * sy),
 )
+
+@Composable
+private fun BusinessCardPhotoModeButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.10f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector        = Icons.Filled.PhotoCamera,
+            contentDescription = "Take a photo",
+            tint               = Color.White.copy(alpha = 0.85f),
+            modifier           = Modifier.size(22.dp),
+        )
+    }
+}
 
 @Composable
 private fun BusinessCardShutterButton(onClick: () -> Unit) {

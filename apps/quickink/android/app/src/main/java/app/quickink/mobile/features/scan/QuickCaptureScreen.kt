@@ -3,7 +3,7 @@
  *
  * Top-level capture surface. Owns the cross-surface chrome —
  * close button, the Document/Business-Card mode pill — and
- * dispatches the live area below the top bar to one of two
+ * dispatches the live area below the top bar to one of three
  * child surfaces:
  *
  *   [DocumentCaptureSurface]      → the existing ML Kit
@@ -17,13 +17,27 @@
  *                                   overlay and an OpenCV-
  *                                   backed detector that auto-
  *                                   captures on a stable quad.
+ *   [PhotoCaptureSurface]         → a plain single-shot still
+ *                                   camera. No pill slot —
+ *                                   entered transiently via the
+ *                                   bottom-nav ⚡ FAB's long-
+ *                                   press (`initialMode =
+ *                                   CaptureMode.Photo` on this
+ *                                   screen) or via the Photo
+ *                                   icon in the other two
+ *                                   surfaces' shutter rows. The
+ *                                   pill keeps highlighting the
+ *                                   last pill-selected mode
+ *                                   while the photo surface is
+ *                                   up, so tapping a pill flips
+ *                                   back with one tap.
  *
  * Why two surfaces instead of one shared camera session:
  * Document mode is hosted by Google's `GmsDocumentScanning`
  * activity, which owns its own camera in a separate process —
  * we can't share its session with an in-process CameraX preview.
  * The toggle picks the surface; mode-switch latency is dominated
- * by Compose's mount/unmount of one of two child composables,
+ * by Compose's mount/unmount of one of the child composables,
  * which is well under the spec's 100 ms budget.
  *
  * The mode pill lives in the top bar (where the "Capture" title
@@ -59,7 +73,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,18 +97,60 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
 fun QuickCaptureScreen(
     controller: ScanFlowController,
     onDismiss: () -> Unit,
+    /**
+     * Optional override for the starting surface. `null` (the
+     * default) reads `quickink.capture.last_mode` from
+     * SettingsPreferences as before. Passing
+     * [CaptureMode.Photo] lets the bottom-nav ⚡ FAB's long-press
+     * jump straight into the photo surface without disturbing
+     * the user's pill choice — the coordinator below uses a
+     * no-op persist on the `.Photo` branch so the next tap on
+     * the FAB still lands on the previously-selected pill mode
+     * (Document or Business Card).
+     */
+    initialMode: CaptureMode? = null,
 ) {
     val context = LocalContext.current
     val prefs = remember { SettingsPreferences(context) }
 
+    val persistedPillMode = remember { prefs.lastCaptureMode }
+    val startingMode = remember(initialMode) { initialMode ?: persistedPillMode }
+
     // Persisted starting mode. Captured once at composition time
     // (`remember`) so flipping the pill during the session doesn't
     // immediately re-read disk — `coordinator.select(...)` writes
-    // through on every change.
+    // through on every change. Long-press → `.Photo` is transient:
+    // it should NOT overwrite the user's last pill choice. Gate
+    // the persist hook so only pill-eligible modes round-trip to
+    // SettingsPreferences. If the user later flips the pill from
+    // inside this transient surface, that pill-driven `select()`
+    // will land here too and re-persist normally.
     val coordinator = remember {
         CaptureModeCoordinator(
-            initial = prefs.lastCaptureMode,
-            persist = { prefs.lastCaptureMode = it },
+            initial = startingMode,
+            persist = { mode ->
+                if (mode != CaptureMode.Photo) {
+                    prefs.lastCaptureMode = mode
+                }
+            },
+        )
+    }
+
+    // The most recent pill-selected mode (Document or Business
+    // Card — never `.Photo`). Drives the highlighted option in
+    // the top-bar pill. Diverges from `coordinator.mode` when
+    // the user enters `.Photo` transiently via the FAB long-
+    // press or the shutter-row Photo icon: the pill keeps
+    // showing whatever pill choice the user last made, so on
+    // the photo surface the user still sees Document /
+    // Business Card highlighted and can flip back with one tap.
+    // Matches spec test #5 ("top-bar pill should still read
+    // 'Document'") and spec §11 ("the user can switch to
+    // Document mode via the pill without re-granting").
+    var lastPillMode by remember {
+        mutableStateOf(
+            if (persistedPillMode == CaptureMode.Photo) CaptureMode.Document
+            else persistedPillMode
         )
     }
 
@@ -133,9 +191,22 @@ fun QuickCaptureScreen(
             ) {
                 CircleIconButton(icon = Icons.Filled.Close, onClick = onDismiss)
                 Spacer(Modifier.weight(1f))
+                // Pill stays two-wide (Document / Business Card)
+                // AND stays visible on every surface — including
+                // `.Photo`. `current = lastPillMode`, not
+                // `coordinator.mode`, so on the photo surface
+                // the user still sees their previous pill choice
+                // highlighted (per spec test #5) and can flip
+                // back to Document / Business Card with one tap
+                // (per spec §11, which expects the pill to be
+                // available as an escape hatch when camera
+                // permission is denied for photo mode).
                 ModeTogglePill(
-                    current = coordinator.mode,
-                    onSelect = { coordinator.select(it) },
+                    current = lastPillMode,
+                    onSelect = { mode ->
+                        lastPillMode = mode
+                        coordinator.select(mode)
+                    },
                 )
                 Spacer(Modifier.weight(1f))
                 // Matches the 36dp footprint the close button
@@ -144,19 +215,27 @@ fun QuickCaptureScreen(
                 Spacer(Modifier.size(36.dp))
             }
 
-            // Surface dispatch — render exactly one of the two
-            // surfaces; never both. Compose's `if/else` already
-            // disposes the inactive branch's effects, so flipping
-            // the toggle tears down the previous detector +
-            // overlay (or the previous launcher state) without
-            // any explicit cleanup wiring here.
+            // Surface dispatch — render exactly one of the three
+            // surfaces; never two at once. Compose's `when`
+            // already disposes the inactive branches' effects,
+            // so flipping the toggle tears down the previous
+            // detector + overlay (or the previous launcher
+            // state, or the photo CameraX session) without any
+            // explicit cleanup wiring here.
             when (coordinator.mode) {
                 CaptureMode.Document -> DocumentCaptureSurface(
-                    controller = controller,
-                    onDismiss  = onDismiss,
-                    modifier   = Modifier.weight(1f),
+                    controller    = controller,
+                    onDismiss     = onDismiss,
+                    onSelectPhoto = { coordinator.select(CaptureMode.Photo) },
+                    modifier      = Modifier.weight(1f),
                 )
                 CaptureMode.BusinessCard -> BusinessCardCaptureSurface(
+                    controller    = controller,
+                    onDismiss     = onDismiss,
+                    onSelectPhoto = { coordinator.select(CaptureMode.Photo) },
+                    modifier      = Modifier.weight(1f),
+                )
+                CaptureMode.Photo -> PhotoCaptureSurface(
                     controller = controller,
                     onDismiss  = onDismiss,
                     modifier   = Modifier.weight(1f),
@@ -179,6 +258,17 @@ fun QuickCaptureScreen(
  * transition" callout — Compose's `animateColorAsState` handles
  * the actual cross-fade.
  */
+/**
+ * The pill is intentionally two-wide on a 393dp device — three
+ * pills crowd the top bar against the close button and right-slot
+ * spacer. `.Photo` is a transient surface (long-press FAB /
+ * shutter-row icon), so it doesn't take a pill slot. If a third
+ * pill ever ships, the Instagram-style ordering
+ * (Document / Photo / Business Card) reduces accidental
+ * Business-Card taps.
+ */
+private val pillModes: List<CaptureMode> = listOf(CaptureMode.Document, CaptureMode.BusinessCard)
+
 @Composable
 private fun ModeTogglePill(
     current: CaptureMode,
@@ -193,7 +283,7 @@ private fun ModeTogglePill(
             .background(Color.White.copy(alpha = 0.10f))
             .padding(4.dp),
     ) {
-        CaptureMode.values().forEachIndexed { i, m ->
+        pillModes.forEachIndexed { i, m ->
             if (i > 0) Spacer(Modifier.size(4.dp))
             val active = (m == current)
             val bg by animateColorAsState(
