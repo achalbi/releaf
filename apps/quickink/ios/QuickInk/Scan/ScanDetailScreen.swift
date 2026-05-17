@@ -508,14 +508,39 @@ struct ScanDetailScreen: View {
     ///     (pinch-to-zoom comes free).
     /// (3) Pinch-zoomable first-page JPEG fallback when no PDF.
     /// (4) Paper-toned placeholder when nothing is available.
+    /// Resolves the playable video file:// URL for the capture
+    /// when the .mov / .mp4 is locally present. Returns nil when
+    /// the row isn't a video, the URI is empty, or the file isn't
+    /// on disk (e.g. cross-device receive window before the
+    /// binary-restore pass lands the clip).
+    private func playableVideoURL(for capture: CaptureSummary) -> URL? {
+        guard let url = Self.resolvedLocalURL(for: capture.videoUri),
+              FileManager.default.fileExists(atPath: url.path)
+        else { return nil }
+        return url
+    }
+
+    /// Tap handler for the preview block. Routes to the video
+    /// player when the capture has a playable clip, otherwise
+    /// falls through to the fullscreen PDF viewer (the existing
+    /// behaviour for stills / scans / imports).
+    private func handlePreviewTap(for capture: CaptureSummary) {
+        if let url = playableVideoURL(for: capture) {
+            videoPlayerURL = url
+        } else {
+            showFullscreenViewer = true
+        }
+    }
+
     @ViewBuilder
     private func previewBlock(for capture: CaptureSummary) -> some View {
         if let pdfURL = pdfURL(from: capture) {
             if capture.pageCount > 1 {
                 pageTurnViewer(for: pdfURL, capture: capture)
                     .contentShape(Rectangle())
-                    .onTapGesture { showFullscreenViewer = true }
+                    .onTapGesture { handlePreviewTap(for: capture) }
                     .overlay(alignment: .topTrailing) { topRightChips(for: capture) }
+                    .overlay(alignment: .center)    { videoPlayOverlay(for: capture) }
             } else {
                 PDFKitView(
                     url: pdfURL,
@@ -527,8 +552,9 @@ struct ScanDetailScreen: View {
                     .background(QuickInkColors.bg)
                     .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
                     .contentShape(Rectangle())
-                    .onTapGesture { showFullscreenViewer = true }
+                    .onTapGesture { handlePreviewTap(for: capture) }
                     .overlay(alignment: .topTrailing) { topRightChips(for: capture) }
+                    .overlay(alignment: .center)    { videoPlayOverlay(for: capture) }
             }
         } else if let image = loadedPreviewImage(for: capture) {
             Image(uiImage: image)
@@ -564,6 +590,37 @@ struct ScanDetailScreen: View {
             .frame(maxWidth: .infinity)
             .frame(height: 320)
             .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+        }
+    }
+
+    /// Center-aligned circular play button overlaid on the preview
+    /// when the capture is a hold-to-record video with the .mov /
+    /// .mp4 locally available. Visual hint that "this is playable"
+    /// + a tap target that opens the full-screen player. Skipped
+    /// when the row isn't a video OR when the video file hasn't
+    /// been downloaded yet (the Video pending card below the
+    /// preview tells the user it's on its way).
+    @ViewBuilder
+    private func videoPlayOverlay(for capture: CaptureSummary) -> some View {
+        if let url = playableVideoURL(for: capture) {
+            Button(action: { videoPlayerURL = url }) {
+                ZStack {
+                    Circle()
+                        .fill(Color.black.opacity(0.55))
+                        .frame(width: 72, height: 72)
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(.white)
+                        // Pull the icon ~3pt right so the visual
+                        // centre of the triangle lands on the
+                        // disc's geometric centre (Apple's play
+                        // glyph is left-weighted).
+                        .offset(x: 3)
+                }
+                .shadow(color: Color.black.opacity(0.35), radius: 12, x: 0, y: 4)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Play recorded video")
         }
     }
 
@@ -933,9 +990,10 @@ struct ScanDetailScreen: View {
 
     // MARK: - Video card
 
-    /// Decides which (if any) video-related card to render based
-    /// on the local file + Drive id pair. See `body` for the
-    /// three-state contract.
+    /// Decides whether to render the "video is downloading"
+    /// placeholder below the preview. The playable case is now
+    /// surfaced via a play-button overlay on the preview itself
+    /// (`videoPlayOverlay`) — no second card needed.
     @ViewBuilder
     private func videoCardSection(for capture: CaptureSummary) -> some View {
         let localURL = Self.resolvedLocalURL(for: capture.videoUri)
@@ -945,9 +1003,7 @@ struct ScanDetailScreen: View {
         let hasDriveId = !(capture.videoDriveFileId?
                             .trimmingCharacters(in: .whitespaces) ?? "").isEmpty
 
-        if hasLocal, let url = localURL {
-            videoCard(url: url)
-        } else if hasDriveId {
+        if !hasLocal, hasDriveId {
             videoPendingCard
         }
     }
@@ -961,49 +1017,13 @@ struct ScanDetailScreen: View {
         return URL(fileURLWithPath: raw)
     }
 
-    /// Real "Play recorded clip" card — fires when the .mov / .mp4
-    /// is already on disk. Tap launches the AVPlayer sheet.
-    @ViewBuilder
-    private func videoCard(url: URL) -> some View {
-        Button {
-            videoPlayerURL = url
-        } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                videoCardHeader
-
-                HStack(spacing: QuickInkSpacing.s3) {
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 32))
-                        .foregroundStyle(QuickInkColors.accent)
-                    Text("Play recorded clip")
-                        .font(QuickInkFont.ui(13, weight: .medium))
-                        .foregroundStyle(QuickInkColors.ink)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(QuickInkColors.muted)
-                }
-                .padding(QuickInkSpacing.s3)
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(QuickInkColors.surface)
-            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                    .stroke(QuickInkColors.border, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Play recorded video clip")
-    }
-
     /// Placeholder card — shown on a receiver device whose row
     /// has a `video_drive_file_id` but whose local .mov / .mp4
     /// hasn't been downloaded yet. The `QuickInkBinarySync`
     /// restore pass fills `video_uri` in on its next run; this
-    /// card flips to the real player automatically on the next
-    /// re-render. Tap is disabled to make clear there's nothing
-    /// to play yet.
+    /// card flips to the play-button overlay on the preview
+    /// automatically on the next re-render. Tap is disabled to
+    /// make clear there's nothing to play yet.
     @ViewBuilder
     private var videoPendingCard: some View {
         VStack(alignment: .leading, spacing: 0) {

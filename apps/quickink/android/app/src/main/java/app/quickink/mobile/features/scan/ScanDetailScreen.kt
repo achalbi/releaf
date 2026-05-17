@@ -47,6 +47,7 @@ import android.widget.MediaController
 import android.widget.VideoView
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarToday
@@ -553,9 +554,25 @@ fun ScanDetailScreen(
                 // to jump; swipe the pager to advance the chip).
                 val isBusinessCard = primaryTagName
                     ?.equals("business-card", ignoreCase = true) == true
+                // Playable-video URI for the preview overlay. Non-null
+                // only when the row carries a `video_uri` AND the .mp4
+                // is actually on disk (i.e. either this device produced
+                // it or the binary-restore pass has already pulled it).
+                // The preview's fullscreen tap reroutes to the video
+                // player when this is set; the play-button overlay
+                // below is the visual cue.
+                val playableVideoUri = current.videoUri
+                    ?.takeIf { it.isNotBlank() && localFileExists(it) }
+                Box(modifier = Modifier.fillMaxWidth()) {
                 PreviewImage(
                     capture             = current,
-                    onFullscreenClick   = { showFullscreenViewer = true },
+                    onFullscreenClick   = {
+                        if (playableVideoUri != null) {
+                            videoPlayerUri = playableVideoUri
+                        } else {
+                            showFullscreenViewer = true
+                        }
+                    },
                     onMoreClick         = { moreMenuExpanded = true },
                     moreMenuContent     = {
                         ScanActionsDropdown(
@@ -630,6 +647,34 @@ fun ScanDetailScreen(
                     modifier            = Modifier.padding(horizontal = QuickInkSpacing.s5),
                 )
 
+                // Centred play button on top of the preview — only
+                // when the capture has a locally-playable video. Tap
+                // opens the same VideoPlayerDialog the (now-removed)
+                // standalone "Play recorded clip" card used. The
+                // surrounding preview also routes its tap to the
+                // player when playableVideoUri is set, so either
+                // surface fires the player.
+                if (playableVideoUri != null) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = QuickInkSpacing.s5)
+                            .size(72.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .clickable { videoPlayerUri = playableVideoUri },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector       = Icons.Filled.PlayArrow,
+                            contentDescription = "Play recorded video",
+                            tint              = Color.White,
+                            modifier          = Modifier.size(36.dp),
+                        )
+                    }
+                }
+                } // closes the preview Box
+
                 // Page thumbnails strip (multi-page only)
                 if (current.pageCount > 1) {
                     PageThumbnailsStrip(
@@ -640,36 +685,22 @@ fun ScanDetailScreen(
                     )
                 }
 
-                // Video card — three states, gated on the pair
-                // (video_uri, video_drive_file_id):
-                //
-                //   - Both unset                → no card (this
-                //     capture never had a video).
-                //   - video_uri resolves on disk → real
-                //     "Play recorded clip" card with the
-                //     VideoView dialog launcher.
-                //   - Drive id set but local file not yet here →
-                //     placeholder "Downloading…" card so cross-
-                //     device receivers know the clip is on its
-                //     way (the binary-restore pass fills the URI
-                //     in on the next sync).
+                // Video pending placeholder — only shown on a
+                // receiver device whose row has a
+                // `video_drive_file_id` set but whose local .mp4
+                // hasn't been downloaded yet. The playable case
+                // is surfaced via the play-button overlay on the
+                // preview above (see `playableVideoUri`); no
+                // second card needed.
                 val rawVideoUri = current.videoUri?.takeIf { it.isNotBlank() }
                 val hasLocalVideo = rawVideoUri != null && localFileExists(rawVideoUri)
                 val hasVideoDriveId = !current.videoDriveFileId.isNullOrBlank()
-                val videoModifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = QuickInkSpacing.s5)
-                when {
-                    hasLocalVideo && rawVideoUri != null -> {
-                        VideoCard(
-                            videoUri = rawVideoUri,
-                            onTap    = { videoPlayerUri = rawVideoUri },
-                            modifier = videoModifier,
-                        )
-                    }
-                    hasVideoDriveId -> {
-                        VideoPendingCard(modifier = videoModifier)
-                    }
+                if (!hasLocalVideo && hasVideoDriveId) {
+                    VideoPendingCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = QuickInkSpacing.s5),
+                    )
                 }
 
                 // Details card — full width now that the Actions
@@ -2049,80 +2080,6 @@ private fun VideoPendingCard(modifier: Modifier = Modifier) {
     }
 }
 
-/**
- * Video card. Rendered only when the hold-to-record Photo-mode
- * path produced a re-watchable clip (`video_uri` set on the
- * capture row); every other source leaves the field null and
- * this card is skipped from the detail screen.
- *
- * Tap anywhere on the card to launch the player dialog. The
- * card itself is just a heading strip + "Play recorded clip"
- * row — the heavy lifting (VideoView, controls) lives in the
- * dialog so the detail screen stays scroll-friendly.
- */
-@Composable
-private fun VideoCard(
-    videoUri: String,
-    onTap: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalQuickInkColors.current
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(QuickInkRadius.md))
-            .background(colors.surface)
-            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
-            .clickable(onClick = onTap),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier          = Modifier
-                .fillMaxWidth()
-                .background(colors.borderSoft)
-                .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
-        ) {
-            Icon(
-                imageVector       = Icons.Filled.PlayCircle,
-                contentDescription = null,
-                tint              = colors.inkSoft,
-                modifier          = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.size(QuickInkSpacing.s2))
-            Text(
-                text       = "Video",
-                fontSize   = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color      = colors.ink,
-            )
-            Spacer(Modifier.weight(1f))
-        }
-        Row(
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
-            modifier              = Modifier.padding(QuickInkSpacing.s3),
-        ) {
-            Icon(
-                imageVector       = Icons.Filled.PlayCircle,
-                contentDescription = null,
-                tint              = colors.accent,
-                modifier          = Modifier.size(32.dp),
-            )
-            Text(
-                text       = "Play recorded clip",
-                fontSize   = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color      = colors.ink,
-            )
-            Spacer(Modifier.weight(1f))
-            Icon(
-                imageVector       = Icons.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint              = colors.muted,
-                modifier          = Modifier.size(16.dp),
-            )
-        }
-    }
-}
 
 @Composable
 private fun NotesCard(
