@@ -148,9 +148,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.nio.ByteBuffer
 import java.util.concurrent.ExecutorService
@@ -198,12 +201,33 @@ internal fun PhotoCaptureSurface(
         )
     }
     val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-    ) { granted -> hasCameraPermission = granted }
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) { results ->
+        hasCameraPermission = results[Manifest.permission.CAMERA] == true
+        // The mic result is informational — we don't gate on it.
+        // Hold-to-record will produce a video-only .mp4 when the
+        // user denies microphone access; the voice-note transcription
+        // simply doesn't fire downstream.
+    }
 
     LaunchedEffect(Unit) {
-        if (!hasCameraPermission) {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
+        // Request CAMERA + RECORD_AUDIO together so the hold-to-
+        // record path captures audio for the voice-note
+        // transcription pipeline. CAMERA gates the surface
+        // entirely; RECORD_AUDIO is opportunistic — denying it
+        // still lets the user take stills + silent video.
+        val needsCamera = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.CAMERA,
+        ) != PackageManager.PERMISSION_GRANTED
+        val needsMic = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.RECORD_AUDIO,
+        ) != PackageManager.PERMISSION_GRANTED
+        val toRequest = buildList {
+            if (needsCamera) add(Manifest.permission.CAMERA)
+            if (needsMic) add(Manifest.permission.RECORD_AUDIO)
+        }
+        if (toRequest.isNotEmpty()) {
+            permissionLauncher.launch(toRequest.toTypedArray())
         }
     }
 
@@ -212,7 +236,11 @@ internal fun PhotoCaptureSurface(
             ActivePhotoSurface(controller = controller, userId = userId, onDismiss = onDismiss)
         } else {
             PhotoPermissionRationale(
-                onRequest = { permissionLauncher.launch(Manifest.permission.CAMERA) },
+                onRequest = {
+                    permissionLauncher.launch(
+                        arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO),
+                    )
+                },
             )
         }
     }
@@ -428,6 +456,7 @@ private fun ActivePhotoSurface(
                                     recordingStartedAtElapsed = SystemClock.elapsedRealtime()
                                     view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                                     uiState = PhotoUiState.Recording(elapsedMs = 0)
+                                    android.util.Log.i("PhotoCapture", "video recording started")
                                 }
                                 is VideoRecordEvent.Finalize -> {
                                     val file = pendingVideoFile
@@ -451,9 +480,18 @@ private fun ActivePhotoSurface(
                                         return@start
                                     }
                                     if (file == null || !file.exists() || file.length() == 0L) {
+                                        android.util.Log.w(
+                                            "PhotoCapture",
+                                            "video Finalize produced no usable file " +
+                                                "(exists=${file?.exists()}, size=${file?.length()})",
+                                        )
                                         uiState = PhotoUiState.Preview
                                         return@start
                                     }
+                                    android.util.Log.i(
+                                        "PhotoCapture",
+                                        "video recording finalized — ${file.length()}B at ${file.absolutePath}",
+                                    )
                                     uiState = PhotoUiState.Processing
                                     processingScope.launch {
                                         // Note: pass the file through verbatim
@@ -1085,13 +1123,29 @@ private suspend fun commitCapture(
         )
     }
 
-    // `onScanComplete` materialises the captureId synchronously
-    // on its state. Read it back, then insert the voice-note row
-    // and pin the video URI BEFORE returning — the
-    // `VoiceNoteCapturePane` downstream sees an existing row on
-    // its first query and auto-advances, and the detail screen's
-    // first observation already sees the video pinned to the row.
-    val captureId = (controller.state.value as? ScanFlowController.State.Recognizing)?.captureId
+    // The Android controller's `onScanComplete` fires-and-
+    // forgets a coroutine that calls `insertCapture` BEFORE
+    // publishing `State.Recognizing`. So reading
+    // `controller.state.value` immediately after the call
+    // returns gives us `State.Idle` — the captureId isn't on
+    // the state yet. Wait for the controller's state to
+    // transition to `Recognizing`, which guarantees the parent
+    // row has landed in Room and our follow-up `setVideoUri` /
+    // voice-note INSERT can target it without an FK violation
+    // or a 0-rows-affected silent loss. Cap the wait at 8s so
+    // a stuck controller doesn't strand the user.
+    val captureId = withTimeoutOrNull(8_000L) {
+        controller.state
+            .filterIsInstance<ScanFlowController.State.Recognizing>()
+            .first()
+            .captureId
+    }
+    if (captureId == null) {
+        android.util.Log.w(
+            "PhotoCapture",
+            "commitCapture: timed out waiting for State.Recognizing — video / voice note skipped",
+        )
+    }
     if (captureId != null) {
         if (audioUri != null && durationMs != null) {
             val row = runCatching {
@@ -1116,8 +1170,19 @@ private suspend fun commitCapture(
             }
         }
         if (videoUri != null) {
-            runCatching {
+            val outcome = runCatching {
                 captureRepo.setVideoUri(captureId, videoUri.toString())
+            }
+            if (outcome.isSuccess) {
+                android.util.Log.i(
+                    "PhotoCapture",
+                    "commitCapture: setVideoUri ok captureId=${captureId.take(8)}… uri=$videoUri",
+                )
+            } else {
+                android.util.Log.w(
+                    "PhotoCapture",
+                    "commitCapture: setVideoUri failed: ${outcome.exceptionOrNull()}",
+                )
             }
         }
     }

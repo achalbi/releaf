@@ -512,14 +512,18 @@ private struct ActivePhotoSurface: View {
             source:     "photo",
             paperSize:  .custom,
         )
-        // `onScanComplete` flips the controller into
-        // `.recognizing` synchronously, so the captureId is
-        // already on the state object by the time we read it
-        // back. Insert the voice note + pin the video URL
-        // BEFORE dismissing so the `VoiceNoteCapturePane`
-        // downstream sees an existing row on its first query
-        // and the detail screen's first observation already
-        // sees the video pinned to the row.
+        // `onScanComplete` on iOS flips state to `.recognizing`
+        // SYNCHRONOUSLY but defers the actual
+        // `insertCapture(...)` write behind an
+        // `await captureLocationIfEnabled()` inside the
+        // controller's activeTask, which can suspend for 0-2s
+        // while the GPS fix lands. If we ran `setVideoUri` /
+        // the voice-note INSERT against the captureId
+        // immediately, the UPDATE would target a non-existent
+        // row (0 rows affected → silently lost) and the voice
+        // note's FK to captures would fail with
+        // `SQLITE_CONSTRAINT`. Poll for the row to exist
+        // (capped at 8s) before doing the dependent writes.
         let captureId: String? = {
             if case .recognizing(let id, _, _) = controller.state { return id }
             return nil
@@ -530,24 +534,60 @@ private struct ActivePhotoSurface: View {
         let pendingUserId   = userId
         Task {
             if let captureId = captureId {
-                if let audioURL = pendingAudioURL,
-                   let duration = pendingDuration {
-                    await Self.attachVoiceNote(
-                        captureId:    captureId,
-                        userId:       pendingUserId,
-                        audioFileURL: audioURL,
-                        durationMs:   duration,
-                    )
+                let landed = await Self.waitForCaptureRow(id: captureId, timeoutMs: 8_000)
+                if landed {
+                    if let audioURL = pendingAudioURL,
+                       let duration = pendingDuration {
+                        await Self.attachVoiceNote(
+                            captureId:    captureId,
+                            userId:       pendingUserId,
+                            audioFileURL: audioURL,
+                            durationMs:   duration,
+                        )
+                    }
+                    if let videoURL = pendingVideoURL {
+                        do {
+                            try await CaptureRepository().setVideoUri(
+                                captureId: captureId,
+                                videoUri:  videoURL.absoluteString,
+                            )
+                            NSLog("[PhotoCapture] setVideoUri ok captureId=%@ uri=%@",
+                                  captureId, videoURL.absoluteString)
+                        } catch {
+                            NSLog("[PhotoCapture] setVideoUri failed: %@", "\(error)")
+                        }
+                    }
+                } else {
+                    NSLog("[PhotoCapture] waitForCaptureRow timed out for captureId=%@ — " +
+                          "video / voice note skipped", captureId)
                 }
-                if let videoURL = pendingVideoURL {
-                    try? await CaptureRepository().setVideoUri(
-                        captureId: captureId,
-                        videoUri:  videoURL.absoluteString,
-                    )
-                }
+            } else {
+                NSLog("[PhotoCapture] no captureId on state after onScanComplete — " +
+                      "video / voice note skipped")
             }
             await MainActor.run { onDismiss() }
         }
+    }
+
+    /// Poll `captures` until the row with `id` exists OR the
+    /// timeout elapses. Used by `commit` to wait out the race
+    /// between `onScanComplete` flipping state to `.recognizing`
+    /// and the controller's deferred `insertCapture` actually
+    /// landing the row. 100ms cadence is fast enough that a
+    /// typical 50-150ms `insertCapture` window is caught on the
+    /// first poll, and bounded enough that an 8s timeout costs
+    /// at most ~80 cheap reads.
+    private static func waitForCaptureRow(id: String, timeoutMs: Int) async -> Bool {
+        let pollMs = 100
+        var elapsed = 0
+        let repo = CaptureRepository()
+        while elapsed < timeoutMs {
+            let exists: Bool = (try? await repo.exists(captureId: id)) ?? false
+            if exists { return true }
+            try? await Task.sleep(nanoseconds: UInt64(pollMs * 1_000_000))
+            elapsed += pollMs
+        }
+        return false
     }
 
     /// Persist the extracted audio as a voice note attached to
@@ -1036,6 +1076,8 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
             pendingVideoURL = nil
             try? FileManager.default.removeItem(at: outputFileURL)
         }
+        let cacheSize = (try? FileManager.default.attributesOfItem(atPath: outputFileURL.path)[.size] as? Int) ?? 0
+        NSLog("[PhotoCapture] handleVideo cache=%@ size=%dB", outputFileURL.path, cacheSize)
         let asset = AVURLAsset(url: outputFileURL)
         let firstFrame = await Self.extractFirstFrame(from: asset)
         let durationMs = Int((CMTimeGetSeconds(asset.duration) * 1000.0).rounded())
@@ -1049,6 +1091,11 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
         // it the page (first frame) and voice note (audio) survive
         // but the user can't re-watch the full clip.
         let videoURL = Self.persistVideo(from: outputFileURL)
+        NSLog("[PhotoCapture] handleVideo persisted firstFrame=%@ audio=%@ video=%@ duration=%dms",
+              firstFrame == nil ? "nil" : "ok",
+              audioURL?.absoluteString ?? "nil",
+              videoURL?.absoluteString ?? "nil",
+              durationMs)
 
         guard let image = firstFrame else {
             // No frames at all (very short or malformed recording)

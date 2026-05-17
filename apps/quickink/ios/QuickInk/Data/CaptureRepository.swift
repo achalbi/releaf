@@ -250,6 +250,24 @@ public final class CaptureRepository: @unchecked Sendable {
         }
     }
 
+    /// Cheap existence check for the parent capture row. Used by
+    /// the Photo-mode commit path to wait out the race between
+    /// `ScanFlowController.onScanComplete` (which flips state to
+    /// `.recognizing` synchronously but defers `insertCapture`
+    /// behind an `await captureLocationIfEnabled()` that takes
+    /// 0-2s) and our follow-up `setVideoUri` / voice-note INSERT
+    /// against the new row's id.
+    public func exists(captureId: String) async throws -> Bool {
+        try await dbQueue.read { db in
+            let count = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM captures WHERE id = ? LIMIT 1",
+                arguments: [captureId],
+            ) ?? 0
+            return count > 0
+        }
+    }
+
     /// Pin a file:// URI for the raw video that produced this
     /// capture — only set by the hold-to-record path in
     /// `PhotoCaptureSurface` once the .mov / .mp4 has been
