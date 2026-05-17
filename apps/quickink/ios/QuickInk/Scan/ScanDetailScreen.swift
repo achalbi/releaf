@@ -10,6 +10,8 @@
  */
 
 import SwiftUI
+import AVFoundation
+import AVKit
 import Combine
 import GRDB
 import PDFKit
@@ -50,6 +52,10 @@ struct ScanDetailScreen: View {
     /// Set true by the overlay button on the inline preview; cleared
     /// by the cover's close affordance or a system back-swipe.
     @State private var showFullscreenViewer = false
+    /// Set true by the "Play video" CTA on the video card. Cleared
+    /// when the user dismisses the player sheet. Only ever non-nil
+    /// for hold-to-record Photo-mode captures (video_uri set).
+    @State private var videoPlayerURL: URL? = nil
     /// Selected page index for the thumbnail strip (0-based). Drives
     /// the highlighted thumbnail and which page is shown in the
     /// preview. Defaults to 0 (first page).
@@ -151,6 +157,16 @@ struct ScanDetailScreen: View {
                         // Page thumbnails strip (only when multi-page)
                         if capture.pageCount > 1 {
                             pageThumbnailsStrip(for: capture)
+                        }
+
+                        // Video card — only rendered when the
+                        // hold-to-record Photo-mode path produced
+                        // a re-watchable clip (video_uri set). Tap
+                        // opens a full-screen AVPlayer sheet.
+                        if let raw = capture.videoUri?.trimmingCharacters(in: .whitespaces),
+                           !raw.isEmpty {
+                            videoCard(videoUri: raw)
+                                .padding(.horizontal, QuickInkSpacing.s5)
                         }
 
                         // Details card — full width now that the
@@ -424,6 +440,15 @@ struct ScanDetailScreen: View {
         // walks through before the share sheet. Crop + pencil per
         // page; Done writes the edited images to temp files and
         // hands them to the share sheet above.
+        // Photo-mode hold-to-record clip player. Renders a
+        // standard AVKit `VideoPlayer` in a sheet; closes via
+        // swipe-down or the system Done button.
+        .sheet(item: Binding(
+            get: { videoPlayerURL.map { IdentifiedURL(url: $0) } },
+            set: { videoPlayerURL = $0?.url }
+        )) { wrapper in
+            CaptureVideoPlayerSheet(url: wrapper.url)
+        }
         .fullScreenCover(item: $pendingEditorBundle) { bundle in
             ImageEditorScreen(
                 pages: bundle.pages,
@@ -897,6 +922,64 @@ struct ScanDetailScreen: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Page \(index + 1)\(isSelected ? ", selected" : "")")
+    }
+
+    // MARK: - Video card
+
+    /// Video card. Rendered only when the hold-to-record Photo-mode
+    /// path produced a re-watchable clip — every other capture
+    /// source leaves `video_uri` nil and this branch is skipped
+    /// from `body`. Tap anywhere on the card to open a full-screen
+    /// `AVPlayer` sheet.
+    @ViewBuilder
+    private func videoCard(videoUri: String) -> some View {
+        let url: URL? = {
+            if let parsed = URL(string: videoUri), parsed.isFileURL { return parsed }
+            return URL(fileURLWithPath: videoUri)
+        }()
+        Button {
+            videoPlayerURL = url
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: QuickInkSpacing.s2) {
+                    Image(systemName: "play.rectangle.fill")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(QuickInkColors.inkSoft)
+                    Text("Video")
+                        .font(QuickInkFont.ui(13, weight: .semibold))
+                        .foregroundStyle(QuickInkColors.ink)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, QuickInkSpacing.s3)
+                .padding(.vertical, QuickInkSpacing.s2)
+                .background(QuickInkColors.borderSoft)
+
+                HStack(spacing: QuickInkSpacing.s3) {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(QuickInkColors.accent)
+                    Text("Play recorded clip")
+                        .font(QuickInkFont.ui(13, weight: .medium))
+                        .foregroundStyle(QuickInkColors.ink)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(QuickInkColors.muted)
+                }
+                .padding(QuickInkSpacing.s3)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(QuickInkColors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                    .stroke(QuickInkColors.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(url == nil)
+        .accessibilityLabel("Play recorded video clip")
     }
 
     // MARK: - Details card
@@ -1479,7 +1562,7 @@ struct ScanDetailScreen: View {
                            created_at, source, latitude, longitude,
                            locality, sub_locality, address, notes,
                            folder_id, last_opened_at, last_opened_page,
-                           last_opened_device
+                           last_opened_device, video_uri
                     FROM captures
                     WHERE id = ? AND deleted_at IS NULL
                     LIMIT 1
@@ -1635,6 +1718,49 @@ private struct IdentifiedForm: Identifiable {
 private struct IdentifiedURLs: Identifiable {
     let id = UUID()
     let urls: [URL]
+}
+
+/// Identifiable wrapper around the video-clip URL for the player
+/// sheet. Used so `.sheet(item:)` re-presents on a fresh `videoUri`
+/// even when the underlying string is identical to the previous
+/// presentation.
+private struct IdentifiedURL: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+/// Full-screen video player sheet for the hold-to-record Photo-mode
+/// clip. Wraps AVKit's `VideoPlayer` (iOS 14+) with a dark
+/// background and a system-style header so the player feels at
+/// home in the detail screen. AVKit handles play/pause/scrub
+/// controls automatically.
+private struct CaptureVideoPlayerSheet: View {
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Color.white.opacity(0.15))
+                            .clipShape(Circle())
+                    }
+                    .accessibilityLabel("Close video player")
+                    .padding(QuickInkSpacing.s4)
+                }
+                AVKit.VideoPlayer(player: AVPlayer(url: url))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
 }
 
 /// Identifiable wrapper around the rasterised pages so the

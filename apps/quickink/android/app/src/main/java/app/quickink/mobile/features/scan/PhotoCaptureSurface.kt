@@ -133,6 +133,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import app.quickink.mobile.QuickInkApp
+import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.voicenote.SpeechTranscriber
 import app.quickink.mobile.data.voicenote.TranscribeResult
 import app.quickink.mobile.data.voicenote.VoiceNoteRepository
@@ -230,9 +231,16 @@ private sealed interface CapturedBuffer {
     val file: File
 
     data class Still(override val image: Bitmap, override val file: File) : CapturedBuffer
+    /**
+     * Hold-to-record result. [videoFile] is the raw .mp4 that gets
+     * promoted into AttachmentStorage at commit time so the detail
+     * screen can re-play it; [audioFile] is the extracted audio
+     * track for the voice-note transcription pipeline.
+     */
     data class Video(
         override val image: Bitmap,
         override val file: File,
+        val videoFile: File,
         val audioFile: File?,
         val durationMs: Long,
     ) : CapturedBuffer
@@ -267,6 +275,14 @@ private fun ActivePhotoSurface(
     val recorderExecutor = remember { ContextCompat.getMainExecutor(context) }
     val app = context.applicationContext as QuickInkApp
     val repo = remember(app) { VoiceNoteRepository(app.database.voiceNoteDao()) }
+    val captureRepo = remember(app) {
+        CaptureRepository(
+            captureDao    = app.database.captureDao(),
+            ocrResultDao  = app.database.ocrResultDao(),
+            tagDao        = app.database.tagDao(),
+            captureTagDao = app.database.captureTagDao(),
+        )
+    }
 
     var uiState by remember { mutableStateOf<PhotoUiState>(PhotoUiState.Preview) }
     var commitError by remember { mutableStateOf<String?>(null) }
@@ -285,7 +301,10 @@ private fun ActivePhotoSurface(
             // backgroundScope intentionally NOT cancelled — the
             // transcription job needs to outlive the surface.
             (uiState as? PhotoUiState.Captured)?.let { st ->
-                (st.buffer as? CapturedBuffer.Video)?.audioFile?.delete()
+                (st.buffer as? CapturedBuffer.Video)?.let { v ->
+                    v.audioFile?.delete()
+                    v.videoFile.delete()
+                }
                 st.buffer.file.delete()
             }
             pendingVideoFile?.delete()
@@ -437,10 +456,23 @@ private fun ActivePhotoSurface(
                                     }
                                     uiState = PhotoUiState.Processing
                                     processingScope.launch {
+                                        // Note: pass the file through verbatim
+                                        // so `processVideoBuffer` can extract
+                                        // first frame + audio AND hand back
+                                        // the .mp4 path itself for promotion
+                                        // to AttachmentStorage on commit.
                                         val processed = withContext(Dispatchers.IO) {
                                             processVideoBuffer(context, file)
                                         }
-                                        file.delete()
+                                        // file is preserved when processed
+                                        // is non-null — it becomes the
+                                        // `videoFile` member that commit()
+                                        // copies into AttachmentStorage and
+                                        // deletes afterwards. On failure
+                                        // (processed == null) clean up here.
+                                        if (processed == null) {
+                                            file.delete()
+                                        }
                                         withContext(Dispatchers.Main) {
                                             uiState = if (processed != null) {
                                                 PhotoUiState.Captured(processed)
@@ -467,7 +499,10 @@ private fun ActivePhotoSurface(
                 isCommitting = isCommitting,
                 onRetake = {
                     commitError = null
-                    (captured.buffer as? CapturedBuffer.Video)?.audioFile?.delete()
+                    (captured.buffer as? CapturedBuffer.Video)?.let { v ->
+                        v.audioFile?.delete()
+                        v.videoFile.delete()
+                    }
                     captured.buffer.file.delete()
                     uiState = PhotoUiState.Preview
                 },
@@ -480,6 +515,7 @@ private fun ActivePhotoSurface(
                                 userId         = userId,
                                 controller     = controller,
                                 repo           = repo,
+                                captureRepo    = captureRepo,
                                 buffer         = captured.buffer,
                                 backgroundScope = backgroundScope,
                             )
@@ -932,6 +968,7 @@ private fun processVideoBuffer(context: Context, videoFile: File): CapturedBuffe
         return CapturedBuffer.Video(
             image      = firstFrame,
             file       = frameFile,
+            videoFile  = videoFile,
             audioFile  = audioFile,
             durationMs = durationMs,
         )
@@ -1014,6 +1051,7 @@ private suspend fun commitCapture(
     userId: String,
     controller: ScanFlowController,
     repo: VoiceNoteRepository,
+    captureRepo: CaptureRepository,
     buffer: CapturedBuffer,
     backgroundScope: CoroutineScope,
 ): Boolean {
@@ -1024,6 +1062,16 @@ private suspend fun commitCapture(
         runCatching {
             val storedFile = File(AttachmentStorage.directory(context), "${Uuidv7.generate()}.m4a")
             audio.copyTo(storedFile, overwrite = true)
+            Uri.fromFile(storedFile)
+        }.getOrNull()
+    }
+    // Promote the raw .mp4 into AttachmentStorage so the
+    // detail screen can re-play it. The cache copy is deleted
+    // below once the persistent copy lands.
+    val videoUri = (buffer as? CapturedBuffer.Video)?.videoFile?.let { src ->
+        runCatching {
+            val storedFile = File(AttachmentStorage.directory(context), "${Uuidv7.generate()}.mp4")
+            src.copyTo(storedFile, overwrite = true)
             Uri.fromFile(storedFile)
         }.getOrNull()
     }
@@ -1039,34 +1087,46 @@ private suspend fun commitCapture(
 
     // `onScanComplete` materialises the captureId synchronously
     // on its state. Read it back, then insert the voice-note row
-    // BEFORE returning — the `VoiceNoteCapturePane` downstream
-    // sees an existing row on its first query and auto-advances.
+    // and pin the video URI BEFORE returning — the
+    // `VoiceNoteCapturePane` downstream sees an existing row on
+    // its first query and auto-advances, and the detail screen's
+    // first observation already sees the video pinned to the row.
     val captureId = (controller.state.value as? ScanFlowController.State.Recognizing)?.captureId
-    if (audioUri != null && durationMs != null && captureId != null) {
-        val row = runCatching {
-            repo.insert(
-                captureId  = captureId,
-                userId     = userId,
-                audioUri   = audioUri.toString(),
-                durationMs = durationMs,
-            )
-        }.getOrNull()
-        if (row != null) {
-            backgroundScope.launch(Dispatchers.IO) {
-                val transcribe = runCatching {
-                    SpeechTranscriber.transcribe(context, audioUri.toString())
-                }.getOrNull()
-                if (transcribe is TranscribeResult.Success) {
-                    runCatching {
-                        repo.setTranscription(row.id, transcribe.text, transcribe.source)
+    if (captureId != null) {
+        if (audioUri != null && durationMs != null) {
+            val row = runCatching {
+                repo.insert(
+                    captureId  = captureId,
+                    userId     = userId,
+                    audioUri   = audioUri.toString(),
+                    durationMs = durationMs,
+                )
+            }.getOrNull()
+            if (row != null) {
+                backgroundScope.launch(Dispatchers.IO) {
+                    val transcribe = runCatching {
+                        SpeechTranscriber.transcribe(context, audioUri.toString())
+                    }.getOrNull()
+                    if (transcribe is TranscribeResult.Success) {
+                        runCatching {
+                            repo.setTranscription(row.id, transcribe.text, transcribe.source)
+                        }
                     }
                 }
+            }
+        }
+        if (videoUri != null) {
+            runCatching {
+                captureRepo.setVideoUri(captureId, videoUri.toString())
             }
         }
     }
     // Clean up the per-capture cache files now that the
     // canonical AttachmentStorage copies own the data.
     buffer.file.delete()
-    (buffer as? CapturedBuffer.Video)?.audioFile?.delete()
+    (buffer as? CapturedBuffer.Video)?.let { v ->
+        v.audioFile?.delete()
+        v.videoFile.delete()
+    }
     return true
 }

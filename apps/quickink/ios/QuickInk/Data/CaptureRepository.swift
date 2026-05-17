@@ -250,6 +250,24 @@ public final class CaptureRepository: @unchecked Sendable {
         }
     }
 
+    /// Pin a file:// URI for the raw video that produced this
+    /// capture — only set by the hold-to-record path in
+    /// `PhotoCaptureSurface` once the .mov / .mp4 has been
+    /// promoted from cache into AttachmentStorage. The detail
+    /// screen reads this back to render the inline player.
+    /// Nullable — pass `nil` to clear (e.g. on a user delete of
+    /// the video without deleting the parent capture).
+    public func setVideoUri(captureId: String, videoUri: String?) async throws {
+        let now = IsoClock.nowIso()
+        try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE captures
+                SET video_uri = ?, updated_at = ?, dirty = 1
+                WHERE id = ?
+                """, arguments: [videoUri, now, captureId])
+        }
+    }
+
     /// Backfill the reverse-geocoded place name + full address on a
     /// capture whose coordinates landed without them at scan time
     /// (rate-limited CLGeocoder, no network, or a remote area the

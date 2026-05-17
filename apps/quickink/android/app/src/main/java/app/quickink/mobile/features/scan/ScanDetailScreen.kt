@@ -43,10 +43,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import android.widget.MediaController
+import android.widget.VideoView
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
@@ -63,6 +68,10 @@ import app.quickink.mobile.features.scan.businesscard.AddContactReviewSheet
 import app.quickink.mobile.features.scan.businesscard.launchAddContactIntent
 import app.quickink.mobile.features.scan.businesscard.runBusinessCardExtraction
 import app.releaf.shared.scan.businesscard.ExtractedContact
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -180,6 +189,10 @@ fun ScanDetailScreen(
     // the inline preview; cleared by the dialog's close affordance or
     // the back press.
     var showFullscreenViewer by remember(captureId) { mutableStateOf(false) }
+    // Set to a non-null URI by the "Play" CTA on the video card.
+    // Cleared by the dialog's dismiss affordance. Only ever non-null
+    // for hold-to-record Photo-mode captures (video_uri set).
+    var videoPlayerUri by remember(captureId) { mutableStateOf<String?>(null) }
     // More-actions dropdown anchored to the ellipsis chip beside the
     // fullscreen chip on the preview. Holds the actions that used to
     // live in the inline Actions card.
@@ -627,6 +640,20 @@ fun ScanDetailScreen(
                     )
                 }
 
+                // Video card — only when the hold-to-record Photo-
+                // mode path produced a re-watchable clip
+                // (video_uri set). Tap to launch the inline
+                // ExoPlayer-style VideoView dialog.
+                current.videoUri?.takeIf { it.isNotBlank() }?.let { uri ->
+                    VideoCard(
+                        videoUri = uri,
+                        onTap    = { videoPlayerUri = uri },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = QuickInkSpacing.s5),
+                    )
+                }
+
                 // Details card — full width now that the Actions
                 // card has moved to the more-menu dropdown anchored
                 // beside the fullscreen chip on the preview.
@@ -1010,6 +1037,18 @@ fun ScanDetailScreen(
                 showFullscreenViewer = false
             }
         }
+    }
+
+    // Hold-to-record video clip player. Renders the canonical
+    // .mp4 via a stock Android `VideoView` + `MediaController`
+    // inside a full-screen dialog. Dismiss tears down the
+    // VideoView so the MediaPlayer releases its surface.
+    val playingUri = videoPlayerUri
+    if (playingUri != null) {
+        VideoPlayerDialog(
+            videoUri  = playingUri,
+            onDismiss = { videoPlayerUri = null },
+        )
     }
 
     // Business Card review sheet — opens once `runBusinessCard-
@@ -1866,6 +1905,140 @@ private fun PageThumbnailsStrip(
  * column (the transcript editor appends), so this card surfaces
  * content from both surfaces.
  */
+/**
+ * Full-screen dialog wrapping a stock Android `VideoView` for
+ * the hold-to-record Photo-mode clip. The VideoView's own
+ * `MediaController` handles play / pause / scrub; we attach it
+ * once on construction and seek to 0 + start so the clip auto-
+ * plays on present.
+ */
+@Composable
+private fun VideoPlayerDialog(videoUri: String, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties       = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress      = true,
+            dismissOnClickOutside   = false,
+        ),
+    ) {
+        Box(
+            modifier         = Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+            contentAlignment = Alignment.Center,
+        ) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory  = { ctx ->
+                    VideoView(ctx).apply {
+                        setVideoURI(Uri.parse(videoUri))
+                        val controller = MediaController(ctx)
+                        controller.setAnchorView(this)
+                        setMediaController(controller)
+                        setOnPreparedListener { mp -> mp.start() }
+                    }
+                },
+            )
+            // Top-right close affordance — the MediaController has
+            // its own pause/play but no exit, so render a small
+            // circular X over the player.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(QuickInkSpacing.s4)
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.15f))
+                    .clickable(onClick = onDismiss),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector       = Icons.Outlined.Close,
+                    contentDescription = "Close video player",
+                    tint              = Color.White,
+                    modifier          = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Video card. Rendered only when the hold-to-record Photo-mode
+ * path produced a re-watchable clip (`video_uri` set on the
+ * capture row); every other source leaves the field null and
+ * this card is skipped from the detail screen.
+ *
+ * Tap anywhere on the card to launch the player dialog. The
+ * card itself is just a heading strip + "Play recorded clip"
+ * row — the heavy lifting (VideoView, controls) lives in the
+ * dialog so the detail screen stays scroll-friendly.
+ */
+@Composable
+private fun VideoCard(
+    videoUri: String,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalQuickInkColors.current
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
+            .clickable(onClick = onTap),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier          = Modifier
+                .fillMaxWidth()
+                .background(colors.borderSoft)
+                .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
+        ) {
+            Icon(
+                imageVector       = Icons.Filled.PlayCircle,
+                contentDescription = null,
+                tint              = colors.inkSoft,
+                modifier          = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s2))
+            Text(
+                text       = "Video",
+                fontSize   = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color      = colors.ink,
+            )
+            Spacer(Modifier.weight(1f))
+        }
+        Row(
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+            modifier              = Modifier.padding(QuickInkSpacing.s3),
+        ) {
+            Icon(
+                imageVector       = Icons.Filled.PlayCircle,
+                contentDescription = null,
+                tint              = colors.accent,
+                modifier          = Modifier.size(32.dp),
+            )
+            Text(
+                text       = "Play recorded clip",
+                fontSize   = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color      = colors.ink,
+            )
+            Spacer(Modifier.weight(1f))
+            Icon(
+                imageVector       = Icons.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint              = colors.muted,
+                modifier          = Modifier.size(16.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun NotesCard(
     notes: String?,

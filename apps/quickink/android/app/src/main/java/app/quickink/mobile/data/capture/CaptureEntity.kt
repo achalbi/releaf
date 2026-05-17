@@ -199,6 +199,18 @@ data class CaptureEntity(
     @ColumnInfo(name = "preview_drive_file_id")
     val previewDriveFileId: String? = null,
 
+    /**
+     * Local file:// URI for the raw video that produced this capture
+     * (hold-to-record Photo-mode path, v22). NULL for every other
+     * source — document scans, business cards, gallery imports, and
+     * the still-tap photo path all land without a video. The detail
+     * screen reads this back to render an inline MediaPlayer / video
+     * card. Nullable + defaulted so existing construction sites keep
+     * compiling.
+     */
+    @ColumnInfo(name = "video_uri")
+    val videoUri: String? = null,
+
     @ColumnInfo(name = "created_at")
     val createdAt: String,
 

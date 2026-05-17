@@ -840,6 +840,23 @@ public final class QuickInkDatabase: @unchecked Sendable {
             try db.execute(sql: "CREATE INDEX idx_story_voice_clip_tombstone ON story_voice_clip (deleted_at) WHERE deleted_at IS NOT NULL")
         }
 
+        // ─── v16_capture_video_uri ──────────────────────────────
+        //
+        // Adds `captures.video_uri` so a hold-to-record Photo-mode
+        // capture can keep the raw .mov / .mp4 as a re-watchable
+        // artifact on the detail screen. NULL = no video (the
+        // common case — every still photo, document scan, business
+        // card capture, and gallery import lands without one). The
+        // file lives in AttachmentStorage alongside the JPEG and
+        // .m4a, so Drive sync rolls it up via the existing binary-
+        // push path once we wire a `videoDriveFileId` in a follow-
+        // up (today the file stays local-only until that ships).
+        //
+        // Mirror of Android Room v22 schema bump.
+        migrator.registerMigration("v16_capture_video_uri") { db in
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN video_uri TEXT")
+        }
+
         return migrator
     }
 }

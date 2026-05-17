@@ -298,6 +298,14 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
     /// note → edit transcript → save appends here). Nullable; absent
     /// on payloads from pre-v15 / pre-v13 clients.
     public let notes: String?
+    /// Local file:// URI for the raw video that produced the capture
+    /// (hold-to-record Photo-mode path, v16). Nil for every other
+    /// source. Today we ship the URI verbatim across devices; the
+    /// receiver won't be able to play it back until a future binary-
+    /// upload pass lands the video on Drive and rewrites this field
+    /// to the per-device cache path on pull (mirrors the pdf_uri /
+    /// preview_uri sync story).
+    public let videoUri: String?
     public let createdAt: String
     public let updatedAt: String
 
@@ -319,6 +327,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         subLocality: String? = nil,
         address: String? = nil,
         notes: String? = nil,
+        videoUri: String? = nil,
         createdAt: String,
         updatedAt: String
     ) {
@@ -339,6 +348,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         self.subLocality = subLocality
         self.address = address
         self.notes = notes
+        self.videoUri = videoUri
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -377,6 +387,10 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         // `notes` landed in v13 (iOS) / Room v15 (Android). Tolerate
         // its absence on older payloads — they read back as nil.
         self.notes              = try c.decodeIfPresent(String.self, forKey: .notes)
+        // `video_uri` landed in v16 (iOS) / Room v22 (Android). Same
+        // back-compat treatment — payloads from older clients read
+        // back as nil.
+        self.videoUri           = try c.decodeIfPresent(String.self, forKey: .videoUri)
         self.createdAt          = try c.decode(String.self, forKey: .createdAt)
         self.updatedAt          = try c.decode(String.self, forKey: .updatedAt)
     }
@@ -399,6 +413,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         case subLocality        = "sub_locality"
         case address
         case notes
+        case videoUri           = "video_uri"
         case createdAt          = "created_at"
         case updatedAt          = "updated_at"
     }

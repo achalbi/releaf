@@ -285,6 +285,22 @@ interface CaptureDao {
     suspend fun setPaperSize(id: String, paperSize: String, timestamp: String)
 
     /**
+     * Pin a file:// URI for the raw video that produced the
+     * capture — only set by the hold-to-record path in
+     * [PhotoCaptureSurface] once the .mp4 has been promoted from
+     * cache into AttachmentStorage. The detail screen reads this
+     * back to render an inline video player. Pass `null` to clear.
+     * Same dirty + updated_at pattern as the other setters so the
+     * change syncs through Drive.
+     */
+    @Query("""
+        UPDATE captures
+        SET video_uri = :videoUri, updated_at = :timestamp, dirty = 1
+        WHERE id = :id
+    """)
+    suspend fun setVideoUri(id: String, videoUri: String?, timestamp: String)
+
+    /**
      * Backfill the reverse-geocoded place name + full address on a
      * capture whose coordinates landed without them at scan time
      * (rate-limited Geocoder, offline, or a remote area the system

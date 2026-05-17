@@ -234,7 +234,7 @@ private struct ActivePhotoSurface: View {
                             .progressViewStyle(.circular)
                             .tint(.white)
                     }
-                case .captured(let image, _, _):
+                case .captured(let image, _, _, _):
                     capturedPreview(image: image)
                 }
             }
@@ -306,7 +306,7 @@ private struct ActivePhotoSurface: View {
             // Small video badge so the user can tell a tap-still
             // from a hold-video at a glance on the Retake/Use Photo
             // screen (the bottom row doesn't disambiguate).
-            if case .captured(_, let audioURL, _) = session.state, audioURL != nil {
+            if case .captured(_, let audioURL, _, _) = session.state, audioURL != nil {
                 HStack(spacing: 4) {
                     Image(systemName: "waveform")
                         .font(.system(size: 11, weight: .semibold))
@@ -499,7 +499,7 @@ private struct ActivePhotoSurface: View {
     /// advances when it sees the pre-attached row, so the user
     /// flows straight to the review screen.
     private func commit() {
-        guard case .captured(let image, let audioURL, let durationMs) = session.state else { return }
+        guard case .captured(let image, let audioURL, let durationMs, let videoURL) = session.state else { return }
         guard let result = ImportArtifacts.build(from: [image]) else {
             commitError = "Couldn't save photo — try again"
             return
@@ -515,26 +515,36 @@ private struct ActivePhotoSurface: View {
         // `onScanComplete` flips the controller into
         // `.recognizing` synchronously, so the captureId is
         // already on the state object by the time we read it
-        // back. Insert the voice note BEFORE dismissing so the
-        // `VoiceNoteCapturePane` downstream sees an existing
-        // row on its first query and auto-advances.
+        // back. Insert the voice note + pin the video URL
+        // BEFORE dismissing so the `VoiceNoteCapturePane`
+        // downstream sees an existing row on its first query
+        // and the detail screen's first observation already
+        // sees the video pinned to the row.
         let captureId: String? = {
             if case .recognizing(let id, _, _) = controller.state { return id }
             return nil
         }()
         let pendingAudioURL = audioURL
         let pendingDuration = durationMs
+        let pendingVideoURL = videoURL
         let pendingUserId   = userId
         Task {
-            if let captureId = captureId,
-               let audioURL  = pendingAudioURL,
-               let duration  = pendingDuration {
-                await Self.attachVoiceNote(
-                    captureId:    captureId,
-                    userId:       pendingUserId,
-                    audioFileURL: audioURL,
-                    durationMs:   duration,
-                )
+            if let captureId = captureId {
+                if let audioURL = pendingAudioURL,
+                   let duration = pendingDuration {
+                    await Self.attachVoiceNote(
+                        captureId:    captureId,
+                        userId:       pendingUserId,
+                        audioFileURL: audioURL,
+                        durationMs:   duration,
+                    )
+                }
+                if let videoURL = pendingVideoURL {
+                    try? await CaptureRepository().setVideoUri(
+                        captureId: captureId,
+                        videoUri:  videoURL.absoluteString,
+                    )
+                }
             }
             await MainActor.run { onDismiss() }
         }
@@ -732,7 +742,7 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
         case recording(elapsedSeconds: Int)
         case capturing
         case processing
-        case captured(UIImage, audioURL: URL?, durationMs: Int?)
+        case captured(UIImage, audioURL: URL?, durationMs: Int?, videoURL: URL?)
 
         /// Equatable conformance — UIImage isn't Equatable by
         /// reference identity, so compare by case only (with
@@ -882,12 +892,19 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
     }
 
     func discardBuffer() {
-        if case .captured(_, let audioURL, _) = state, let audioURL = audioURL {
-            // Best-effort cleanup of the extracted audio file
-            // when the user hits Retake. Commit() copies the
-            // file into the persistent voice-note location, so
-            // this only deletes the cache copy.
-            try? FileManager.default.removeItem(at: audioURL)
+        if case .captured(_, let audioURL, _, let videoURL) = state {
+            // Best-effort cleanup of the AttachmentStorage copies
+            // when the user hits Retake. Commit() leaves the
+            // files in place (the capture row points at them);
+            // this branch only fires when the user explicitly
+            // discards the capture, so blowing the files away
+            // is safe.
+            if let audioURL = audioURL {
+                try? FileManager.default.removeItem(at: audioURL)
+            }
+            if let videoURL = videoURL {
+                try? FileManager.default.removeItem(at: videoURL)
+            }
         }
         state = .preview
     }
@@ -963,7 +980,7 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
             return
         }
         Task { @MainActor in
-            self.state = .captured(image, audioURL: nil, durationMs: nil)
+            self.state = .captured(image, audioURL: nil, durationMs: nil, videoURL: nil)
         }
     }
 
@@ -1008,11 +1025,12 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
     }
 
     /// Extract the first video frame + audio track from the
-    /// recorded .mov, then transition to `.captured` with the
-    /// audio URL pinned for the commit path. The raw .mov gets
-    /// deleted immediately afterwards — we never persist the
-    /// video itself, only its first frame (as the page) and
-    /// its audio (as the voice note).
+    /// recorded .mov, promote the .mov itself into
+    /// AttachmentStorage so the detail screen can play it back
+    /// later, then transition to `.captured` with both URLs
+    /// pinned for the commit path. The cache copy of the .mov
+    /// gets deleted afterwards — the AttachmentStorage copy is
+    /// the canonical artifact from here on.
     private func handleVideo(outputFileURL: URL) async {
         defer {
             pendingVideoURL = nil
@@ -1026,15 +1044,36 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
         // VoiceNoteRepository expects a file:// path it can
         // serve up to the transcriber and sync workers later.
         let audioURL = await Self.extractAudio(from: asset)
+        // Persist the raw .mov into AttachmentStorage too. The
+        // detail screen plays this back via AVPlayer — without
+        // it the page (first frame) and voice note (audio) survive
+        // but the user can't re-watch the full clip.
+        let videoURL = Self.persistVideo(from: outputFileURL)
 
         guard let image = firstFrame else {
             // No frames at all (very short or malformed recording)
             // → drop everything and return to preview.
             if let audioURL = audioURL { try? FileManager.default.removeItem(at: audioURL) }
+            if let videoURL = videoURL { try? FileManager.default.removeItem(at: videoURL) }
             state = .preview
             return
         }
-        state = .captured(image, audioURL: audioURL, durationMs: durationMs)
+        state = .captured(image, audioURL: audioURL, durationMs: durationMs, videoURL: videoURL)
+    }
+
+    /// Copy the raw cache .mov into AttachmentStorage so it
+    /// survives a cache eviction + lines up with the same
+    /// lifecycle every other capture binary follows (Drive
+    /// sync, thumbnails, etc.). Returns nil on copy failure —
+    /// the captured-preview still loads, but the detail screen
+    /// will treat the capture as "no video" on the rare error
+    /// path.
+    private static func persistVideo(from cacheURL: URL) -> URL? {
+        guard let data = try? Data(contentsOf: cacheURL) else { return nil }
+        // `.mov` is what AVCaptureMovieFileOutput hands us;
+        // AttachmentStorage stores it verbatim so AVPlayer plays
+        // back without re-encoding.
+        return AttachmentStorage.write(data, ext: "mov")
     }
 
     /// Pull the first frame of the asset as a `UIImage`. Uses

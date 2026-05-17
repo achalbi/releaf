@@ -116,6 +116,13 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         // story_item_id. iOS GRDB v15_story_voice_clips.
         StoryVoiceClipEntity::class,
     ],
+    // v22 — Adds `captures.video_uri` so the hold-to-record Photo-
+    // mode path can keep the raw .mp4 as a re-watchable artifact
+    // on the detail screen. Mirror of iOS GRDB v16_capture_video_uri.
+    // Nullable string; older rows + every non-Photo capture read
+    // back as null. Room rebuilds destructively under
+    // `fallbackToDestructiveMigration` until real users have data.
+    //
     // v21 — Stories Phase 2. Adds `story_voice_clip` table for
     // inline voice clips attached to a `story_item` of
     // `kind = 'voice_clip'`. Mirror of the existing `voice_notes`
@@ -231,7 +238,7 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // Free-form TEXT, nullable, no index — read pattern is "load the
     // whole field for the detail screen" so a full-text index isn't
     // useful yet.
-    version       = 21,
+    version       = 22,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {

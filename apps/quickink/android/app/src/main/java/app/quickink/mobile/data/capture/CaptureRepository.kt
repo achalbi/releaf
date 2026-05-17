@@ -211,6 +211,15 @@ class CaptureRepository(
     }
 
     /**
+     * Pin the raw-video file:// URI for the capture (hold-to-record
+     * Photo-mode path). Mirrors iOS `CaptureRepository.setVideoUri`.
+     * Pass `null` to clear.
+     */
+    suspend fun setVideoUri(captureId: String, videoUri: String?) {
+        captureDao.setVideoUri(captureId, videoUri, IsoClock.nowIso())
+    }
+
+    /**
      * Stamp a fresh [CapturedLocation] onto an existing capture row
      * — both the locality / sub-locality / address fields and the
      * lat / lon pair, in two DAO writes. Used by

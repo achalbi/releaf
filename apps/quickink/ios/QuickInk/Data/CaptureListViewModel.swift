@@ -78,6 +78,13 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
     /// Workspace v1 — install id of the producing device; reserved
     /// for future cross-device "continue on iPhone" UX.
     public let lastOpenedDevice: String?
+    /// Raw video the hold-to-record Photo-mode path produced, kept
+    /// as a re-watchable artifact on the detail screen (v16). Nil
+    /// for every other source — document scans, business cards,
+    /// gallery imports, and the still-tap photo path all land
+    /// without a video. The detail screen reads this back to
+    /// render an inline `AVPlayer`.
+    public let videoUri: String?
 
     public init(
         id: String,
@@ -97,7 +104,8 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         folderId: String? = nil,
         lastOpenedAt: String? = nil,
         lastOpenedPage: Int? = nil,
-        lastOpenedDevice: String? = nil
+        lastOpenedDevice: String? = nil,
+        videoUri: String? = nil
     ) {
         self.id          = id
         self.title       = title
@@ -117,6 +125,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         self.lastOpenedAt     = lastOpenedAt
         self.lastOpenedPage   = lastOpenedPage
         self.lastOpenedDevice = lastOpenedDevice
+        self.videoUri    = videoUri
     }
 
     public init(from decoder: Decoder) throws {
@@ -154,6 +163,10 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         self.lastOpenedAt     = try c.decodeIfPresent(String.self, forKey: .lastOpenedAt)
         self.lastOpenedPage   = try c.decodeIfPresent(Int.self,    forKey: .lastOpenedPage)
         self.lastOpenedDevice = try c.decodeIfPresent(String.self, forKey: .lastOpenedDevice)
+        // `video_uri` landed in v16. Tolerate SELECTs that don't
+        // request it — they read back as nil. Older rows that
+        // predate the migration also read back as nil.
+        self.videoUri    = try c.decodeIfPresent(String.self, forKey: .videoUri)
     }
 
     public enum CodingKeys: String, CodingKey {
@@ -175,6 +188,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         case lastOpenedAt     = "last_opened_at"
         case lastOpenedPage   = "last_opened_page"
         case lastOpenedDevice = "last_opened_device"
+        case videoUri         = "video_uri"
     }
 }
 

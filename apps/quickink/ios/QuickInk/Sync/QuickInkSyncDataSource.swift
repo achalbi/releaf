@@ -120,6 +120,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                     subLocality:        row["sub_locality"] as String?,
                     address:            row["address"] as String?,
                     notes:              row["notes"] as String?,
+                    videoUri:           row["video_uri"] as String?,
                     createdAt:          row["created_at"],
                     updatedAt:          row["updated_at"]
                 )
@@ -897,13 +898,39 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             return payload.previewUri
         }()
 
+        // `video_uri` carries a file:// path that's only valid on
+        // the source device — same reconcile rule as pdf_uri /
+        // preview_uri. We have no `video_drive_file_id` slot yet
+        // (the binary upload pass for videos is a follow-up), so
+        // until that ships the receiver simply blanks the URI on
+        // cross-device pulls — the JPEG page + audio voice note
+        // both still come through, the video just doesn't.
+        let existingVideoUri: String? = try Row.fetchOne(
+            db,
+            sql: "SELECT video_uri FROM captures WHERE id = ? LIMIT 1",
+            arguments: [payload.id]
+        )?["video_uri"] as String?
+        let resolvedVideoUri: String? = {
+            if let cur = existingVideoUri, Self.fileExistsAt(cur) {
+                return cur
+            }
+            // No video_drive_file_id today — the remote payload's
+            // file:// path won't resolve on this device, so drop
+            // it rather than persisting a dead URI.
+            if let p = payload.videoUri, Self.fileExistsAt(p) {
+                return p
+            }
+            return nil
+        }()
+
         try db.execute(sql: """
             INSERT INTO captures (
                 id, user_id, title, pdf_uri, preview_uri, page_count,
                 source, paper_size, drive_file_id, pdf_drive_file_id, preview_drive_file_id,
                 latitude, longitude, locality, sub_locality, address, notes,
+                video_uri,
                 created_at, updated_at, dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ON CONFLICT(id) DO UPDATE SET
                 user_id               = excluded.user_id,
                 title                 = excluded.title,
@@ -921,6 +948,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 sub_locality          = excluded.sub_locality,
                 address               = excluded.address,
                 notes                 = excluded.notes,
+                video_uri             = excluded.video_uri,
                 updated_at            = excluded.updated_at,
                 dirty                 = 0
             WHERE captures.updated_at < excluded.updated_at
@@ -932,6 +960,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 payload.latitude, payload.longitude,
                 payload.locality, payload.subLocality, payload.address,
                 payload.notes,
+                resolvedVideoUri,
                 payload.createdAt, payload.updatedAt,
             ])
     }

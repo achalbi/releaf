@@ -196,6 +196,16 @@ data class CapturePayloadV2(
      * from pre-v15 clients.
      */
     @SerialName("notes")                 val notes: String? = null,
+    /**
+     * Local file:// URI for the raw video that produced the capture
+     * (hold-to-record Photo-mode path, v22). Nullable; absent on
+     * payloads from pre-v22 clients. Ships verbatim across devices
+     * today — receivers can't play it back until a future binary
+     * upload pass lands the video on Drive (mirrors the pdf_uri /
+     * preview_uri sync story); for now [toEntity] drops the URI on
+     * receive so we don't persist a dead path.
+     */
+    @SerialName("video_uri")             val videoUri: String? = null,
     @SerialName("created_at")            val createdAt: String,
     @SerialName("updated_at")            val updatedAt: String,
 )
@@ -220,6 +230,7 @@ fun CaptureEntity.toV2Payload(): CapturePayloadV2 = CapturePayloadV2(
     subLocality        = subLocality,
     address            = address,
     notes              = notes,
+    videoUri           = videoUri,
     createdAt          = createdAt,
     updatedAt          = updatedAt,
 )
@@ -248,6 +259,12 @@ fun CapturePayloadV2.toEntity(driveFileId: String?): CaptureEntity = CaptureEnti
     driveFileId        = driveFileId,
     pdfDriveFileId     = pdfDriveFileId,
     previewDriveFileId = previewDriveFileId,
+    // Drop the URI on receive — the remote path is meaningless on
+    // this device and there's no binary-upload pass yet to backfill
+    // a local copy. The JPEG page + .m4a voice note both come
+    // through; the video itself stays local-only until the
+    // companion upload path ships.
+    videoUri           = null,
     createdAt          = createdAt,
     updatedAt          = updatedAt,
     dirty              = false,
