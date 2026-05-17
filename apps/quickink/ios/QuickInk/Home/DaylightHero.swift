@@ -50,6 +50,16 @@ import Foundation
 /// One day's daylight snapshot for a given `now`. Pre-computes the
 /// fractional position the now-marker should sit at and the two
 /// flanking labels so the view layer is presentational only.
+///
+/// During the night the snapshot switches into a "night view":
+/// `isNight` goes true, `sunset` carries the sunset that *started*
+/// the current night (yesterday's before sunrise, today's after
+/// sunset), `sunrise` carries the upcoming sunrise that closes it
+/// (today's before sunrise, tomorrow's after sunset), and
+/// `dayProgress` tracks the fraction of the night elapsed. The
+/// view swaps the tile order (Sunset on the left, the upcoming
+/// Sunrise on the right) so the chip layout is always "passed →
+/// upcoming". Mirror of Android's `DaylightSnapshot`.
 struct DaylightSnapshot: Equatable {
     enum Phase: Equatable {
         case beforeSunrise
@@ -61,15 +71,24 @@ struct DaylightSnapshot: Equatable {
     }
 
     let phase: Phase
+    /// Daytime: today's sunrise (already passed).
+    /// BeforeSunrise night: today's sunrise (upcoming).
+    /// AfterSunset night: tomorrow's sunrise (upcoming).
     let sunrise: Date?
+    /// Daytime: today's sunset (upcoming).
+    /// BeforeSunrise night: yesterday's sunset (passed).
+    /// AfterSunset night: today's sunset (passed).
     let sunset: Date?
     let now: Date
-    /// 0.0 = exactly at sunrise, 1.0 = exactly at sunset, clamped.
-    /// Caller uses this to position the now-marker on the meter.
+    /// Day phases: 0.0 at sunrise, 1.0 at sunset, clamped.
+    /// Night phases: 0.0 at the night-start sunset, 1.0 at the
+    /// next sunrise.
     let dayProgress: Double
-    /// "8h 49m in" / "Day starts in 1h 14m" / "Day ended"
+    /// True during the night — drives the tile-order swap.
+    let isNight: Bool
+    /// "Since sunset 2h 18m" / "8h 49m in"
     let leadingLabel: String
-    /// "4h 23m left" / "13h 12m today" / "Sunrise in 9h 48m"
+    /// "Until sunrise 8h 54m" / "4h 23m left"
     let trailingLabel: String
 }
 
@@ -94,6 +113,7 @@ func computeDaylight(
             sunset:        times.sunset,
             now:           now,
             dayProgress:   0,
+            isNight:       false,
             leadingLabel:  "—",
             trailingLabel: "—"
         )
@@ -101,38 +121,74 @@ func computeDaylight(
     let total = max(1, sunset.timeIntervalSince(sunrise))
 
     if now < sunrise {
+        // Pre-dawn — still inside last night. Anchor between
+        // *yesterday's* sunset and today's sunrise so the "since
+        // sunset" duration keeps counting up through the small
+        // hours instead of resetting at midnight.
+        let yesterday = now.addingTimeInterval(-24 * 3600)
+        let yesterdaySunset = sunTimesFor(yesterday, latitude: lat, longitude: lng).sunset
         let untilRise = sunrise.timeIntervalSince(now)
+        if let prevSet = yesterdaySunset {
+            let nightTotal  = max(1, sunrise.timeIntervalSince(prevSet))
+            let sinceSunset = max(0, now.timeIntervalSince(prevSet))
+            let progress    = (sinceSunset / nightTotal).clamped(to: 0...1)
+            return DaylightSnapshot(
+                phase:         .beforeSunrise,
+                sunrise:       sunrise,
+                sunset:        prevSet,
+                now:           now,
+                dayProgress:   progress,
+                isNight:       true,
+                leadingLabel:  "Since sunset \(formatDuration(sinceSunset))",
+                trailingLabel: "Until sunrise \(formatDuration(untilRise))"
+            )
+        }
+        // Polar fallback — yesterday's sunset unresolved. Fall back
+        // to the simpler "Until sunrise" framing so the card still
+        // carries useful information.
         return DaylightSnapshot(
             phase:         .beforeSunrise,
             sunrise:       sunrise,
             sunset:        sunset,
             now:           now,
             dayProgress:   0,
-            leadingLabel:  "Day starts in \(formatDuration(untilRise))",
+            isNight:       false,
+            leadingLabel:  "Until sunrise \(formatDuration(untilRise))",
             trailingLabel: "\(formatDuration(total)) today"
         )
     }
     if now > sunset {
-        // After sunset, point at *tomorrow's* sunrise — that's the
-        // information the user actually wants in the "remaining"
-        // slot. Falls back to nil-of-times silently if the next
+        // Post-dusk — anchored between today's sunset and the next
+        // sunrise. Falls back to nil-of-times silently if the next
         // day's solar calc fails (only at polar latitudes).
         let tomorrow = now.addingTimeInterval(24 * 3600)
         let tomorrowSunrise = sunTimesFor(tomorrow, latitude: lat, longitude: lng).sunrise
-        let trailing: String
-        if let next = tomorrowSunrise {
-            trailing = "Sunrise in \(formatDuration(next.timeIntervalSince(now)))"
-        } else {
-            trailing = "\(formatDuration(total)) today"
+        let sinceSunset = max(0, now.timeIntervalSince(sunset))
+        if let nextRise = tomorrowSunrise {
+            let nightTotal   = max(1, nextRise.timeIntervalSince(sunset))
+            let untilSunrise = max(0, nextRise.timeIntervalSince(now))
+            let progress     = (sinceSunset / nightTotal).clamped(to: 0...1)
+            return DaylightSnapshot(
+                phase:         .afterSunset,
+                sunrise:       nextRise,
+                sunset:        sunset,
+                now:           now,
+                dayProgress:   progress,
+                isNight:       true,
+                leadingLabel:  "Since sunset \(formatDuration(sinceSunset))",
+                trailingLabel: "Until sunrise \(formatDuration(untilSunrise))"
+            )
         }
+        // Polar fallback — no resolvable next sunrise.
         return DaylightSnapshot(
             phase:         .afterSunset,
             sunrise:       sunrise,
             sunset:        sunset,
             now:           now,
             dayProgress:   1,
+            isNight:       false,
             leadingLabel:  "Day ended",
-            trailingLabel: trailing
+            trailingLabel: "\(formatDuration(total)) today"
         )
     }
 
@@ -145,6 +201,7 @@ func computeDaylight(
         sunset:        sunset,
         now:           now,
         dayProgress:   progress,
+        isNight:       false,
         leadingLabel:  "\(formatDuration(elapsed)) in",
         trailingLabel: "\(formatDuration(remaining)) left"
     )
@@ -206,27 +263,53 @@ struct DaylightHero: View {
             // the pair always splits the card in two regardless of
             // dynamic-type stretch.
             HStack(spacing: QuickInkSpacing.s2) {
-                splitTile(
-                    label:    "Sunrise",
-                    time:     formattedTime(snapshot.sunrise),
-                    icon:     "sunrise.fill",
-                    ringFill: QuickInkColors.leafYellowBase,
-                    bg:       sunBg,
-                    border:   sunBorder,
-                    pulsePhase: 0
-                )
-                splitTile(
-                    label:    "Sunset",
-                    time:     formattedTime(snapshot.sunset),
-                    icon:     "sunset.fill",
-                    ringFill: QuickInkColors.coralBase,
-                    bg:       setBg,
-                    border:   setBorder,
-                    // 1.7 s phase offset on the second pulse so the
-                    // two tiles don't breathe in lockstep — feels
-                    // alive without being synchronous.
-                    pulsePhase: 1.7
-                )
+                if snapshot.isNight {
+                    // Night view — Sunset (already passed) on the
+                    // left, the next Sunrise (upcoming) on the
+                    // right. Matches Android's chip order so the
+                    // "since → until" stat row underneath lines up
+                    // with the tile it's qualifying.
+                    splitTile(
+                        label:    "Sunset",
+                        time:     formattedTime(snapshot.sunset),
+                        icon:     "sunset.fill",
+                        ringFill: QuickInkColors.coralBase,
+                        bg:       setBg,
+                        border:   setBorder,
+                        pulsePhase: 0
+                    )
+                    splitTile(
+                        label:    "Sunrise",
+                        time:     formattedTime(snapshot.sunrise),
+                        icon:     "sunrise.fill",
+                        ringFill: QuickInkColors.leafYellowBase,
+                        bg:       sunBg,
+                        border:   sunBorder,
+                        pulsePhase: 1.7
+                    )
+                } else {
+                    splitTile(
+                        label:    "Sunrise",
+                        time:     formattedTime(snapshot.sunrise),
+                        icon:     "sunrise.fill",
+                        ringFill: QuickInkColors.leafYellowBase,
+                        bg:       sunBg,
+                        border:   sunBorder,
+                        pulsePhase: 0
+                    )
+                    splitTile(
+                        label:    "Sunset",
+                        time:     formattedTime(snapshot.sunset),
+                        icon:     "sunset.fill",
+                        ringFill: QuickInkColors.coralBase,
+                        bg:       setBg,
+                        border:   setBorder,
+                        // 1.7 s phase offset on the second pulse so
+                        // the two tiles don't breathe in lockstep —
+                        // feels alive without being synchronous.
+                        pulsePhase: 1.7
+                    )
+                }
             }
 
             // Elapsed / remaining row + meter. Polar fallback
@@ -385,10 +468,16 @@ struct DaylightHero: View {
         let set  = formattedTime(snapshot.sunset)
         switch snapshot.phase {
         case .beforeSunrise:
+            if snapshot.isNight {
+                return "Pre-dawn. Sunset was at \(set), sunrise at \(rise). \(snapshot.leadingLabel). \(snapshot.trailingLabel)."
+            }
             return "Sunrise at \(rise), sunset at \(set). \(snapshot.leadingLabel)."
         case .daytime:
             return "Sunrise at \(rise), sunset at \(set). \(snapshot.trailingLabel)."
         case .afterSunset:
+            if snapshot.isNight {
+                return "Night. Sunset was at \(set), next sunrise at \(rise). \(snapshot.leadingLabel). \(snapshot.trailingLabel)."
+            }
             return "Sunrise was at \(rise), sunset was at \(set). \(snapshot.trailingLabel)."
         case .unresolved:
             return "Sunrise and sunset unavailable for this location."

@@ -123,26 +123,33 @@ internal enum class DaylightPhase {
  * stat blocks (big value + muted caption) so the view layer is
  * presentational only.
  *
- * After sunset the snapshot switches into a "night view": [isNight]
- * goes true, [tomorrowSunrise] carries the next solar event, and
- * [dayProgress] tracks the fraction of the night that has elapsed
- * between [sunset] and [tomorrowSunrise]. The composable swaps the
- * tile order (Sunset on the left, tomorrow's Sunrise on the right)
- * and the meter switches the sun marker for a crescent moon.
+ * During the night the snapshot switches into a "night view":
+ * [isNight] goes true; [nightSunset] is the sunset that *started*
+ * the current night (yesterday's before sunrise, today's after
+ * sunset) and [nightSunrise] is the sunrise that *closes* it
+ * (today's before sunrise, tomorrow's after sunset). [dayProgress]
+ * tracks the fraction of the night elapsed between the pair. The
+ * composable swaps the tile order (Sunset on the left, the
+ * upcoming Sunrise on the right) and the meter switches the sun
+ * marker for a crescent moon.
  */
 internal data class DaylightSnapshot(
     val phase: DaylightPhase,
     val sunrise: ZonedDateTime?,
     val sunset: ZonedDateTime?,
-    /** Tomorrow's sunrise — only populated in the AfterSunset phase. */
-    val tomorrowSunrise: ZonedDateTime?,
+    /** Sunset that opened the current night (yesterday's before
+     *  sunrise, today's after sunset). Null in day/unresolved phases. */
+    val nightSunset: ZonedDateTime?,
+    /** Sunrise that closes the current night (today's before sunrise,
+     *  tomorrow's after sunset). Null in day/unresolved phases. */
+    val nightSunrise: ZonedDateTime?,
     val now: ZonedDateTime,
     /**
      * Day phases: 0.0 at sunrise, 1.0 at sunset, clamped.
-     * Night phase: 0.0 at sunset, 1.0 at the next sunrise.
+     * Night phase: 0.0 at [nightSunset], 1.0 at [nightSunrise].
      */
     val dayProgress: Float,
-    /** True for the AfterSunset phase — drives the night view. */
+    /** True during the night — drives the tile-swap + moon meter. */
     val isNight: Boolean,
     /** Big number on the left of the meter card. */
     val leadingValue: String,
@@ -176,7 +183,8 @@ internal fun computeDaylight(
             phase           = DaylightPhase.Unresolved,
             sunrise         = sunrise,
             sunset          = sunset,
-            tomorrowSunrise = null,
+            nightSunset     = null,
+            nightSunrise    = null,
             now             = now,
             dayProgress     = 0f,
             isNight         = false,
@@ -191,20 +199,51 @@ internal fun computeDaylight(
 
     return when {
         now.isBefore(sunrise) -> {
-            val untilRise = Duration.between(now, sunrise)
-            DaylightSnapshot(
-                phase           = DaylightPhase.BeforeSunrise,
-                sunrise         = sunrise,
-                sunset          = sunset,
-                tomorrowSunrise = null,
-                now             = now,
-                dayProgress     = 0f,
-                isNight         = false,
-                leadingValue    = formatDuration(untilRise),
-                leadingCaption  = "Until sunrise",
-                trailingValue   = formatDuration(totalDuration),
-                trailingCaption = "Today's daylight",
-            )
+            // Pre-dawn — still inside last night. Anchor between
+            // *yesterday's* sunset and today's sunrise so the
+            // "since sunset" duration keeps counting up through the
+            // small hours instead of resetting at midnight.
+            val yesterdaySet = sunTimesFor(today.minusDays(1), latitude = lat, longitude = lng).second
+            val untilRise    = Duration.between(now, sunrise)
+            if (yesterdaySet != null) {
+                val nightSec = (sunrise.toEpochSecond() - yesterdaySet.toEpochSecond())
+                    .coerceAtLeast(1L)
+                val sinceSunset   = Duration.between(yesterdaySet, now)
+                val nightProgress = (sinceSunset.seconds.toFloat() / nightSec.toFloat())
+                    .coerceIn(0f, 1f)
+                DaylightSnapshot(
+                    phase           = DaylightPhase.BeforeSunrise,
+                    sunrise         = sunrise,
+                    sunset          = sunset,
+                    nightSunset     = yesterdaySet,
+                    nightSunrise    = sunrise,
+                    now             = now,
+                    dayProgress     = nightProgress,
+                    isNight         = true,
+                    leadingValue    = formatDuration(sinceSunset),
+                    leadingCaption  = "Since sunset",
+                    trailingValue   = formatDuration(untilRise),
+                    trailingCaption = "Until sunrise",
+                )
+            } else {
+                // Polar fallback — yesterday's sunset unresolved.
+                // Fall back to the simpler "Until sunrise" framing
+                // so the card still carries useful information.
+                DaylightSnapshot(
+                    phase           = DaylightPhase.BeforeSunrise,
+                    sunrise         = sunrise,
+                    sunset          = sunset,
+                    nightSunset     = null,
+                    nightSunrise    = sunrise,
+                    now             = now,
+                    dayProgress     = 0f,
+                    isNight         = false,
+                    leadingValue    = formatDuration(untilRise),
+                    leadingCaption  = "Until sunrise",
+                    trailingValue   = formatDuration(totalDuration),
+                    trailingCaption = "Today's daylight",
+                )
+            }
         }
         now.isAfter(sunset) -> {
             // Night view: anchor between today's sunset and the
@@ -222,7 +261,8 @@ internal fun computeDaylight(
                     phase           = DaylightPhase.AfterSunset,
                     sunrise         = sunrise,
                     sunset          = sunset,
-                    tomorrowSunrise = tomorrowRise,
+                    nightSunset     = sunset,
+                    nightSunrise    = tomorrowRise,
                     now             = now,
                     dayProgress     = nightProgress,
                     isNight         = true,
@@ -239,7 +279,8 @@ internal fun computeDaylight(
                     phase           = DaylightPhase.AfterSunset,
                     sunrise         = sunrise,
                     sunset          = sunset,
-                    tomorrowSunrise = null,
+                    nightSunset     = sunset,
+                    nightSunrise    = null,
                     now             = now,
                     dayProgress     = 1f,
                     isNight         = false,
@@ -259,7 +300,8 @@ internal fun computeDaylight(
                 phase           = DaylightPhase.Daytime,
                 sunrise         = sunrise,
                 sunset          = sunset,
-                tomorrowSunrise = null,
+                nightSunset     = null,
+                nightSunrise    = null,
                 now             = now,
                 dayProgress     = progress,
                 isNight         = false,
@@ -367,13 +409,13 @@ internal fun DaylightHero(
             modifier = Modifier.fillMaxWidth(),
         ) {
             if (snapshot.isNight) {
-                // Sunset tile carries today's set time on the left;
-                // tomorrow's sunrise sits on the right as the
-                // upcoming event.
+                // Sunset tile carries the sunset that opened this
+                // night (yesterday's before sunrise, today's after
+                // sunset). The upcoming sunrise sits on the right.
                 SplitTile(
                     modifier     = Modifier.weight(1f),
                     label        = "Sunset",
-                    time         = formatTime(snapshot.sunset),
+                    time         = formatTime(snapshot.nightSunset),
                     icon         = SunIcon.Set,
                     arrow        = SunIcon.Set,
                     ringFill     = QuickInkColors.CoralBase,
@@ -389,7 +431,7 @@ internal fun DaylightHero(
                 SplitTile(
                     modifier     = Modifier.weight(1f),
                     label        = "Sunrise",
-                    time         = formatTime(snapshot.tomorrowSunrise),
+                    time         = formatTime(snapshot.nightSunrise),
                     icon         = SunIcon.Rise,
                     arrow        = SunIcon.Rise,
                     ringFill     = QuickInkColors.LeafYellowBase,
@@ -800,13 +842,17 @@ private fun a11yLabel(snapshot: DaylightSnapshot): String {
     val trailingLine = "${snapshot.trailingValue} ${snapshot.trailingCaption.lowercase(Locale.getDefault())}"
     val leadingLine  = "${snapshot.leadingValue} ${snapshot.leadingCaption.lowercase(Locale.getDefault())}"
     return when (snapshot.phase) {
-        DaylightPhase.BeforeSunrise ->
+        DaylightPhase.BeforeSunrise -> if (snapshot.isNight) {
+            val prevSet = formatTime(snapshot.nightSunset)
+            "Pre-dawn. Sunset was at $prevSet, sunrise at $rise. $leadingLine. $trailingLine."
+        } else {
             "Sunrise at $rise, sunset at $set. $leadingLine."
+        }
         DaylightPhase.Daytime ->
             "Sunrise at $rise, sunset at $set. $trailingLine."
         DaylightPhase.AfterSunset -> if (snapshot.isNight) {
-            val nextRise = formatTime(snapshot.tomorrowSunrise)
-            "Night. Sunset was at $set, next sunrise at $nextRise. $trailingLine."
+            val nextRise = formatTime(snapshot.nightSunrise)
+            "Night. Sunset was at $set, next sunrise at $nextRise. $leadingLine. $trailingLine."
         } else {
             "Sunrise was at $rise, sunset was at $set. $trailingLine."
         }
