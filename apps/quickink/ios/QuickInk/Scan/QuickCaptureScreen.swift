@@ -185,20 +185,16 @@ struct QuickCaptureScreen: View {
             // Top-bar control depends on which surface is up:
             //   - `.document` / `.businessCard` → the two-wide
             //     pill, highlighting whichever mode is active.
-            //   - `.photo` → a single "Scan document" button
-            //     that jumps straight to Document mode. Photo
-            //     mode is a transient one-shot capture and the
-            //     pill's two-way toggle reads as unnecessary
-            //     decision-making while the user is mid-photo;
-            //     a single CTA back to scanning is the cleaner
-            //     escape hatch (still satisfies spec §11's
-            //     "user can leave photo via the top bar
-            //     without dismissing" expectation).
+            //   - `.photo` → a static "Photo" chip in the same
+            //     slot. Photo mode is a transient one-shot
+            //     capture; the chip is a passive mode indicator
+            //     (no tap, no CTA) so the user reads the top
+            //     bar as "you're in Photo right now" without
+            //     being prompted to flip back to scanning. The
+            //     close button on the left and completing the
+            //     capture remain the two ways out.
             if coordinator.mode == .photo {
-                ScanDocumentButton(onTap: {
-                    lastPillMode = .document
-                    coordinator.select(.document)
-                })
+                PhotoModeChip()
             } else {
                 ModeTogglePill(
                     current:  lastPillMode,
@@ -268,29 +264,21 @@ private struct ModeTogglePill: View {
     }
 }
 
-// MARK: - Scan document escape (photo surface only)
+// MARK: - Photo mode chip (photo surface only)
 
-/// Single CTA shown in the top bar while the photo surface is
-/// mounted, in place of the two-wide Document/Business Card pill.
-/// Taps jump straight to Document mode — a more decisive escape
-/// hatch than a two-way toggle when the user is mid-photo and
-/// wants to go back to scanning. Visually anchored to the same
-/// translucent-chip vocabulary the pill uses so it reads as
-/// part of the top-bar control family rather than a foreign
-/// element.
-private struct ScanDocumentButton: View {
-    let onTap: () -> Void
+/// Passive mode indicator shown in the top bar while the photo
+/// surface is mounted, in place of the two-wide Document /
+/// Business Card pill. Text-only chip styled in the same
+/// translucent-pill vocabulary the pill uses so it reads as
+/// part of the top-bar control family. No tap, no action — the
+/// chip's job is to label the current surface ("you're in Photo")
+/// so the top bar isn't blank while the pill is suppressed.
+/// Escape happens via the close button or completing the
+/// capture.
+private struct PhotoModeChip: View {
     var body: some View {
-        Button(action: {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            onTap()
-        }) {
-            HStack(spacing: 6) {
-                Image(systemName: "doc.viewfinder")
-                    .font(.system(size: 14, weight: .medium))
-                Text("Scan document")
-                    .font(QuickInkText.label)
-            }
+        Text("Photo")
+            .font(QuickInkText.label)
             .foregroundStyle(.white)
             .padding(.horizontal, QuickInkSpacing.s4)
             .padding(.vertical, QuickInkSpacing.s2)
@@ -298,8 +286,6 @@ private struct ScanDocumentButton: View {
                 RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous)
                     .fill(Color.white.opacity(0.10))
             )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Scan document instead")
+            .accessibilityLabel("Photo mode")
     }
 }
