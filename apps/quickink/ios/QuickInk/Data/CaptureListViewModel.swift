@@ -85,6 +85,14 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
     /// without a video. The detail screen reads this back to
     /// render an inline `AVPlayer`.
     public let videoUri: String?
+    /// Drive file id of the per-row video binary upload (v17). Set
+    /// after `QuickInkBinarySync.uploadAndCascade` mirrors the
+    /// .mov / .mp4 to Drive. The detail screen pairs this with
+    /// [videoUri] to discriminate between three states: real
+    /// player (both set + local file exists), placeholder
+    /// "downloading" card (drive id set, local file not yet
+    /// downloaded), or no card at all (neither set).
+    public let videoDriveFileId: String?
 
     public init(
         id: String,
@@ -105,7 +113,8 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         lastOpenedAt: String? = nil,
         lastOpenedPage: Int? = nil,
         lastOpenedDevice: String? = nil,
-        videoUri: String? = nil
+        videoUri: String? = nil,
+        videoDriveFileId: String? = nil
     ) {
         self.id          = id
         self.title       = title
@@ -125,7 +134,8 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         self.lastOpenedAt     = lastOpenedAt
         self.lastOpenedPage   = lastOpenedPage
         self.lastOpenedDevice = lastOpenedDevice
-        self.videoUri    = videoUri
+        self.videoUri         = videoUri
+        self.videoDriveFileId = videoDriveFileId
     }
 
     public init(from decoder: Decoder) throws {
@@ -166,7 +176,10 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         // `video_uri` landed in v16. Tolerate SELECTs that don't
         // request it — they read back as nil. Older rows that
         // predate the migration also read back as nil.
-        self.videoUri    = try c.decodeIfPresent(String.self, forKey: .videoUri)
+        self.videoUri         = try c.decodeIfPresent(String.self, forKey: .videoUri)
+        // `video_drive_file_id` landed in v17. Same back-compat
+        // tolerance.
+        self.videoDriveFileId = try c.decodeIfPresent(String.self, forKey: .videoDriveFileId)
     }
 
     public enum CodingKeys: String, CodingKey {
@@ -189,6 +202,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         case lastOpenedPage   = "last_opened_page"
         case lastOpenedDevice = "last_opened_device"
         case videoUri         = "video_uri"
+        case videoDriveFileId = "video_drive_file_id"
     }
 }
 

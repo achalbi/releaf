@@ -159,15 +159,22 @@ struct ScanDetailScreen: View {
                             pageThumbnailsStrip(for: capture)
                         }
 
-                        // Video card — only rendered when the
-                        // hold-to-record Photo-mode path produced
-                        // a re-watchable clip (video_uri set). Tap
-                        // opens a full-screen AVPlayer sheet.
-                        if let raw = capture.videoUri?.trimmingCharacters(in: .whitespaces),
-                           !raw.isEmpty {
-                            videoCard(videoUri: raw)
-                                .padding(.horizontal, QuickInkSpacing.s5)
-                        }
+                        // Video card — three states, gated on the
+                        // pair (video_uri, video_drive_file_id):
+                        //
+                        //   - Both unset                → no card
+                        //     (this capture never had a video).
+                        //   - video_uri resolves on disk → real
+                        //     "Play recorded clip" card with the
+                        //     AVPlayer launcher.
+                        //   - Drive id set but local file not yet
+                        //     here → placeholder "Downloading…"
+                        //     card so cross-device receivers know
+                        //     the clip is on its way (the binary-
+                        //     restore pass fills the URI in on
+                        //     the next sync).
+                        videoCardSection(for: capture)
+                            .padding(.horizontal, QuickInkSpacing.s5)
 
                         // Details card — full width now that the
                         // Actions card has moved to the more-menu
@@ -926,34 +933,43 @@ struct ScanDetailScreen: View {
 
     // MARK: - Video card
 
-    /// Video card. Rendered only when the hold-to-record Photo-mode
-    /// path produced a re-watchable clip — every other capture
-    /// source leaves `video_uri` nil and this branch is skipped
-    /// from `body`. Tap anywhere on the card to open a full-screen
-    /// `AVPlayer` sheet.
+    /// Decides which (if any) video-related card to render based
+    /// on the local file + Drive id pair. See `body` for the
+    /// three-state contract.
     @ViewBuilder
-    private func videoCard(videoUri: String) -> some View {
-        let url: URL? = {
-            if let parsed = URL(string: videoUri), parsed.isFileURL { return parsed }
-            return URL(fileURLWithPath: videoUri)
-        }()
+    private func videoCardSection(for capture: CaptureSummary) -> some View {
+        let localURL = Self.resolvedLocalURL(for: capture.videoUri)
+        let hasLocal = localURL.map {
+            FileManager.default.fileExists(atPath: $0.path)
+        } ?? false
+        let hasDriveId = !(capture.videoDriveFileId?
+                            .trimmingCharacters(in: .whitespaces) ?? "").isEmpty
+
+        if hasLocal, let url = localURL {
+            videoCard(url: url)
+        } else if hasDriveId {
+            videoPendingCard
+        }
+    }
+
+    /// Parse a `video_uri` row value into a usable file:// URL.
+    /// Returns nil for empty or unparseable values.
+    private static func resolvedLocalURL(for videoUri: String?) -> URL? {
+        guard let raw = videoUri?.trimmingCharacters(in: .whitespaces),
+              !raw.isEmpty else { return nil }
+        if let parsed = URL(string: raw), parsed.isFileURL { return parsed }
+        return URL(fileURLWithPath: raw)
+    }
+
+    /// Real "Play recorded clip" card — fires when the .mov / .mp4
+    /// is already on disk. Tap launches the AVPlayer sheet.
+    @ViewBuilder
+    private func videoCard(url: URL) -> some View {
         Button {
             videoPlayerURL = url
         } label: {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: QuickInkSpacing.s2) {
-                    Image(systemName: "play.rectangle.fill")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(QuickInkColors.inkSoft)
-                    Text("Video")
-                        .font(QuickInkFont.ui(13, weight: .semibold))
-                        .foregroundStyle(QuickInkColors.ink)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, QuickInkSpacing.s3)
-                .padding(.vertical, QuickInkSpacing.s2)
-                .background(QuickInkColors.borderSoft)
+                videoCardHeader
 
                 HStack(spacing: QuickInkSpacing.s3) {
                     Image(systemName: "play.circle.fill")
@@ -978,8 +994,63 @@ struct ScanDetailScreen: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(url == nil)
         .accessibilityLabel("Play recorded video clip")
+    }
+
+    /// Placeholder card — shown on a receiver device whose row
+    /// has a `video_drive_file_id` but whose local .mov / .mp4
+    /// hasn't been downloaded yet. The `QuickInkBinarySync`
+    /// restore pass fills `video_uri` in on its next run; this
+    /// card flips to the real player automatically on the next
+    /// re-render. Tap is disabled to make clear there's nothing
+    /// to play yet.
+    @ViewBuilder
+    private var videoPendingCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            videoCardHeader
+
+            HStack(spacing: QuickInkSpacing.s3) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(QuickInkColors.accent)
+                    .frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Downloading video…")
+                        .font(QuickInkFont.ui(13, weight: .medium))
+                        .foregroundStyle(QuickInkColors.ink)
+                    Text("Restoring from Drive — try again in a moment.")
+                        .font(QuickInkText.caption)
+                        .foregroundStyle(QuickInkColors.muted)
+                }
+                Spacer()
+            }
+            .padding(QuickInkSpacing.s3)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(QuickInkColors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                .stroke(QuickInkColors.border, lineWidth: 1)
+        )
+        .accessibilityLabel("Video downloading from Drive")
+    }
+
+    @ViewBuilder
+    private var videoCardHeader: some View {
+        HStack(spacing: QuickInkSpacing.s2) {
+            Image(systemName: "play.rectangle.fill")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(QuickInkColors.inkSoft)
+            Text("Video")
+                .font(QuickInkFont.ui(13, weight: .semibold))
+                .foregroundStyle(QuickInkColors.ink)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, QuickInkSpacing.s3)
+        .padding(.vertical, QuickInkSpacing.s2)
+        .background(QuickInkColors.borderSoft)
     }
 
     // MARK: - Details card
@@ -1562,7 +1633,7 @@ struct ScanDetailScreen: View {
                            created_at, source, latitude, longitude,
                            locality, sub_locality, address, notes,
                            folder_id, last_opened_at, last_opened_page,
-                           last_opened_device, video_uri
+                           last_opened_device, video_uri, video_drive_file_id
                     FROM captures
                     WHERE id = ? AND deleted_at IS NULL
                     LIMIT 1

@@ -640,18 +640,36 @@ fun ScanDetailScreen(
                     )
                 }
 
-                // Video card — only when the hold-to-record Photo-
-                // mode path produced a re-watchable clip
-                // (video_uri set). Tap to launch the inline
-                // ExoPlayer-style VideoView dialog.
-                current.videoUri?.takeIf { it.isNotBlank() }?.let { uri ->
-                    VideoCard(
-                        videoUri = uri,
-                        onTap    = { videoPlayerUri = uri },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = QuickInkSpacing.s5),
-                    )
+                // Video card — three states, gated on the pair
+                // (video_uri, video_drive_file_id):
+                //
+                //   - Both unset                → no card (this
+                //     capture never had a video).
+                //   - video_uri resolves on disk → real
+                //     "Play recorded clip" card with the
+                //     VideoView dialog launcher.
+                //   - Drive id set but local file not yet here →
+                //     placeholder "Downloading…" card so cross-
+                //     device receivers know the clip is on its
+                //     way (the binary-restore pass fills the URI
+                //     in on the next sync).
+                val rawVideoUri = current.videoUri?.takeIf { it.isNotBlank() }
+                val hasLocalVideo = rawVideoUri != null && localFileExists(rawVideoUri)
+                val hasVideoDriveId = !current.videoDriveFileId.isNullOrBlank()
+                val videoModifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = QuickInkSpacing.s5)
+                when {
+                    hasLocalVideo && rawVideoUri != null -> {
+                        VideoCard(
+                            videoUri = rawVideoUri,
+                            onTap    = { videoPlayerUri = rawVideoUri },
+                            modifier = videoModifier,
+                        )
+                    }
+                    hasVideoDriveId -> {
+                        VideoPendingCard(modifier = videoModifier)
+                    }
                 }
 
                 // Details card — full width now that the Actions
@@ -1958,6 +1976,73 @@ private fun VideoPlayerDialog(videoUri: String, onDismiss: () -> Unit) {
                     contentDescription = "Close video player",
                     tint              = Color.White,
                     modifier          = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Placeholder card — shown on a receiver device whose row has
+ * a `video_drive_file_id` set but whose local .mp4 hasn't been
+ * downloaded yet. The `QuickInkBinarySync` restore pass fills
+ * `video_uri` in on its next run; the card flips to the real
+ * player automatically on the next re-render. Disabled tap to
+ * make clear there's nothing to play yet.
+ */
+@Composable
+private fun VideoPendingCard(modifier: Modifier = Modifier) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md)),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier          = Modifier
+                .fillMaxWidth()
+                .background(colors.borderSoft)
+                .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s2),
+        ) {
+            Icon(
+                imageVector       = Icons.Filled.PlayCircle,
+                contentDescription = null,
+                tint              = colors.inkSoft,
+                modifier          = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s2))
+            Text(
+                text       = "Video",
+                fontSize   = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color      = colors.ink,
+            )
+            Spacer(Modifier.weight(1f))
+        }
+        Row(
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+            modifier              = Modifier.padding(QuickInkSpacing.s3),
+        ) {
+            androidx.compose.material3.CircularProgressIndicator(
+                color       = colors.accent,
+                strokeWidth = 2.dp,
+                modifier    = Modifier.size(24.dp),
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text       = "Downloading video…",
+                    fontSize   = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color      = colors.ink,
+                )
+                Text(
+                    text  = "Restoring from Drive — try again in a moment.",
+                    style = type.caption,
+                    color = colors.muted,
                 )
             }
         }
