@@ -319,12 +319,16 @@ public struct QuickInkBottomNavBar: View {
     /// jumps straight into the Photo surface — the canonical
     /// "I just want a photo, fast" shortcut from the spec.
     ///
-    /// Implementation note: the inner disc is wrapped in a `ZStack`
-    /// with both `.onTapGesture` and `.onLongPressGesture` rather
-    /// than a `Button(action:)`. SwiftUI's `Button` consumes touch-
-    /// down and a hold inside the button doesn't fire a separate
-    /// long-press gesture — stacking the two gestures on a plain
-    /// view gives us both without an interaction conflict.
+    /// Implementation note: the disc uses a single
+    /// `ExclusiveGesture(LongPress before Tap)` instead of
+    /// stacking `.onLongPressGesture` + `.onTapGesture`. SwiftUI
+    /// evaluates the OUTERMOST modifier first, which means a
+    /// chained `.onLongPressGesture(...).onTapGesture(...)` puts
+    /// tap on top and the tap recognizer consumes the touch
+    /// sequence before long-press ever gets a chance to fire on a
+    /// 0.4s hold. `ExclusiveGesture` is the documented combinator
+    /// for "long-press wins, tap is the fallback for quick
+    /// releases" and avoids the shadowing problem.
     @ViewBuilder
     private var zapFab: some View {
         let gradient = LinearGradient(
@@ -332,6 +336,15 @@ public struct QuickInkBottomNavBar: View {
             startPoint: .top,
             endPoint: .bottom
         )
+        let longPress = LongPressGesture(minimumDuration: 0.4)
+            .onEnded { _ in
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                onLongPressScan()
+            }
+        let tap = TapGesture()
+            .onEnded {
+                onScan()
+            }
         ZStack {
             Circle()
                 .fill(QuickInkColors.bg)
@@ -347,17 +360,7 @@ public struct QuickInkBottomNavBar: View {
         }
         .offset(y: -16)
         .contentShape(Circle())
-        // Long-press registered first so SwiftUI evaluates the
-        // hold-then-release path before the tap. Without this
-        // order, a tap-down + release at >0.4s fires onScan
-        // instead of onLongPressScan.
-        .onLongPressGesture(minimumDuration: 0.4) {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            onLongPressScan()
-        }
-        .onTapGesture {
-            onScan()
-        }
+        .gesture(longPress.exclusively(before: tap))
         .accessibilityLabel("Quick capture")
         .accessibilityHint("Double tap to scan, long press for photo")
     }
