@@ -65,36 +65,52 @@ import AVFoundation
 import UIKit
 import ReleafCoreScan
 
-/// First-launch discoverability state for the Photo-capture
-/// long-press shortcut on the bottom-nav ⚡ FAB. Two persisted
-/// bools combine to drive the small "Hold ⚡ for a quick photo"
-/// tooltip that appears above the FAB:
+/// Discoverability state for the Photo-capture long-press
+/// shortcut on the bottom-nav ⚡ FAB. Owns the single persisted
+/// `dismissed` flag that gates the "Hold ⚡ for a quick photo"
+/// chip above the FAB.
 ///
-///   - `hasCompletedFirstScanKey` — flipped to true the first
-///     time any scan (Document / Business Card / Photo) lands
-///     through `ScanFlowController.onScanComplete`. Gates the
-///     tooltip so brand-new users on Home / Workspace don't see
-///     a hint pointing at an action they haven't earned yet.
+/// Why this is an `ObservableObject` rather than a plain enum
+/// of statics on top of `@AppStorage`: in practice `@AppStorage`
+/// doesn't always re-render SwiftUI views when the underlying
+/// `UserDefaults` key is written through a direct
+/// `UserDefaults.standard.set(...)` call (only through the
+/// `@AppStorage` setter). The chip stays stuck on its previous
+/// value until something else nudges the view tree. Routing the
+/// write through `@Published dismissed` here guarantees the
+/// publish fires the instant `markDismissed()` is called, so the
+/// FAB chip fades out exactly when the user long-presses.
 ///
-///   - `dismissedKey` — flipped to true the first time the user
-///     long-presses the FAB. Hides the tooltip permanently from
-///     that point forward; the user has discovered the gesture.
-///
-/// The bar reads both via `@AppStorage` so a write here triggers
-/// a re-render via KVO without manual refresh wiring. Spec §3.1.
-public enum PhotoFabHint {
-    public static let hasCompletedFirstScanKey = "quickink.capture.has_completed_first_scan"
-    public static let dismissedKey             = "quickink.capture.photo_fab_hint_dismissed"
+/// Spec §3.1 originally gated the chip on a first-scan flag too
+/// ("show only after the user has scanned at least once"). We
+/// dropped that gate so existing users upgrading into this build
+/// see the chip immediately, without needing one more scan to
+/// flip a freshly-introduced UserDefaults bool. The chip is small
+/// and one long-press dismisses it forever, so the noise cost is
+/// low and the discoverability win is universal.
+@MainActor
+public final class PhotoFabHint: ObservableObject {
 
-    public static func markFirstScanCompleted() {
-        // `set(true:)` is idempotent and thread-safe — cheap to
-        // call from every `onPassComplete` rather than gating on
-        // a read first.
-        UserDefaults.standard.set(true, forKey: hasCompletedFirstScanKey)
+    /// Persisted across launches under this UserDefaults key. A
+    /// single bool is all the hint state we keep — once the user
+    /// long-presses the FAB they've discovered the gesture and
+    /// shouldn't see the chip again.
+    private static let dismissedKey = "quickink.capture.photo_fab_hint_dismissed"
+
+    @Published public private(set) var dismissed: Bool
+
+    public init() {
+        self.dismissed = UserDefaults.standard.bool(forKey: Self.dismissedKey)
     }
 
-    public static func markDismissed() {
-        UserDefaults.standard.set(true, forKey: dismissedKey)
+    /// Flip the dismissed flag if it wasn't already set. Writes
+    /// to UserDefaults AND publishes through `@Published` so
+    /// `@StateObject` / `@ObservedObject` consumers see the
+    /// change synchronously on the current run loop tick.
+    public func markDismissed() {
+        guard !dismissed else { return }
+        UserDefaults.standard.set(true, forKey: Self.dismissedKey)
+        dismissed = true
     }
 }
 

@@ -321,19 +321,21 @@ private struct MainShell: View {
     /// inherit the override.
     @State private var pendingInitialMode: CaptureMode? = nil
 
-    /// Photo-FAB hint state — two `@AppStorage` bools that the
-    /// `PhotoFabHint` namespace owns the keys for. `@AppStorage`
-    /// subscribes to UserDefaults KVO so a `PhotoFabHint.markX()`
-    /// call from anywhere (including off the main actor) triggers
-    /// a re-render here. The hint shows after the first completed
-    /// scan and hides permanently after the first FAB long-press.
-    /// Spec §3.1.
-    @AppStorage(PhotoFabHint.hasCompletedFirstScanKey) private var hasCompletedFirstScan: Bool = false
-    @AppStorage(PhotoFabHint.dismissedKey)             private var photoFabHintDismissed: Bool = false
+    /// Photo-FAB hint state. Owns the single persisted `dismissed`
+    /// flag that gates the "Hold ⚡ for a quick photo" chip above
+    /// the ⚡ FAB. Routed through a `@StateObject` (rather than
+    /// `@AppStorage`) because `@AppStorage` doesn't reliably re-
+    /// render when the underlying UserDefaults key is written via
+    /// a direct `UserDefaults.standard.set(...)` call — the chip
+    /// would otherwise stay stuck on the previous value until the
+    /// next unrelated state change nudged the view tree. The chip
+    /// shows on every launch until the user long-presses once,
+    /// after which it stays dismissed permanently.
+    @StateObject private var photoFabHint = PhotoFabHint()
 
     /// Derived gate for the bar's `showPhotoHint` prop.
     private var showPhotoFabHint: Bool {
-        hasCompletedFirstScan && !photoFabHintDismissed
+        !photoFabHint.dismissed
     }
 
     /// Tab-style switch between top-level destinations (Library,
@@ -410,12 +412,6 @@ private struct MainShell: View {
         _controller = StateObject(wrappedValue: ScanFlowController(
             userId: userId,
             onPassComplete: { summary in
-                // First-scan marker for the Photo-FAB hint
-                // gate. Idempotent — every subsequent pass
-                // hits the same true value. Fires here (not
-                // at the analytics enqueue below) so the gate
-                // flips even if the analytics flag is off.
-                PhotoFabHint.markFirstScanCompleted()
                 Task.detached(priority: .background) {
                     do {
                         try await AnalyticsRepository(
@@ -531,9 +527,11 @@ private struct MainShell: View {
                             // `QuickCaptureScreen` init. Also marks
                             // the FAB hint dismissed — the user has
                             // discovered the gesture, no need to
-                            // surface the chip ever again.
+                            // surface the chip ever again. Routed
+                            // through the @StateObject so the chip's
+                            // fade-out fires on the same render tick.
                             onLongPressScan: {
-                                PhotoFabHint.markDismissed()
+                                photoFabHint.markDismissed()
                                 pendingInitialMode = .photo
                                 showQuickCapture = true
                             },
