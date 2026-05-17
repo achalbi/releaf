@@ -66,6 +66,15 @@ public struct QuickInkBottomNavBar: View {
     public let onLongPressScan: () -> Void
     public let onStories: () -> Void
     public let onSettings: () -> Void
+    /// First-launch discoverability hint above the ⚡ FAB —
+    /// renders the floating "Hold ⚡ for a quick photo" chip
+    /// when `true`. The caller (MainShell) computes this from
+    /// two `@AppStorage` bools managed via `PhotoFabHint`:
+    /// hint shows after the user's first completed scan and
+    /// hides permanently after their first FAB long-press.
+    /// Defaults to `false` so legacy hosts / previews opt in
+    /// explicitly. Spec §3.1.
+    public let showPhotoHint: Bool
 
     public init(
         activeTab: NavTab,
@@ -74,7 +83,8 @@ public struct QuickInkBottomNavBar: View {
         onScan: @escaping () -> Void,
         onLongPressScan: @escaping () -> Void = {},
         onStories: @escaping () -> Void,
-        onSettings: @escaping () -> Void
+        onSettings: @escaping () -> Void,
+        showPhotoHint: Bool = false
     ) {
         self.activeTab = activeTab
         self.onHome = onHome
@@ -83,6 +93,7 @@ public struct QuickInkBottomNavBar: View {
         self.onLongPressScan = onLongPressScan
         self.onStories = onStories
         self.onSettings = onSettings
+        self.showPhotoHint = showPhotoHint
     }
 
     public var body: some View {
@@ -145,10 +156,51 @@ public struct QuickInkBottomNavBar: View {
             )
             .shadow(color: QuickInkColors.ink.opacity(0.12), radius: 8, x: 0, y: 2)
 
+            // Photo-hint chip rendered as a peer of the FAB so
+            // it floats above the bar's top edge alongside the
+            // lifted ⚡ disc. `.allowsHitTesting(false)` so the
+            // chip never intercepts FAB taps even when overlap
+            // is close — discoverability shouldn't block the
+            // action it's pointing at.
+            if showPhotoHint {
+                photoHintChip
+                    // FAB visual top sits at y ≈ -16 from the
+                    // ZStack top edge (FAB is 64pt aligned to top,
+                    // then shifted `.offset(y: -16)`). Push the
+                    // chip a further ~52pt up so its bottom edge
+                    // clears the FAB with breathing room.
+                    .offset(y: -68)
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
+
             zapFab
         }
         .padding(.horizontal, QuickInkSpacing.s4)
         .padding(.bottom, QuickInkSpacing.s6)
+        .animation(.easeInOut(duration: 0.25), value: showPhotoHint)
+    }
+
+    /// Floating chip — "Hold ⚡ for a quick photo." Cream pill
+    /// with the same surface + hairline + shadow vocabulary the
+    /// bar itself uses, so it reads as part of the same surface
+    /// family rather than a foreign callout. No tail / caret in
+    /// v1 — the proximity to the FAB carries the affordance.
+    @ViewBuilder
+    private var photoHintChip: some View {
+        Text("Hold ⚡ for a quick photo")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(QuickInkColors.ink)
+            .padding(.horizontal, QuickInkSpacing.s3)
+            .padding(.vertical, QuickInkSpacing.s2)
+            .background(
+                Capsule().fill(QuickInkColors.surface)
+            )
+            .overlay(
+                Capsule().strokeBorder(QuickInkColors.border, lineWidth: 1)
+            )
+            .shadow(color: QuickInkColors.ink.opacity(0.18), radius: 6, x: 0, y: 2)
+            .accessibilityLabel("Tip: hold the quick-capture button for a quick photo")
     }
 
     @ViewBuilder

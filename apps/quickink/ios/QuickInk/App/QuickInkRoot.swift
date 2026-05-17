@@ -321,6 +321,21 @@ private struct MainShell: View {
     /// inherit the override.
     @State private var pendingInitialMode: CaptureMode? = nil
 
+    /// Photo-FAB hint state — two `@AppStorage` bools that the
+    /// `PhotoFabHint` namespace owns the keys for. `@AppStorage`
+    /// subscribes to UserDefaults KVO so a `PhotoFabHint.markX()`
+    /// call from anywhere (including off the main actor) triggers
+    /// a re-render here. The hint shows after the first completed
+    /// scan and hides permanently after the first FAB long-press.
+    /// Spec §3.1.
+    @AppStorage(PhotoFabHint.hasCompletedFirstScanKey) private var hasCompletedFirstScan: Bool = false
+    @AppStorage(PhotoFabHint.dismissedKey)             private var photoFabHintDismissed: Bool = false
+
+    /// Derived gate for the bar's `showPhotoHint` prop.
+    private var showPhotoFabHint: Bool {
+        hasCompletedFirstScan && !photoFabHintDismissed
+    }
+
     /// Tab-style switch between top-level destinations (Library,
     /// Search, Settings). Replaces the nav stack with a single entry,
     /// so back from any tab returns to Home — matches the standard
@@ -395,6 +410,12 @@ private struct MainShell: View {
         _controller = StateObject(wrappedValue: ScanFlowController(
             userId: userId,
             onPassComplete: { summary in
+                // First-scan marker for the Photo-FAB hint
+                // gate. Idempotent — every subsequent pass
+                // hits the same true value. Fires here (not
+                // at the analytics enqueue below) so the gate
+                // flips even if the analytics flag is off.
+                PhotoFabHint.markFirstScanCompleted()
                 Task.detached(priority: .background) {
                     do {
                         try await AnalyticsRepository(
@@ -507,13 +528,18 @@ private struct MainShell: View {
                             // same tick guarantees the fullScreenCover
                             // body re-runs with `pendingInitialMode`
                             // resolved before SwiftUI evaluates the
-                            // `QuickCaptureScreen` init.
+                            // `QuickCaptureScreen` init. Also marks
+                            // the FAB hint dismissed — the user has
+                            // discovered the gesture, no need to
+                            // surface the chip ever again.
                             onLongPressScan: {
+                                PhotoFabHint.markDismissed()
                                 pendingInitialMode = .photo
                                 showQuickCapture = true
                             },
                             onStories:       { navToTab(.stories) },
-                            onSettings:      { navToTab(.settings) }
+                            onSettings:      { navToTab(.settings) },
+                            showPhotoHint:   showPhotoFabHint
                         )
                     }
                 }

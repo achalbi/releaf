@@ -65,6 +65,39 @@ import AVFoundation
 import UIKit
 import ReleafCoreScan
 
+/// First-launch discoverability state for the Photo-capture
+/// long-press shortcut on the bottom-nav ⚡ FAB. Two persisted
+/// bools combine to drive the small "Hold ⚡ for a quick photo"
+/// tooltip that appears above the FAB:
+///
+///   - `hasCompletedFirstScanKey` — flipped to true the first
+///     time any scan (Document / Business Card / Photo) lands
+///     through `ScanFlowController.onScanComplete`. Gates the
+///     tooltip so brand-new users on Home / Workspace don't see
+///     a hint pointing at an action they haven't earned yet.
+///
+///   - `dismissedKey` — flipped to true the first time the user
+///     long-presses the FAB. Hides the tooltip permanently from
+///     that point forward; the user has discovered the gesture.
+///
+/// The bar reads both via `@AppStorage` so a write here triggers
+/// a re-render via KVO without manual refresh wiring. Spec §3.1.
+public enum PhotoFabHint {
+    public static let hasCompletedFirstScanKey = "quickink.capture.has_completed_first_scan"
+    public static let dismissedKey             = "quickink.capture.photo_fab_hint_dismissed"
+
+    public static func markFirstScanCompleted() {
+        // `set(true:)` is idempotent and thread-safe — cheap to
+        // call from every `onPassComplete` rather than gating on
+        // a read first.
+        UserDefaults.standard.set(true, forKey: hasCompletedFirstScanKey)
+    }
+
+    public static func markDismissed() {
+        UserDefaults.standard.set(true, forKey: dismissedKey)
+    }
+}
+
 struct PhotoCaptureSurface: View {
 
     let controller: ScanFlowController
