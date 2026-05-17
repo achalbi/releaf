@@ -69,6 +69,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -191,23 +192,32 @@ fun QuickCaptureScreen(
             ) {
                 CircleIconButton(icon = Icons.Filled.Close, onClick = onDismiss)
                 Spacer(Modifier.weight(1f))
-                // Pill stays two-wide (Document / Business Card)
-                // AND stays visible on every surface — including
-                // `.Photo`. `current = lastPillMode`, not
-                // `coordinator.mode`, so on the photo surface
-                // the user still sees their previous pill choice
-                // highlighted (per spec test #5) and can flip
-                // back to Document / Business Card with one tap
-                // (per spec §11, which expects the pill to be
-                // available as an escape hatch when camera
-                // permission is denied for photo mode).
-                ModeTogglePill(
-                    current = lastPillMode,
-                    onSelect = { mode ->
-                        lastPillMode = mode
-                        coordinator.select(mode)
-                    },
-                )
+                // Top-bar control depends on which surface is up:
+                //   - `.Document` / `.BusinessCard` → the two-wide
+                //     pill, highlighting whichever mode is active.
+                //   - `.Photo` → a single "Scan document" button
+                //     that jumps straight to Document mode. Photo
+                //     mode is a transient one-shot capture and the
+                //     pill's two-way toggle reads as unnecessary
+                //     decision-making while the user is mid-photo;
+                //     a single CTA back to scanning is the cleaner
+                //     escape hatch (still satisfies spec §11's
+                //     "user can leave photo via the top bar
+                //     without dismissing" expectation).
+                if (coordinator.mode == CaptureMode.Photo) {
+                    ScanDocumentButton(onClick = {
+                        lastPillMode = CaptureMode.Document
+                        coordinator.select(CaptureMode.Document)
+                    })
+                } else {
+                    ModeTogglePill(
+                        current = lastPillMode,
+                        onSelect = { mode ->
+                            lastPillMode = mode
+                            coordinator.select(mode)
+                        },
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 // Matches the 36dp footprint the close button
                 // claims on the left so the toggle stays
@@ -337,6 +347,47 @@ internal fun CircleIconButton(icon: ImageVector, onClick: () -> Unit) {
             contentDescription = null,
             tint              = Color.White.copy(alpha = 0.85f),
             modifier          = Modifier.size(18.dp),
+        )
+    }
+}
+
+/**
+ * Single CTA shown in the top bar while the photo surface is
+ * mounted, in place of the two-wide Document/Business Card pill.
+ * Taps jump straight to Document mode — a more decisive escape
+ * hatch than a two-way toggle when the user is mid-photo and
+ * wants to go back to scanning. Visually anchored to the same
+ * translucent-chip vocabulary the pill uses so it reads as part
+ * of the top-bar control family rather than a foreign element.
+ */
+@Composable
+private fun ScanDocumentButton(onClick: () -> Unit) {
+    val type = LocalQuickInkTypography.current
+    val view = LocalView.current
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(QuickInkRadius.pill))
+            .background(Color.White.copy(alpha = 0.10f))
+            .clickable {
+                view.performHapticFeedback(
+                    android.view.HapticFeedbackConstants.CONTEXT_CLICK,
+                )
+                onClick()
+            }
+            .padding(horizontal = QuickInkSpacing.s4, vertical = QuickInkSpacing.s2),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector        = Icons.Filled.DocumentScanner,
+            contentDescription = null,
+            tint               = Color.White,
+            modifier           = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.size(6.dp))
+        Text(
+            text  = "Scan document",
+            style = type.label,
+            color = Color.White,
         )
     }
 }

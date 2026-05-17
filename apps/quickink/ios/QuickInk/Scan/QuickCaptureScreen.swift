@@ -182,23 +182,32 @@ struct QuickCaptureScreen: View {
 
             Spacer()
 
-            // Pill stays two-wide (Document / Business Card)
-            // AND stays visible on every surface — including
-            // `.photo`. `current:` reads from `lastPillMode`,
-            // not `coordinator.mode`, so on the photo surface
-            // the user still sees their previous pill choice
-            // highlighted (per spec test #5) and can flip back
-            // to Document / Business Card with one tap (per
-            // spec §11, which expects the pill to be available
-            // as an escape hatch when camera permission is
-            // denied for photo mode).
-            ModeTogglePill(
-                current:  lastPillMode,
-                onSelect: { mode in
-                    lastPillMode = mode
-                    coordinator.select(mode)
-                },
-            )
+            // Top-bar control depends on which surface is up:
+            //   - `.document` / `.businessCard` → the two-wide
+            //     pill, highlighting whichever mode is active.
+            //   - `.photo` → a single "Scan document" button
+            //     that jumps straight to Document mode. Photo
+            //     mode is a transient one-shot capture and the
+            //     pill's two-way toggle reads as unnecessary
+            //     decision-making while the user is mid-photo;
+            //     a single CTA back to scanning is the cleaner
+            //     escape hatch (still satisfies spec §11's
+            //     "user can leave photo via the top bar
+            //     without dismissing" expectation).
+            if coordinator.mode == .photo {
+                ScanDocumentButton(onTap: {
+                    lastPillMode = .document
+                    coordinator.select(.document)
+                })
+            } else {
+                ModeTogglePill(
+                    current:  lastPillMode,
+                    onSelect: { mode in
+                        lastPillMode = mode
+                        coordinator.select(mode)
+                    },
+                )
+            }
 
             Spacer()
 
@@ -256,5 +265,41 @@ private struct ModeTogglePill: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             onSelect(mode)
         }
+    }
+}
+
+// MARK: - Scan document escape (photo surface only)
+
+/// Single CTA shown in the top bar while the photo surface is
+/// mounted, in place of the two-wide Document/Business Card pill.
+/// Taps jump straight to Document mode — a more decisive escape
+/// hatch than a two-way toggle when the user is mid-photo and
+/// wants to go back to scanning. Visually anchored to the same
+/// translucent-chip vocabulary the pill uses so it reads as
+/// part of the top-bar control family rather than a foreign
+/// element.
+private struct ScanDocumentButton: View {
+    let onTap: () -> Void
+    var body: some View {
+        Button(action: {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            onTap()
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: "doc.viewfinder")
+                    .font(.system(size: 14, weight: .medium))
+                Text("Scan document")
+                    .font(QuickInkText.label)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, QuickInkSpacing.s4)
+            .padding(.vertical, QuickInkSpacing.s2)
+            .background(
+                RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous)
+                    .fill(Color.white.opacity(0.10))
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Scan document instead")
     }
 }
