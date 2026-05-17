@@ -13,6 +13,15 @@ import XCTest
 
 final class StoryDayMarkersTests: XCTestCase {
 
+    // Pin the test process's timezone to UTC so the engine's local-
+    // hour computation produces deterministic output regardless of
+    // the dev machine's locale. Production runs on the user's actual
+    // timezone — this is purely a test-determinism affordance.
+    override class func setUp() {
+        super.setUp()
+        NSTimeZone.default = TimeZone(identifier: "UTC")!
+    }
+
     // MARK: - Fixtures
 
     private func item(id: String, occurredAt: String? = nil, createdAt: String = isoUtc("2026-05-01T09:00:00")) -> StoryItem {

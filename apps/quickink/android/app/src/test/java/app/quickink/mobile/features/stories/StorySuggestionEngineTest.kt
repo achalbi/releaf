@@ -15,10 +15,19 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertFalse
+import org.junit.Before
 import org.junit.Test
 import java.time.OffsetDateTime
+import java.util.TimeZone
 
 class StorySuggestionEngineTest {
+
+    // Pin the process's timezone to UTC so the engine's date-range
+    // formatting reads deterministically regardless of the dev
+    // machine's locale. Production uses the user's actual timezone.
+    @Before fun pinTimezoneToUtc() {
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+    }
 
     // ── Fixtures ─────────────────────────────────────────────────
 

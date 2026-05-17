@@ -13,9 +13,19 @@ package app.quickink.mobile.features.stories
 import app.quickink.mobile.data.storyitem.StoryItemEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
+import java.util.TimeZone
 
 class StoryDayMarkersTest {
+
+    // Pin the process's timezone to UTC so the engine's local-hour
+    // computation produces deterministic output regardless of the
+    // dev machine's locale. Production runs on the user's actual
+    // timezone — this is purely a test-determinism affordance.
+    @Before fun pinTimezoneToUtc() {
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+    }
 
     // ── Fixtures ─────────────────────────────────────────────────
 

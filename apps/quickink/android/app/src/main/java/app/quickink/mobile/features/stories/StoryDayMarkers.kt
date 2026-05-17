@@ -46,15 +46,24 @@ object StoryDayMarkers {
      * Compute markers for a story's items. Returns markers in the
      * same order the items appear; the very first item always gets
      * one (the reader needs an opener even for single-day stories).
+     *
+     * Dates + hours read in the user's CURRENT system timezone (the
+     * spec's "local time of the effective date"). An 8 pm capture
+     * in Tokyo and an 8 pm capture in New York both fall in their
+     * respective EVENING buckets, even when viewed from a third
+     * timezone. Per-capture timezone in the schema is v1.1; until
+     * then, the viewing device's zone is the best we have.
      */
     fun derive(items: List<StoryItemEntity>): List<StoryDayMarker> {
         val out = mutableListOf<StoryDayMarker>()
         var lastKey: Pair<Triple<Int, Int, Int>, StoryDayBucket>? = null
+        val localZone = java.time.ZoneId.systemDefault()
         for (item in items) {
             val iso = item.occurredAt ?: item.createdAt
-            val dt = parseIso(iso) ?: continue
-            val date = Triple(dt.year, dt.monthValue, dt.dayOfMonth)
-            val bucket = StoryDayBucket.of(dt.hour)
+            val parsed = parseIso(iso) ?: continue
+            val local = parsed.atZoneSameInstant(localZone)
+            val date = Triple(local.year, local.monthValue, local.dayOfMonth)
+            val bucket = StoryDayBucket.of(local.hour)
             val key = date to bucket
             if (key != lastKey) {
                 out += StoryDayMarker(

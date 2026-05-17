@@ -20,6 +20,15 @@ import XCTest
 
 final class StorySuggestionEngineTests: XCTestCase {
 
+    // Pin the test process's timezone to UTC so the engine's date-
+    // range formatting reads deterministically regardless of the
+    // dev machine's locale. Production uses the user's actual
+    // timezone.
+    override class func setUp() {
+        super.setUp()
+        NSTimeZone.default = TimeZone(identifier: "UTC")!
+    }
+
     // MARK: - Fixtures
 
     private func point(

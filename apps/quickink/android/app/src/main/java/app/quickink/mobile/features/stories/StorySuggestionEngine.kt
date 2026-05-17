@@ -120,8 +120,13 @@ object StorySuggestionEngine {
     private val DAY_ONLY  = DateTimeFormatter.ofPattern("d",     Locale.ENGLISH)
 
     private fun formatDateRange(start: OffsetDateTime, end: OffsetDateTime): String {
-        val sd = start.toLocalDate()
-        val ed = end.toLocalDate()
+        // Date range reads in the user's CURRENT local timezone so the
+        // reason line reads as the local day the user remembers, not
+        // the UTC date that may be a day off. iOS matches via
+        // `Calendar.current` on its `DateFormatter`s.
+        val zone = java.time.ZoneId.systemDefault()
+        val sd = start.atZoneSameInstant(zone).toLocalDate()
+        val ed = end.atZoneSameInstant(zone).toLocalDate()
         if (sd == ed) return MONTH_DAY.format(sd)
         if (sd.year == ed.year && sd.month == ed.month) {
             return "${MONTH_DAY.format(sd)}–${DAY_ONLY.format(ed)}"
