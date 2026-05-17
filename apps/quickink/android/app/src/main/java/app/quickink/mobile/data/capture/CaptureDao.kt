@@ -575,10 +575,12 @@ interface CaptureDao {
             (deleted_at IS NULL AND (
                 pdf_drive_file_id IS NULL
                 OR (preview_uri IS NOT NULL AND preview_drive_file_id IS NULL)
+                OR (video_uri   IS NOT NULL AND video_drive_file_id   IS NULL)
             ))
             OR (deleted_at IS NOT NULL AND (
-                pdf_drive_file_id IS NOT NULL
+                pdf_drive_file_id     IS NOT NULL
                 OR preview_drive_file_id IS NOT NULL
+                OR video_drive_file_id   IS NOT NULL
             ))
           )
         ORDER BY created_at DESC
@@ -592,11 +594,31 @@ interface CaptureDao {
     @Query("UPDATE captures SET preview_drive_file_id = :driveFileId WHERE id = :id")
     suspend fun setPreviewDriveFileId(id: String, driveFileId: String?)
 
+    /**
+     * Stamp the Drive file id of a successful video upload (the
+     * hold-to-record Photo-mode .mp4 mirrored alongside the PDF +
+     * preview by `QuickInkBinarySync.uploadLive`). Pass `null` to
+     * clear on tombstone cascade.
+     */
+    @Query("UPDATE captures SET video_drive_file_id = :driveFileId WHERE id = :id")
+    suspend fun setVideoDriveFileId(id: String, driveFileId: String?)
+
     @Query("UPDATE captures SET pdf_uri = :pdfUri WHERE id = :id")
     suspend fun setPdfUri(id: String, pdfUri: String)
 
     @Query("UPDATE captures SET preview_uri = :previewUri WHERE id = :id")
     suspend fun setPreviewUri(id: String, previewUri: String?)
+
+    /**
+     * Restore-only setter — used by `QuickInkBinarySync.restorePending`
+     * to rewrite `video_uri` after a Drive-pull lands the .mp4 into
+     * AttachmentStorage on this device. Distinct from the user-
+     * facing `setVideoUri(id, uri, timestamp)` above because the
+     * restore path deliberately does NOT bump `dirty` / `updated_at`
+     * — the URI is a device-local detail, not a content edit.
+     */
+    @Query("UPDATE captures SET video_uri = :videoUri WHERE id = :id")
+    suspend fun setVideoUriLocal(id: String, videoUri: String?)
 
     /**
      * Rewrite any occurrence of [oldFrag] in `pdf_uri` / `preview_uri`

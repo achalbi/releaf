@@ -116,6 +116,15 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         // story_item_id. iOS GRDB v15_story_voice_clips.
         StoryVoiceClipEntity::class,
     ],
+    // v23 — Adds `captures.video_drive_file_id` so the binary-sync
+    // worker can mirror the raw .mp4 to Drive alongside the PDF +
+    // preview JPEG, and the restore pass can re-download it on
+    // other devices. Mirror of iOS GRDB v17_capture_video_drive_file_id.
+    // Nullable; populated by `QuickInkBinarySync` after a
+    // successful upload, nulled on tombstone cascade. Room rebuilds
+    // destructively under `fallbackToDestructiveMigration` until
+    // real users have data.
+    //
     // v22 — Adds `captures.video_uri` so the hold-to-record Photo-
     // mode path can keep the raw .mp4 as a re-watchable artifact
     // on the detail screen. Mirror of iOS GRDB v16_capture_video_uri.
@@ -238,7 +247,7 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // Free-form TEXT, nullable, no index — read pattern is "load the
     // whole field for the detail screen" so a full-text index isn't
     // useful yet.
-    version       = 22,
+    version       = 23,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {

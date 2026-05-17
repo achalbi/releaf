@@ -849,12 +849,29 @@ public final class QuickInkDatabase: @unchecked Sendable {
         // card capture, and gallery import lands without one). The
         // file lives in AttachmentStorage alongside the JPEG and
         // .m4a, so Drive sync rolls it up via the existing binary-
-        // push path once we wire a `videoDriveFileId` in a follow-
-        // up (today the file stays local-only until that ships).
+        // push path now that v17 wired the `video_drive_file_id`
+        // companion.
         //
         // Mirror of Android Room v22 schema bump.
         migrator.registerMigration("v16_capture_video_uri") { db in
             try db.execute(sql: "ALTER TABLE captures ADD COLUMN video_uri TEXT")
+        }
+
+        // ─── v17_capture_video_drive_file_id ────────────────────
+        //
+        // Adds `captures.video_drive_file_id` so the binary-sync
+        // worker can mirror the raw .mov / .mp4 to Drive alongside
+        // the PDF + preview JPEG. NULL = the video hasn't been
+        // pushed yet (or no video exists for this capture).
+        // Populated by `QuickInkBinarySync.uploadAndCascade` after
+        // a successful `DriveClient.uploadBinaryAtPath`; nulled
+        // again on tombstone cascade. Mirror of the
+        // `pdf_drive_file_id` / `preview_drive_file_id` shape from
+        // v3.
+        //
+        // Mirror of Android Room v23 schema bump.
+        migrator.registerMigration("v17_capture_video_drive_file_id") { db in
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN video_drive_file_id TEXT")
         }
 
         return migrator

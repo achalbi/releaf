@@ -398,6 +398,14 @@ class QuickInkBinarySync(
                 clearLocalId = { captureDao.setPreviewDriveFileId(row.id, null) },
             ) { driveClient.trash(id, accessToken) }
         }
+        row.videoDriveFileId?.let { id ->
+            trashBinary(
+                driveFileId = id,
+                label = "video tombstone row=${row.id.take(8)}…",
+                stats = stats,
+                clearLocalId = { captureDao.setVideoDriveFileId(row.id, null) },
+            ) { driveClient.trash(id, accessToken) }
+        }
     }
 
     private suspend fun uploadLive(
@@ -449,6 +457,35 @@ class QuickInkBinarySync(
                 }
             } else {
                 Log.w(TAG, "binary.upload.preview skipped — local file missing (row=${row.id.take(8)}…)")
+            }
+        }
+
+        // Video — only set for hold-to-record Photo-mode captures.
+        // Same date-bucketed path as the PDF + preview so a folder
+        // listing groups all three. `video/mp4` is the MIME we
+        // ship; iOS uploads a `.mov` container under the same
+        // `.mp4` Drive extension since the underlying streams are
+        // identical and the receiver doesn't care about the
+        // wrapper.
+        if (row.videoDriveFileId == null && !row.videoUri.isNullOrBlank()) {
+            val bytes = readLocalBytes(row.videoUri)
+            if (bytes != null) {
+                uploadBinary(
+                    label = "video row=${row.id.take(8)}…",
+                    stats = stats,
+                ) {
+                    driveClient.uploadBinaryAtPath(
+                        data         = bytes,
+                        contentType  = "video/mp4",
+                        relativePath = "$bucket/${row.id}.mp4",
+                        rootFolderId = rootFolderId,
+                        accessToken  = accessToken,
+                    )
+                }?.let { driveFile ->
+                    captureDao.setVideoDriveFileId(row.id, driveFile.id)
+                }
+            } else {
+                Log.w(TAG, "binary.upload.video skipped — local file missing (row=${row.id.take(8)}…)")
             }
         }
     }
@@ -635,6 +672,68 @@ class QuickInkBinarySync(
                     } catch (e: Exception) {
                         stats.failed++
                         Log.w(TAG, "restorePending.preview failed ($rowTag): $e")
+                    }
+                }
+            }
+
+            // ── Video (hold-to-record clip) ─────────────────────
+            // Mirror of the PDF + preview restore loops. The video
+            // is only ever set for Photo-mode captures, so most
+            // rows skip this branch on the missing-uri check.
+            if (row.videoUri.isNullOrBlank() || !localFileExists(row.videoUri)) {
+                val effectiveVideoDriveId = row.videoDriveFileId
+                    ?: rootFolderId?.let { rootId ->
+                        val bucket = dateBucket(row.createdAt)
+                        val path = "$bucket/${row.id}.mp4"
+                        val rowTag = "row=${row.id.take(8)}… path=$path"
+                        try {
+                            val found = driveClient.findFileAtPath(path, rootId, accessToken)
+                            if (found != null) {
+                                captureDao.setVideoDriveFileId(row.id, found.id)
+                                Log.i(TAG, "restorePending.video relinked ($rowTag → driveId=${found.id.take(12)}…)")
+                                found.id
+                            } else {
+                                // Quiet — every non-Photo capture
+                                // legitimately has no video; no
+                                // log to keep the per-row noise
+                                // down.
+                                null
+                            }
+                        } catch (e: DriveError.Unauthenticated) {
+                            Log.w(TAG, "restorePending.video find-by-path auth rejected ($rowTag) — rethrowing")
+                            throw e
+                        } catch (e: DriveError.RateLimited) {
+                            Log.w(TAG, "restorePending.video find-by-path rate limited ($rowTag) — rethrowing")
+                            throw e
+                        } catch (e: Exception) {
+                            Log.w(TAG, "restorePending.video find-by-path failed ($rowTag): $e")
+                            null
+                        }
+                    }
+
+                if (effectiveVideoDriveId != null) {
+                    stats.attempted++
+                    val rowTag = "row=${row.id.take(8)}… videoDriveId=${effectiveVideoDriveId.take(12)}…"
+                    try {
+                        val bytes = driveClient.downloadBytes(effectiveVideoDriveId, accessToken)
+                        val newUri = writeBytes(bytes, "mp4")
+                        if (newUri != null) {
+                            captureDao.setVideoUriLocal(row.id, newUri.toString())
+                            stats.completed++
+                            Log.i(TAG, "restorePending.video ok ($rowTag, ${bytes.size}B)")
+                        } else {
+                            Log.w(TAG, "restorePending.video write-failed ($rowTag)")
+                            stats.failed++
+                        }
+                    } catch (e: DriveError.Unauthenticated) {
+                        Log.w(TAG, "restorePending.video auth rejected ($rowTag) — rethrowing")
+                        throw e
+                    } catch (e: DriveError.RateLimited) {
+                        Log.w(TAG, "restorePending.video rate limited ($rowTag) — rethrowing")
+                        throw e
+                    } catch (e: Exception) {
+                        stats.failed++
+                        Log.w(TAG, "restorePending.video failed ($rowTag): $e")
                     }
                 }
             }

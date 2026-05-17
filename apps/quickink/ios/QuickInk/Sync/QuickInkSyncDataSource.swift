@@ -104,6 +104,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                     category:           nil,
                     pdfDriveFileId:     row["pdf_drive_file_id"] as String?,
                     previewDriveFileId: row["preview_drive_file_id"] as String?,
+                    videoDriveFileId:   row["video_drive_file_id"] as String?,
                     // Older rows pre-v4 had no source column; the
                     // ALTER TABLE default (`'scan'`) means SELECT
                     // always returns a value, but tolerate a nil
@@ -900,11 +901,9 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
 
         // `video_uri` carries a file:// path that's only valid on
         // the source device — same reconcile rule as pdf_uri /
-        // preview_uri. We have no `video_drive_file_id` slot yet
-        // (the binary upload pass for videos is a follow-up), so
-        // until that ships the receiver simply blanks the URI on
-        // cross-device pulls — the JPEG page + audio voice note
-        // both still come through, the video just doesn't.
+        // preview_uri. When the local file is missing, blank the
+        // URI and let `QuickInkBinarySync.restorePending` fill it
+        // back in from `video_drive_file_id` on the next pass.
         let existingVideoUri: String? = try Row.fetchOne(
             db,
             sql: "SELECT video_uri FROM captures WHERE id = ? LIMIT 1",
@@ -914,9 +913,14 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             if let cur = existingVideoUri, Self.fileExistsAt(cur) {
                 return cur
             }
-            // No video_drive_file_id today — the remote payload's
-            // file:// path won't resolve on this device, so drop
-            // it rather than persisting a dead URI.
+            // Source payload's URI won't resolve on this device —
+            // drop it and rely on the binary-restore pass to
+            // re-download from Drive using video_drive_file_id.
+            if payload.videoDriveFileId != nil {
+                return nil
+            }
+            // No Drive copy either — only a literal file:// path
+            // that happens to be valid here counts.
             if let p = payload.videoUri, Self.fileExistsAt(p) {
                 return p
             }
@@ -926,11 +930,12 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
         try db.execute(sql: """
             INSERT INTO captures (
                 id, user_id, title, pdf_uri, preview_uri, page_count,
-                source, paper_size, drive_file_id, pdf_drive_file_id, preview_drive_file_id,
+                source, paper_size, drive_file_id,
+                pdf_drive_file_id, preview_drive_file_id, video_drive_file_id,
                 latitude, longitude, locality, sub_locality, address, notes,
                 video_uri,
                 created_at, updated_at, dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ON CONFLICT(id) DO UPDATE SET
                 user_id               = excluded.user_id,
                 title                 = excluded.title,
@@ -942,6 +947,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 drive_file_id         = excluded.drive_file_id,
                 pdf_drive_file_id     = excluded.pdf_drive_file_id,
                 preview_drive_file_id = excluded.preview_drive_file_id,
+                video_drive_file_id   = excluded.video_drive_file_id,
                 latitude              = excluded.latitude,
                 longitude             = excluded.longitude,
                 locality              = excluded.locality,
@@ -956,7 +962,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 payload.id, payload.userId, payload.title,
                 resolvedPdfUri, resolvedPreviewUri, payload.pageCount,
                 payload.source, payload.paperSize, driveFileId,
-                payload.pdfDriveFileId, payload.previewDriveFileId,
+                payload.pdfDriveFileId, payload.previewDriveFileId, payload.videoDriveFileId,
                 payload.latitude, payload.longitude,
                 payload.locality, payload.subLocality, payload.address,
                 payload.notes,

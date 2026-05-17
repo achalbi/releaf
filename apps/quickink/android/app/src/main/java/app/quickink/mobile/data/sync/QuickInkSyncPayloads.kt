@@ -150,6 +150,16 @@ data class CapturePayloadV2(
     /** Drive file id of the per-row preview-JPEG binary upload. */
     @SerialName("preview_drive_file_id") val previewDriveFileId: String? = null,
     /**
+     * Drive file id of the per-row hold-to-record video binary
+     * upload (.mp4 in Drive). Same restore semantics as
+     * [pdfDriveFileId]: the receive-side `QuickInkBinarySync.restorePending`
+     * downloads the bytes, drops them into AttachmentStorage, then
+     * rewrites `video_uri` to the new local path. Nullable; absent
+     * on payloads from pre-v22 clients and on every capture without
+     * a video.
+     */
+    @SerialName("video_drive_file_id")   val videoDriveFileId: String? = null,
+    /**
      * How the capture was created — `"scan"` (the document scanner)
      * or `"import"` (the system photo picker). Defaulted to "scan"
      * for back-compat with rows synced from older clients that
@@ -199,11 +209,12 @@ data class CapturePayloadV2(
     /**
      * Local file:// URI for the raw video that produced the capture
      * (hold-to-record Photo-mode path, v22). Nullable; absent on
-     * payloads from pre-v22 clients. Ships verbatim across devices
-     * today — receivers can't play it back until a future binary
-     * upload pass lands the video on Drive (mirrors the pdf_uri /
-     * preview_uri sync story); for now [toEntity] drops the URI on
-     * receive so we don't persist a dead path.
+     * payloads from pre-v22 clients. Source-device URI ships
+     * verbatim, but the receiver drops it in `toEntity` and waits
+     * for `QuickInkBinarySync.restorePending` to download the
+     * companion .mp4 from Drive via [videoDriveFileId] and rewrite
+     * `video_uri` to the new local path. Mirror of the pdf_uri /
+     * preview_uri sync story.
      */
     @SerialName("video_uri")             val videoUri: String? = null,
     @SerialName("created_at")            val createdAt: String,
@@ -222,6 +233,7 @@ fun CaptureEntity.toV2Payload(): CapturePayloadV2 = CapturePayloadV2(
     category           = null,
     pdfDriveFileId     = pdfDriveFileId,
     previewDriveFileId = previewDriveFileId,
+    videoDriveFileId   = videoDriveFileId,
     source             = source,
     paperSize          = paperSize,
     latitude           = latitude,
@@ -259,11 +271,12 @@ fun CapturePayloadV2.toEntity(driveFileId: String?): CaptureEntity = CaptureEnti
     driveFileId        = driveFileId,
     pdfDriveFileId     = pdfDriveFileId,
     previewDriveFileId = previewDriveFileId,
+    videoDriveFileId   = videoDriveFileId,
     // Drop the URI on receive — the remote path is meaningless on
-    // this device and there's no binary-upload pass yet to backfill
-    // a local copy. The JPEG page + .m4a voice note both come
-    // through; the video itself stays local-only until the
-    // companion upload path ships.
+    // this device. `QuickInkBinarySync.restorePending` downloads
+    // the companion .mp4 from Drive via [videoDriveFileId] and
+    // rewrites `video_uri` to the local file:// path via
+    // `captureDao.setVideoUriLocal`.
     videoUri           = null,
     createdAt          = createdAt,
     updatedAt          = updatedAt,

@@ -211,6 +211,18 @@ data class CaptureEntity(
     @ColumnInfo(name = "video_uri")
     val videoUri: String? = null,
 
+    /**
+     * Drive file id of the per-row video binary upload (v23). NULL
+     * = the video hasn't been pushed to Drive yet (or no video
+     * exists). Populated by `QuickInkBinarySync` after a successful
+     * upload; nulled on tombstone cascade. Receivers consume it the
+     * same way as [pdfDriveFileId]: download into AttachmentStorage,
+     * then rewrite `video_uri` to the new local path via
+     * `setVideoUri`.
+     */
+    @ColumnInfo(name = "video_drive_file_id")
+    val videoDriveFileId: String? = null,
+
     @ColumnInfo(name = "created_at")
     val createdAt: String,
 

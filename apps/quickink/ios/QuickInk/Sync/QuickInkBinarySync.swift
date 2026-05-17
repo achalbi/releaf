@@ -134,6 +134,10 @@ public final class QuickInkBinarySync: @unchecked Sendable {
                     try? await driveClient.trash(fileId: previewId, accessToken: accessToken)
                     try? await repo.markPreviewSynced(captureId: row.id, driveFileId: nil)
                 }
+                if let videoId = row.videoDriveFileId {
+                    try? await driveClient.trash(fileId: videoId, accessToken: accessToken)
+                    try? await repo.markVideoSynced(captureId: row.id, driveFileId: nil)
+                }
             } else {
                 // Live row — upload missing binaries.
                 if row.pdfDriveFileId == nil, let bytes = readLocalFile(uri: row.pdfUri) {
@@ -163,6 +167,31 @@ public final class QuickInkBinarySync: @unchecked Sendable {
                         try? await repo.markPreviewSynced(captureId: row.id, driveFileId: driveFile.id)
                     }
                 }
+
+                // Video — only set for hold-to-record Photo-mode
+                // captures. Same date-bucketed path as the PDF +
+                // preview so a folder listing groups all three.
+                // `video/mp4` is the MIME we ship even though iOS
+                // hands us a `.mov` container — the underlying H.264
+                // / AAC streams are the same, and Drive doesn't
+                // care about the wrapper. We keep the `.mp4`
+                // extension on the Drive object so the Android
+                // download path doesn't have to special-case the
+                // platform-specific container.
+                if row.videoDriveFileId == nil,
+                   let videoUri = row.videoUri,
+                   let bytes = readLocalFile(uri: videoUri) {
+                    let path = "\(dateBucket(row.createdAt))/\(row.id).mp4"
+                    if let driveFile = try? await driveClient.uploadBinaryAtPath(
+                        bytes,
+                        contentType: "video/mp4",
+                        relativePath: path,
+                        rootFolderId: root.id,
+                        accessToken: accessToken
+                    ) {
+                        try? await repo.markVideoSynced(captureId: row.id, driveFileId: driveFile.id)
+                    }
+                }
             }
         }
     }
@@ -179,24 +208,33 @@ public final class QuickInkBinarySync: @unchecked Sendable {
             let id: String
             let pdfUri: String
             let previewUri: String?
+            let videoUri: String?
             let pdfDriveFileId: String?
             let previewDriveFileId: String?
+            let videoDriveFileId: String?
         }
 
         let rows: [LocalRow] = try await dbQueue.read { db in
             let raw = try Row.fetchAll(db, sql: """
-                SELECT id, pdf_uri, preview_uri, pdf_drive_file_id, preview_drive_file_id
+                SELECT id, pdf_uri, preview_uri, video_uri,
+                       pdf_drive_file_id, preview_drive_file_id, video_drive_file_id
                 FROM captures
                 WHERE user_id = ? AND deleted_at IS NULL
-                  AND (pdf_drive_file_id IS NOT NULL OR preview_drive_file_id IS NOT NULL)
+                  AND (
+                       pdf_drive_file_id     IS NOT NULL
+                    OR preview_drive_file_id IS NOT NULL
+                    OR video_drive_file_id   IS NOT NULL
+                  )
                 """, arguments: [userId])
             return raw.map { row in
                 LocalRow(
                     id: row["id"],
                     pdfUri: row["pdf_uri"],
                     previewUri: row["preview_uri"] as String?,
+                    videoUri: row["video_uri"] as String?,
                     pdfDriveFileId: row["pdf_drive_file_id"] as String?,
-                    previewDriveFileId: row["preview_drive_file_id"] as String?
+                    previewDriveFileId: row["preview_drive_file_id"] as String?,
+                    videoDriveFileId: row["video_drive_file_id"] as String?
                 )
             }
         }
@@ -229,6 +267,27 @@ public final class QuickInkBinarySync: @unchecked Sendable {
                         captureId: row.id,
                         pdfUri: nil,
                         previewUri: url.absoluteString
+                    )
+                }
+            }
+            // Video — only present for hold-to-record Photo-mode
+            // captures. Same restore shape as the PDF + preview
+            // path: download the bytes, drop them into
+            // AttachmentStorage, then rewrite `video_uri` to the
+            // local file:// path so the detail screen's player
+            // resolves on this device.
+            if let videoDriveId = row.videoDriveFileId,
+               !localFileExists(uri: row.videoUri) {
+                if let bytes = try? await driveClient.downloadBytes(
+                    fileId: videoDriveId,
+                    accessToken: accessToken
+                ),
+                   let url = AttachmentStorage.write(bytes, ext: "mp4") {
+                    try? await repo.updateLocalUris(
+                        captureId: row.id,
+                        pdfUri: nil,
+                        previewUri: nil,
+                        videoUri: url.absoluteString
                     )
                 }
             }

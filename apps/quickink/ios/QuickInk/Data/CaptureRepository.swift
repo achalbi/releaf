@@ -556,17 +556,20 @@ public final class CaptureRepository: @unchecked Sendable {
         public let userId: String
         public let pdfUri: String
         public let previewUri: String?
+        public let videoUri: String?
         public let createdAt: String
         public let pdfDriveFileId: String?
         public let previewDriveFileId: String?
+        public let videoDriveFileId: String?
         public let deletedAt: String?
     }
 
     public func pendingBinaryRows(userId: String) async throws -> [PendingBinaryRow] {
         try await dbQueue.read { db -> [PendingBinaryRow] in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT id, user_id, pdf_uri, preview_uri, created_at,
-                       pdf_drive_file_id, preview_drive_file_id, deleted_at
+                SELECT id, user_id, pdf_uri, preview_uri, video_uri, created_at,
+                       pdf_drive_file_id, preview_drive_file_id,
+                       video_drive_file_id, deleted_at
                 FROM captures
                 WHERE user_id = ?
                   AND (
@@ -574,11 +577,13 @@ public final class CaptureRepository: @unchecked Sendable {
                     (deleted_at IS NULL AND (
                         pdf_drive_file_id IS NULL
                         OR (preview_uri IS NOT NULL AND preview_drive_file_id IS NULL)
+                        OR (video_uri IS NOT NULL AND video_drive_file_id IS NULL)
                     ))
                     -- Tombstoned rows that still have Drive ids to trash.
                     OR (deleted_at IS NOT NULL AND (
                         pdf_drive_file_id IS NOT NULL
                         OR preview_drive_file_id IS NOT NULL
+                        OR video_drive_file_id IS NOT NULL
                     ))
                   )
                 ORDER BY created_at DESC
@@ -590,9 +595,11 @@ public final class CaptureRepository: @unchecked Sendable {
                     userId:              row["user_id"],
                     pdfUri:              row["pdf_uri"],
                     previewUri:          row["preview_uri"] as String?,
+                    videoUri:            row["video_uri"] as String?,
                     createdAt:           row["created_at"],
                     pdfDriveFileId:      row["pdf_drive_file_id"] as String?,
                     previewDriveFileId:  row["preview_drive_file_id"] as String?,
+                    videoDriveFileId:    row["video_drive_file_id"] as String?,
                     deletedAt:           row["deleted_at"] as String?
                 )
             }
@@ -618,15 +625,28 @@ public final class CaptureRepository: @unchecked Sendable {
         }
     }
 
-    /// Stamp pdf_uri (and optionally preview_uri) on a capture row
-    /// after a fresh-device restore-from-Drive copy completes. The
-    /// previous URIs are stale (point at another device's storage),
-    /// so the restorer rewrites them to local paths once the binary
-    /// is back in `AttachmentStorage`.
+    /// Stamp the Drive file id of a successful video upload — the
+    /// hold-to-record Photo-mode .mov / .mp4 mirrored alongside the
+    /// PDF + preview by `QuickInkBinarySync.uploadAndCascade`. Pass
+    /// `nil` to clear on tombstone cascade.
+    public func markVideoSynced(captureId: String, driveFileId: String?) async throws {
+        try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE captures SET video_drive_file_id = ? WHERE id = ?
+                """, arguments: [driveFileId, captureId])
+        }
+    }
+
+    /// Stamp pdf_uri (and optionally preview_uri / video_uri) on a
+    /// capture row after a fresh-device restore-from-Drive copy
+    /// completes. The previous URIs are stale (point at another
+    /// device's storage), so the restorer rewrites them to local
+    /// paths once the binary is back in `AttachmentStorage`.
     public func updateLocalUris(
         captureId: String,
         pdfUri: String?,
-        previewUri: String?
+        previewUri: String?,
+        videoUri: String? = nil
     ) async throws {
         try await dbQueue.write { db in
             if let pdfUri {
@@ -638,6 +658,11 @@ public final class CaptureRepository: @unchecked Sendable {
                 try db.execute(sql: """
                     UPDATE captures SET preview_uri = ? WHERE id = ?
                     """, arguments: [previewUri, captureId])
+            }
+            if let videoUri {
+                try db.execute(sql: """
+                    UPDATE captures SET video_uri = ? WHERE id = ?
+                    """, arguments: [videoUri, captureId])
             }
         }
     }

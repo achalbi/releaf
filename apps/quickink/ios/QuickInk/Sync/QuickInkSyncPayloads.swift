@@ -257,6 +257,15 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
     /// Drive file id of the per-row preview-JPEG binary upload.
     /// Same restore semantics as [pdfDriveFileId].
     public let previewDriveFileId: String?
+    /// Drive file id of the per-row hold-to-record video binary
+    /// upload (.mp4 in Drive). Set by `QuickInkBinarySync` after
+    /// the source device successfully uploads the .mov / .mp4 to
+    /// Drive. Receivers consume it the same way as
+    /// [pdfDriveFileId]: download into AttachmentStorage, rewrite
+    /// `video_uri` to the local file:// path. Nullable; absent on
+    /// payloads from pre-v17 clients and on every capture that
+    /// doesn't have a video to begin with.
+    public let videoDriveFileId: String?
     /// How the capture was created — `"scan"` (the document scanner)
     /// or `"import"` (the system photo picker). Defaulted to "scan"
     /// for back-compat with rows synced from older clients that
@@ -319,6 +328,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         category: String?,
         pdfDriveFileId: String? = nil,
         previewDriveFileId: String? = nil,
+        videoDriveFileId: String? = nil,
         source: String = "scan",
         paperSize: String = "a4",
         latitude: Double? = nil,
@@ -340,6 +350,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         self.category = category
         self.pdfDriveFileId = pdfDriveFileId
         self.previewDriveFileId = previewDriveFileId
+        self.videoDriveFileId = videoDriveFileId
         self.source = source
         self.paperSize = paperSize
         self.latitude = latitude
@@ -364,6 +375,10 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         self.category           = try c.decodeIfPresent(String.self, forKey: .category)
         self.pdfDriveFileId     = try c.decodeIfPresent(String.self, forKey: .pdfDriveFileId)
         self.previewDriveFileId = try c.decodeIfPresent(String.self, forKey: .previewDriveFileId)
+        // `video_drive_file_id` landed in v17 (iOS) / Room v23
+        // (Android). Tolerate its absence on older payloads — they
+        // read back as nil.
+        self.videoDriveFileId   = try c.decodeIfPresent(String.self, forKey: .videoDriveFileId)
         // `source` is back-compat optional on the wire — older
         // clients didn't write it, and a fresh-device restore from
         // such an older payload should read back as a scan rather
@@ -405,6 +420,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         case category
         case pdfDriveFileId     = "pdf_drive_file_id"
         case previewDriveFileId = "preview_drive_file_id"
+        case videoDriveFileId   = "video_drive_file_id"
         case source
         case paperSize          = "paper_size"
         case latitude
