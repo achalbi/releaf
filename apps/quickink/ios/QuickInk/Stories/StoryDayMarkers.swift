@@ -104,9 +104,25 @@ public enum StoryDayMarkers {
         ]
         for fmt in formatters {
             if let date = fmt.date(from: iso) {
-                let cal = Calendar(identifier: .gregorian)
-                let comps = cal.dateComponents([.year, .month, .day, .hour], from: date)
-                return Parsed(date: comps, hour: comps.hour ?? 0)
+                // Read the date components in the ISO's own offset
+                // (UTC for `Z`-suffixed timestamps). The Android
+                // engine reads `OffsetDateTime.hour` which behaves
+                // the same way — pinning to UTC here keeps both
+                // platforms deterministic for the same input. The
+                // spec wording "local time of the effective date"
+                // (shared/algorithms/story-suggestions.md §3) is
+                // operationally interpreted as "the wire-clock
+                // hour" until we start storing per-capture
+                // timezone in v1.1.
+                var cal = Calendar(identifier: .gregorian)
+                cal.timeZone = TimeZone(identifier: "UTC")!
+                // DayKey.date only carries y/m/d — including the
+                // hour here splits same-bucket different-hour
+                // items into separate markers (DateComponents
+                // Equatable is field-by-field).
+                let dateOnly = cal.dateComponents([.year, .month, .day], from: date)
+                let withHour = cal.dateComponents([.hour], from: date)
+                return Parsed(date: dateOnly, hour: withHour.hour ?? 0)
             }
         }
         return nil

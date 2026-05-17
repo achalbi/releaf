@@ -159,19 +159,27 @@ public enum StorySuggestionEngine {
         return (title, reason)
     }
 
+    /// Both formatters + the comparison calendar pin to UTC so the
+    /// engine emits the same date range as the Android side for the
+    /// same input — Android reads via `OffsetDateTime.toLocalDate()`
+    /// which preserves the offset. See `StoryDayMarkers.parseIso`
+    /// for the same rationale.
     private static let monthDayFmt: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "MMM d"
+        f.timeZone   = TimeZone(identifier: "UTC")
         return f
     }()
     private static let dayOnlyFmt: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "d"
+        f.timeZone   = TimeZone(identifier: "UTC")
         return f
     }()
 
     private static func formatDateRange(start: Date, end: Date) -> String {
-        let cal = Calendar(identifier: .gregorian)
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
         if cal.isDate(start, inSameDayAs: end) {
             return monthDayFmt.string(from: start)
         }
