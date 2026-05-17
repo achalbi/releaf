@@ -39,6 +39,7 @@ struct StoryAddSheet: View {
 
     @State private var showVoiceRecorder = false
     @State private var pickerFilter: StoryLibraryPickerSheet.Filter? = nil
+    @State private var showNotePicker = false
     @State private var stubToast: String? = nil
 
     var body: some View {
@@ -56,7 +57,7 @@ struct StoryAddSheet: View {
                     sectionHeader("FROM YOUR LIBRARY")
                     row(icon: "photo.on.rectangle",     label: "Choose a photo",       hint: "picker",       action: { pickerFilter = .photo })
                     row(icon: "doc.text",               label: "Choose a document",    hint: "picker",       action: { pickerFilter = .document })
-                    row(icon: "note.text",              label: "Choose a note",        hint: "picker",       action: stub("Note picker ships in v1.1."))
+                    row(icon: "note.text",              label: "Choose a note",        hint: "picker",       action: { showNotePicker = true })
 
                     sectionDivider()
                     sectionHeader("LAYOUT")
@@ -100,6 +101,17 @@ struct StoryAddSheet: View {
                     onPickCapture(captureId, kind)
                 },
                 onCancel: { pickerFilter = nil }
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showNotePicker) {
+            StoryNotePickerSheet(
+                userId: userId,
+                onPick:   { entryId in
+                    showNotePicker = false
+                    onPickCapture(entryId, .note)
+                },
+                onCancel: { showNotePicker = false }
             )
             .presentationDetents([.medium, .large])
         }

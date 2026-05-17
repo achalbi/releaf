@@ -78,6 +78,7 @@ fun StoryAddSheet(
 
     var showVoiceRecorder by remember { mutableStateOf(false) }
     var pickerFilter by remember { mutableStateOf<StoryPickerFilter?>(null) }
+    var showNotePicker by remember { mutableStateOf(false) }
     var stubToast by remember { mutableStateOf<String?>(null) }
 
     fun showStub(message: String) {
@@ -131,7 +132,7 @@ fun StoryAddSheet(
             SectionHeader("FROM YOUR LIBRARY")
             AddRow(icon = Icons.Outlined.Photo,      label = "Choose a photo",      hint = "picker",     onClick = { pickerFilter = StoryPickerFilter.PHOTO })
             AddRow(icon = Icons.Outlined.Description, label = "Choose a document",  hint = "picker",     onClick = { pickerFilter = StoryPickerFilter.DOCUMENT })
-            AddRow(icon = Icons.AutoMirrored.Outlined.Notes, label = "Choose a note", hint = "picker",   onClick = { showStub("Note picker ships in v1.1.") })
+            AddRow(icon = Icons.AutoMirrored.Outlined.Notes, label = "Choose a note", hint = "picker",   onClick = { showNotePicker = true })
 
             SectionDivider()
             SectionHeader("LAYOUT")
@@ -173,6 +174,17 @@ fun StoryAddSheet(
                 onPickCapture(captureId, kind)
             },
             onDismiss = { pickerFilter = null },
+        )
+    }
+
+    if (showNotePicker) {
+        StoryNotePickerSheet(
+            userId    = userId,
+            onPick    = { entryId ->
+                showNotePicker = false
+                onPickCapture(entryId, StoryItemEntity.Kind.NOTE)
+            },
+            onDismiss = { showNotePicker = false },
         )
     }
 }
