@@ -9,7 +9,7 @@
  * matching width + bottom-clearance values).
  *
  *   ┌─────────────────────────────────────────┐
- *   │  Home   Library   ⚡   Search  Settings │
+ *   │  Home   Library   ⚡   Stories Settings │
  *   └─────────────────────────────────────────┘
  *
  * Active-tab indication is driven by `activeTab`; each cell paints
@@ -42,7 +42,7 @@ import SwiftUI
 /// sentinel for sub-screens (e.g. ScanDetail) that host the bar but
 /// aren't themselves a destination — passing `.none` paints no
 /// active cell.
-public enum NavTab { case home, workspace, search, settings, none }
+public enum NavTab { case home, workspace, stories, settings, none }
 
 /// The reserved space the bottom nav occupies on screens that own a
 /// scroll surface. Padding callers should add at the bottom of their
@@ -57,7 +57,14 @@ public struct QuickInkBottomNavBar: View {
     public let onHome: () -> Void
     public let onWorkspace: () -> Void
     public let onScan: () -> Void
-    public let onSearch: () -> Void
+    /// Long-press on the ⚡ FAB — jumps the user directly into
+    /// the Photo capture surface (QuickCaptureScreen with
+    /// `initialMode: .photo`). Tap still goes to `onScan`, which
+    /// opens whichever pill-selected mode the user last used.
+    /// Defaults to a no-op so callers that don't care about the
+    /// long-press path (legacy hosts, previews) keep working.
+    public let onLongPressScan: () -> Void
+    public let onStories: () -> Void
     public let onSettings: () -> Void
 
     public init(
@@ -65,14 +72,16 @@ public struct QuickInkBottomNavBar: View {
         onHome: @escaping () -> Void,
         onWorkspace: @escaping () -> Void,
         onScan: @escaping () -> Void,
-        onSearch: @escaping () -> Void,
+        onLongPressScan: @escaping () -> Void = {},
+        onStories: @escaping () -> Void,
         onSettings: @escaping () -> Void
     ) {
         self.activeTab = activeTab
         self.onHome = onHome
         self.onWorkspace = onWorkspace
         self.onScan = onScan
-        self.onSearch = onSearch
+        self.onLongPressScan = onLongPressScan
+        self.onStories = onStories
         self.onSettings = onSettings
     }
 
@@ -124,7 +133,7 @@ public struct QuickInkBottomNavBar: View {
                 Color.clear
                     .frame(maxWidth: .infinity)
                     .frame(height: 64)
-                navIconAsset(assetName: "IconSearch", label: "Search", active: activeTab == .search, action: onSearch)
+                navIconAsset(assetName: "IconStory", label: "Stories", active: activeTab == .stories, action: onStories)
                     .frame(maxWidth: .infinity)
                 navIcon(systemName: "gearshape", label: "Settings", active: activeTab == .settings, action: onSettings)
                     .frame(maxWidth: .infinity)
@@ -199,7 +208,7 @@ public struct QuickInkBottomNavBar: View {
 
     /// Asset-backed nav icon — same shape as `navIcon` but renders a
     /// QuickInk vector asset (template-rendered, tinted via
-    /// foregroundStyle). Used for the Library / Search tabs which
+    /// foregroundStyle). Used for the Library / Stories tabs which
     /// have brand-specific icons in `Assets.xcassets`.
     @ViewBuilder
     private func navIconAsset(
@@ -252,9 +261,18 @@ public struct QuickInkBottomNavBar: View {
 
     /// The signature ⚡ Zap FAB — coral disc with a top→bottom
     /// gradient, lifted ~16pt above the card's top edge so it reads
-    /// as a hovering brand mark. Delegates to `onScan` so each host
-    /// screen can decide whether to open QuickCaptureScreen directly
-    /// or hop through a state-lifting flag (the QuickInkRoot route).
+    /// as a hovering brand mark. Delegates to `onScan` on tap and
+    /// `onLongPressScan` on a 0.4s hold. Tap opens the user's last
+    /// pill-selected mode (Document or Business Card); long-press
+    /// jumps straight into the Photo surface — the canonical
+    /// "I just want a photo, fast" shortcut from the spec.
+    ///
+    /// Implementation note: the inner disc is wrapped in a `ZStack`
+    /// with both `.onTapGesture` and `.onLongPressGesture` rather
+    /// than a `Button(action:)`. SwiftUI's `Button` consumes touch-
+    /// down and a hold inside the button doesn't fire a separate
+    /// long-press gesture — stacking the two gestures on a plain
+    /// view gives us both without an interaction conflict.
     @ViewBuilder
     private var zapFab: some View {
         let gradient = LinearGradient(
@@ -262,23 +280,33 @@ public struct QuickInkBottomNavBar: View {
             startPoint: .top,
             endPoint: .bottom
         )
-        Button(action: onScan) {
-            ZStack {
-                Circle()
-                    .fill(QuickInkColors.bg)
-                    .frame(width: 64, height: 64)
-                    .shadow(color: QuickInkColors.ink.opacity(0.22), radius: 10, x: 0, y: 5)
-                Circle()
-                    .fill(gradient)
-                    .frame(width: 56, height: 56)
-                    .shadow(color: QuickInkColors.accent.opacity(0.38), radius: 16, x: 0, y: 8)
-                Image(systemName: "bolt")
-                    .font(.system(size: 32, weight: .semibold))
-                    .foregroundStyle(QuickInkColors.textOnAccent)
-            }
-            .offset(y: -16)
+        ZStack {
+            Circle()
+                .fill(QuickInkColors.bg)
+                .frame(width: 64, height: 64)
+                .shadow(color: QuickInkColors.ink.opacity(0.22), radius: 10, x: 0, y: 5)
+            Circle()
+                .fill(gradient)
+                .frame(width: 56, height: 56)
+                .shadow(color: QuickInkColors.accent.opacity(0.38), radius: 16, x: 0, y: 8)
+            Image(systemName: "bolt")
+                .font(.system(size: 32, weight: .semibold))
+                .foregroundStyle(QuickInkColors.textOnAccent)
         }
-        .buttonStyle(.plain)
+        .offset(y: -16)
+        .contentShape(Circle())
+        // Long-press registered first so SwiftUI evaluates the
+        // hold-then-release path before the tap. Without this
+        // order, a tap-down + release at >0.4s fires onScan
+        // instead of onLongPressScan.
+        .onLongPressGesture(minimumDuration: 0.4) {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            onLongPressScan()
+        }
+        .onTapGesture {
+            onScan()
+        }
         .accessibilityLabel("Quick capture")
+        .accessibilityHint("Double tap to scan, long press for photo")
     }
 }

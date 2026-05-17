@@ -50,6 +50,16 @@ public enum DrivePath {
     /// audio_drive_file_id).
     public static let kindVoiceNote        = "voice_note"
 
+    // ─── Stories (Phase 1 + Phase 2) ──────────────────────────────
+    /// QuickInk-only — a curated narrative row (see STORIES_HANDOFF.md).
+    public static let kindStory            = "story"
+    /// QuickInk-only — one entry in a story's ordered child list.
+    public static let kindStoryItem        = "story_item"
+    /// QuickInk-only — inline voice clip attached to a `story_item`
+    /// of kind `voice_clip`. The audio binary travels via
+    /// `QuickInkBinarySync`; this JSON kind carries the metadata.
+    public static let kindStoryVoiceClip   = "story_voice_clip"
+
     // ---- folder names ----
     public static let folderNotebooks       = "notebooks"
     public static let folderChapters        = "chapters"
@@ -77,6 +87,12 @@ public enum DrivePath {
     /// QuickInk voice notes — `{yyyy}/{mm}/{dd}/{captureId}/voice-{id}.json`,
     /// co-located with the parent capture's day folder like ocr_results.
     public static let folderVoiceNotes       = "voice_notes"
+    /// QuickInk stories (Phase 1) — `stories/{id}.json`. One row per
+    /// curated narrative; flat layout since story counts stay small.
+    public static let folderStories          = "stories"
+    /// QuickInk story items (Phase 1) — `story_items/{id}.json`.
+    /// One row per entry in a story; flat for the same reason.
+    public static let folderStoryItems       = "story_items"
     public static let folderTasks           = "tasks"
     public static let folderTombstones      = "tombstones"
 
@@ -167,6 +183,20 @@ public enum DrivePath {
     /// `quickInkOcrResult`.
     public static func quickInkVoiceNote(createdAt: String, captureId: String, id: String) -> String {
         "\(quickInkDateBucket(from: createdAt))/\(captureId)/voice-\(id).json"
+    }
+
+    /// QuickInk Story (Phase 1) — flat `stories/{id}.json`.
+    public static func story(id: String) -> String { "\(folderStories)/\(id).json" }
+
+    /// QuickInk story item (Phase 1) — flat `story_items/{id}.json`.
+    public static func storyItem(id: String) -> String { "\(folderStoryItems)/\(id).json" }
+
+    /// Date-bucketed QuickInk story voice clip path —
+    /// `{yyyy}/{mm}/{dd}/{storyItemId}/storyvoice-{id}.json`. Mirrors
+    /// `quickInkVoiceNote` but co-locates under the parent
+    /// `story_item` rather than a capture.
+    public static func quickInkStoryVoiceClip(createdAt: String, storyItemId: String, id: String) -> String {
+        "\(quickInkDateBucket(from: createdAt))/\(storyItemId)/storyvoice-\(id).json"
     }
 
     public static func tombstone(id: String) -> String { "\(folderTombstones)/\(id).json" }

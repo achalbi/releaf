@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#2C2826" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" role="img">
+  <title>Stories</title>
+  <path d="M8 6 h8 a2 2 0 0 1 2 2 v8"/>
+  <path d="M7 9 h8 a2 2 0 0 1 2 2 v7 a2 2 0 0 1 -2 2 H7 a2 2 0 0 1 -2 -2 V11 a2 2 0 0 1 2 -2 z"/>
+</svg>

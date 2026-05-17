@@ -1,42 +1,23 @@
 /*
  * QuickInkTypography.kt
  *
- * QuickInk's editorial type system, sourced from the typography spec:
+ * QuickInk's editorial type system, sourced from the typography
+ * token JSON (see `design/` token export). Three bundled families:
  *
- *   | Element                  | Font                | Style       |
- *   | ------------------------ | ------------------- | ----------- |
- *   | App Name                 | New York Large Bold | Hero        |
- *   | Notebook Titles          | New York Medium     | Elegant     |
- *   | Editor Body              | SF Pro Text         | Clean       |
- *   | Toolbar                  | SF Pro Medium       | Compact     |
- *   | Empty States             | New York Italic     | Emotional   |
- *   | AI Summaries             | SF Pro              | Structured  |
- *   | Sustainability Campaigns | New York Bold       | Editorial   |
+ *   - Lora               → editorial serif. Display, onboarding hero,
+ *                          sustainability headlines, empty-state
+ *                          callouts, serif CTAs.
+ *   - Plus Jakarta Sans  → product-UI sans. Body, labels, eyebrows,
+ *                          metadata, captions, section headings,
+ *                          page titles, card titles.
+ *   - Caveat             → handwritten OCR previews (Medium only).
  *
- * "New York" + "SF Pro" are Apple system fonts. The Android side
- * uses the closest visual analogs delivered via Compose's
- * downloadable Google Fonts:
- *
- *   - Cormorant Garamond → New York stand-in. Bundled in
- *     `res/font/cormorant_garamond_*.ttf`. Editorial face with a
- *     warm, slightly hand-cut character; renders the App Name,
- *     sustainability campaigns, empty states, and onboarding hero.
- *   - Inter → SF Pro stand-in. The standard product-UI sans, with
- *     proportions tuned for screen rendering. Replaces the previous
- *     `FontFamily.SansSerif` (Roboto) for a tighter, more refined
- *     read across body, labels, section headings.
- *
- * Caveat (handwritten) stays bundled — only used for note-thumbnail
- * OCR snippets and the editor's handwritten-title affordance.
- *
- * Loading: Cormorant Garamond is bundled so editorial type paints on
- * first frame. Compose downloads the Inter weights it needs the first
- * time the app paints; subsequent launches resolve from disk cache.
- * While the Inter download is in flight the system fallback
- * (FontFamily.SansSerif) renders, so the UI never blocks. Cert hashes
- * for the Play Services font provider live in `res/values/font_certs.xml`.
+ * All three are bundled under `res/font/` — no downloadable-fonts
+ * roundtrip, editorial type paints on first frame.
  *
  * Mirror of iOS `QuickInkText` styles in `QuickInkTheme.swift`.
+ * The iOS side has not been updated to Lora / Plus Jakarta Sans yet;
+ * mirror will drift until that lands.
  */
 
 package app.quickink.mobile.ui.theme
@@ -46,91 +27,59 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.googlefonts.Font as GoogleFontFont
-import androidx.compose.ui.text.googlefonts.GoogleFont
 import androidx.compose.ui.unit.sp
 import app.quickink.mobile.R
 
 /**
- * Provider for Compose downloadable Google Fonts. Routes through
- * Google Play services' on-device font provider, verified against
- * the cert pins in `R.array.com_google_android_gms_fonts_certs`
- * (sourced verbatim from the official Compose samples — see
- * `res/values/font_certs.xml`).
- *
- * Single shared instance — every `GoogleFontFont(...)` call in
- * [QuickInkFonts] points back here so the device caches the
- * provider and dedup-resolves repeated weight requests.
- */
-private val googleFontsProvider: GoogleFont.Provider = GoogleFont.Provider(
-    providerAuthority = "com.google.android.gms.fonts",
-    providerPackage   = "com.google.android.gms",
-    certificates      = R.array.com_google_android_gms_fonts_certs,
-)
-
-/** Inter — Android's SF Pro stand-in (modern product-UI sans). */
-private val interFont = GoogleFont("Inter")
-
-/**
- * Font families QuickInk uses.
- *
- * - `serif` → Cormorant Garamond, bundled in `res/font/`. Used for
- *   App Name (`Display`), Sustainability Campaigns (`Editorial`),
- *   Empty States (`BodyItalic`), and onboarding hero copy. Bundled
- *   rather than downloaded so the editorial type renders without a
- *   first-launch Google Fonts roundtrip.
- * - `ui` → Inter via downloadable Google Fonts. App body, labels,
- *   section headings, card titles, captions, AI summaries.
- * - `handwritten` → Caveat (Medium only). Bundled.
- *
- * Spec deviation: the original spec mapped Notebook Titles
- * (CardTitle) to New York Medium. On screen the serif Medium 14sp
- * read as too literary for what is functionally a file-name list,
- * so CardTitle is sans now. App Name, Sustainability Campaigns,
- * Empty States, and onboarding still follow the spec.
+ * Font families QuickInk uses. All three families are bundled in
+ * `res/font/` so first-frame rendering is deterministic.
  */
 object QuickInkFonts {
     /**
-     * Editorial serif — Cormorant Garamond bundled in
-     * `res/font/cormorant_garamond_*.ttf`. Powers App Name
-     * (`Display`), Sustainability Campaigns (`Editorial`), Empty
-     * States (`BodyItalic`), and the onboarding hero. Five upright
-     * weights (Light → Bold) plus Normal and Medium italics — covers
-     * every active token plus headroom. Light + Light Italic +
-     * SemiBold Italic + Bold Italic are also on disk if a future
-     * style needs them.
+     * Editorial serif — Lora. Powers [QuickInkTextStyle.Display],
+     * [QuickInkTextStyle.OnboardingTitle], [QuickInkTextStyle.Editorial],
+     * [QuickInkTextStyle.OnboardingBody], [QuickInkTextStyle.BodyItalic],
+     * and [QuickInkTextStyle.CtaSerif].
+     *
+     * Bundled weights: Regular, Medium, SemiBold, Bold + Regular and
+     * Medium italics. Lora has no Light variant — anywhere the old
+     * Cormorant Light read elegantly at 28sp, [Display] now uses
+     * Regular at 26sp to match optical density.
      */
     val serif: FontFamily = FontFamily(
-        Font(R.font.cormorant_garamond_light,         FontWeight.Light),
-        Font(R.font.cormorant_garamond_regular,       FontWeight.Normal),
-        Font(R.font.cormorant_garamond_medium,        FontWeight.Medium),
-        Font(R.font.cormorant_garamond_semibold,      FontWeight.SemiBold),
-        Font(R.font.cormorant_garamond_bold,          FontWeight.Bold),
-        Font(R.font.cormorant_garamond_italic,        FontWeight.Normal, FontStyle.Italic),
-        Font(R.font.cormorant_garamond_medium_italic, FontWeight.Medium, FontStyle.Italic),
+        Font(R.font.lora_regular,       FontWeight.Normal),
+        Font(R.font.lora_medium,        FontWeight.Medium),
+        Font(R.font.lora_semibold,      FontWeight.SemiBold),
+        Font(R.font.lora_bold,          FontWeight.Bold),
+        Font(R.font.lora_italic,        FontWeight.Normal, FontStyle.Italic),
+        Font(R.font.lora_medium_italic, FontWeight.Medium, FontStyle.Italic),
     )
 
     /**
-     * UI sans — Inter via downloadable Google Fonts. Product-UI
-     * standard, with screen-tuned proportions that read tighter and
-     * more refined than Roboto. Powers Editor Body, Toolbar, AI
-     * Summaries, section headings, captions, and meta copy.
+     * UI sans — Plus Jakarta Sans. Powers every sans token: [QuickInkTextStyle.Body],
+     * [QuickInkTextStyle.Caption], [QuickInkTextStyle.Meta], [QuickInkTextStyle.Label],
+     * [QuickInkTextStyle.Eyebrow], [QuickInkTextStyle.PageTitle], [QuickInkTextStyle.Heading],
+     * [QuickInkTextStyle.CardTitle].
+     *
+     * Bundled instead of pulled via downloadable Google Fonts (as
+     * Inter was) so there's no first-launch network roundtrip and no
+     * brief flash of fallback sans before the real face loads.
      */
     val ui: FontFamily = FontFamily(
-        GoogleFontFont(interFont, googleFontsProvider, FontWeight.Normal),
-        GoogleFontFont(interFont, googleFontsProvider, FontWeight.Medium),
-        GoogleFontFont(interFont, googleFontsProvider, FontWeight.SemiBold),
-        GoogleFontFont(interFont, googleFontsProvider, FontWeight.Bold),
+        Font(R.font.plus_jakarta_sans_regular,  FontWeight.Normal),
+        Font(R.font.plus_jakarta_sans_medium,   FontWeight.Medium),
+        Font(R.font.plus_jakarta_sans_semibold, FontWeight.SemiBold),
+        Font(R.font.plus_jakarta_sans_bold,     FontWeight.Bold),
     )
 
     /**
      * Caveat for handwritten preview snippets (Library cards' OCR
-     * thumbnails, NoteEditor handwritten title affordances). Only
-     * the Medium weight is bundled — that's what the iOS side
-     * uses, and the call sites all consume `QuickInkTextStyle.Handwritten`
-     * at a single 20sp / Medium variant. If a thinner or bolder
-     * stroke is needed later, drop the additional weights into
-     * `res/font/caveat_*` and register them here the same way.
+     * thumbnails, NoteEditor handwritten-title affordances). Only the
+     * Medium weight is bundled — matches iOS (`Caveat-Medium.ttf`),
+     * and every call site consumes [QuickInkTextStyle.Handwritten] at
+     * a single 20sp / Medium variant. Asking for Normal would force
+     * Compose to synthesize a thinner stroke from Medium glyphs and
+     * look faded.
      */
     val handwritten: FontFamily = FontFamily(
         Font(R.font.caveat_medium, FontWeight.Medium),
@@ -138,92 +87,180 @@ object QuickInkFonts {
 }
 
 /**
- * Pre-baked text styles matching the typography spec. Use these
- * instead of constructing `TextStyle` calls inline — a brand pass
- * tweak lands in one place.
+ * Pre-baked text styles matching the typography token JSON. Use
+ * these instead of constructing `TextStyle` calls inline so a brand
+ * pass tweak lands in one place.
  *
- * Family contract (mostly mapped to the spec table):
- *   - Editorial serif (Roboto Serif via [QuickInkFonts.serif]):
- *     [Display] (App Name), [Editorial] (Sustainability Campaigns),
- *     [BodyItalic] (Empty States), [OnboardingTitle],
- *     [OnboardingBody], [CtaSerif].
- *   - Sans (Inter via [QuickInkFonts.ui]): [Body] (Editor Body),
- *     [CardTitle] (was Notebook Titles per spec, moved to sans —
- *     see token doc), [Label] (Toolbar), [PageTitle], [Heading],
- *     [Eyebrow], [Meta],
- *     [Caption]. AI Summaries also resolve here via [Body].
- *   - Handwritten ([QuickInkFonts.handwritten]): [Handwritten] only.
+ * Family contract:
+ *   - Serif (Lora): [Display], [OnboardingTitle], [Editorial],
+ *     [OnboardingBody], [BodyItalic], [CtaSerif].
+ *   - Sans (Plus Jakarta Sans): [Body], [Caption], [Meta], [Label],
+ *     [Eyebrow], [PageTitle], [Heading], [CardTitle].
+ *   - Handwritten (Caveat): [Handwritten] only.
+ *
+ * Token names map directly except for three sans aliases kept for
+ * call-site stability: [Label] = `UiLabel`, [Eyebrow] = `UiLabelCaps`,
+ * [Meta] = `Metadata`. [PageTitle], [Heading], and [CardTitle] are
+ * structural — no direct token entry, but used widely enough that
+ * removing them would mean rewriting most screens.
  *
  * Mirror of iOS `QuickInkText` enum.
  */
 object QuickInkTextStyle {
+
+    // ─── Serif (Lora) ─────────────────────────────────────────────
+
     /**
-     * App Name — "Hero" tier. Roboto Serif Light at 28sp with
-     * neutral tracking. Light weight reads elegant and unhurried
-     * at this size, more wordmark than running text — Bold/SemiBold
-     * felt heavy at 32-40sp. iOS mirror uses New York Light via
-     * `Font.system(size: 28, weight: .light, design: .serif)`.
-     * Audited via grep for `QuickInkTextStyle.Display`: only home +
-     * profile.
+     * Home greeting ("Achal B I"). Was Cormorant Light 28sp — now
+     * Lora Regular 26sp for matching optical density (Lora has no
+     * Light variant).
      */
     val Display: TextStyle = TextStyle(
         fontFamily    = QuickInkFonts.serif,
-        fontSize      = 28.sp,
-        fontWeight    = FontWeight.Bold,
-        lineHeight    = 34.sp,
-        letterSpacing = 0.sp,
+        fontWeight    = FontWeight.Normal,
+        fontSize      = 26.sp,
+        lineHeight    = 30.sp,
+        letterSpacing = (-0.5).sp,
+    )
+
+    /** Onboarding hero title. Lora Medium 20 / 26 / -0.3. */
+    val OnboardingTitle: TextStyle = TextStyle(
+        fontFamily    = QuickInkFonts.serif,
+        fontWeight    = FontWeight.Medium,
+        fontSize      = 20.sp,
+        lineHeight    = 26.sp,
+        letterSpacing = (-0.3).sp,
     )
 
     /**
-     * Sustainability Campaigns — "Editorial" tier. Roboto Serif
-     * Medium at 16sp. The eco-card headline ("8 pages saved"),
-     * trees-saved milestones, and any future campaign moments
-     * resolve here.
-     * Distinct from [Heading] (sans) so productivity headings stay
-     * clearly functional while editorial sustainability moments
-     * carry the brand serif voice.
+     * Sustainability / campaign headlines, smart-collection titles.
+     * Lora Medium 15 / 22.
      */
     val Editorial: TextStyle = TextStyle(
-        fontFamily    = QuickInkFonts.serif,
-        fontSize      = 16.sp,
-        fontWeight    = FontWeight.Medium,
-        lineHeight    = 22.sp,
-        letterSpacing = (-0.1).sp,
-    )
-
-    /**
-     * Onboarding hero title — sized to match the JSX mockup
-     * (`text-[30px] leading-[1.15]`). Smaller than [Display] so the
-     * two-line tagline doesn't crowd the illustration on a 390-wide
-     * phone frame. Editorial serif (Roboto Serif).
-     */
-    val OnboardingTitle: TextStyle = TextStyle(
         fontFamily = QuickInkFonts.serif,
-        fontSize   = 22.sp,
         fontWeight = FontWeight.Medium,
-        lineHeight = 28.sp,
+        fontSize   = 15.sp,
+        lineHeight = 22.sp,
     )
 
     /**
-     * Onboarding body — editorial serif (Roboto Serif) Medium.
-     * Used by the onboarding scaffold's tagline + SignInScreen's
-     * lead copy where the editorial showroom feel matters more than
-     * density. App screens use [Body] (Inter sans) instead.
+     * Onboarding tagline / SignIn lead copy. Regular (was Medium)
+     * reads better in long editorial copy. App screens use [Body]
+     * (sans) for non-editorial body copy.
      */
     val OnboardingBody: TextStyle = TextStyle(
         fontFamily = QuickInkFonts.serif,
+        fontWeight = FontWeight.Normal,
         fontSize   = 16.sp,
-        fontWeight = FontWeight.Medium,
         lineHeight = 24.sp,
     )
 
     /**
-     * App page title (Settings, Library, Detail, etc.) — Inter
-     * SemiBold at 20sp. Sans, not serif: the editorial serif is
-     * reserved for App Name + sustainability campaigns + onboarding
-     * hero, so app-screen page titles stay on the product-UI sans
-     * for a confident functional read. Slightly negative letter-
-     * spacing tightens the wordmark feel.
+     * Empty states ("No notes yet…"), smart-collection rule grammar,
+     * AI suggestion chips. Lora Regular Italic 16 / 24.
+     */
+    val BodyItalic: TextStyle = TextStyle(
+        fontFamily = QuickInkFonts.serif,
+        fontWeight = FontWeight.Normal,
+        fontStyle  = FontStyle.Italic,
+        fontSize   = 16.sp,
+        lineHeight = 24.sp,
+    )
+
+    /**
+     * Primary CTA on onboarding & sheet "Save / Continue" actions —
+     * the only place serif meets a filled button. Lora SemiBold 14 /
+     * 18 / +0.2 tracking.
+     */
+    val CtaSerif: TextStyle = TextStyle(
+        fontFamily    = QuickInkFonts.serif,
+        fontWeight    = FontWeight.SemiBold,
+        fontSize      = 14.sp,
+        lineHeight    = 18.sp,
+        letterSpacing = 0.2.sp,
+    )
+
+    // ─── Sans (Plus Jakarta Sans) ─────────────────────────────────
+
+    /**
+     * Default UI body, doc list titles, modal body copy. Plus Jakarta
+     * Sans Regular 14 / 20.
+     *
+     * Token rev: was 16sp Medium; tokens spec Regular 14sp for tighter
+     * list density. Touches every screen — review for visual regressions
+     * on first pass.
+     */
+    val Body: TextStyle = TextStyle(
+        fontFamily = QuickInkFonts.ui,
+        fontWeight = FontWeight.Normal,
+        fontSize   = 14.sp,
+        lineHeight = 20.sp,
+    )
+
+    /**
+     * Folder meta ("47 items · 3 new"), date stamps, page counts,
+     * tag counts. PJS Regular 12 / 16. Token name: `Metadata`; kept
+     * as [Meta] for call-site stability.
+     */
+    val Meta: TextStyle = TextStyle(
+        fontFamily = QuickInkFonts.ui,
+        fontWeight = FontWeight.Normal,
+        fontSize   = 12.sp,
+        lineHeight = 16.sp,
+    )
+
+    /**
+     * Badge pills ("OCR done", "Shared", "Map"), thumbnail tags.
+     * PJS Medium 10 / 16.
+     */
+    val Caption: TextStyle = TextStyle(
+        fontFamily = QuickInkFonts.ui,
+        fontWeight = FontWeight.Medium,
+        fontSize   = 10.sp,
+        lineHeight = 16.sp,
+    )
+
+    /**
+     * Section eyebrows ("Folders", "Smart collections"), folder names
+     * in list, toolbar chip text, nav labels. PJS SemiBold 14 / 20.
+     * Token name: `UiLabel`; kept as [Label] for call-site stability.
+     *
+     * Token rev: was Medium; tokens promote to SemiBold so labels
+     * sit a clear notch above [Body].
+     */
+    val Label: TextStyle = TextStyle(
+        fontFamily = QuickInkFonts.ui,
+        fontWeight = FontWeight.SemiBold,
+        fontSize   = 14.sp,
+        lineHeight = 20.sp,
+    )
+
+    /**
+     * Uppercase eyebrow above grouped content — "CONTINUE",
+     * "AUTO-CURATED RULE", tab-bar labels. PJS SemiBold 11 / 16 /
+     * +1.4 tracking. Token name: `UiLabelCaps`; kept as [Eyebrow] for
+     * call-site stability.
+     *
+     * Compose's `TextStyle` has no `textCase` field, so this style
+     * does not force uppercase — callers must `.uppercase()` the
+     * string when they want caps. (Existing call sites already do.)
+     */
+    val Eyebrow: TextStyle = TextStyle(
+        fontFamily    = QuickInkFonts.ui,
+        fontWeight    = FontWeight.SemiBold,
+        fontSize      = 11.sp,
+        lineHeight    = 16.sp,
+        letterSpacing = 1.4.sp,
+    )
+
+    // ─── Sans — structural (no direct token entry) ────────────────
+
+    /**
+     * App page title (Settings, Library, Detail, etc.). PJS SemiBold
+     * 20 / 26 / -0.2. Not in the token JSON but used widely; kept
+     * structurally between [OnboardingTitle] (serif hero) and
+     * [Heading] (sans 16) so app pages read functional rather than
+     * editorial.
      */
     val PageTitle: TextStyle = TextStyle(
         fontFamily    = QuickInkFonts.ui,
@@ -234,11 +271,9 @@ object QuickInkTextStyle {
     )
 
     /**
-     * App section heading ("Recents", "Quick categories", etc.)
-     * — Inter SemiBold at 16sp. Sans for the same reason as
-     * [PageTitle]: section headings on app screens read as functional
-     * UI rather than literary chapter titles. Sustainability-tier
-     * editorial moments use [Editorial] instead.
+     * App section heading ("Recents", "Quick categories", etc.). PJS
+     * SemiBold 16 / 22 / -0.1. Not in the token JSON. Sustainability-
+     * tier editorial moments use [Editorial] (serif) instead.
      */
     val Heading: TextStyle = TextStyle(
         fontFamily    = QuickInkFonts.ui,
@@ -248,71 +283,12 @@ object QuickInkTextStyle {
         letterSpacing = (-0.1).sp,
     )
 
-    /** Eyebrow — uppercase + tracked, used above grouped content. Inter sans semibold. */
-    val Eyebrow: TextStyle = TextStyle(
-        fontFamily    = QuickInkFonts.ui,
-        fontSize      = 11.sp,
-        fontWeight    = FontWeight.SemiBold,
-        letterSpacing = 1.2.sp,
-        lineHeight    = 14.sp,
-    )
-
     /**
-     * Editor Body + AI Summaries — "Clean" / "Structured" tiers.
-     * Inter Medium at 16sp. App-screen reading copy and Haiku-
-     * generated summary blocks both resolve here. The editorial
-     * serif is reserved for [Display] / [Editorial] / [CardTitle]
-     * / [BodyItalic] taglines.
-     */
-    val Body: TextStyle = TextStyle(
-        fontFamily = QuickInkFonts.ui,
-        fontSize   = 16.sp,
-        fontWeight = FontWeight.Medium,
-        lineHeight = 24.sp,
-    )
-
-    /**
-     * Empty States — "Emotional" tier. Roboto Serif italic Medium
-     * at 16sp. Used by no-content prompts and SmartSuggestion-style
-     * taglines where a literary, slightly hand-held tone reads
-     * better than a clinical sans.
-     */
-    val BodyItalic: TextStyle = TextStyle(
-        fontFamily = QuickInkFonts.serif,
-        fontSize   = 16.sp,
-        fontWeight = FontWeight.Medium,
-        fontStyle  = FontStyle.Italic,
-        lineHeight = 24.sp,
-    )
-
-    /**
-     * Caveat handwritten — note thumbnail previews.
-     *
-     * Weight is `Medium` because that's the only Caveat variant
-     * bundled (matches iOS, which uses `Caveat-Medium.ttf`). Asking
-     * Compose for `FontWeight.Normal` here would force it to
-     * synthesize a thinner stroke from the Medium glyphs — looks
-     * faded and inconsistent with the iOS rendering. Pinning to
-     * Medium keeps the call site honest about what's actually
-     * available in the bundled file.
-     */
-    val Handwritten: TextStyle = TextStyle(
-        fontFamily = QuickInkFonts.handwritten,
-        fontSize   = 20.sp,
-        fontWeight = FontWeight.Medium,
-        lineHeight = 26.sp,
-    )
-
-    /**
-     * Card title — Inter SemiBold at 14sp, used for note/scan
-     * thumbnail titles in the home recent rail and the library
-     * grid. Briefly switched to Roboto Serif Medium per the
-     * "Notebook Titles → New York Medium" spec row, but on screen
-     * the serif read as too literary at 14sp — too much editorial
-     * weight on what is functionally a file-name list. Back on
-     * sans for the productivity-app feel; SemiBold gives it a
-     * notch more emphasis than [Label] (Medium) so titles still
-     * sit clearly above their captions.
+     * Card title — note/scan thumbnail titles in home recent rail
+     * and library grid. PJS SemiBold 14 / 18. Not in the token JSON.
+     * Briefly tried serif per a "Notebook Titles → New York Medium"
+     * spec row, but at 14sp serif read too literary for a file-name
+     * list.
      */
     val CardTitle: TextStyle = TextStyle(
         fontFamily = QuickInkFonts.ui,
@@ -321,47 +297,17 @@ object QuickInkTextStyle {
         lineHeight = 18.sp,
     )
 
-    /**
-     * Toolbar — "Compact" tier. Inter Medium at 14sp. Used by chip
-     * text, nav labels, and small CTAs. Was SemiBold; dropped to
-     * Medium per the spec's "SF Pro Medium" callout — toolbar
-     * affordances should read as compact and unobtrusive, not as
-     * shouting bold copy.
-     */
-    val Label: TextStyle = TextStyle(
-        fontFamily = QuickInkFonts.ui,
-        fontSize   = 14.sp,
-        fontWeight = FontWeight.Medium,
-        lineHeight = 20.sp,
-    )
+    // ─── Handwritten (Caveat) ─────────────────────────────────────
 
     /**
-     * CTA label rendered in the editorial serif family. Used by
-     * the onboarding "Continue" / "Continue with Google" buttons so
-     * the action matches the serif hero typography rather than
-     * dropping into UI sans for the button text. Stays on
-     * [QuickInkFonts.serif] (Roboto Serif) — onboarding-only.
+     * Caveat handwritten — note-thumbnail previews and the editor's
+     * handwritten-title affordance. Pinned to Medium (only weight
+     * bundled, matches iOS).
      */
-    val CtaSerif: TextStyle = TextStyle(
-        fontFamily = QuickInkFonts.serif,
-        fontSize   = 14.sp,
-        fontWeight = FontWeight.SemiBold,
-        lineHeight = 18.sp,
-    )
-
-    /** Meta — timestamps, sync status, helper copy. Inter sans medium. */
-    val Meta: TextStyle = TextStyle(
-        fontFamily = QuickInkFonts.ui,
-        fontSize   = 12.sp,
+    val Handwritten: TextStyle = TextStyle(
+        fontFamily = QuickInkFonts.handwritten,
+        fontSize   = 20.sp,
         fontWeight = FontWeight.Medium,
-        lineHeight = 16.sp,
-    )
-
-    /** Caption — confidence badges, page counters. Inter sans medium. */
-    val Caption: TextStyle = TextStyle(
-        fontFamily = QuickInkFonts.ui,
-        fontSize   = 10.sp,
-        fontWeight = FontWeight.Medium,
-        lineHeight = 14.sp,
+        lineHeight = 26.sp,
     )
 }

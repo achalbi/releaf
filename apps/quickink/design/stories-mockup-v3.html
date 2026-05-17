@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>QuickInk · Stories · v3 (refined)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Caveat:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --canvas: #FAF7F2; --surface: #FFFFFF; --border: #EDE4D2;
+    --border-soft: #F0E9DD; --border-softer: #F5EDE0;
+    --coral: #D97757; --coral-deep: #993C1D;
+    --ink: #2C2826; --ink-soft: #5C4A38; --muted: #A8A29E;
+    --paper-1: #E8DCC4; --paper-2: #F0E4D7; --paper-3: #EADFCF;
+    --serif: 'Cormorant Garamond', Georgia, serif;
+    --hand: 'Caveat', cursive;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #ECE4D2; min-height: 100vh; font-family: var(--sans); color: var(--ink); }
+  body { padding: 32px 16px 80px; }
+
+  header { max-width: 1100px; margin: 0 auto 24px; text-align: center; }
+  header h1 { font-family: var(--serif); font-size: 38px; font-weight: 500; margin: 0; letter-spacing: 0.5px; }
+  header .tagline { font-family: var(--hand); font-size: 20px; color: var(--ink-soft); margin-top: 2px; }
+  header .version { display: inline-block; margin-top: 8px; font-size: 11px; letter-spacing: 2px; color: var(--coral-deep); background: var(--surface); padding: 4px 12px; border-radius: 999px; border: 1.5px solid var(--coral); }
+  header p { color: var(--ink-soft); font-size: 14px; max-width: 700px; margin: 14px auto 0; line-height: 1.55; }
+  header .nav-link { display: inline-block; margin-top: 14px; padding: 8px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; color: var(--ink); text-decoration: none; font-size: 13px; font-weight: 500; }
+  header .nav-link:hover { border-color: var(--coral); color: var(--coral); }
+
+  .tabs { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; max-width: 1000px; margin: 24px auto 28px; }
+  .tab { background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 8px 14px; font-size: 12.5px; font-weight: 500; color: var(--ink-soft); cursor: pointer; transition: all 0.15s ease; }
+  .tab:hover { border-color: var(--coral); color: var(--coral); }
+  .tab.active { background: var(--coral); color: var(--surface); border-color: var(--coral); }
+  .tab.sub { font-size: 11.5px; padding: 7px 12px; }
+
+  .stage { max-width: 1280px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 32px; justify-items: center; }
+  .frame-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .frame-label { font-size: 12.5px; color: var(--ink-soft); font-weight: 500; max-width: 320px; text-align: center; line-height: 1.4; }
+  .frame-label strong { color: var(--coral-deep); font-weight: 500; }
+  .frame-label em { color: var(--ink); font-style: italic; }
+
+  .phone {
+    width: 320px; height: 680px; background: var(--canvas);
+    border-radius: 38px; border: 10px solid #1f1c1a;
+    box-shadow: 0 18px 40px rgba(44,40,38,0.18);
+    position: relative; overflow: hidden; padding: 30px 16px 12px;
+    display: flex; flex-direction: column;
+  }
+  .phone::before { content:''; position: absolute; top: 6px; left: 50%; transform: translateX(-50%); width: 90px; height: 18px; background: #1f1c1a; border-radius: 0 0 14px 14px; z-index: 5; }
+  .statusbar { position: absolute; top: 8px; left: 24px; right: 24px; display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-soft); z-index: 6; }
+  .saved-toast { position: absolute; top: 38px; right: 16px; font-size: 10px; color: var(--muted); font-style: italic; font-family: var(--serif); z-index: 6; }
+
+  .h-title { font-family: var(--serif); font-size: 28px; font-weight: 500; margin: 4px 0 8px; }
+  .search { background: var(--border-soft); border-radius: 12px; padding: 9px 12px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .section { font-size: 11.5px; font-weight: 500; color: var(--ink-soft); margin: 4px 0 8px; }
+  .back { font-size: 13px; color: var(--ink-soft); cursor: pointer; padding: 4px 0; display: flex; align-items: center; gap: 12px; }
+  .back .right { margin-left: auto; color: var(--coral); font-style: italic; font-family: var(--serif); }
+
+  .nav { position: absolute; bottom: 0; left: 0; right: 0; background: var(--surface); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 10px 0 14px; font-size: 10px; color: var(--muted); }
+  .nav span { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; }
+  .nav .dot { font-size: 16px; }
+  .nav .active { color: var(--coral); font-weight: 500; }
+  .fab { position: absolute; bottom: 72px; right: 22px; width: 48px; height: 48px; border-radius: 50%; background: var(--coral); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 6px 16px rgba(217,119,87,0.35); cursor: pointer; }
+
+  /* 1. Stories tab */
+  .sugg-hero { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px; margin-bottom: 14px; cursor: pointer; transition: border-color 0.15s; }
+  .sugg-hero:hover { border-color: var(--coral); }
+  .sugg-hero .label { font-size: 10px; letter-spacing: 1.5px; color: var(--coral-deep); font-weight: 500; margin-bottom: 6px; }
+  .sugg-hero .preview-strip { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 4px; height: 70px; border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
+  .sugg-hero .preview-strip div { background: var(--paper-1); border-radius: 4px; }
+  .sugg-hero .preview-strip div:nth-child(2) { background: var(--paper-3); }
+  .sugg-hero .preview-strip div:nth-child(3) { background: var(--coral); opacity: 0.55; }
+  .sugg-hero .lead { font-family: var(--serif); font-size: 16px; font-weight: 500; line-height: 1.15; margin-bottom: 3px; }
+  .sugg-hero .reason { font-family: var(--serif); font-style: italic; font-size: 12.5px; color: var(--ink-soft); line-height: 1.35; }
+  .sugg-hero .footer-row { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--border); }
+  .sugg-hero .dismiss { font-size: 11px; color: var(--muted); font-family: var(--serif); font-style: italic; }
+  .sugg-hero .cta { font-size: 12px; color: var(--coral); font-weight: 500; }
+
+  .story-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 10px; display: flex; gap: 10px; margin-bottom: 10px; align-items: center; cursor: pointer; }
+  .story-card:hover { border-color: var(--coral); }
+  .story-card .cover { width: 56px; height: 56px; border-radius: 10px; background: var(--paper-1); flex-shrink: 0; position: relative; overflow: hidden; }
+  .story-card .cover.coral { background: var(--coral); opacity: 0.7; }
+  .story-card .cover.tan { background: var(--paper-3); }
+  .story-card .cover .ct { position: absolute; bottom: 4px; left: 5px; right: 5px; font-family: var(--serif); font-size: 7.5px; font-weight: 500; color: var(--ink); line-height: 1; }
+  .story-card .cover.coral .ct { color: #fff; }
+  .story-card h4 { font-family: var(--serif); font-size: 15px; font-weight: 500; margin: 0; line-height: 1.15; }
+  .story-card .meta { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+  .pill { display: inline-block; font-size: 9.5px; padding: 2px 8px; border-radius: 8px; background: var(--border-soft); color: var(--ink-soft); margin-top: 4px; font-weight: 500; }
+  .pill.live { background: #FAECE7; color: var(--coral-deep); }
+
+  /* 2. Suggestion preview */
+  .preview-hero { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 14px 12px; margin-bottom: 12px; position: relative; }
+  .preview-hero .preview-label { font-size: 10px; letter-spacing: 1.5px; color: var(--coral-deep); font-weight: 500; margin-bottom: 6px; }
+  .preview-hero .sample-cover { background: linear-gradient(135deg, var(--paper-1), var(--paper-3)); height: 110px; border-radius: 10px; padding: 14px; color: var(--ink); display: flex; flex-direction: column; justify-content: flex-end; margin-bottom: 10px; position: relative; overflow: hidden; }
+  .preview-hero .sample-cover .stamp { position: absolute; top: 10px; left: 14px; font-size: 9px; letter-spacing: 1.5px; color: var(--ink-soft); font-family: var(--serif); font-style: italic; }
+  .preview-hero .sample-cover .ct { font-family: var(--serif); font-size: 20px; font-weight: 500; line-height: 1.05; }
+  .preview-hero .sample-cover .cs { font-family: var(--hand); font-size: 14px; color: var(--ink-soft); margin-top: 2px; }
+  .preview-hero .first-page { background: var(--canvas); border-radius: 8px; padding: 8px 10px; }
+  .preview-hero .first-page .ph { height: 48px; background: var(--paper-1); border-radius: 4px; margin-bottom: 5px; }
+  .preview-hero .first-page .cp { font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--ink-soft); line-height: 1.3; }
+  .preview-hero .controls { display: flex; gap: 6px; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 0.5px solid var(--border); font-size: 11px; color: var(--ink-soft); }
+  .preview-hero .controls .cnt { font-family: var(--serif); font-style: italic; }
+  .preview-hero .controls .swap { margin-left: auto; color: var(--coral); font-weight: 500; cursor: pointer; }
+  .what-inside { font-size: 11px; color: var(--ink-soft); margin-bottom: 8px; font-family: var(--serif); font-style: italic; line-height: 1.35; padding: 0 4px; }
+  .reason-box { background: var(--border-softer); border-radius: 10px; padding: 9px 11px; font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--ink-soft); line-height: 1.35; margin-bottom: 12px; }
+  .item-strip { display: flex; gap: 4px; overflow-x: auto; padding: 2px 0 6px; }
+  .item-strip::-webkit-scrollbar { display: none; }
+  .item-strip .ts { flex: 0 0 50px; height: 50px; border-radius: 6px; background: var(--paper-1); border: 1px solid var(--border); }
+  .item-strip .ts.doc { background: var(--surface); }
+  .item-strip .ts.coral { background: var(--coral); opacity: 0.55; }
+  .item-strip .ts.tan { background: var(--paper-3); }
+  .item-strip .ts.note { background: var(--paper-2); }
+
+  .cta-row { position: absolute; bottom: 20px; left: 18px; right: 18px; display: flex; gap: 8px; }
+  .btn { flex: 1; padding: 11px; border-radius: 12px; font-size: 13px; text-align: center; font-weight: 500; cursor: pointer; }
+  .btn.primary { background: var(--coral); color: #fff; }
+  .btn.ghost { background: var(--surface); border: 1px solid var(--border); color: var(--ink); }
+
+  /* 3. Editor */
+  .edit-cover-strip { display: flex; gap: 8px; align-items: center; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; }
+  .edit-cover-strip .mini-cover { width: 36px; height: 36px; border-radius: 6px; background: linear-gradient(135deg, var(--paper-1), var(--paper-3)); flex-shrink: 0; }
+  .edit-cover-strip .info { flex: 1; min-width: 0; }
+  .edit-cover-strip .t { font-family: var(--serif); font-size: 14px; font-weight: 500; line-height: 1.1; }
+  .edit-cover-strip .s { font-family: var(--hand); font-size: 12px; color: var(--ink-soft); line-height: 1.1; margin-top: 1px; }
+  .edit-cover-strip .change { color: var(--coral); font-size: 11px; font-weight: 500; }
+  .scroll { flex: 1; overflow-y: auto; padding-bottom: 60px; display: flex; flex-direction: column; gap: 6px; }
+  .scroll::-webkit-scrollbar { display: none; }
+  .item-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 9px; display: flex; gap: 9px; align-items: center; font-size: 12px; transition: box-shadow 0.15s, border-color 0.15s; }
+  .item-card.active { border-color: var(--coral); box-shadow: 0 2px 8px rgba(217,119,87,0.15); }
+  .item-card .thumb-sm { width: 40px; height: 40px; border-radius: 7px; background: var(--paper-1); flex-shrink: 0; }
+  .item-card .thumb-sm.doc { background: var(--paper-2); border: 1px solid var(--border); }
+  .item-card .thumb-sm.coral { background: var(--coral); opacity: 0.55; }
+  .item-card .cap { flex: 1; color: var(--ink); line-height: 1.3; }
+  .item-card .cap em { color: var(--muted); font-style: normal; font-size: 11px; }
+  .item-card .menu { color: var(--muted); font-size: 14px; padding: 0 4px; cursor: pointer; }
+  .item-card .menu:hover { color: var(--ink); }
+  .slot-btn { align-self: center; background: var(--surface); border: 1px dashed var(--border); border-radius: 999px; padding: 4px 14px; font-size: 11px; color: var(--ink-soft); cursor: pointer; transition: all 0.15s; }
+  .slot-btn:hover { border-color: var(--coral); border-style: solid; color: var(--coral); }
+  .note-block { background: var(--paper-2); border-radius: 12px; padding: 10px 12px; font-family: var(--serif); font-style: italic; font-size: 13px; color: var(--ink-soft); line-height: 1.4; position: relative; }
+  .note-block .menu { position: absolute; top: 6px; right: 8px; color: var(--muted); font-size: 13px; cursor: pointer; }
+  .divider-block { text-align: center; font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--ink-soft); padding: 6px 0; letter-spacing: 0.5px; }
+  .edit-bottom { position: absolute; bottom: 12px; left: 18px; right: 18px; display: flex; gap: 8px; background: linear-gradient(to bottom, rgba(250,247,242,0), var(--canvas) 30%); padding: 10px 0 0; }
+
+  /* 3a/3b. Sheet overlays — trigger highlights */
+  .dim { opacity: 0.35; pointer-events: none; }
+  .trigger-add {
+    align-self: center; background: var(--surface); border: 1.5px solid var(--coral);
+    border-radius: 999px; padding: 4px 16px; font-size: 11.5px; color: var(--coral);
+    font-weight: 500; box-shadow: 0 4px 12px rgba(217,119,87,0.30);
+    margin: 3px 0; position: relative; z-index: 1;
+  }
+  .trigger-add::after { content: ''; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%); width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 5px solid var(--coral); }
+  .item-card.trigger { border-color: var(--coral); border-width: 1.5px; box-shadow: 0 4px 12px rgba(217,119,87,0.30); position: relative; z-index: 1; }
+  .item-card.trigger .menu { color: var(--coral); font-weight: 500; }
+
+  .ix-backdrop { position: absolute; inset: 0; background: rgba(44,40,38,0.45); z-index: 2; }
+  .ix-sheet { position: absolute; bottom: 0; left: 0; right: 0; background: var(--surface); border-top-left-radius: 22px; border-top-right-radius: 22px; padding: 12px 18px 20px; z-index: 3; max-height: 78%; overflow-y: auto; }
+  .ix-sheet::-webkit-scrollbar { display: none; }
+  .ix-handle { width: 38px; height: 4px; background: var(--border); border-radius: 999px; margin: 0 auto 12px; }
+  .ix-sheet h3 { font-family: var(--serif); font-size: 20px; font-weight: 500; margin: 0 0 2px; }
+  .ix-sub { font-family: var(--serif); font-style: italic; font-size: 12.5px; color: var(--ink-soft); margin: 0 0 12px; line-height: 1.3; }
+  .ix-sub em { color: var(--ink); font-style: italic; }
+  .ix-section { font-family: var(--serif); font-style: italic; font-size: 10.5px; color: var(--coral-deep); letter-spacing: 1.2px; margin: 10px 0 6px; padding-bottom: 4px; border-bottom: 0.5px solid var(--border); }
+  .ix-section:first-of-type { margin-top: 0; }
+  .ix-opt { display: flex; align-items: center; gap: 11px; padding: 7px 0; cursor: pointer; }
+  .ix-opt:hover .ix-icon { background: var(--border-softer); color: var(--coral); }
+  .ix-icon { width: 30px; height: 30px; border-radius: 7px; background: var(--canvas); border: 0.5px solid var(--border); display: flex; align-items: center; justify-content: center; color: var(--ink-soft); font-size: 15px; flex-shrink: 0; transition: all 0.12s; }
+  .ix-icon i { font-size: 15px; }
+  .ix-label { flex: 1; font-size: 13px; line-height: 1.2; }
+  .ix-hint { font-family: var(--serif); font-style: italic; font-size: 10.5px; color: var(--muted); }
+
+  .ix-preview { display: flex; align-items: center; gap: 10px; padding: 6px 0 12px; border-bottom: 0.5px solid var(--border); margin-bottom: 4px; }
+  .ix-preview .pv { width: 40px; height: 40px; border-radius: 7px; background: var(--paper-2); border: 0.5px solid var(--border); flex-shrink: 0; }
+  .ix-preview .pn { font-family: var(--serif); font-size: 13.5px; font-weight: 500; line-height: 1.1; }
+  .ix-preview .ps { font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+  .ix-row { display: flex; align-items: center; gap: 11px; padding: 8px 0; font-size: 13px; cursor: pointer; }
+  .ix-row:hover { color: var(--coral); }
+  .ix-row .mi { width: 24px; color: var(--ink-soft); font-size: 15px; text-align: center; }
+  .ix-row.danger { color: var(--coral-deep); }
+  .ix-row.danger .mi { color: var(--coral-deep); }
+  .ix-layout { padding: 8px 0; }
+  .ix-layout .lbl { font-size: 13px; margin-bottom: 6px; display: flex; align-items: center; gap: 11px; }
+  .ix-layout .lbl .mi { width: 24px; color: var(--ink-soft); font-size: 15px; text-align: center; }
+  .ix-pills { display: flex; gap: 5px; margin-left: 35px; }
+  .ix-pills .pill2 { flex: 1; text-align: center; padding: 6px; font-size: 11px; border-radius: 7px; border: 0.5px solid var(--border); background: var(--canvas); color: var(--ink-soft); cursor: pointer; }
+  .ix-pills .pill2.on { background: var(--coral); color: #fff; border-color: var(--coral); font-weight: 500; }
+  .ix-sep { height: 0.5px; background: var(--border); margin: 4px 0; }
+
+  /* 4. Reader */
+  .reader-cover { background: linear-gradient(135deg, var(--paper-1) 0%, #c89a82 100%); height: 200px; border-radius: 12px; padding: 14px; color: var(--ink); display: flex; flex-direction: column; justify-content: flex-end; margin-bottom: 12px; position: relative; overflow: hidden; }
+  .reader-cover::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,0) 50%, rgba(44,40,38,0.25) 100%); }
+  .reader-cover .stamp { position: absolute; top: 12px; left: 16px; font-size: 9px; letter-spacing: 2px; color: var(--ink-soft); font-family: var(--serif); font-style: italic; z-index: 1; }
+  .reader-cover .ctitle { font-family: var(--serif); font-size: 28px; font-weight: 500; line-height: 1.05; position: relative; z-index: 1; }
+  .reader-cover .csub { font-family: var(--hand); font-size: 15px; color: var(--ink); opacity: 0.85; margin-top: 4px; position: relative; z-index: 1; }
+  .reader-attribution { font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--ink-soft); text-align: center; margin: -4px 0 12px; }
+  .day-marker { position: sticky; top: 0; background: linear-gradient(to bottom, var(--canvas) 70%, rgba(250,247,242,0)); padding: 6px 0 10px; font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--coral-deep); letter-spacing: 1px; z-index: 2; }
+  .reader-body { font-family: var(--serif); font-size: 14px; color: var(--ink); line-height: 1.55; padding: 0 4px; margin: 6px 0; }
+  .reader-quote { font-family: var(--serif); font-style: italic; color: var(--ink-soft); font-size: 13px; padding: 4px 16px; border-left: 2px solid var(--coral); line-height: 1.45; margin: 6px 0; }
+  .reader-item { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 8px; margin-bottom: 6px; }
+  .reader-item .photo { height: 110px; border-radius: 8px; background: var(--paper-1); margin-bottom: 6px; }
+  .reader-item .photo.coral { background: var(--coral); opacity: 0.6; }
+  .reader-item .photo.doc { background: var(--paper-2); }
+  .reader-item .caption { font-family: var(--serif); font-size: 12px; color: var(--ink-soft); font-style: italic; line-height: 1.35; }
+  .end-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-top: 12px; text-align: center; }
+  .end-card .end-mark { font-family: var(--serif); font-style: italic; font-size: 13px; color: var(--ink-soft); letter-spacing: 1.5px; margin-bottom: 10px; }
+  .end-card .end-acts { display: flex; gap: 6px; }
+  .end-card .end-btn { flex: 1; padding: 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+  .end-card .end-btn.ghost { background: var(--canvas); border: 1px solid var(--border); color: var(--ink-soft); }
+  .end-card .end-btn.primary { background: var(--coral); color: #fff; }
+  .footer { text-align: center; font-size: 11px; color: var(--muted); font-family: var(--serif); font-style: italic; padding: 8px 0; }
+
+  /* 5. Share sheet */
+  .backdrop { position: absolute; inset: 0; background: rgba(44,40,38,0.4); z-index: 4; }
+  .sheet { position: absolute; bottom: 0; left: 0; right: 0; background: var(--surface); border-top-left-radius: 22px; border-top-right-radius: 22px; padding: 18px 16px 24px; z-index: 5; }
+  .sheet .handle { width: 38px; height: 4px; background: var(--border); border-radius: 999px; margin: 0 auto 14px; }
+  .sheet h3 { font-family: var(--serif); font-size: 18px; font-weight: 500; margin: 0 0 12px; }
+  .share-preview { background: var(--canvas); border: 1px solid var(--border); border-radius: 12px; padding: 10px; display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+  .share-preview .thumb { width: 48px; height: 56px; border-radius: 4px; background: linear-gradient(135deg, var(--paper-1), var(--paper-3)); flex-shrink: 0; position: relative; }
+  .share-preview .thumb::before { content: ''; position: absolute; top: 6px; left: 5px; right: 5px; bottom: 18px; background: rgba(255,255,255,0.5); border-radius: 2px; }
+  .share-preview .thumb::after { content: 'Tokyo'; position: absolute; bottom: 4px; left: 5px; font-family: var(--serif); font-size: 6px; color: var(--ink); }
+  .share-preview .meta { flex: 1; min-width: 0; }
+  .share-preview .pname { font-family: var(--serif); font-size: 13px; font-weight: 500; line-height: 1.15; }
+  .share-preview .pdetail { font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--ink-soft); margin-top: 2px; line-height: 1.25; }
+  .share-preview .toggle { font-size: 10.5px; color: var(--coral); font-weight: 500; }
+  .share-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+  .share-opt { background: var(--canvas); border: 1px solid var(--border); border-radius: 12px; padding: 11px; cursor: pointer; transition: border-color 0.15s; }
+  .share-opt:hover { border-color: var(--coral); }
+  .share-opt.active { border-color: var(--coral); }
+  .share-opt .icon { width: 28px; height: 28px; border-radius: 8px; background: var(--border-soft); display: flex; align-items: center; justify-content: center; color: var(--ink-soft); font-size: 14px; margin-bottom: 6px; }
+  .share-opt.active .icon { background: var(--coral); color: #fff; }
+  .share-opt .name { font-size: 12px; font-weight: 500; line-height: 1.2; }
+  .share-opt .desc { font-size: 10.5px; color: var(--ink-soft); margin-top: 3px; line-height: 1.3; }
+  .share-link { background: var(--border-softer); border: 1px dashed var(--coral); border-radius: 10px; padding: 10px; margin-top: 10px; }
+  .share-link .row { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--ink-soft); }
+  .share-link .copy { color: var(--coral); font-weight: 500; cursor: pointer; }
+  .share-link .opt { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; padding-top: 6px; border-top: 0.5px dashed rgba(217,119,87,0.4); font-size: 10.5px; color: var(--ink-soft); font-family: var(--serif); font-style: italic; }
+  .share-link .opt .add { color: var(--coral); font-weight: 500; font-style: normal; font-family: var(--sans); }
+
+  .stage[data-mode="single"] { grid-template-columns: 1fr; }
+  .stage[data-mode="single"] .frame-wrap.hidden { display: none; }
+  .stage[data-mode="single"] .phone { transform: scale(1.05); }
+
+  footer.note { text-align: center; color: var(--ink-soft); font-size: 13px; max-width: 720px; margin: 40px auto 0; line-height: 1.6; padding: 0 16px; font-family: var(--serif); font-style: italic; }
+  footer.note code { font-family: monospace; font-style: normal; background: var(--border-softer); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>QuickInk · Stories</h1>
+  <div class="tagline">scan, jot, find again — now share.</div>
+  <div class="version">VERSION 3 · THE COMPLETE MOCK</div>
+  <p>One mock for v3. Seven screens — the five main surfaces plus the two editor sheet interactions — all in one place. Click a tab to focus on one.</p>
+  <a class="nav-link" href="stories-mockup.html">← Back to versions</a>
+  &nbsp;
+  <a class="nav-link" href="stories-mockup-v1.html">See v1 (original)</a>
+  &nbsp;
+  <a class="nav-link" href="stories-mockup-v2.html">See v2 (chapbook)</a>
+</header>
+
+<div class="tabs" id="tabs">
+  <div class="tab active" data-target="all">All seven</div>
+  <div class="tab" data-target="s1">1 · Stories tab</div>
+  <div class="tab" data-target="s2">2 · Suggestion</div>
+  <div class="tab" data-target="s3">3 · Editor</div>
+  <div class="tab sub" data-target="s3a">3a · + Add sheet</div>
+  <div class="tab sub" data-target="s3b">3b · ⋯ Item menu</div>
+  <div class="tab" data-target="s4">4 · Reader</div>
+  <div class="tab" data-target="s5">5 · Share sheet</div>
+</div>
+
+<div class="stage" id="stage">
+
+  <!-- 1 · STORIES TAB -->
+  <div class="frame-wrap" data-screen="s1">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>● ● ●</span></div>
+      <div style="height: 22px;"></div>
+      <div class="h-title">Stories</div>
+      <div class="search">⌕ &nbsp;Search your stories</div>
+
+      <div class="sugg-hero">
+        <div class="label">SUGGESTED · TODAY</div>
+        <div class="preview-strip"><div></div><div></div><div></div></div>
+        <div class="lead">Tokyo, May 4–7</div>
+        <div class="reason">12 photos and 3 receipts. We've arranged them in the order you took them.</div>
+        <div class="footer-row">
+          <span class="dismiss">Not interested</span>
+          <span class="cta">Open preview →</span>
+        </div>
+      </div>
+
+      <div class="section">Your stories</div>
+      <div class="story-card">
+        <div class="cover" style="background:#A8C5A5"><span class="ct">Mira</span></div>
+        <div>
+          <h4>Mira's first month</h4>
+          <div class="meta">14 items · Apr 2026</div>
+          <span class="pill live">Public link</span>
+        </div>
+      </div>
+      <div class="story-card">
+        <div class="cover coral"><span class="ct">Lisbon</span></div>
+        <div>
+          <h4>Lisbon notebook</h4>
+          <div class="meta">22 items · Mar 2026</div>
+          <span class="pill">Draft</span>
+        </div>
+      </div>
+      <div class="story-card">
+        <div class="cover tan"><span class="ct">Reno</span></div>
+        <div>
+          <h4>Renovation log</h4>
+          <div class="meta">36 items · ongoing</div>
+          <span class="pill live">Public link</span>
+        </div>
+      </div>
+
+      <div class="fab">+</div>
+      <div class="nav">
+        <span><span class="dot">◳</span>Scan</span>
+        <span><span class="dot">◫</span>Library</span>
+        <span class="active"><span class="dot">▤</span>Stories</span>
+        <span><span class="dot">⌕</span>Search</span>
+      </div>
+    </div>
+    <div class="frame-label"><strong>1 · Stories tab</strong> — one focused suggestion card with reason and dismiss, story covers pull color from hero image</div>
+  </div>
+
+  <!-- 2 · SUGGESTION PREVIEW -->
+  <div class="frame-wrap" data-screen="s2">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>● ● ●</span></div>
+      <div style="height: 22px;"></div>
+      <div class="back">← Stories</div>
+      <div class="h-title" style="font-size:22px">Tokyo · May 4–7</div>
+      <div class="reason-box">12 photos and 3 receipts, May 4 to May 7, near Tokyo.</div>
+
+      <div class="preview-hero">
+        <div class="preview-label">WHAT IT'LL LOOK LIKE</div>
+        <div class="sample-cover">
+          <span class="stamp">MAY 2026</span>
+          <div class="ct">Tokyo, May 2026</div>
+          <div class="cs">a week of noodles and rain</div>
+        </div>
+        <div class="first-page">
+          <div class="ph"></div>
+          <div class="cp">Landing at Haneda, jet-lagged.</div>
+        </div>
+        <div class="controls">
+          <span class="cnt">15 items · 5 pages</span>
+          <span class="swap">Swap cover</span>
+        </div>
+      </div>
+
+      <div class="what-inside">What's inside, in order:</div>
+      <div class="item-strip">
+        <div class="ts"></div>
+        <div class="ts coral"></div>
+        <div class="ts doc"></div>
+        <div class="ts tan"></div>
+        <div class="ts note"></div>
+        <div class="ts"></div>
+        <div class="ts coral"></div>
+        <div class="ts doc"></div>
+      </div>
+
+      <div class="cta-row">
+        <div class="btn ghost">Edit first</div>
+        <div class="btn primary">Make story</div>
+      </div>
+    </div>
+    <div class="frame-label"><strong>2 · Suggestion preview</strong> — actual cover and first page rendered, not just thumbnails</div>
+  </div>
+
+  <!-- 3 · EDITOR -->
+  <div class="frame-wrap" data-screen="s3">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>● ● ●</span></div>
+      <div class="saved-toast">Saved just now</div>
+      <div style="height: 22px;"></div>
+      <div class="back">←<span class="right">Preview · Share</span></div>
+
+      <div class="edit-cover-strip">
+        <div class="mini-cover"></div>
+        <div class="info">
+          <div class="t">Tokyo, May 2026</div>
+          <div class="s">a week of noodles and rain</div>
+        </div>
+        <div class="change">Cover</div>
+      </div>
+
+      <div class="scroll">
+        <div class="divider-block">— May 4 —</div>
+        <div class="item-card">
+          <div class="thumb-sm"></div>
+          <div class="cap">Landing at Haneda, jet-lagged.</div>
+          <span class="menu">⋯</span>
+        </div>
+        <button class="slot-btn">＋ Add</button>
+        <div class="note-block">
+          First udon shop, behind the station. Slurped fast, paid in coins.
+          <span class="menu">⋯</span>
+        </div>
+        <button class="slot-btn">＋ Add</button>
+        <div class="item-card active">
+          <div class="thumb-sm doc"></div>
+          <div class="cap">Receipt · ¥1,180 <em>· Hakata Tonkotsu</em></div>
+          <span class="menu">⋯</span>
+        </div>
+        <button class="slot-btn">＋ Add</button>
+        <div class="divider-block">— May 5 —</div>
+        <div class="item-card">
+          <div class="thumb-sm coral"></div>
+          <div class="cap">Shibuya crossing at dusk.</div>
+          <span class="menu">⋯</span>
+        </div>
+        <button class="slot-btn">＋ Add</button>
+      </div>
+
+      <div class="edit-bottom">
+        <div class="btn ghost">Preview</div>
+        <div class="btn primary">Share</div>
+      </div>
+    </div>
+    <div class="frame-label"><strong>3 · Editor</strong> — single "+ Add" button per slot, per-item ⋯ menu, active card elevation, persistent cover strip on top</div>
+  </div>
+
+  <!-- 3a · + ADD SHEET -->
+  <div class="frame-wrap" data-screen="s3a">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>● ● ●</span></div>
+      <div style="height: 22px;"></div>
+
+      <div class="dim">
+        <div class="back">←<span class="right">Preview · Share</span></div>
+        <div class="edit-cover-strip">
+          <div class="mini-cover"></div>
+          <div class="info"><div class="t">Tokyo, May 2026</div><div class="s">a week of noodles and rain</div></div>
+          <div class="change">Cover</div>
+        </div>
+        <div class="divider-block">— May 4 —</div>
+        <div class="item-card"><div class="thumb-sm"></div><div class="cap">Landing at Haneda.</div><span class="menu">⋯</span></div>
+      </div>
+
+      <div class="trigger-add">＋ Add</div>
+
+      <div class="ix-backdrop"></div>
+      <div class="ix-sheet">
+        <div class="ix-handle"></div>
+        <h3>Add</h3>
+        <div class="ix-sub">after — <em>"Landing at Haneda, jet-lagged"</em></div>
+
+        <div class="ix-section">CAPTURE NEW</div>
+        <div class="ix-opt">
+          <div class="ix-icon"><i class="ti ti-camera" aria-hidden="true"></i></div>
+          <div class="ix-label">Scan a page</div>
+          <div class="ix-hint">camera</div>
+        </div>
+        <div class="ix-opt">
+          <div class="ix-icon"><i class="ti ti-photo" aria-hidden="true"></i></div>
+          <div class="ix-label">Take a photo</div>
+          <div class="ix-hint">camera</div>
+        </div>
+        <div class="ix-opt">
+          <div class="ix-icon"><i class="ti ti-microphone" aria-hidden="true"></i></div>
+          <div class="ix-label">Record a voice note</div>
+          <div class="ix-hint">tap & hold</div>
+        </div>
+
+        <div class="ix-section">FROM YOUR LIBRARY</div>
+        <div class="ix-opt">
+          <div class="ix-icon"><i class="ti ti-photo-up" aria-hidden="true"></i></div>
+          <div class="ix-label">Choose a photo</div>
+          <div class="ix-hint">picker</div>
+        </div>
+        <div class="ix-opt">
+          <div class="ix-icon"><i class="ti ti-file-text" aria-hidden="true"></i></div>
+          <div class="ix-label">Choose a document</div>
+          <div class="ix-hint">picker</div>
+        </div>
+        <div class="ix-opt">
+          <div class="ix-icon"><i class="ti ti-notes" aria-hidden="true"></i></div>
+          <div class="ix-label">Choose a note</div>
+          <div class="ix-hint">picker</div>
+        </div>
+
+        <div class="ix-section">LAYOUT</div>
+        <div class="ix-opt">
+          <div class="ix-icon"><i class="ti ti-typography" aria-hidden="true"></i></div>
+          <div class="ix-label">Write a paragraph</div>
+          <div class="ix-hint">serif</div>
+        </div>
+        <div class="ix-opt">
+          <div class="ix-icon"><i class="ti ti-pencil" aria-hidden="true"></i></div>
+          <div class="ix-label">Handwritten note</div>
+          <div class="ix-hint">Caveat</div>
+        </div>
+        <div class="ix-opt">
+          <div class="ix-icon"><i class="ti ti-calendar" aria-hidden="true"></i></div>
+          <div class="ix-label">Date divider</div>
+          <div class="ix-hint">— May 5 —</div>
+        </div>
+        <div class="ix-opt">
+          <div class="ix-icon"><i class="ti ti-map-pin" aria-hidden="true"></i></div>
+          <div class="ix-label">Place pin</div>
+          <div class="ix-hint">Shibuya</div>
+        </div>
+      </div>
+    </div>
+    <div class="frame-label"><strong>3a · + Add sheet</strong> — three sections (capture / library / layout). Italic subtitle anchors where the new item will land: <em>"after — Landing at Haneda"</em></div>
+  </div>
+
+  <!-- 3b · ⋯ ITEM MENU -->
+  <div class="frame-wrap" data-screen="s3b">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>● ● ●</span></div>
+      <div style="height: 22px;"></div>
+
+      <div class="dim">
+        <div class="back">←<span class="right">Preview · Share</span></div>
+        <div class="edit-cover-strip">
+          <div class="mini-cover"></div>
+          <div class="info"><div class="t">Tokyo, May 2026</div><div class="s">a week of noodles and rain</div></div>
+          <div class="change">Cover</div>
+        </div>
+        <div class="divider-block">— May 4 —</div>
+        <div class="item-card"><div class="thumb-sm"></div><div class="cap">Landing at Haneda.</div><span class="menu">⋯</span></div>
+      </div>
+
+      <div class="item-card trigger">
+        <div class="thumb-sm doc"></div>
+        <div class="cap">Receipt · ¥1,180 <em>· Hakata Tonkotsu</em></div>
+        <span class="menu">⋯</span>
+      </div>
+
+      <div class="ix-backdrop"></div>
+      <div class="ix-sheet">
+        <div class="ix-handle"></div>
+        <div class="ix-preview">
+          <div class="pv"></div>
+          <div>
+            <div class="pn">Receipt · ¥1,180</div>
+            <div class="ps">Hakata Tonkotsu · May 5</div>
+          </div>
+        </div>
+
+        <div class="ix-row">
+          <div class="mi"><i class="ti ti-pencil" aria-hidden="true"></i></div>
+          <div>Edit caption</div>
+        </div>
+        <div class="ix-row">
+          <div class="mi"><i class="ti ti-star" aria-hidden="true"></i></div>
+          <div>Set as cover</div>
+        </div>
+
+        <div class="ix-layout">
+          <div class="lbl">
+            <div class="mi"><i class="ti ti-layout-grid" aria-hidden="true"></i></div>
+            <div>Layout</div>
+          </div>
+          <div class="ix-pills">
+            <div class="pill2 on">Full</div>
+            <div class="pill2">Half</div>
+            <div class="pill2">Grid</div>
+          </div>
+        </div>
+
+        <div class="ix-sep"></div>
+
+        <div class="ix-row">
+          <div class="mi"><i class="ti ti-refresh" aria-hidden="true"></i></div>
+          <div>Replace with another item</div>
+        </div>
+        <div class="ix-row">
+          <div class="mi"><i class="ti ti-arrow-up" aria-hidden="true"></i></div>
+          <div>Move up</div>
+        </div>
+        <div class="ix-row">
+          <div class="mi"><i class="ti ti-arrow-down" aria-hidden="true"></i></div>
+          <div>Move down</div>
+        </div>
+
+        <div class="ix-sep"></div>
+
+        <div class="ix-row danger">
+          <div class="mi"><i class="ti ti-trash" aria-hidden="true"></i></div>
+          <div>Remove from story</div>
+        </div>
+      </div>
+    </div>
+    <div class="frame-label"><strong>3b · ⋯ Item menu</strong> — item preview anchors which item is being acted on, inline layout pills, destructive remove sits below a divider in coral</div>
+  </div>
+
+  <!-- 4 · READER -->
+  <div class="frame-wrap" data-screen="s4">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>quickink.app/s/h7tj9k</span></div>
+      <div style="height: 22px;"></div>
+      <div class="reader-cover">
+        <span class="stamp">MAY 2026</span>
+        <div class="ctitle">Tokyo, May 2026</div>
+        <div class="csub">a week of noodles and rain</div>
+      </div>
+      <div class="reader-attribution">by Achal · 15 items</div>
+      <div class="scroll">
+        <div class="day-marker">— MAY 4 · EVENING —</div>
+        <div class="reader-body">We landed Sunday with no plan, which turned out to be the plan.</div>
+        <div class="reader-item">
+          <div class="photo"></div>
+          <div class="caption">Landing at Haneda — jet-lagged.</div>
+        </div>
+        <div class="reader-quote">First udon shop behind the station. Slurped fast, paid in coins.</div>
+        <div class="reader-item">
+          <div class="photo doc"></div>
+          <div class="caption">Receipt · Hakata Tonkotsu · ¥1,180</div>
+        </div>
+        <div class="day-marker">— MAY 5 · DUSK —</div>
+        <div class="reader-item">
+          <div class="photo coral"></div>
+          <div class="caption">Shibuya crossing at dusk.</div>
+        </div>
+        <div class="end-card">
+          <div class="end-mark">— THE END —</div>
+          <div class="end-acts">
+            <button class="end-btn ghost">Reply with a note</button>
+            <button class="end-btn primary">Make your own</button>
+          </div>
+        </div>
+        <div class="footer">— Made with QuickInk · scan, jot, find again. —</div>
+      </div>
+    </div>
+    <div class="frame-label"><strong>4 · Reader</strong> — sticky day markers add a sense of journey, end card gives the reader somewhere to land</div>
+  </div>
+
+  <!-- 5 · SHARE SHEET -->
+  <div class="frame-wrap" data-screen="s5">
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>● ● ●</span></div>
+      <div style="height: 22px;"></div>
+      <div class="edit-cover-strip" style="opacity:0.35">
+        <div class="mini-cover"></div>
+        <div class="info">
+          <div class="t">Tokyo, May 2026</div>
+          <div class="s">a week of noodles and rain</div>
+        </div>
+      </div>
+      <div style="opacity:0.3">
+        <div class="item-card"><div class="thumb-sm"></div><div class="cap">Landing at Haneda</div><span class="menu">⋯</span></div>
+        <div class="item-card" style="margin-top:6px"><div class="thumb-sm doc"></div><div class="cap">Receipt · ¥1,180</div><span class="menu">⋯</span></div>
+      </div>
+
+      <div class="backdrop"></div>
+      <div class="sheet">
+        <div class="handle"></div>
+        <h3>Share Tokyo, May 2026</h3>
+        <div class="share-preview">
+          <div class="thumb"></div>
+          <div class="meta">
+            <div class="pname">Public link preview</div>
+            <div class="pdetail">15 items · cream cover with title overlay · ~3 min read</div>
+          </div>
+          <span class="toggle">Change</span>
+        </div>
+        <div class="share-opts">
+          <div class="share-opt">
+            <div class="icon">◰</div>
+            <div class="name">Save as PDF</div>
+            <div class="desc">Editorial layout, ready to print.</div>
+          </div>
+          <div class="share-opt">
+            <div class="icon">▦</div>
+            <div class="name">Save as image</div>
+            <div class="desc">A tall PNG for chats or stories.</div>
+          </div>
+          <div class="share-opt">
+            <div class="icon">↗</div>
+            <div class="name">Share via app</div>
+            <div class="desc">WhatsApp, Messages, Mail.</div>
+          </div>
+          <div class="share-opt active">
+            <div class="icon">∞</div>
+            <div class="name">Public link</div>
+            <div class="desc">A page anyone can open.</div>
+          </div>
+        </div>
+        <div class="share-link">
+          <div class="row">
+            <span>quickink.app/s/h7tj9k</span>
+            <span class="copy">Copy</span>
+          </div>
+          <div class="opt">
+            <span>require a passcode</span>
+            <span class="add">+ add</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="frame-label"><strong>5 · Share sheet</strong> — preview thumbnail of what's being sent, inline passcode option on public-link</div>
+  </div>
+
+</div>
+
+<footer class="note">
+  v3 — the complete mock. One file, seven surfaces. See <code>design/STORIES_DESIGN.md</code> for the design rationale and engineering plan.
+</footer>
+
+<script>
+  const tabs = document.querySelectorAll('.tab');
+  const stage = document.getElementById('stage');
+  const frames = document.querySelectorAll('.frame-wrap');
+  tabs.forEach(t => t.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    const target = t.dataset.target;
+    if (target === 'all') {
+      stage.dataset.mode = 'all';
+      frames.forEach(f => f.classList.remove('hidden'));
+    } else {
+      stage.dataset.mode = 'single';
+      frames.forEach(f => f.classList.toggle('hidden', f.dataset.screen !== target));
+    }
+  }));
+</script>
+
+</body>
+</html>

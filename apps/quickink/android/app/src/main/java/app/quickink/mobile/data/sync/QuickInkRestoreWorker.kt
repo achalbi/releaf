@@ -128,6 +128,11 @@ class QuickInkRestoreWorker(
             voiceNoteDao       = app.database.voiceNoteDao(),
             locationDao        = app.database.locationDao(),
             captureLocationDao = app.database.captureLocationDao(),
+            personDao          = app.database.personDao(),
+            capturePersonDao   = app.database.capturePersonDao(),
+            storyDao           = app.database.storyDao(),
+            storyItemDao       = app.database.storyItemDao(),
+            storyVoiceClipDao  = app.database.storyVoiceClipDao(),
             userId             = session.userId,
         )
         val syncRepository = SyncRepository(
@@ -216,6 +221,7 @@ class QuickInkRestoreWorker(
                 captureDao         = app.database.captureDao(),
                 profileSettingsDao = app.database.profileSettingsDao(),
                 voiceNoteDao       = app.database.voiceNoteDao(),
+                storyVoiceClipDao  = app.database.storyVoiceClipDao(),
                 driveClient        = app.driveClient,
             )
             Log.i(TAG, "restore: starting binary restore pass")

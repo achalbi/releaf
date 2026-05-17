@@ -2,8 +2,7 @@
  * CaptureMode.swift
  *
  * Which capture surface QuickInk shows behind the shutter on
- * iOS. Two surfaces, picked by an inline pill toggle on
- * QuickCaptureScreen:
+ * iOS. Three surfaces:
  *
  *   - .document       → VisionKit's `VNDocumentCameraViewController`
  *                       (unchanged behavior; runs in Apple's UI).
@@ -11,14 +10,28 @@
  *                       card-shaped guide overlay and a custom
  *                       detector that auto-captures on a stable
  *                       quad.
+ *   - .photo          → in-app `AVCaptureSession` preview with a
+ *                       plain manual shutter. No quad detection,
+ *                       no overlay — a single still that lands in
+ *                       the same scan pipeline tagged
+ *                       `source="photo"` / `paperSize=.custom`.
  *
- * The toggle is persisted under the UserDefaults key
+ * Pill toggle on QuickCaptureScreen stays two-wide
+ * (Document / Business Card). `.photo` is reachable through a
+ * transient entry only — long-press on the bottom-nav ⚡ FAB,
+ * or a Photo icon in the shutter row of the other two surfaces.
+ * That keeps the top-bar pill uncrowded on a 393pt-wide device
+ * while still surfacing a one-tap shortcut from the FAB.
+ *
+ * The pill-selected mode is persisted under the UserDefaults key
  * `quickink.capture.last_mode` (see [SettingsState.lastCaptureMode])
  * so the next session opens on whatever the user used last.
  * First-launch fallback is `.document` — that's the established
- * capture path.
+ * capture path. The long-press → `.photo` path deliberately does
+ * NOT persist (see `QuickCaptureScreen.init`): a transient photo
+ * shouldn't overwrite the user's last pill choice.
  *
- * Why not a single shared `AVCaptureSession` across both modes:
+ * Why not a single shared `AVCaptureSession` across all modes:
  * Document mode runs inside VisionKit's
  * `VNDocumentCameraViewController`, which owns its own
  * `AVCaptureSession` internally. We can't reach into it from
@@ -33,11 +46,13 @@ import Foundation
 public enum CaptureMode: String, CaseIterable, Sendable {
     case document
     case businessCard
+    case photo
 
     public var analyticsKey: String {
         switch self {
         case .document:     return "document"
         case .businessCard: return "business_card"
+        case .photo:        return "photo"
         }
     }
 
@@ -45,12 +60,14 @@ public enum CaptureMode: String, CaseIterable, Sendable {
         switch self {
         case .document:     return "Document"
         case .businessCard: return "Business Card"
+        case .photo:        return "Photo"
         }
     }
 
     public static func fromAnalyticsKey(_ key: String?) -> CaptureMode {
         switch key {
         case "business_card": return .businessCard
+        case "photo":         return .photo
         default:              return .document
         }
     }
@@ -60,11 +77,16 @@ public enum CaptureMode: String, CaseIterable, Sendable {
     /// weight each page (card +4, A4 +2, smaller +1). Document mode
     /// covers VisionKit's standard rectangular-document path; we
     /// assume A4 / Letter rather than trying to infer dimensions
-    /// from the captured pixels.
+    /// from the captured pixels. Photo mode passes `.custom` — an
+    /// arbitrary phone-camera frame's aspect ratio is meaningless
+    /// against the A4 / Letter / card ratio bands, and `.custom`
+    /// shares A4's +0.2 pts/page weight so the sustainability hero
+    /// still scores the page.
     public var paperSize: PaperSize {
         switch self {
         case .document:     return .a4
         case .businessCard: return .card
+        case .photo:        return .custom
         }
     }
 }

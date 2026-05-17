@@ -31,6 +31,13 @@ markdown-renderer     = "0.27.0"  # Later versions (0.36+) require Kotlin 2.2+
 rich-editor           = "1.0.0-rc13"
 # Image loading (page editor photo + scan thumbnails).
 coil                  = "2.7.0"
+# Drag-to-reorder for LazyColumn / LazyRow. Used by Stories Phase 2
+# follow-up — the editor's item list. 2.5.x adds heterogeneous list
+# support (mix draggable rows with non-draggable separators).
+reorderable           = "2.5.1"
+# AndroidX Palette — dominant-colour extraction from a Bitmap. Used
+# by the Stories reader's cover gradient (Phase 3 follow-up).
+androidx-palette      = "1.0.0"
 # Google Play Services location (FusedLocationProviderClient).
 play-services-location = "21.3.0"
 # Google ML Kit Document Scanner (on-device document scanning via Play
@@ -157,6 +164,8 @@ rich-editor-compose       = { module = "com.mohamedrejeb.richeditor:richeditor-c
 #   - play-services-mlkit-document-scanner: on-device scanner for ScansSection
 #   - activity-ktx: Activity Result contracts (photo picker, scanner sender)
 coil-compose              = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
+reorderable-compose       = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
+androidx-palette          = { module = "androidx.palette:palette-ktx",       version.ref = "androidx-palette" }
 play-services-location    = { module = "com.google.android.gms:play-services-location", version.ref = "play-services-location" }
 mlkit-document-scanner    = { module = "com.google.android.gms:play-services-mlkit-document-scanner", version.ref = "mlkit-document-scanner" }
 mlkit-text-recognition    = { module = "com.google.android.gms:play-services-mlkit-text-recognition", version.ref = "mlkit-text-recognition" }

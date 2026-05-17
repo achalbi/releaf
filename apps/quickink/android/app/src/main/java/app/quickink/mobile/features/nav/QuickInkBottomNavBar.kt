@@ -7,10 +7,10 @@
  * centre. Modelled directly after Releaf's `BottomNav.kt` so the two
  * apps share the same UX vocabulary (clean cream card, no glass blur,
  * radial-gradient FAB shadow); QuickInk keeps its brand identity via
- * the bolt icon and the custom `IconNote` / `IconSearch` assets.
+ * the bolt icon and the custom `IconNote` / `IconStory` assets.
  *
  *   ┌─────────────────────────────────────────┐
- *   │  Home   Library   ⚡   Search  Settings │
+ *   │  Home   Library   ⚡   Stories Settings │
  *   └─────────────────────────────────────────┘
  *
  * Surface:
@@ -90,7 +90,7 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
  * (e.g. ScanDetail) that host the bar but aren't themselves a
  * destination — passing [NavTab.None] paints no active cell.
  */
-enum class NavTab { Home, Workspace, Search, Settings, None }
+enum class NavTab { Home, Workspace, Stories, Settings, None }
 
 /**
  * The reserved space the bottom nav occupies on screens that own a
@@ -107,7 +107,7 @@ fun QuickInkBottomNavBar(
     onHome: () -> Unit,
     onWorkspace: () -> Unit,
     onScan: () -> Unit,
-    onSearch: () -> Unit,
+    onStories: () -> Unit,
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -175,11 +175,11 @@ fun QuickInkBottomNavBar(
                 onClick  = onScan,
             )
             RegularTabAsset(
-                drawableId = R.drawable.ic_search,
-                label      = "Search",
-                isSelected = activeTab == NavTab.Search,
+                drawableId = R.drawable.ic_story,
+                label      = "Stories",
+                isSelected = activeTab == NavTab.Stories,
                 modifier   = Modifier.weight(1f),
-                onClick    = onSearch,
+                onClick    = onStories,
             )
             RegularTab(
                 icon       = Icons.Outlined.Settings,
@@ -261,7 +261,7 @@ private fun RegularTab(
 /**
  * Asset-backed regular tab — same shape as [RegularTab] but renders a
  * QuickInk vector drawable from `res/drawable/ic_*.xml`. Used for
- * Library / Search where we have brand-specific icons.
+ * Library / Stories where we have brand-specific icons.
  */
 @Composable
 private fun RegularTabAsset(

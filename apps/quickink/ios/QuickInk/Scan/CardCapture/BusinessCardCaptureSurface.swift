@@ -63,6 +63,13 @@ struct BusinessCardCaptureSurface: View {
 
     let controller: ScanFlowController
     let onDismiss: () -> Void
+    /// Callback fired when the user taps the Photo icon in the
+    /// shutter row. Threaded up through `QuickCaptureScreen`
+    /// so the coordinator can flip `mode = .photo` and SwiftUI
+    /// swaps in `PhotoCaptureSurface`. Defaults to a no-op so
+    /// callers that don't host a coordinator (previews) keep
+    /// compiling.
+    var onSelectPhoto: () -> Void = {}
 
     @State private var permissionStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
 
@@ -70,7 +77,11 @@ struct BusinessCardCaptureSurface: View {
         ZStack {
             switch permissionStatus {
             case .authorized:
-                ActiveBusinessCardSurface(controller: controller, onDismiss: onDismiss)
+                ActiveBusinessCardSurface(
+                    controller:     controller,
+                    onDismiss:      onDismiss,
+                    onSelectPhoto:  onSelectPhoto,
+                )
             case .notDetermined:
                 PermissionRationale(
                     title:   "Allow camera to scan cards",
@@ -123,6 +134,7 @@ private struct ActiveBusinessCardSurface: View {
 
     let controller: ScanFlowController
     let onDismiss: () -> Void
+    let onSelectPhoto: () -> Void
 
     @StateObject private var session: CardCaptureSession = CardCaptureSession()
     @State private var overlayState: OverlayState = .neutral
@@ -149,11 +161,18 @@ private struct ActiveBusinessCardSurface: View {
             // Shutter row — manual fallback. Always available;
             // the post-processor falls back to the guide rect
             // as the "card quad" when no valid lock is in
-            // flight.
-            HStack {
+            // flight. Left slot hosts the Photo icon so the
+            // user can jump into the Photo capture surface
+            // from inside the card flow (matches the same
+            // affordance Document mode exposes). A trailing
+            // 64pt spacer keeps the centre shutter centred
+            // against the leading button.
+            HStack(alignment: .center) {
+                photoModeButton.frame(width: 64, height: 64)
                 Spacer()
                 BusinessCardShutterButton(onTap: triggerManualShutter)
                 Spacer()
+                Color.clear.frame(width: 64, height: 64)
             }
             .padding(.horizontal, QuickInkSpacing.s5)
             .padding(.vertical, QuickInkSpacing.s4)
@@ -195,6 +214,23 @@ private struct ActiveBusinessCardSurface: View {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         CaptureAnalytics.manualFired(mode: .businessCard)
         session.triggerManualCapture()
+    }
+
+    @ViewBuilder
+    private var photoModeButton: some View {
+        Button(action: {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            onSelectPhoto()
+        }) {
+            Image(systemName: "camera")
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.85))
+                .frame(width: 48, height: 48)
+                .background(Color.white.opacity(0.10))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Take a photo")
     }
 }
 

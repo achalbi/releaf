@@ -30,26 +30,25 @@
  *   muted       #A8A29E  tertiary text, inactive nav
  *   paper1/2/3  #E8DCC4 / #F0E4D7 / #EADFCF  note thumbnail bg
  *
- * Typography spec:
+ * Typography — sourced from the typography token JSON in `design/`:
  *
- *   | Element                  | Font                | Style       |
- *   | ------------------------ | ------------------- | ----------- |
- *   | App Name                 | New York Large Bold | Hero        |
- *   | Notebook Titles          | New York Medium     | Elegant     |
- *   | Editor Body              | SF Pro Text         | Clean       |
- *   | Toolbar                  | SF Pro Medium       | Compact     |
- *   | Empty States             | New York Italic     | Emotional   |
- *   | AI Summaries             | SF Pro              | Structured  |
- *   | Sustainability Campaigns | New York Bold       | Editorial   |
+ *   - Lora               → editorial serif. Display, onboarding hero,
+ *                          sustainability headlines, empty-state
+ *                          callouts, serif CTAs.
+ *   - Plus Jakarta Sans  → product-UI sans. Body, labels, eyebrows,
+ *                          metadata, captions, section headings,
+ *                          page titles, card titles.
+ *   - Caveat             → handwritten OCR previews (Medium only).
  *
- * Both fonts ship with iOS 13+ — no bundling required:
- *   - New York → `Font.system(size: weight: design: .serif)`
- *   - SF Pro    → `Font.system(size: weight: design: .default)`
+ * All three families are bundled under `DesignSystem/Fonts/` and
+ * registered via `QuickInkFont.registerAll()` at app launch so SwiftUI
+ * picks up `Font.custom("Lora-Regular", size:)` etc. without a roundtrip.
  *
- * Caveat (handwritten previews) is the only bundled custom font.
- * Cormorant Garamond was the previous editorial serif; the .ttfs
- * still live in `DesignSystem/Fonts/` for now but are no longer
- * referenced and can be removed in a follow-up cleanup.
+ * History — earlier versions used iOS's bundled `Font.system(... .serif)`
+ * (New York) + `Font.system(... .default)` (SF Pro). Switched to bundled
+ * Lora + Plus Jakarta Sans for cross-platform parity with the Android
+ * side, which uses the same families. The previous Cormorant Garamond
+ * .ttfs were removed in this same change.
  */
 
 import SwiftUI
@@ -237,52 +236,67 @@ private extension UIColor {
 // MARK: - Typography
 
 /// Font helpers for QuickInk's editorial type system, sourced
-/// from the typography spec:
+/// from the typography token JSON.
 ///
-///   - App Name              → New York Large Bold  (Hero)
-///   - Notebook Titles       → New York Medium      (Elegant)
-///   - Editor Body           → SF Pro Text          (Clean)
-///   - Toolbar               → SF Pro Medium        (Compact)
-///   - Empty States          → New York Italic      (Emotional)
-///   - AI Summaries          → SF Pro               (Structured)
-///   - Sustainability        → New York Bold        (Editorial)
+/// Three bundled families resolve here:
 ///
-/// Two font families resolve here:
+///   - `serif(...)` → Lora via `Font.custom("Lora-<Weight>", size:)`.
+///     Bundled upright Regular → Bold + Regular and Medium italics
+///     under `DesignSystem/Fonts/`. Italic synthesis is avoided —
+///     `italic: true` resolves to a real italic .ttf (`Lora-Italic`
+///     or `Lora-MediumItalic`) rather than a slant transform.
+///   - `ui(...)` → Plus Jakarta Sans via `Font.custom("PlusJakartaSans-<Weight>", size:)`.
+///     Bundled Regular → Bold. Used for body, labels, chips, nav,
+///     captions.
+///   - `handwritten(...)` → Caveat (Medium only) for note-thumbnail
+///     OCR snippets and the editor's handwritten-title affordance.
 ///
-///   - `serif(...)` → New York via SwiftUI's
-///     `Font.system(size: weight: design: .serif)`. New York is
-///     Apple's bundled editorial serif (iOS 13+); zero-cost,
-///     dynamically-typed, and the canonical "New York" referenced
-///     by the spec. Replaces the previous Cormorant Garamond
-///     (bundled `Font.custom(...)`) — see history below.
-///   - `ui(...)` → SF Pro via `Font.system(...)`. The "SF Pro"
-///     and "SF Pro Text" rows in the spec both resolve here:
-///     SwiftUI auto-selects the SF Pro Text optical variant for
-///     sizes under ~20pt and SF Pro Display above, so no separate
-///     code path is needed.
+/// All three families are registered at app launch via [registerAll]
+/// — the iterator walks the package bundle and registers every .ttf,
+/// so adding a new weight is a matter of dropping the file in
+/// `DesignSystem/Fonts/` and adding a case to the resolver below.
 ///
-/// `handwritten(...)` targets Caveat (Medium only) — still
-/// bundled because iOS ships no comparable handwritten system
-/// face. Caveat is used only for note-thumbnail OCR snippets and
-/// the editor's handwritten-title affordance.
-///
-/// History — Cormorant Garamond was the previous serif (PostScript-
-/// name resolution via `Font.custom("CormorantGaramond-...")`).
-/// Dropped because the high-contrast didone strokes read as
-/// fragile and decorative at app-screen scale. The bundled
-/// `CormorantGaramond-*.ttf` files in `DesignSystem/Fonts/` are no
-/// longer referenced and can be removed in a follow-up cleanup —
-/// `registerAll()` below silently no-ops on missing files, so the
-/// removal is safe in either order.
+/// History — earlier versions used iOS's bundled `Font.system(... .serif)`
+/// (New York) for the editorial serif and `Font.system(...)` (SF Pro)
+/// for the UI sans. Switched to bundled Lora + Plus Jakarta Sans for
+/// cross-platform parity with the Android side (same families, same
+/// per-style values from the token JSON). Before that, Cormorant
+/// Garamond was the bundled editorial serif; both Cormorant and the
+/// dependency on `.system(... .serif)` are gone now.
 public enum QuickInkFont {
 
-    /// Editorial serif (New York) at the given size + weight,
-    /// optionally italic. Resolves via `Font.system(...design: .serif)`
-    /// — SwiftUI handles weight + italic synthesis against the
-    /// New York family bundled with iOS 13+.
+    /// Editorial serif (Lora) at the given size + weight, optionally
+    /// italic. Resolves to a real bundled face: `Lora-Italic` or
+    /// `Lora-MediumItalic` for italic requests (Regular and Medium
+    /// italics are the only italic weights bundled — other weights
+    /// fall back to `Lora-Italic`). Weights outside Regular → Bold
+    /// snap to the nearest bundled weight.
     public static func serif(_ size: CGFloat, weight: Font.Weight = .regular, italic: Bool = false) -> Font {
-        let base = Font.system(size: size, weight: weight, design: .serif)
-        return italic ? base.italic() : base
+        return Font.custom(loraName(for: weight, italic: italic), size: size)
+    }
+
+    /// PostScript-name resolver for Lora. Standard "Family-Style"
+    /// naming on the upstream TTFs — verified via the `name` table.
+    private static func loraName(for weight: Font.Weight, italic: Bool) -> String {
+        let stem: String
+        if weight == .medium {
+            stem = "Medium"
+        } else if weight == .semibold {
+            stem = "SemiBold"
+        } else if weight == .bold || weight == .heavy || weight == .black {
+            stem = "Bold"
+        } else {
+            // ultraLight / thin / light / regular all collapse to
+            // Regular — Lora has no Light variant on the upstream.
+            stem = "Regular"
+        }
+        if italic {
+            // Only Regular + Medium italics bundled. Map SemiBold /
+            // Bold italic requests back to Lora-Italic rather than
+            // letting SwiftUI synthesize from a non-italic face.
+            return stem == "Medium" ? "Lora-MediumItalic" : "Lora-Italic"
+        }
+        return "Lora-\(stem)"
     }
 
     /// Caveat handwritten font for note previews. Only the Medium
@@ -293,13 +307,29 @@ public enum QuickInkFont {
         return Font.custom("Caveat-Medium", size: size)
     }
 
-    /// System sans (SF Pro) for body, labels, chips, nav, captions.
-    /// Routed through `Font.system(...)` so it inherits the
-    /// platform's text-rendering defaults — Dynamic Type metrics,
-    /// ligatures, and the optical SF Pro Text / SF Pro Display
-    /// switch around 20pt.
+    /// UI sans (Plus Jakarta Sans) for body, labels, chips, nav,
+    /// captions. Resolves via `Font.custom("PlusJakartaSans-<Weight>", size:)`
+    /// against the bundled .ttfs — weights outside Regular → Bold
+    /// snap to the nearest bundled weight.
     public static func ui(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        return Font.system(size: size, weight: weight, design: .default)
+        return Font.custom(pjsName(for: weight), size: size)
+    }
+
+    /// PostScript-name resolver for Plus Jakarta Sans. Standard
+    /// "Family-Style" naming on the upstream TTFs.
+    private static func pjsName(for weight: Font.Weight) -> String {
+        if weight == .medium {
+            return "PlusJakartaSans-Medium"
+        } else if weight == .semibold {
+            return "PlusJakartaSans-SemiBold"
+        } else if weight == .bold || weight == .heavy || weight == .black {
+            return "PlusJakartaSans-Bold"
+        } else {
+            // ultraLight / thin / light / regular → Regular. Plus
+            // Jakarta Sans has lighter weights upstream but we only
+            // bundle Regular → Bold to keep the resource size down.
+            return "PlusJakartaSans-Regular"
+        }
     }
 
     /// Register all bundled QuickInk font files. Call once at app
@@ -364,103 +394,124 @@ public enum QuickInkFont {
     }
 }
 
-/// Pre-baked text styles matching the typography spec. Use these
-/// instead of constructing `QuickInkFont.serif(...)` calls inline,
-/// so a brand pass tweak lands in one place.
+/// Pre-baked text styles matching the typography token JSON. Use
+/// these instead of constructing `QuickInkFont.serif(...)` calls
+/// inline, so a brand pass tweak lands in one place.
 ///
-/// Family contract (mostly mapped to the spec table):
-///   - Editorial serif (New York via `QuickInkFont.serif(...)`):
-///     `display` (App Name), `editorial` (Sustainability Campaigns),
-///     `bodyItalic` (Empty States), `onboardingTitle`,
-///     `onboardingBody`.
-///   - Sans (SF Pro via `QuickInkFont.ui(...)`): `body` (Editor Body
-///     / AI Summaries), `cardTitle` (was Notebook Titles per spec,
-///     moved to sans — see token doc), `label` (Toolbar),
-///     `pageTitle`, `heading`, `eyebrow`, `meta`, `caption`.
+/// Family contract:
+///   - Serif (Lora via `QuickInkFont.serif(...)`): `display`,
+///     `onboardingTitle`, `editorial`, `onboardingBody`, `bodyItalic`,
+///     `ctaSerif`.
+///   - Sans (Plus Jakarta Sans via `QuickInkFont.ui(...)`): `body`,
+///     `caption`, `meta`, `label`, `eyebrow`, `pageTitle`, `heading`,
+///     `cardTitle`.
 ///   - Handwritten (`QuickInkFont.handwritten(...)`): `handwritten`.
+///
+/// Token names map directly except for three sans aliases kept for
+/// call-site stability: `label` = `UiLabel`, `eyebrow` = `UiLabelCaps`,
+/// `meta` = `Metadata`. `pageTitle`, `heading`, and `cardTitle` are
+/// structural — no direct token entry — but used widely enough that
+/// removing them would mean rewriting most screens.
+///
+/// Per-style tracking lives in `QuickInkLetterSpacing` because
+/// SwiftUI Fonts don't carry tracking — callers apply it via
+/// `.tracking(...)` on the Text view.
 ///
 /// Counterpart: Android `QuickInkTextStyle` in `QuickInkTypography.kt`.
 public enum QuickInkText {
-    /// App Name — "Hero" tier. New York Light at 28pt. Used for
-    /// the Home greeting name ("Achal B I") and the Profile screen
-    /// header. Light weight reads elegant and unhurried at this
-    /// size, more wordmark than running text. Audited via grep for
-    /// `QuickInkText.display`: only home + profile.
-    public static let display    = QuickInkFont.serif(28, weight: .light)
 
-    /// Sustainability Campaigns — "Editorial" tier. New York Medium
-    /// at 16pt. Reserved for the eco card headline, trees-saved
-    /// milestones, and any future campaign moments. Distinct from
-    /// `heading` (sans) so productivity headings stay clearly
-    /// functional while editorial sustainability moments carry the
-    /// brand serif voice.
-    public static let editorial = QuickInkFont.serif(16, weight: .medium)
+    // MARK: - Serif (Lora)
 
-    /// Onboarding hero title — sized to match the JSX mockup
-    /// (`text-[30px] leading-[1.15]`). Smaller than `display` so
-    /// the two-line tagline doesn't crowd the illustration on a
-    /// 390-wide phone frame. New York Medium.
-    public static let onboardingTitle = QuickInkFont.serif(22, weight: .medium)
+    /// Home greeting ("Achal B I") and Profile screen header. Was
+    /// Cormorant Light 28 — now Lora Regular 26 to match optical
+    /// density (Lora has no Light variant).
+    public static let display    = QuickInkFont.serif(26, weight: .regular)
 
-    /// Onboarding body — New York Medium. Used by the onboarding
-    /// scaffold's tagline + SignInScreen's lead copy where the
-    /// editorial showroom feel matters more than density. App
-    /// screens use `body` (SF Pro) instead.
-    public static let onboardingBody = QuickInkFont.serif(16, weight: .medium)
+    /// Onboarding hero title. Lora Medium 20.
+    public static let onboardingTitle = QuickInkFont.serif(20, weight: .medium)
 
-    /// App page title (Settings, Library, Detail, etc.) — SF Pro
-    /// SemiBold at 20pt. Sans, not serif: the editorial serif is
-    /// reserved for App Name + sustainability campaigns + onboarding
-    /// hero, so app-screen page titles stay on the product-UI sans
-    /// for a confident functional read.
-    public static let pageTitle  = QuickInkFont.ui(20, weight: .semibold)
+    /// Sustainability headlines, smart-collection titles. Lora
+    /// Medium 15. Distinct from `heading` (sans) so productivity
+    /// headings stay clearly functional while editorial moments
+    /// carry the brand serif voice.
+    public static let editorial = QuickInkFont.serif(15, weight: .medium)
 
-    /// Section eyebrow above grouped content (uppercase + tracked).
-    /// SF Pro semibold.
+    /// Onboarding tagline / SignIn lead copy. Lora Regular 16 (was
+    /// Medium — Regular reads better in long editorial copy). App
+    /// screens use `body` (sans) instead.
+    public static let onboardingBody = QuickInkFont.serif(16, weight: .regular)
+
+    /// Empty states ("No notes yet…"), smart-collection rule grammar,
+    /// AI suggestion chips. Lora Regular Italic 16.
+    public static let bodyItalic = QuickInkFont.serif(16, weight: .regular, italic: true)
+
+    /// Primary CTA on onboarding & sheet "Save / Continue" actions
+    /// — the only place serif meets a filled button. Lora SemiBold
+    /// 14. Callers apply `.tracking(QuickInkLetterSpacing.cta)` for
+    /// the +0.2pt token tracking.
+    public static let ctaSerif   = QuickInkFont.serif(14, weight: .semibold)
+
+    // MARK: - Sans (Plus Jakarta Sans)
+
+    /// Default UI body, doc list titles, modal body copy. PJS
+    /// Regular 14.
+    ///
+    /// Token rev: was 16pt Medium; tokens spec Regular 14pt for
+    /// tighter list density. Touches every screen — review for
+    /// visual regressions on first pass.
+    public static let body       = QuickInkFont.ui(14, weight: .regular)
+
+    /// Folder meta ("47 items · 3 new"), date stamps, page counts,
+    /// tag counts. PJS Regular 12. Token name: `Metadata`; kept as
+    /// `meta` for call-site stability.
+    public static let meta       = QuickInkFont.ui(12, weight: .regular)
+
+    /// Badge pills ("OCR done", "Shared", "Map"), thumbnail tags.
+    /// PJS Medium 10.
+    public static let caption    = QuickInkFont.ui(10, weight: .medium)
+
+    /// Section eyebrows ("Folders", "Smart collections"), folder
+    /// names in list, toolbar chips, nav labels. PJS SemiBold 14.
+    /// Token name: `UiLabel`; kept as `label` for call-site stability.
+    ///
+    /// Token rev: was Medium; tokens promote to SemiBold so labels
+    /// sit a clear notch above `body`.
+    public static let label      = QuickInkFont.ui(14, weight: .semibold)
+
+    /// Uppercase eyebrow above grouped content — "CONTINUE",
+    /// "AUTO-CURATED RULE", tab-bar labels. PJS SemiBold 11. Token
+    /// name: `UiLabelCaps`; kept as `eyebrow` for call-site stability.
+    /// Pair with `.tracking(QuickInkLetterSpacing.eyebrow)` and
+    /// `.uppercased()` strings.
     public static let eyebrow    = QuickInkFont.ui(11, weight: .semibold)
 
-    /// App section heading ("Recents", "Categories", etc.) — SF Pro
-    /// SemiBold at 16pt. Sans for the same reason as `pageTitle`.
-    /// Sustainability-tier editorial moments use `editorial` instead.
+    // MARK: - Sans — structural (no direct token entry)
+
+    /// App page title (Settings, Library, Detail, etc.). PJS
+    /// SemiBold 20. Not in the token JSON; kept structurally so
+    /// app-screen page titles stay on sans for a confident functional
+    /// read (the editorial serif is reserved for `display` /
+    /// `onboardingTitle`).
+    public static let pageTitle  = QuickInkFont.ui(20, weight: .semibold)
+
+    /// App section heading ("Recents", "Categories", etc.). PJS
+    /// SemiBold 16. Not in the token JSON. Sustainability-tier
+    /// editorial moments use `editorial` (serif) instead.
     public static let heading    = QuickInkFont.ui(16, weight: .semibold)
 
-    /// Editor Body + AI Summaries — "Clean" / "Structured" tiers.
-    /// SF Pro Text at 16pt Medium (SwiftUI auto-selects the SF Pro
-    /// Text optical variant for this size). App-screen reading
-    /// copy and Haiku-generated summary blocks resolve here.
-    public static let body       = QuickInkFont.ui(16, weight: .medium)
-
-    /// Empty States — "Emotional" tier. New York Italic Medium at
-    /// 16pt. Used by no-content prompts and SmartSuggestion-style
-    /// taglines where a literary tone reads better than a clinical
-    /// sans.
-    public static let bodyItalic = QuickInkFont.serif(16, weight: .medium, italic: true)
-
-    /// Caveat handwritten — used inside note thumbnails.
-    public static let handwritten = QuickInkFont.handwritten(20)
-
-    /// Card title — SF Pro SemiBold at 14pt, used for note/scan
-    /// thumbnail titles in the home recent rail and the library
-    /// grid. Briefly switched to New York Medium per the "Notebook
-    /// Titles → New York Medium" spec row, but on screen the serif
-    /// read as too literary at 14pt — too much editorial weight on
-    /// what is functionally a file-name list. Back on sans for the
-    /// productivity-app feel.
+    /// Card title — note/scan thumbnail titles in home recent rail
+    /// and library grid. PJS SemiBold 14. Not in the token JSON.
+    /// Briefly was serif per a "Notebook Titles → New York Medium"
+    /// spec row, but at 14pt serif read too literary for a file-name
+    /// list.
     public static let cardTitle  = QuickInkFont.ui(14, weight: .semibold)
 
-    /// Toolbar — "Compact" tier. SF Pro Medium at 14pt. Used for
-    /// chip text, nav labels, and small CTAs. Was SemiBold; dropped
-    /// to Medium per the spec's "SF Pro Medium" callout — toolbar
-    /// affordances should read as compact and unobtrusive, not as
-    /// shouting bold copy.
-    public static let label      = QuickInkFont.ui(14, weight: .medium)
+    // MARK: - Handwritten (Caveat)
 
-    /// Meta — timestamps, sync status, helper copy. SF Pro medium.
-    public static let meta       = QuickInkFont.ui(12, weight: .medium)
-
-    /// Caption — smallest readable size. Used in confidence badges,
-    /// page counters, etc. SF Pro medium.
-    public static let caption    = QuickInkFont.ui(10, weight: .medium)
+    /// Caveat handwritten — note-thumbnail previews and the editor's
+    /// handwritten-title affordance. Pinned to Medium (only weight
+    /// bundled, matches Android).
+    public static let handwritten = QuickInkFont.handwritten(20)
 }
 
 // MARK: - Spacing
@@ -492,10 +543,12 @@ public enum QuickInkRadius {
 // MARK: - Letter spacing
 
 public enum QuickInkLetterSpacing {
-    /// Eyebrow / overline — 1.2 px tracking on top of the
-    /// 11 pt label. Values in points; SwiftUI consumes them via
-    /// the `.tracking()` modifier.
-    public static let eyebrow: CGFloat = 1.2
+    /// `UiLabelCaps` tracking — 1.4 pt on top of the 11 pt eyebrow
+    /// label. Values in points; SwiftUI consumes them via the
+    /// `.tracking()` modifier.
+    public static let eyebrow: CGFloat = 1.4
+    /// `CtaSerif` tracking — +0.2 pt on the 14 pt serif CTA label.
+    public static let cta: CGFloat     = 0.2
     public static let body: CGFloat    = 0
 }
 

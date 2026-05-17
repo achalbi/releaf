@@ -36,6 +36,13 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!--
+      Optional: used only when the user explicitly taps "Link contact"
+      in the People editor. We never read the address book without
+      that gesture, and the system runtime-permission dialog is gated
+      on the in-app press.
+    -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
 
     <!--
       Camera is required for the in-app Business Card surface AND

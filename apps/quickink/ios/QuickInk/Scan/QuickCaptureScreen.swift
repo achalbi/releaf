@@ -51,15 +51,34 @@ struct QuickCaptureScreen: View {
     /// CaptureModeCoordinator.
     @StateObject private var coordinator: CaptureModeCoordinator
 
-    init(controller: ScanFlowController, onDismiss: @escaping () -> Void) {
+    /// Optional override for the starting surface. `nil` (the
+    /// default) reads `quickink.capture.last_mode` from
+    /// UserDefaults as before. Passing `.photo` lets the bottom-
+    /// nav ⚡ FAB's long-press jump straight into the photo
+    /// surface without disturbing the user's pill choice — the
+    /// coordinator below uses a no-op persist on the long-press
+    /// path so the next tap on the FAB still lands on the
+    /// previously-selected pill mode (Document or Business Card).
+    init(
+        controller: ScanFlowController,
+        initialMode: CaptureMode? = nil,
+        onDismiss: @escaping () -> Void,
+    ) {
         self.controller = controller
         self.onDismiss = onDismiss
-        let initial = CaptureMode.fromAnalyticsKey(
+        let starting: CaptureMode = initialMode ?? CaptureMode.fromAnalyticsKey(
             UserDefaults.standard.string(forKey: "quickink.capture.last_mode")
         )
+        // Long-press → `.photo` is transient: it should NOT
+        // overwrite the user's last pill choice. Gate the
+        // persist hook so only pill-eligible modes round-trip
+        // to UserDefaults. If the user later flips the pill
+        // from inside this transient surface, that pill-driven
+        // select() will land here too and re-persist normally.
         _coordinator = StateObject(wrappedValue: CaptureModeCoordinator(
-            initial: initial,
+            initial: starting,
             persist: { mode in
+                guard mode != .photo else { return }
                 UserDefaults.standard.set(mode.analyticsKey, forKey: "quickink.capture.last_mode")
             },
         ))
@@ -82,11 +101,18 @@ struct QuickCaptureScreen: View {
                     switch coordinator.mode {
                     case .document:
                         DocumentCaptureSurface(
-                            controller: controller,
-                            onDismiss:  onDismiss,
+                            controller:     controller,
+                            onDismiss:      onDismiss,
+                            onSelectPhoto:  { coordinator.select(.photo) },
                         )
                     case .businessCard:
                         BusinessCardCaptureSurface(
+                            controller:     controller,
+                            onDismiss:      onDismiss,
+                            onSelectPhoto:  { coordinator.select(.photo) },
+                        )
+                    case .photo:
+                        PhotoCaptureSurface(
                             controller: controller,
                             onDismiss:  onDismiss,
                         )
@@ -122,10 +148,29 @@ struct QuickCaptureScreen: View {
 
             Spacer()
 
-            ModeTogglePill(
-                current:  coordinator.mode,
-                onSelect: { coordinator.select($0) },
-            )
+            // Pill stays two-wide (Document / Business Card).
+            // `.photo` is a transient surface reached via long-
+            // press on the FAB or the in-shutter-row Photo icon,
+            // not via the pill — so on the photo surface we hide
+            // the pill rather than paint it with no active state.
+            // The user exits photo mode by tapping the close
+            // button or completing the capture.
+            if coordinator.mode != .photo {
+                ModeTogglePill(
+                    current:  coordinator.mode,
+                    onSelect: { coordinator.select($0) },
+                )
+            } else {
+                Text("Photo")
+                    .font(QuickInkText.label)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, QuickInkSpacing.s4)
+                    .padding(.vertical, QuickInkSpacing.s2)
+                    .background(
+                        RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous)
+                            .fill(Color.white.opacity(0.10))
+                    )
+            }
 
             Spacer()
 
@@ -145,9 +190,18 @@ private struct ModeTogglePill: View {
     let current: CaptureMode
     let onSelect: (CaptureMode) -> Void
 
+    /// The pill is intentionally two-wide on a 393pt device —
+    /// three pills crowd the top bar against the close button
+    /// and right-slot spacer. `.photo` is a transient surface
+    /// (long-press FAB / shutter-row icon), so it doesn't take
+    /// a pill slot. If a third pill ever ships, the
+    /// Instagram-style ordering (Document / Photo / Business
+    /// Card) reduces accidental Business-Card taps.
+    private static let pillModes: [CaptureMode] = [.document, .businessCard]
+
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(CaptureMode.allCases, id: \.self) { m in
+            ForEach(Self.pillModes, id: \.self) { m in
                 let active = (m == current)
                 Button(action: { tap(m) }) {
                     Text(m.pillLabel)

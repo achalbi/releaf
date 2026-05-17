@@ -733,6 +733,113 @@ public final class QuickInkDatabase: @unchecked Sendable {
             try db.execute(sql: "ALTER TABLE captures ADD COLUMN notes TEXT")
         }
 
+        // ─── v14_stories ────────────────────────────────────────
+        //
+        // Stories feature Phase 1 — see design/STORIES_HANDOFF.md.
+        // Two tables: `story` (the curated narrative itself) and
+        // `story_item` (its ordered children — references to
+        // captures, photos, notes, voice clips, or inline text /
+        // handwritten / date-divider / place-pin blocks).
+        //
+        // `position` is 1024-spaced so a reorder is a single update
+        // (new = (prev + next) / 2) instead of a full rewrite; we
+        // renormalize on collision (handled in the repository).
+        //
+        // `cover_item_id` on `story` intentionally is NOT declared
+        // as a SQL foreign key. Per the handoff doc's don't-do list:
+        // "Don't drop the cover_item_id FK when the referenced item
+        // is removed from the story. Null it instead." The
+        // repository nulls it on item-removal; a real FK with
+        // ON DELETE SET NULL would also require restating the
+        // SQLite circular-reference dance which we avoid by
+        // enforcing the rule in code.
+        //
+        // `story_id` on `story_item` DOES have ON DELETE CASCADE —
+        // removing a whole story removes all its items.
+        //
+        // Dirty + deleted_at columns mirror the rest of the schema
+        // so the Phase 6 public-link sync can use the same dirty-
+        // flag pattern when it ships.
+        migrator.registerMigration("v14_stories") { db in
+            try db.execute(sql: """
+                CREATE TABLE story (
+                    id                  TEXT PRIMARY KEY NOT NULL,
+                    user_id             TEXT NOT NULL,
+                    title               TEXT NOT NULL,
+                    subtitle            TEXT,
+                    cover_item_id       TEXT,
+                    cover_style         TEXT NOT NULL DEFAULT 'photo',
+                    theme_style         TEXT NOT NULL DEFAULT 'editorial',
+                    grouping_mode       TEXT NOT NULL DEFAULT 'timeline',
+                    time_range_start    TEXT,
+                    time_range_end      TEXT,
+                    status              TEXT NOT NULL DEFAULT 'draft',
+                    share_mode          TEXT NOT NULL DEFAULT 'private',
+                    share_slug          TEXT,
+                    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty               INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at          TEXT
+                )
+                """)
+            try db.execute(sql: """
+                CREATE TABLE story_item (
+                    id                  TEXT PRIMARY KEY NOT NULL,
+                    story_id            TEXT NOT NULL REFERENCES story(id) ON DELETE CASCADE,
+                    position            INTEGER NOT NULL,
+                    kind                TEXT NOT NULL,
+                    ref_id              TEXT,
+                    text                TEXT,
+                    caption             TEXT,
+                    occurred_at         TEXT,
+                    layout              TEXT NOT NULL DEFAULT 'full',
+                    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty               INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at          TEXT
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_story_user            ON story (user_id, updated_at DESC)")
+            try db.execute(sql: "CREATE INDEX idx_story_dirty           ON story (dirty) WHERE dirty = 1")
+            try db.execute(sql: "CREATE INDEX idx_story_tombstone       ON story (deleted_at) WHERE deleted_at IS NOT NULL")
+            try db.execute(sql: "CREATE INDEX idx_story_item_story_pos  ON story_item (story_id, position)")
+            try db.execute(sql: "CREATE INDEX idx_story_item_dirty      ON story_item (dirty) WHERE dirty = 1")
+            try db.execute(sql: "CREATE INDEX idx_story_item_tombstone  ON story_item (deleted_at) WHERE deleted_at IS NOT NULL")
+        }
+
+        // ─── v15_story_voice_clips ──────────────────────────────
+        //
+        // Stories Phase 2 — inline voice clips attached to a
+        // `story_item` row of kind = 'voice_clip'. Mirror of the
+        // existing `voice_notes` table (capture-attached voice
+        // notes), but keyed off `story_item_id` rather than
+        // `capture_id`. AAC-LC 64 kbps mono, max 10 s. Drive sync
+        // mirrors voice_notes: two columns, one for the JSON
+        // metadata row, one for the .m4a binary.
+        migrator.registerMigration("v15_story_voice_clips") { db in
+            try db.execute(sql: """
+                CREATE TABLE story_voice_clip (
+                    id                      TEXT PRIMARY KEY NOT NULL,
+                    story_item_id           TEXT NOT NULL REFERENCES story_item(id) ON DELETE CASCADE,
+                    user_id                 TEXT NOT NULL,
+                    audio_uri               TEXT NOT NULL,
+                    duration_ms             INTEGER NOT NULL DEFAULT 0,
+                    transcription           TEXT,
+                    transcription_source    TEXT,
+                    drive_file_id           TEXT,
+                    audio_drive_file_id     TEXT,
+                    created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty                   INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at              TEXT
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_story_voice_clip_item      ON story_voice_clip (story_item_id, created_at)")
+            try db.execute(sql: "CREATE INDEX idx_story_voice_clip_user      ON story_voice_clip (user_id, created_at)")
+            try db.execute(sql: "CREATE INDEX idx_story_voice_clip_dirty     ON story_voice_clip (dirty) WHERE dirty = 1")
+            try db.execute(sql: "CREATE INDEX idx_story_voice_clip_tombstone ON story_voice_clip (deleted_at) WHERE deleted_at IS NOT NULL")
+        }
+
         return migrator
     }
 }

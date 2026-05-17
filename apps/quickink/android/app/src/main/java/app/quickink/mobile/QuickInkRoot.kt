@@ -59,9 +59,12 @@ import app.quickink.mobile.features.calendar.CalendarScreen
 import app.quickink.mobile.features.daylight.DaylightLocationStore
 import app.quickink.mobile.data.folder.FolderRepository
 import app.quickink.mobile.data.location.LocationRepository
+import app.quickink.mobile.data.person.PersonRepository
 import app.quickink.mobile.data.tag.TagRepository
 import app.quickink.mobile.data.smartcollection.SmartCollectionRepository
 import app.quickink.mobile.features.workspace.FolderDetailScreen
+import app.quickink.mobile.features.workspace.LocationDetailScreen
+import app.quickink.mobile.features.workspace.PersonDetailScreen
 import app.quickink.mobile.features.workspace.SmartCollectionScreen
 import app.quickink.mobile.features.workspace.TagLibraryScreen
 import app.quickink.mobile.features.workspace.WorkspaceHomeScreen
@@ -84,7 +87,13 @@ import app.quickink.mobile.features.scan.ScanCaptureSurface
 import app.quickink.mobile.features.scan.ScanReviewScreen
 import app.quickink.mobile.features.scan.buildImportArtifacts
 import app.quickink.mobile.features.scan.buildPdfImportArtifact
+import app.quickink.mobile.BuildConfig
+import app.quickink.mobile.data.story.StoryRepository
 import app.quickink.mobile.features.search.SearchScreen
+import app.quickink.mobile.features.stories.StoriesShelfScreen
+import app.quickink.mobile.features.stories.StoryEditorScreen
+import app.quickink.mobile.features.stories.StoryReaderScreen
+import app.quickink.mobile.features.stories.StorySuggestionPreviewScreen
 import app.quickink.mobile.features.settings.CategoriesSettingsScreen
 import app.quickink.mobile.features.settings.ProfileScreen
 import app.quickink.mobile.features.settings.SettingsPreferences
@@ -201,6 +210,23 @@ private object Routes {
     const val SETTINGS          = "settings"
     const val PROFILE           = "profile"
     const val SEARCH            = "search"
+    /** Stories shelf — bottom-nav slot (replaced the Search tab). */
+    const val STORIES           = "stories"
+
+    /** Stories editor (Phase 2) — opened from the shelf FAB / card tap. */
+    const val STORY_EDITOR      = "story_editor/{storyId}"
+    fun storyEditor(storyId: String): String = "story_editor/${Uri.encode(storyId)}"
+
+    /** Stories reader (Phase 3) — opened from the editor's Preview button
+     *  and (Phase 6) from a published Drive link. */
+    const val STORY_READER      = "story_reader/{storyId}"
+    fun storyReader(storyId: String): String = "story_reader/${Uri.encode(storyId)}"
+
+    /** Stories suggestion preview (Phase 5) — opened from the hero
+     *  card's "Open preview" link on the shelf. */
+    const val STORY_SUGGESTION_PREVIEW = "story_suggestion_preview/{suggestionId}"
+    fun storySuggestionPreview(suggestionId: String): String =
+        "story_suggestion_preview/${Uri.encode(suggestionId)}"
     const val NOTE_EDITOR       = "note_editor/{entryId}"
     const val CATEGORIES        = "categories"
     const val SCAN_DETAIL       = "scan_detail/{captureId}"
@@ -222,6 +248,16 @@ private object Routes {
 
     /** Workspace v1 tag library (Phase D — Screen 4). */
     const val TAG_LIBRARY       = "tag_library"
+
+    /** Location detail — captures attached to a single location. */
+    const val LOCATION_DETAIL   = "location_detail/{locationId}"
+    fun locationDetail(locationId: String): String =
+        "location_detail/${Uri.encode(locationId)}"
+
+    /** Person detail — captures attached to a single person. */
+    const val PERSON_DETAIL     = "person_detail/{personId}"
+    fun personDetail(personId: String): String =
+        "person_detail/${Uri.encode(personId)}"
 
     /** Standalone Calendar — panchanga + Indian holidays + per-day
      *  capture dots. Pushed from the home header's calendar button. */
@@ -411,6 +447,25 @@ private fun MainShell(
             LocationRepository(
                 locationDao = app.database.locationDao(),
             ).seedDefaultsIfEmpty(userId)
+
+            // Seed "Me" placeholder person on first sign-in. Same
+            // idempotent contract as the locations seed above.
+            PersonRepository(
+                personDao = app.database.personDao(),
+            ).seedDefaultsIfEmpty(userId)
+
+            // Stories Phase 1 — debug-only dev seeder so the Stories
+            // tab has cards to render in QA builds. Idempotent: skips
+            // when the user already has any active stories. Gated by
+            // `BuildConfig.DEBUG` so release builds never run it. See
+            // `design/STORIES_HANDOFF.md` §4 Phase 1 task 1.8.
+            if (BuildConfig.DEBUG) {
+                StoryRepository(
+                    storyDao          = app.database.storyDao(),
+                    storyItemDao      = app.database.storyItemDao(),
+                    storyVoiceClipDao = app.database.storyVoiceClipDao(),
+                ).seedDevStoriesIfEmpty(userId)
+            }
         } catch (_: Exception) { /* best-effort */ }
     }
 
@@ -640,8 +695,18 @@ private fun MainShell(
         Routes.NOTES_LIST,
         Routes.FOLDER_DETAIL,
         Routes.SMART_COLLECTION,
-        Routes.TAG_LIBRARY       -> NavTab.Workspace
-        Routes.SEARCH            -> NavTab.Search
+        Routes.TAG_LIBRARY,
+        Routes.LOCATION_DETAIL,
+        Routes.PERSON_DETAIL     -> NavTab.Workspace
+        Routes.STORIES,
+        Routes.STORY_EDITOR,
+        Routes.STORY_READER,
+        Routes.STORY_SUGGESTION_PREVIEW -> NavTab.Stories
+        // Search no longer owns a bottom-nav slot — Stories replaced
+        // it. Search is still reachable via the Home top-bar +
+        // Workspace `onOpenSearch` callbacks; when it's the current
+        // route we paint the bar with no active pill.
+        Routes.SEARCH            -> NavTab.None
         Routes.SETTINGS          -> NavTab.Settings
         Routes.SCAN_DETAIL       -> NavTab.None
         else                     -> null
@@ -716,6 +781,58 @@ private fun MainShell(
                 },
             )
         }
+        composable(Routes.STORIES) {
+            StoriesShelfScreen(
+                userId                  = userId,
+                onOpenStory             = { storyId ->
+                    navController.navigate(Routes.storyEditor(storyId))
+                },
+                onOpenSuggestionPreview = { id ->
+                    navController.navigate(Routes.storySuggestionPreview(id))
+                },
+            )
+        }
+        composable(
+            route     = Routes.STORY_SUGGESTION_PREVIEW,
+            arguments = listOf(navArgument("suggestionId") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val id = backStackEntry.arguments?.getString("suggestionId").orEmpty()
+            StorySuggestionPreviewScreen(
+                suggestionId = id,
+                userId       = userId,
+                onBack       = { navController.popBackStack() },
+                onOpenStory  = { storyId ->
+                    // Replace the preview step with the editor so a
+                    // back-press from the editor returns to the shelf,
+                    // not back to the preview.
+                    navController.popBackStack()
+                    navController.navigate(Routes.storyEditor(storyId))
+                },
+            )
+        }
+        composable(
+            route     = Routes.STORY_EDITOR,
+            arguments = listOf(navArgument("storyId") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val storyId = backStackEntry.arguments?.getString("storyId").orEmpty()
+            StoryEditorScreen(
+                storyId    = storyId,
+                userId     = userId,
+                onBack     = { navController.popBackStack() },
+                onPreview  = { navController.navigate(Routes.storyReader(storyId)) },
+            )
+        }
+        composable(
+            route     = Routes.STORY_READER,
+            arguments = listOf(navArgument("storyId") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val storyId = backStackEntry.arguments?.getString("storyId").orEmpty()
+            StoryReaderScreen(
+                storyId = storyId,
+                userId  = userId,
+                onBack  = { navController.popBackStack() },
+            )
+        }
         composable(Routes.NOTES_LIST) {
             NotesListScreen(
                 userId     = userId,
@@ -744,6 +861,12 @@ private fun MainShell(
                 onOpenSmartCollection = { collection ->
                     navController.navigate(Routes.smartCollection(collection.id))
                 },
+                onOpenLocation = { location ->
+                    navController.navigate(Routes.locationDetail(location.id))
+                },
+                onOpenPerson = { person ->
+                    navController.navigate(Routes.personDetail(person.id))
+                },
                 onBrowseTags = { navController.navigate(Routes.TAG_LIBRARY) },
             )
         }
@@ -760,6 +883,34 @@ private fun MainShell(
                     navController.navigate(Routes.scanDetail(capture.id))
                 },
                 onOpenSearch  = { navToTab(Routes.SEARCH) },
+            )
+        }
+        composable(
+            route     = Routes.LOCATION_DETAIL,
+            arguments = listOf(navArgument("locationId") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val locationId = backStackEntry.arguments?.getString("locationId").orEmpty()
+            LocationDetailScreen(
+                locationId    = locationId,
+                userId        = userId,
+                onBack        = { navController.popBackStack() },
+                onOpenCapture = { capture ->
+                    navController.navigate(Routes.scanDetail(capture.id))
+                },
+            )
+        }
+        composable(
+            route     = Routes.PERSON_DETAIL,
+            arguments = listOf(navArgument("personId") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val personId = backStackEntry.arguments?.getString("personId").orEmpty()
+            PersonDetailScreen(
+                personId      = personId,
+                userId        = userId,
+                onBack        = { navController.popBackStack() },
+                onOpenCapture = { capture ->
+                    navController.navigate(Routes.scanDetail(capture.id))
+                },
             )
         }
         composable(
@@ -860,7 +1011,7 @@ private fun MainShell(
                 onHome      = { navToTab(Routes.HOME) },
                 onWorkspace = { navToTab(workspaceTabRoute) },
                 onScan      = { showQuickCapture = true },
-                onSearch    = { navToTab(Routes.SEARCH) },
+                onStories   = { navToTab(Routes.STORIES) },
                 onSettings  = { navToTab(Routes.SETTINGS) },
                 modifier    = Modifier.align(Alignment.BottomCenter),
             )

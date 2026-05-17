@@ -258,6 +258,10 @@ private struct MainShell: View {
         case settings
         case profile
         case search
+        case stories
+        case storyEditor(storyId: String)
+        case storyReader(storyId: String)
+        case storySuggestionPreview(suggestionId: String)
         case manageCategories
         case scanDetail(captureId: String)
         // Per-category browse — pushed from the Home category grid.
@@ -306,6 +310,17 @@ private struct MainShell: View {
     /// different ownership layers.
     @State private var showQuickCapture = false
 
+    /// Optional override for QuickCaptureScreen's starting mode.
+    /// Tap on the FAB leaves this `nil` so the screen reads its
+    /// usual `quickink.capture.last_mode` default. Long-press on
+    /// the FAB sets `.photo`, which routes the user straight into
+    /// the photo surface — the screen's no-op persist on the
+    /// `.photo` branch prevents this transient choice from
+    /// overwriting the user's pill-selected last mode. Cleared
+    /// to `nil` on dismiss so a subsequent tap-FAB doesn't
+    /// inherit the override.
+    @State private var pendingInitialMode: CaptureMode? = nil
+
     /// Tab-style switch between top-level destinations (Library,
     /// Search, Settings). Replaces the nav stack with a single entry,
     /// so back from any tab returns to Home — matches the standard
@@ -328,7 +343,13 @@ private struct MainShell: View {
         switch last {
         case .workspaceHome, .notesList, .folderDetail, .smartCollection, .tagLibrary:
             return NavTab.workspace
-        case .search:                                                return NavTab.search
+        case .stories, .storyEditor, .storyReader,
+             .storySuggestionPreview:                                return NavTab.stories
+        // Search no longer owns a bottom-nav slot — Stories replaced
+        // it. Search is still reachable from the Home top-bar + the
+        // Workspace `onOpenSearch` callbacks; when it's on top of the
+        // stack we paint the bar with no active pill.
+        case .search:                                                return NavTab.none
         case .settings:                                              return NavTab.settings
         case .scanDetail:                                            return NavTab.none
         case .calendar, .profile, .manageCategories,
@@ -476,12 +497,23 @@ private struct MainShell: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if let tab = activeTab {
                         QuickInkBottomNavBar(
-                            activeTab:   tab,
-                            onHome:      { path.removeAll() },
-                            onWorkspace: { navToTab(workspaceTabRoute) },
-                            onScan:      { showQuickCapture = true },
-                            onSearch:    { navToTab(.search) },
-                            onSettings:  { navToTab(.settings) }
+                            activeTab:       tab,
+                            onHome:          { path.removeAll() },
+                            onWorkspace:     { navToTab(workspaceTabRoute) },
+                            onScan:          { showQuickCapture = true },
+                            // Long-press jumps the FAB directly into
+                            // the photo surface. Setting both the
+                            // pending mode AND the cover flag in the
+                            // same tick guarantees the fullScreenCover
+                            // body re-runs with `pendingInitialMode`
+                            // resolved before SwiftUI evaluates the
+                            // `QuickCaptureScreen` init.
+                            onLongPressScan: {
+                                pendingInitialMode = .photo
+                                showQuickCapture = true
+                            },
+                            onStories:       { navToTab(.stories) },
+                            onSettings:      { navToTab(.settings) }
                         )
                     }
                 }
@@ -523,6 +555,15 @@ private struct MainShell: View {
             // via is_seeded.
             let smartRepo = SmartCollectionRepository()
             try? await smartRepo.seedDefaultsIfNeeded(userId: userId)
+
+            // Stories Phase 1 — debug-only dev seeder so the Stories
+            // tab has cards to render in QA builds. Idempotent: skips
+            // when the user already has any active stories. Stripped
+            // out of release builds by `#if DEBUG`. See
+            // `design/STORIES_HANDOFF.md` §4 Phase 1 task 1.8.
+            #if DEBUG
+            try? await StoryRepository().seedDevStoriesIfEmpty(userId: userId)
+            #endif
             // One-shot post-onboarding location-permission ask.
             // Existing users who completed onboarding before the
             // Location step shipped (Phase 7) would otherwise never
@@ -548,8 +589,15 @@ private struct MainShell: View {
         // QuickCaptureScreen the Home FAB shows.
         .fullScreenCover(isPresented: $showQuickCapture) {
             QuickCaptureScreen(
-                controller: controller,
-                onDismiss:  { showQuickCapture = false }
+                controller:  controller,
+                initialMode: pendingInitialMode,
+                onDismiss:   {
+                    showQuickCapture = false
+                    // Reset to nil on dismiss so a subsequent
+                    // tap-FAB doesn't inherit the long-press
+                    // override and land on Photo by accident.
+                    pendingInitialMode = nil
+                }
             )
         }
         // Appearance overrides — `preferredColorScheme(nil)` lets
@@ -721,6 +769,50 @@ private struct MainShell: View {
                     path.append(.scanDetail(captureId: captureId))
                 },
                 settings: settings
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .stories:
+            StoriesShelfScreen(
+                userId:                  userId,
+                onOpenStory:             { storyId in path.append(.storyEditor(storyId: storyId)) },
+                onOpenSuggestionPreview: { id in path.append(.storySuggestionPreview(suggestionId: id)) }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .storySuggestionPreview(let suggestionId):
+            StorySuggestionPreviewScreen(
+                suggestionId: suggestionId,
+                userId:       userId,
+                onBack:       { path.removeLast() },
+                onOpenStory:  { storyId in
+                    // Replace the preview step with the editor so a
+                    // back-press from the editor returns to the shelf,
+                    // not back to the preview the user just acted on.
+                    path.removeLast()
+                    path.append(.storyEditor(storyId: storyId))
+                }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .storyEditor(let storyId):
+            StoryEditorScreen(
+                storyId:    storyId,
+                userId:     userId,
+                onBack:     { path.removeLast() },
+                onPreview:  { path.append(.storyReader(storyId: storyId)) }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .storyReader(let storyId):
+            StoryReaderScreen(
+                storyId: storyId,
+                userId:  userId,
+                onBack:  { path.removeLast() }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)

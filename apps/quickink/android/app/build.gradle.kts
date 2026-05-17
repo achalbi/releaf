@@ -301,6 +301,16 @@ dependencies {
     // the `file://` URIs that `captures.preview_uri` stores.
     implementation(libs.coil.compose)
 
+    // Reorderable — drag-to-reorder for the Stories editor's item
+    // list (STORIES_HANDOFF.md §4 Phase 2 task 2.8). Heterogeneous-
+    // list support (mix draggable rows with non-draggable add-slots)
+    // lands in 2.5.x.
+    implementation(libs.reorderable.compose)
+
+    // AndroidX Palette — dominant-colour extraction for the Stories
+    // reader's cover gradient (Phase 3 follow-up).
+    implementation(libs.androidx.palette)
+
     // CameraX — drives QuickInk's Business Card capture surface (an
     // in-app preview + ImageAnalysis pipeline + still-capture path).
     // Document mode is unaffected; it keeps using Google's system

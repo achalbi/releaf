@@ -283,6 +283,99 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 ) { out.append(entry) }
             }
 
+            // ---- stories ----
+            let storyRows = try Story
+                .filter(Column("user_id") == userId)
+                .filter(Column("deleted_at") == nil)
+                .filter(Column("dirty") == true)
+                .fetchAll(db)
+            for row in storyRows {
+                let payload = StoryPayloadV1(
+                    id:             row.id,
+                    userId:         row.userId,
+                    title:          row.title,
+                    subtitle:       row.subtitle,
+                    coverItemId:    row.coverItemId,
+                    coverStyle:     row.coverStyle,
+                    themeStyle:     row.themeStyle,
+                    groupingMode:   row.groupingMode,
+                    timeRangeStart: row.timeRangeStart,
+                    timeRangeEnd:   row.timeRangeEnd,
+                    status:         row.status,
+                    shareMode:      row.shareMode,
+                    shareSlug:      row.shareSlug,
+                    createdAt:      row.createdAt,
+                    updatedAt:      row.updatedAt
+                )
+                if let entry = try Self.makeEntry(
+                    id: row.id,
+                    kind: DrivePath.kindStory,
+                    drivePath: DrivePath.story(id: row.id),
+                    updatedAt: row.updatedAt,
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
+            // ---- story_items (not user-scoped — FK to story) ----
+            let storyItemRows = try StoryItem
+                .filter(Column("deleted_at") == nil)
+                .filter(Column("dirty") == true)
+                .fetchAll(db)
+            for row in storyItemRows {
+                let payload = StoryItemPayloadV1(
+                    id:         row.id,
+                    storyId:    row.storyId,
+                    position:   row.position,
+                    kind:       row.kind,
+                    refId:      row.refId,
+                    text:       row.text,
+                    caption:    row.caption,
+                    occurredAt: row.occurredAt,
+                    layout:     row.layout,
+                    createdAt:  row.createdAt,
+                    updatedAt:  row.updatedAt
+                )
+                if let entry = try Self.makeEntry(
+                    id: row.id,
+                    kind: DrivePath.kindStoryItem,
+                    drivePath: DrivePath.storyItem(id: row.id),
+                    updatedAt: row.updatedAt,
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
+            // ---- story_voice_clips ----
+            let storyVoiceClipRows = try StoryVoiceClip
+                .filter(Column("user_id") == userId)
+                .filter(Column("deleted_at") == nil)
+                .filter(Column("dirty") == true)
+                .fetchAll(db)
+            for row in storyVoiceClipRows {
+                let payload = StoryVoiceClipPayloadV1(
+                    id:                  row.id,
+                    storyItemId:         row.storyItemId,
+                    userId:              row.userId,
+                    audioUri:            row.audioUri,
+                    durationMs:          row.durationMs,
+                    transcription:       row.transcription,
+                    transcriptionSource: row.transcriptionSource,
+                    audioDriveFileId:    row.audioDriveFileId,
+                    createdAt:           row.createdAt,
+                    updatedAt:           row.updatedAt
+                )
+                if let entry = try Self.makeEntry(
+                    id: row.id,
+                    kind: DrivePath.kindStoryVoiceClip,
+                    drivePath: DrivePath.quickInkStoryVoiceClip(
+                        createdAt:   row.createdAt,
+                        storyItemId: row.storyItemId,
+                        id:          row.id
+                    ),
+                    updatedAt: row.updatedAt,
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
             // ---- ocr_results (raw SQL; not user-scoped — FK to captures) ----
             let ocrRows = try Row.fetchAll(db, sql: """
                 SELECT * FROM ocr_results
@@ -431,6 +524,45 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 ))
             }
 
+            // story — user-scoped.
+            let storyTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM story
+                WHERE user_id = ? AND deleted_at IS NOT NULL AND dirty = 1
+                """, arguments: [userId])
+            for row in storyTombstones {
+                out.append(PendingTombstone(
+                    kind: DrivePath.kindStory,
+                    id: row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+
+            // story_item — not user-scoped (FK to story).
+            let storyItemTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM story_item
+                WHERE deleted_at IS NOT NULL AND dirty = 1
+                """)
+            for row in storyItemTombstones {
+                out.append(PendingTombstone(
+                    kind: DrivePath.kindStoryItem,
+                    id: row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+
+            // story_voice_clip — user-scoped.
+            let storyVoiceClipTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM story_voice_clip
+                WHERE user_id = ? AND deleted_at IS NOT NULL AND dirty = 1
+                """, arguments: [userId])
+            for row in storyVoiceClipTombstones {
+                out.append(PendingTombstone(
+                    kind: DrivePath.kindStoryVoiceClip,
+                    id: row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+
             return out
         }
 
@@ -478,6 +610,18 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             case DrivePath.kindVoiceNote:
                 let p = try decoder.decode(VoiceNotePayloadV1.self, from: change.payload)
                 try Self.upsertVoiceNoteRow(db, payload: p, driveFileId: driveFileId)
+
+            case DrivePath.kindStory:
+                let p = try decoder.decode(StoryPayloadV1.self, from: change.payload)
+                try Self.upsertStoryRow(db, payload: p)
+
+            case DrivePath.kindStoryItem:
+                let p = try decoder.decode(StoryItemPayloadV1.self, from: change.payload)
+                try Self.upsertStoryItemRow(db, payload: p)
+
+            case DrivePath.kindStoryVoiceClip:
+                let p = try decoder.decode(StoryVoiceClipPayloadV1.self, from: change.payload)
+                try Self.upsertStoryVoiceClipRow(db, payload: p, driveFileId: driveFileId)
 
             default:
                 // Forward-compat: unknown kind, skip.
@@ -587,6 +731,9 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
         case DrivePath.kindCaptureTag:      return "capture_tags"
         case DrivePath.kindSmartCollection: return "smart_collections"
         case DrivePath.kindVoiceNote:       return "voice_notes"
+        case DrivePath.kindStory:           return "story"
+        case DrivePath.kindStoryItem:       return "story_item"
+        case DrivePath.kindStoryVoiceClip:  return "story_voice_clip"
         default: return ""
         }
     }
@@ -838,6 +985,131 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             WHERE voice_notes.updated_at < excluded.updated_at
             """, arguments: [
                 payload.id, payload.captureId, payload.userId,
+                resolvedAudioUri, payload.durationMs,
+                payload.transcription, payload.transcriptionSource,
+                driveFileId, payload.audioDriveFileId,
+                payload.createdAt, payload.updatedAt,
+            ])
+    }
+
+    /// Stories Phase 1 — upsert a `story` row. Last-write-wins on
+    /// `updated_at`. No FK parent to check; `cover_item_id` is a soft
+    /// reference (see StoryEntity for why).
+    private static func upsertStoryRow(_ db: Database, payload: StoryPayloadV1) throws {
+        try db.execute(sql: """
+            INSERT INTO story (
+                id, user_id, title, subtitle,
+                cover_item_id, cover_style, theme_style, grouping_mode,
+                time_range_start, time_range_end,
+                status, share_mode, share_slug,
+                created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                user_id          = excluded.user_id,
+                title            = excluded.title,
+                subtitle         = excluded.subtitle,
+                cover_item_id    = excluded.cover_item_id,
+                cover_style      = excluded.cover_style,
+                theme_style      = excluded.theme_style,
+                grouping_mode    = excluded.grouping_mode,
+                time_range_start = excluded.time_range_start,
+                time_range_end   = excluded.time_range_end,
+                status           = excluded.status,
+                share_mode       = excluded.share_mode,
+                share_slug       = excluded.share_slug,
+                updated_at       = excluded.updated_at,
+                dirty            = 0
+            WHERE story.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.userId, payload.title, payload.subtitle,
+                payload.coverItemId, payload.coverStyle, payload.themeStyle, payload.groupingMode,
+                payload.timeRangeStart, payload.timeRangeEnd,
+                payload.status, payload.shareMode, payload.shareSlug,
+                payload.createdAt, payload.updatedAt,
+            ])
+    }
+
+    /// Stories Phase 1 — upsert a `story_item` row. Parent `story`
+    /// must exist locally first (FK cascade is on hard-delete only,
+    /// but the FK constraint itself fires on insert).
+    private static func upsertStoryItemRow(_ db: Database, payload: StoryItemPayloadV1) throws {
+        let parentExists = try Bool.fetchOne(
+            db,
+            sql: "SELECT EXISTS(SELECT 1 FROM story WHERE id = ?)",
+            arguments: [payload.storyId]
+        ) ?? false
+        guard parentExists else { return }
+
+        try db.execute(sql: """
+            INSERT INTO story_item (
+                id, story_id, position, kind,
+                ref_id, text, caption, occurred_at, layout,
+                created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                story_id    = excluded.story_id,
+                position    = excluded.position,
+                kind        = excluded.kind,
+                ref_id      = excluded.ref_id,
+                text        = excluded.text,
+                caption     = excluded.caption,
+                occurred_at = excluded.occurred_at,
+                layout      = excluded.layout,
+                updated_at  = excluded.updated_at,
+                dirty       = 0
+            WHERE story_item.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.storyId, payload.position, payload.kind,
+                payload.refId, payload.text, payload.caption, payload.occurredAt, payload.layout,
+                payload.createdAt, payload.updatedAt,
+            ])
+    }
+
+    /// Stories Phase 2 — upsert a `story_voice_clip` row. Mirror of
+    /// [upsertVoiceNoteRow]: parent existence check + cross-device
+    /// URI reconciliation (keep local URI if file exists; else blank
+    /// it so the binary-restore pass picks it up).
+    private static func upsertStoryVoiceClipRow(_ db: Database, payload: StoryVoiceClipPayloadV1, driveFileId: String?) throws {
+        let parentExists = try Bool.fetchOne(
+            db,
+            sql: "SELECT EXISTS(SELECT 1 FROM story_item WHERE id = ? AND deleted_at IS NULL)",
+            arguments: [payload.storyItemId]
+        ) ?? false
+        guard parentExists else { return }
+
+        let existingAudioUri: String? = try Row.fetchOne(
+            db,
+            sql: "SELECT audio_uri FROM story_voice_clip WHERE id = ? LIMIT 1",
+            arguments: [payload.id]
+        ).map { $0["audio_uri"] as String? } ?? nil
+
+        let resolvedAudioUri: String = {
+            if let cur = existingAudioUri, Self.fileExistsAt(cur) { return cur }
+            if payload.audioDriveFileId != nil { return "" }
+            return payload.audioUri
+        }()
+
+        try db.execute(sql: """
+            INSERT INTO story_voice_clip (
+                id, story_item_id, user_id, audio_uri, duration_ms,
+                transcription, transcription_source,
+                drive_file_id, audio_drive_file_id,
+                created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                story_item_id        = excluded.story_item_id,
+                user_id              = excluded.user_id,
+                audio_uri            = excluded.audio_uri,
+                duration_ms          = excluded.duration_ms,
+                transcription        = excluded.transcription,
+                transcription_source = excluded.transcription_source,
+                drive_file_id        = excluded.drive_file_id,
+                audio_drive_file_id  = excluded.audio_drive_file_id,
+                updated_at           = excluded.updated_at,
+                dirty                = 0
+            WHERE story_voice_clip.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.storyItemId, payload.userId,
                 resolvedAudioUri, payload.durationMs,
                 payload.transcription, payload.transcriptionSource,
                 driveFileId, payload.audioDriveFileId,

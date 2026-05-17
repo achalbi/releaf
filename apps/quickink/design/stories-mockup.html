@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>QuickInk · Stories · versions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Caveat:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --canvas: #FAF7F2; --surface: #FFFFFF; --border: #EDE4D2;
+    --border-soft: #F0E9DD; --border-softer: #F5EDE0;
+    --coral: #D97757; --coral-deep: #993C1D;
+    --ink: #2C2826; --ink-soft: #5C4A38; --muted: #A8A29E;
+    --paper-1: #E8DCC4; --paper-2: #F0E4D7; --paper-3: #EADFCF;
+    --shelf: #1f1c1a;
+    --serif: 'Cormorant Garamond', Georgia, serif;
+    --hand: 'Caveat', cursive;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #ECE4D2; min-height: 100vh; font-family: var(--sans); color: var(--ink); }
+  body { padding: 48px 16px 80px; }
+  header { max-width: 900px; margin: 0 auto 36px; text-align: center; }
+  header h1 { font-family: var(--serif); font-size: 42px; font-weight: 500; margin: 0; letter-spacing: 0.5px; }
+  header .tagline { font-family: var(--hand); font-size: 22px; color: var(--ink-soft); margin-top: 4px; }
+  header p { color: var(--ink-soft); font-size: 15px; max-width: 660px; margin: 16px auto 0; line-height: 1.6; }
+
+  .grid { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 26px 22px; display: flex; flex-direction: column; align-items: center; transition: border-color 0.2s, transform 0.2s; text-decoration: none; color: inherit; }
+  .card:hover { border-color: var(--coral); transform: translateY(-3px); }
+  .card.recommended { border-color: var(--coral); border-width: 1.5px; }
+  .v-label { font-size: 11px; letter-spacing: 2px; color: var(--ink-soft); font-weight: 500; margin-bottom: 8px; }
+  .v-label.coral { color: var(--coral-deep); }
+  .v-title { font-family: var(--serif); font-size: 24px; font-weight: 500; margin-bottom: 4px; text-align: center; }
+  .v-sub { font-family: var(--hand); font-size: 16px; color: var(--coral); margin-bottom: 16px; text-align: center; }
+
+  .preview { width: 200px; height: 340px; background: var(--canvas); border-radius: 26px; border: 6px solid var(--shelf); padding: 18px 10px 8px; display: flex; flex-direction: column; overflow: hidden; position: relative; margin-bottom: 16px; }
+  .preview::before { content:''; position: absolute; top: 3px; left: 50%; transform: translateX(-50%); width: 56px; height: 11px; background: var(--shelf); border-radius: 0 0 9px 9px; }
+
+  /* v1 preview */
+  .v1-h { font-family: var(--serif); font-size: 18px; font-weight: 500; margin: 2px 0 5px; }
+  .v1-search { background: var(--border-soft); border-radius: 7px; padding: 4px 7px; font-size: 8px; color: var(--muted); margin-bottom: 6px; }
+  .v1-sec { font-size: 8px; color: var(--ink-soft); font-weight: 500; margin: 3px 0 4px; }
+  .v1-sugg-row { display: flex; gap: 4px; margin-bottom: 6px; }
+  .v1-sugg { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px; }
+  .v1-sugg .m { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; height: 26px; margin-bottom: 3px; border-radius: 3px; overflow: hidden; }
+  .v1-sugg .m div { background: var(--paper-1); }
+  .v1-sugg .m div:nth-child(2) { background: var(--paper-2); }
+  .v1-sugg .m div:nth-child(3) { background: var(--paper-3); }
+  .v1-sugg .m div:nth-child(4) { background: var(--coral); opacity: 0.5; }
+  .v1-sugg .tt { font-size: 7px; font-weight: 500; line-height: 1.1; }
+  .v1-sugg .rs { font-size: 6px; color: var(--ink-soft); margin-top: 1px; }
+  .v1-card { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 5px; display: flex; gap: 5px; margin-bottom: 4px; align-items: center; }
+  .v1-card .cv { width: 24px; height: 24px; border-radius: 4px; background: var(--paper-1); }
+  .v1-card .cv.coral { background: var(--coral); opacity: 0.6; }
+  .v1-card .cv.tan { background: var(--paper-3); }
+  .v1-card .info h5 { font-family: var(--serif); font-size: 9px; font-weight: 500; margin: 0; }
+  .v1-card .info .mt { font-size: 7px; color: var(--ink-soft); margin-top: 1px; }
+
+  /* v3 preview — refined v1 */
+  .v3-h { font-family: var(--serif); font-size: 18px; font-weight: 500; margin: 2px 0 5px; }
+  .v3-search { background: var(--border-soft); border-radius: 7px; padding: 4px 7px; font-size: 8px; color: var(--muted); margin-bottom: 7px; }
+  .v3-hero { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 7px; margin-bottom: 8px; }
+  .v3-hero .lb { font-size: 6.5px; letter-spacing: 1px; color: var(--coral-deep); font-weight: 500; margin-bottom: 4px; }
+  .v3-hero .ps { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 2px; height: 32px; border-radius: 4px; overflow: hidden; margin-bottom: 5px; }
+  .v3-hero .ps div { background: var(--paper-1); }
+  .v3-hero .ps div:nth-child(2) { background: var(--paper-3); }
+  .v3-hero .ps div:nth-child(3) { background: var(--coral); opacity: 0.55; }
+  .v3-hero .ld { font-family: var(--serif); font-size: 10px; font-weight: 500; line-height: 1.1; }
+  .v3-hero .rs { font-family: var(--serif); font-style: italic; font-size: 7.5px; color: var(--ink-soft); line-height: 1.3; margin-top: 2px; }
+  .v3-hero .fr { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; padding-top: 4px; border-top: 0.5px solid var(--border); }
+  .v3-hero .ds { font-size: 6.5px; color: var(--muted); font-family: var(--serif); font-style: italic; }
+  .v3-hero .ct { font-size: 7px; color: var(--coral); font-weight: 500; }
+  .v3-card { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 5px; display: flex; gap: 5px; margin-bottom: 4px; align-items: center; }
+  .v3-card .cv { width: 24px; height: 24px; border-radius: 4px; background: linear-gradient(135deg, var(--paper-1), var(--paper-3)); position: relative; }
+  .v3-card .cv.green { background: linear-gradient(135deg, #A8C5A5, #87a884); }
+  .v3-card .cv.warm { background: linear-gradient(135deg, var(--coral), #b06044); }
+  .v3-card .info h5 { font-family: var(--serif); font-size: 9px; font-weight: 500; margin: 0; }
+  .v3-card .info .mt { font-size: 7px; color: var(--ink-soft); margin-top: 1px; }
+
+  /* v2 preview — chapbook shelf */
+  .v2-h { font-family: var(--serif); font-size: 18px; font-weight: 500; margin: 2px 0 5px; }
+  .v2-ban { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 5px 6px; margin-bottom: 7px; }
+  .v2-ban .ld { font-family: var(--serif); font-size: 9px; font-weight: 500; line-height: 1.1; }
+  .v2-ban .rs { font-family: var(--serif); font-style: italic; font-size: 7px; color: var(--ink-soft); margin-top: 1px; }
+  .v2-ban .ps { display: flex; gap: 2px; margin-top: 3px; }
+  .v2-ban .pl { font-size: 6px; background: var(--border-softer); color: var(--coral-deep); padding: 1px 4px; border-radius: 4px; font-weight: 500; }
+  .v2-shf { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .v2-bk { background: var(--canvas); border-radius: 1px 4px 4px 1px; padding: 6px 5px 5px 8px; aspect-ratio: 3/4; box-shadow: -2px 0 0 var(--shelf), 1px 1px 0 var(--border); display: flex; flex-direction: column; position: relative; }
+  .v2-bk::before { content: ''; position: absolute; left: 1px; top: 5px; bottom: 5px; width: 1px; background: repeating-linear-gradient(to bottom, var(--ink-soft) 0 2px, transparent 2px 5px); }
+  .v2-bk.draft { background: var(--paper-2); }
+  .v2-bk .bg { font-family: var(--serif); font-style: italic; font-size: 5px; color: var(--ink-soft); letter-spacing: 0.8px; text-align: center; }
+  .v2-bk .mn { font-family: var(--serif); font-size: 15px; font-weight: 500; color: var(--coral); text-align: center; line-height: 1; margin: 2px 0; }
+  .v2-bk .ti { font-family: var(--serif); font-size: 7.5px; font-weight: 500; text-align: center; line-height: 1; }
+  .v2-bk .rl { width: 11px; height: 0.5px; background: var(--ink); margin: 1px auto; }
+  .v2-bk .sb { font-family: var(--serif); font-style: italic; font-size: 5.5px; color: var(--ink-soft); text-align: center; line-height: 1; }
+  .v2-bk .mt { font-family: var(--serif); font-style: italic; font-size: 5px; color: var(--ink-soft); text-align: center; margin-top: auto; }
+  .v2-sb { height: 2.5px; background: var(--shelf); border-radius: 0 0 1px 1px; margin: 3px 3px 5px; }
+
+  .v-desc { font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; text-align: center; margin-bottom: 16px; min-height: 80px; padding: 0 4px; }
+  .v-desc strong { color: var(--ink); font-weight: 500; }
+  .v-cta { background: var(--coral); color: #fff; padding: 11px 22px; border-radius: 999px; font-size: 13px; font-weight: 500; }
+  .v-cta.ghost { background: var(--surface); color: var(--ink); border: 1px solid var(--border); }
+  .card:hover .v-cta { background: var(--coral-deep); }
+  .card:hover .v-cta.ghost { border-color: var(--coral); color: var(--coral); }
+
+  .recommended-badge { font-size: 10px; letter-spacing: 1.5px; color: var(--coral-deep); background: var(--border-softer); padding: 3px 10px; border-radius: 999px; font-weight: 500; margin-bottom: 8px; }
+
+  .diff-section { max-width: 1200px; margin: 48px auto 0; background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 28px 32px; overflow-x: auto; }
+  .diff-section h2 { font-family: var(--serif); font-size: 22px; font-weight: 500; margin: 0 0 18px; text-align: center; }
+  .diff-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .diff-table th, .diff-table td { padding: 11px 10px; text-align: left; border-bottom: 0.5px solid var(--border); vertical-align: top; }
+  .diff-table th { font-weight: 500; font-size: 12px; color: var(--ink-soft); }
+  .diff-table td:first-child, .diff-table th:first-child { font-weight: 500; color: var(--ink); width: 18%; }
+  .diff-table td { color: var(--ink-soft); }
+  .diff-table th.head-v3 { color: var(--coral); }
+
+  footer.note { text-align: center; color: var(--ink-soft); font-size: 13px; max-width: 700px; margin: 36px auto 0; line-height: 1.6; padding: 0 16px; font-family: var(--serif); font-style: italic; }
+  footer.note code { font-family: monospace; font-style: normal; background: var(--border-softer); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>QuickInk · Stories</h1>
+  <div class="tagline">three design directions</div>
+  <p>Three takes on the same feature, ordered as we explored them. v1 is the conventional memories pattern; v2 reinvents it as a bound chapbook; v3 keeps v1's familiar shape and polishes the rough edges.</p>
+</header>
+
+<div class="grid">
+
+  <!-- V1 -->
+  <a class="card" href="stories-mockup-v1.html">
+    <div class="v-label">VERSION 1</div>
+    <div class="v-title">Memories-style</div>
+    <div class="v-sub">the original</div>
+
+    <div class="preview">
+      <div class="v1-h">Stories</div>
+      <div class="v1-search">⌕ Search your stories</div>
+      <div class="v1-sec">Suggested for you</div>
+      <div class="v1-sugg-row">
+        <div class="v1-sugg">
+          <div class="m"><div></div><div></div><div></div><div></div></div>
+          <div class="tt">Tokyo</div><div class="rs">12 photos</div>
+        </div>
+        <div class="v1-sugg">
+          <div class="m"><div></div><div></div><div></div><div></div></div>
+          <div class="tt">Brunch</div><div class="rs">5 photos</div>
+        </div>
+        <div class="v1-sugg">
+          <div class="m"><div></div><div></div><div></div><div></div></div>
+          <div class="tt">Reno</div><div class="rs">22 items</div>
+        </div>
+      </div>
+      <div class="v1-sec">Your stories</div>
+      <div class="v1-card"><div class="cv"></div><div class="info"><h5>Mira's first month</h5><div class="mt">14 items · Apr</div></div></div>
+      <div class="v1-card"><div class="cv coral"></div><div class="info"><h5>Lisbon notebook</h5><div class="mt">22 items · Mar</div></div></div>
+      <div class="v1-card"><div class="cv tan"></div><div class="info"><h5>Renovation log</h5><div class="mt">36 items</div></div></div>
+    </div>
+
+    <div class="v-desc">The original conventional take. List of cards, suggestion row, scrolling reader. Reliable but generic.</div>
+    <div class="v-cta ghost">Open v1 →</div>
+  </a>
+
+  <!-- V3 — RECOMMENDED -->
+  <a class="card recommended" href="stories-mockup-v3.html">
+    <div class="recommended-badge">RECOMMENDED</div>
+    <div class="v-label coral">VERSION 3</div>
+    <div class="v-title">Refined memories</div>
+    <div class="v-sub">v1 with the edges sanded</div>
+
+    <div class="preview">
+      <div class="v3-h">Stories</div>
+      <div class="v3-search">⌕ Search your stories</div>
+      <div class="v3-hero">
+        <div class="lb">SUGGESTED · TODAY</div>
+        <div class="ps"><div></div><div></div><div></div></div>
+        <div class="ld">Tokyo, May 4–7</div>
+        <div class="rs">12 photos and 3 receipts. Arranged in the order you took them.</div>
+        <div class="fr"><span class="ds">Not interested</span><span class="ct">Open preview →</span></div>
+      </div>
+      <div class="v3-card"><div class="cv green"></div><div class="info"><h5>Mira's first month</h5><div class="mt">14 items · Apr</div></div></div>
+      <div class="v3-card"><div class="cv warm"></div><div class="info"><h5>Lisbon notebook</h5><div class="mt">22 items · Mar</div></div></div>
+      <div class="v3-card"><div class="cv"></div><div class="info"><h5>Renovation log</h5><div class="mt">36 items</div></div></div>
+    </div>
+
+    <div class="v-desc">Same shape as v1, six refinements: <strong>calmer suggestion</strong>, smart covers, sample-page preview, cleaner editor, sticky day markers, share preview.</div>
+    <div class="v-cta">Open v3 →</div>
+  </a>
+
+  <!-- V2 -->
+  <a class="card" href="stories-mockup-v2.html">
+    <div class="v-label">VERSION 2</div>
+    <div class="v-title">Chapbook</div>
+    <div class="v-sub">the bold reinvention</div>
+
+    <div class="preview">
+      <div class="v2-h">Library</div>
+      <div class="v2-ban">
+        <div class="ld">Three ways to tell May 4–7.</div>
+        <div class="rs">12 photos and 3 receipts.</div>
+        <div class="ps">
+          <span class="pl">food</span><span class="pl">daily</span><span class="pl">receipts</span>
+        </div>
+      </div>
+      <div class="v2-shf">
+        <div class="v2-bk">
+          <div class="bg">NO. 7</div><div class="mn">Q</div>
+          <div class="ti">Mira's first<br>month</div>
+          <div class="rl"></div><div class="sb">april</div>
+          <div class="mt">14 pages</div>
+        </div>
+        <div class="v2-bk draft">
+          <div class="bg">DRAFT</div><div class="mn">Q</div>
+          <div class="ti">Lisbon<br>notebook</div>
+          <div class="rl"></div><div class="sb">march</div>
+          <div class="mt">22 pages</div>
+        </div>
+      </div>
+      <div class="v2-sb"></div>
+      <div class="v2-shf">
+        <div class="v2-bk">
+          <div class="bg">NO. 5</div><div class="mn">Q</div>
+          <div class="ti">Renovation<br>log</div>
+          <div class="rl"></div><div class="sb">ongoing</div>
+          <div class="mt">36 pages</div>
+        </div>
+        <div class="v2-bk draft">
+          <div class="bg">DRAFT</div><div class="mn">Q</div>
+          <div class="ti">Saturday<br>brunch</div>
+          <div class="rl"></div><div class="sb">this week</div>
+          <div class="mt">5 pages</div>
+        </div>
+      </div>
+      <div class="v2-sb"></div>
+    </div>
+
+    <div class="v-desc">A bold concept reinvention. Story is a bound book, items are pages, reader page-turns. Visually distinct but a larger build.</div>
+    <div class="v-cta ghost">Open v2 →</div>
+  </a>
+
+</div>
+
+<!-- DIFF TABLE -->
+<div class="diff-section">
+  <h2>What's different — v1, v2, v3</h2>
+  <table class="diff-table">
+    <thead>
+      <tr>
+        <th></th>
+        <th>v1 · memories-style</th>
+        <th>v2 · chapbook</th>
+        <th class="head-v3">v3 · refined memories</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Concept</td>
+        <td>Curated album with items</td>
+        <td>A small bound book of pages</td>
+        <td>Same as v1, sanded down</td>
+      </tr>
+      <tr>
+        <td>Stories tab</td>
+        <td>Horizontal suggestion row + cards</td>
+        <td>Shelf of book covers + banner with three angles</td>
+        <td>One focused suggestion card with full reason text + dismiss</td>
+      </tr>
+      <tr>
+        <td>Cover treatment</td>
+        <td>Hero photo with title overlay (always coral fallback)</td>
+        <td>Composed cover — Q monogram, serif title, coral rule</td>
+        <td>Auto-pulls dominant color from hero; one-tap typographic cream alt</td>
+      </tr>
+      <tr>
+        <td>Suggestion preview</td>
+        <td>Grid of item thumbnails</td>
+        <td>Three angles to pick (food / daily / receipts)</td>
+        <td>Sample first page rendered, item strip below</td>
+      </tr>
+      <tr>
+        <td>Editor</td>
+        <td>Card list with inline icon row in slots</td>
+        <td>Single page canvas with page strip + voice clip</td>
+        <td>Single "+" button per slot, per-item menu, active card elevation</td>
+      </tr>
+      <tr>
+        <td>Reader</td>
+        <td>Cover + scrolling feed</td>
+        <td>Book pages, swipe to turn, drop cap + pull quote</td>
+        <td>Sticky day markers ("May 4 · evening"), end card with reply + make-your-own</td>
+      </tr>
+      <tr>
+        <td>Share sheet</td>
+        <td>Four options + an awkward fifth tile</td>
+        <td>Four options + in-app feed deferred</td>
+        <td>Preview thumbnail at top, inline passcode option on public-link</td>
+      </tr>
+      <tr>
+        <td>Brand fit</td>
+        <td>Generic photo-app pattern</td>
+        <td>Unmistakably QuickInk — paper, ink, calligraphic Q</td>
+        <td>Editorial polish layered onto a familiar shape</td>
+      </tr>
+      <tr>
+        <td>Build cost</td>
+        <td>~4 weeks for MVP</td>
+        <td>~6 weeks for MVP (page-turn, voice infra, ToC)</td>
+        <td>~4 weeks for MVP (same as v1, plus 1 week of polish)</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<footer class="note">
+  See <code>design/STORIES_DESIGN.md</code> for the full plan. v3 is the recommended path forward — it preserves what works about v1 while addressing the brand-fit and clarity issues, without the engineering cost of the v2 chapbook reinvention.
+</footer>
+
+</body>
+</html>

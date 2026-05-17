@@ -69,11 +69,28 @@ object DrivePath {
     /** QuickInk-only — capture↔location many-to-many join row. */
     const val KIND_CAPTURE_LOCATION = "capture_location"
 
+    /** QuickInk-only — user-defined person ("Me", "Mom", "Dr. Rao",
+     *  etc.). Optional axis attached to captures via the
+     *  [KIND_CAPTURE_PERSON] join. Seeded with "Me" on first launch. */
+    const val KIND_PERSON           = "person"
+    /** QuickInk-only — capture↔person many-to-many join row. */
+    const val KIND_CAPTURE_PERSON   = "capture_person"
+
     /** QuickInk-only — voice note attached to a capture. Audio
      *  binary lives at the binary side via `QuickInkBinarySync`;
      *  this JSON kind carries the metadata (duration, transcript,
      *  audio_drive_file_id). */
     const val KIND_VOICE_NOTE       = "voice_note"
+
+    // ─── Stories (Phase 1 + Phase 2) ──────────────────────────────
+    /** QuickInk-only — a curated narrative row (STORIES_HANDOFF.md). */
+    const val KIND_STORY              = "story"
+    /** QuickInk-only — one entry in a story's ordered child list. */
+    const val KIND_STORY_ITEM         = "story_item"
+    /** QuickInk-only — inline voice clip attached to a `story_item`
+     *  of kind `voice_clip`. The audio binary travels via
+     *  `QuickInkBinarySync`; this JSON kind carries the metadata. */
+    const val KIND_STORY_VOICE_CLIP   = "story_voice_clip"
 
     // ---- folder names (no trailing slash; join with `/`) ----
     const val FOLDER_NOTEBOOKS       = "notebooks"
@@ -108,9 +125,17 @@ object DrivePath {
     const val FOLDER_LOCATIONS         = "locations"
     /** QuickInk capture↔location joins — `capture_locations/{id}.json`. */
     const val FOLDER_CAPTURE_LOCATIONS = "capture_locations"
+    /** QuickInk people — `people/{id}.json`. */
+    const val FOLDER_PEOPLE            = "people"
+    /** QuickInk capture↔person joins — `capture_people/{id}.json`. */
+    const val FOLDER_CAPTURE_PEOPLE    = "capture_people"
     /** QuickInk voice notes — `{yyyy}/{mm}/{dd}/{captureId}/voice-{id}.json`,
      *  co-located with the parent capture's day folder like ocr_results. */
     const val FOLDER_VOICE_NOTES       = "voice_notes"
+    /** QuickInk stories — `stories/{id}.json`. Flat layout. */
+    const val FOLDER_STORIES           = "stories"
+    /** QuickInk story items — `story_items/{id}.json`. Flat layout. */
+    const val FOLDER_STORY_ITEMS       = "story_items"
     const val FOLDER_TASKS           = "tasks"
     const val FOLDER_TOMBSTONES      = "tombstones"
 
@@ -190,6 +215,12 @@ object DrivePath {
     /** QuickInk capture↔location join payload — `capture_locations/{id}.json`. */
     fun captureLocation(id: String): String = "$FOLDER_CAPTURE_LOCATIONS/$id.json"
 
+    /** QuickInk's per-person file — `people/{id}.json`. */
+    fun person(id: String): String = "$FOLDER_PEOPLE/$id.json"
+
+    /** QuickInk capture↔person join payload — `capture_people/{id}.json`. */
+    fun capturePerson(id: String): String = "$FOLDER_CAPTURE_PEOPLE/$id.json"
+
     /**
      * Date-bucketed QuickInk voice-note path —
      * `{yyyy}/{mm}/{dd}/{captureId}/voice-{id}.json`. Co-locates voice
@@ -198,6 +229,21 @@ object DrivePath {
      */
     fun quickInkVoiceNote(createdAt: String, captureId: String, id: String): String =
         "${quickInkDateBucket(createdAt)}/$captureId/voice-$id.json"
+
+    /** QuickInk story — flat `stories/{id}.json`. */
+    fun story(id: String): String = "$FOLDER_STORIES/$id.json"
+
+    /** QuickInk story item — flat `story_items/{id}.json`. */
+    fun storyItem(id: String): String = "$FOLDER_STORY_ITEMS/$id.json"
+
+    /**
+     * Date-bucketed QuickInk story voice-clip path —
+     * `{yyyy}/{mm}/{dd}/{storyItemId}/storyvoice-{id}.json`. Mirrors
+     * [quickInkVoiceNote] but co-locates under the parent
+     * `story_item` rather than a capture.
+     */
+    fun quickInkStoryVoiceClip(createdAt: String, storyItemId: String, id: String): String =
+        "${quickInkDateBucket(createdAt)}/$storyItemId/storyvoice-$id.json"
 
     /**
      * QuickInk's per-user profile-settings file —

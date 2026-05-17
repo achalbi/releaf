@@ -5,7 +5,7 @@
  * the QuickInk palette + typography, and exposes a
  * `LocalQuickInkColors` / `LocalQuickInkTypography` CompositionLocal
  * pair so screens can read tokens without round-tripping through
- * Material's mapping (which loses the Cormorant Garamond /
+ * Material's mapping (which loses the Lora editorial serif and the
  * AccentSoft / Paper tones that don't have direct Material slots).
  *
  * Use:
@@ -122,24 +122,24 @@ private val DarkQuickInkColors = QuickInkColorScheme(
 
 @Immutable
 data class QuickInkTypographyScheme(
-    /** Roboto Serif Bold — App Name "Hero" tier. */
+    /** Lora — home greeting / "Display" hero. */
     val display: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Display,
-    /** Roboto Serif Bold — Sustainability Campaigns "Editorial" tier. */
+    /** Lora — sustainability headlines, smart-collection titles. */
     val editorial: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Editorial,
     val onboardingTitle: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.OnboardingTitle,
-    /** Editorial serif body — onboarding showroom feel. App screens use [body]. */
+    /** Lora — onboarding showroom body. App screens use [body] (Plus Jakarta Sans). */
     val onboardingBody: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.OnboardingBody,
     val pageTitle: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.PageTitle,
     val heading: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Heading,
     val eyebrow: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Eyebrow,
-    /** Inter sans — Editor Body / AI Summaries. Onboarding uses [onboardingBody]. */
+    /** Plus Jakarta Sans — default UI body, modal copy, AI summaries. */
     val body: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Body,
-    /** Roboto Serif Italic — Empty States "Emotional" tier. */
+    /** Lora Italic — empty-state callouts, smart-collection rule grammar. */
     val bodyItalic: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.BodyItalic,
     val handwritten: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Handwritten,
-    /** Inter SemiBold — note/scan thumbnail titles. */
+    /** Plus Jakarta Sans SemiBold — note/scan thumbnail titles. */
     val cardTitle: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.CardTitle,
-    /** Inter Medium — Toolbar "Compact" tier. */
+    /** Plus Jakarta Sans SemiBold — toolbar chips, nav labels, section eyebrows. */
     val label: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Label,
     val ctaSerif: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.CtaSerif,
     val meta: androidx.compose.ui.text.TextStyle = QuickInkTextStyle.Meta,

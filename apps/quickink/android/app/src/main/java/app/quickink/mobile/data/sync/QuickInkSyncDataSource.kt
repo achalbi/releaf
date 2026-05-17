@@ -31,9 +31,11 @@ package app.quickink.mobile.data.sync
 
 import app.quickink.mobile.data.capture.CaptureDao
 import app.quickink.mobile.data.capturelocation.CaptureLocationDao
+import app.quickink.mobile.data.captureperson.CapturePersonDao
 import app.quickink.mobile.data.capturetag.CaptureTagDao
 import app.quickink.mobile.data.folder.FolderDao
 import app.quickink.mobile.data.location.LocationDao
+import app.quickink.mobile.data.person.PersonDao
 import app.quickink.mobile.data.tag.TagDao
 import app.quickink.mobile.data.ocr.OcrResultDao
 import app.quickink.mobile.data.smartcollection.SmartCollectionDao
@@ -71,6 +73,13 @@ class QuickInkSyncDataSource(
     // ─── Locations (v16) ────────────────────────────────────────
     private val locationDao: LocationDao,
     private val captureLocationDao: CaptureLocationDao,
+    // ─── People (v18) ───────────────────────────────────────────
+    private val personDao: PersonDao,
+    private val capturePersonDao: CapturePersonDao,
+    // ─── Stories (v20 + v21) ────────────────────────────────────
+    private val storyDao: app.quickink.mobile.data.story.StoryDao,
+    private val storyItemDao: app.quickink.mobile.data.storyitem.StoryItemDao,
+    private val storyVoiceClipDao: app.quickink.mobile.data.storyvoiceclip.StoryVoiceClipDao,
     private val userId: String,
     private val json: Json = SyncJson,
 ) : SyncDataSource {
@@ -282,6 +291,39 @@ class QuickInkSyncDataSource(
             )
         }
 
+        // ---- people (user-scoped) ----
+        for (row in personDao.dirtyRows()
+            .filter { it.deletedAt == null && it.userId == userId }) {
+            val payload = row.toV1Payload()
+            val elem = json.encodeToJsonElement(PersonPayloadV1.serializer(), payload)
+            val bytes = CanonicalJson.encodeToBytes(elem)
+            entries += DirtyEntry(
+                kind          = DrivePath.KIND_PERSON,
+                id            = row.id,
+                drivePath     = DrivePath.person(row.id),
+                payload       = bytes,
+                payloadSha256 = sha256Hex(bytes),
+                updatedAt     = row.updatedAt,
+            )
+        }
+
+        // ---- capture_people (no user_id column; FK to captures
+        //      handles ownership). ----
+        for (row in capturePersonDao.dirtyRows()
+            .filter { it.deletedAt == null }) {
+            val payload = row.toV1Payload()
+            val elem = json.encodeToJsonElement(CapturePersonPayloadV1.serializer(), payload)
+            val bytes = CanonicalJson.encodeToBytes(elem)
+            entries += DirtyEntry(
+                kind          = DrivePath.KIND_CAPTURE_PERSON,
+                id            = row.id,
+                drivePath     = DrivePath.capturePerson(row.id),
+                payload       = bytes,
+                payloadSha256 = sha256Hex(bytes),
+                updatedAt     = row.updatedAt,
+            )
+        }
+
         // ---- voice_notes (user-scoped) ----
         val voiceRows = (voiceNoteDao.activeRows(userId) + voiceNoteDao.dirtyRows()
             .filter { it.deletedAt == null && it.userId == userId })
@@ -297,6 +339,55 @@ class QuickInkSyncDataSource(
                     createdAt = row.createdAt,
                     captureId = row.captureId,
                     id        = row.id,
+                ),
+                payload       = bytes,
+                payloadSha256 = sha256Hex(bytes),
+                updatedAt     = row.updatedAt,
+            )
+        }
+
+        // ---- stories (user-scoped) — push dirty rows only ----
+        for (row in storyDao.dirtyRows().filter { it.deletedAt == null && it.userId == userId }) {
+            val payload = row.toV1Payload()
+            val elem  = json.encodeToJsonElement(StoryPayloadV1.serializer(), payload)
+            val bytes = CanonicalJson.encodeToBytes(elem)
+            entries += DirtyEntry(
+                kind          = DrivePath.KIND_STORY,
+                id            = row.id,
+                drivePath     = DrivePath.story(row.id),
+                payload       = bytes,
+                payloadSha256 = sha256Hex(bytes),
+                updatedAt     = row.updatedAt,
+            )
+        }
+
+        // ---- story_items (not user-scoped — FK to story) ----
+        for (row in storyItemDao.dirtyRows().filter { it.deletedAt == null }) {
+            val payload = row.toV1Payload()
+            val elem  = json.encodeToJsonElement(StoryItemPayloadV1.serializer(), payload)
+            val bytes = CanonicalJson.encodeToBytes(elem)
+            entries += DirtyEntry(
+                kind          = DrivePath.KIND_STORY_ITEM,
+                id            = row.id,
+                drivePath     = DrivePath.storyItem(row.id),
+                payload       = bytes,
+                payloadSha256 = sha256Hex(bytes),
+                updatedAt     = row.updatedAt,
+            )
+        }
+
+        // ---- story_voice_clips (user-scoped) ----
+        for (row in storyVoiceClipDao.dirtyRows().filter { it.deletedAt == null && it.userId == userId }) {
+            val payload = row.toV1Payload()
+            val elem  = json.encodeToJsonElement(StoryVoiceClipPayloadV1.serializer(), payload)
+            val bytes = CanonicalJson.encodeToBytes(elem)
+            entries += DirtyEntry(
+                kind          = DrivePath.KIND_STORY_VOICE_CLIP,
+                id            = row.id,
+                drivePath     = DrivePath.quickInkStoryVoiceClip(
+                    createdAt   = row.createdAt,
+                    storyItemId = row.storyItemId,
+                    id          = row.id,
                 ),
                 payload       = bytes,
                 payloadSha256 = sha256Hex(bytes),
@@ -385,6 +476,41 @@ class QuickInkSyncDataSource(
         for (row in captureLocationDao.dirtyRows().filter { it.deletedAt != null }) {
             entries += PendingTombstone(
                 kind      = DrivePath.KIND_CAPTURE_LOCATION,
+                id        = row.id,
+                deletedAt = row.deletedAt ?: row.updatedAt,
+            )
+        }
+        for (row in personDao.dirtyRows().filter { it.deletedAt != null && it.userId == userId }) {
+            entries += PendingTombstone(
+                kind      = DrivePath.KIND_PERSON,
+                id        = row.id,
+                deletedAt = row.deletedAt ?: row.updatedAt,
+            )
+        }
+        for (row in capturePersonDao.dirtyRows().filter { it.deletedAt != null }) {
+            entries += PendingTombstone(
+                kind      = DrivePath.KIND_CAPTURE_PERSON,
+                id        = row.id,
+                deletedAt = row.deletedAt ?: row.updatedAt,
+            )
+        }
+        for (row in storyDao.dirtyRows().filter { it.deletedAt != null && it.userId == userId }) {
+            entries += PendingTombstone(
+                kind      = DrivePath.KIND_STORY,
+                id        = row.id,
+                deletedAt = row.deletedAt ?: row.updatedAt,
+            )
+        }
+        for (row in storyItemDao.dirtyRows().filter { it.deletedAt != null }) {
+            entries += PendingTombstone(
+                kind      = DrivePath.KIND_STORY_ITEM,
+                id        = row.id,
+                deletedAt = row.deletedAt ?: row.updatedAt,
+            )
+        }
+        for (row in storyVoiceClipDao.dirtyRows().filter { it.deletedAt != null && it.userId == userId }) {
+            entries += PendingTombstone(
+                kind      = DrivePath.KIND_STORY_VOICE_CLIP,
                 id        = row.id,
                 deletedAt = row.deletedAt ?: row.updatedAt,
             )
@@ -528,6 +654,71 @@ class QuickInkSyncDataSource(
                 val p = json.decodeFromString(CaptureLocationPayloadV1.serializer(), text)
                 captureLocationDao.upsertFromRemote(p.toEntity(driveFileId = driveFileId))
             }
+            DrivePath.KIND_PERSON -> {
+                val p = json.decodeFromString(PersonPayloadV1.serializer(), text)
+                // Preserve the device-local contact link (lookup_key
+                // resolves only on this device; photo_uri is a
+                // content:// handle that's also device-scoped). Phone
+                // + email travel on the payload and arrive cleanly.
+                val incoming = p.toEntity(driveFileId = driveFileId)
+                val existing = personDao.findById(p.id)
+                val merged = if (existing != null) {
+                    incoming.copy(
+                        contactLookupKey = existing.contactLookupKey,
+                        contactPhotoUri  = existing.contactPhotoUri,
+                    )
+                } else incoming
+                personDao.upsertFromRemote(merged)
+            }
+            DrivePath.KIND_CAPTURE_PERSON -> {
+                val p = json.decodeFromString(CapturePersonPayloadV1.serializer(), text)
+                capturePersonDao.upsertFromRemote(p.toEntity(driveFileId = driveFileId))
+            }
+            DrivePath.KIND_STORY -> {
+                val p = json.decodeFromString(StoryPayloadV1.serializer(), text)
+                storyDao.upsertFromRemote(p.toEntity())
+            }
+            DrivePath.KIND_STORY_ITEM -> {
+                val p = json.decodeFromString(StoryItemPayloadV1.serializer(), text)
+                // Defensive parent-existence check — story_item has a
+                // FK to story with ON DELETE CASCADE. Skip if the
+                // parent story isn't local yet; the next sync pass
+                // will pick it up after the parent arrives.
+                if (storyDao.findById(p.storyId) == null) {
+                    android.util.Log.w(
+                        "QuickInkSync",
+                        "applyRemoteUpsert: skipping orphan story_item " +
+                            "id=${p.id} story_id=${p.storyId}"
+                    )
+                    return
+                }
+                storyItemDao.upsertFromRemote(p.toEntity())
+            }
+            DrivePath.KIND_STORY_VOICE_CLIP -> {
+                val p = json.decodeFromString(StoryVoiceClipPayloadV1.serializer(), text)
+                // FK to story_item with ON DELETE CASCADE.
+                if (storyItemDao.findById(p.storyItemId) == null) {
+                    android.util.Log.w(
+                        "QuickInkSync",
+                        "applyRemoteUpsert: skipping orphan story_voice_clip " +
+                            "id=${p.id} story_item_id=${p.storyItemId}"
+                    )
+                    return
+                }
+                // Reconcile `audio_uri` the same way the
+                // KIND_VOICE_NOTE branch does — keep our local URI if
+                // the file is here, else blank for the binary-restore
+                // pass.
+                val existing = storyVoiceClipDao.findById(p.id)
+                val resolvedAudioUri: String = when {
+                    existing != null && fileExistsAt(existing.audioUri) -> existing.audioUri
+                    p.audioDriveFileId != null -> ""
+                    else -> p.audioUri
+                }
+                storyVoiceClipDao.upsertFromRemote(
+                    p.toEntity(driveFileId = driveFileId).copy(audioUri = resolvedAudioUri)
+                )
+            }
             DrivePath.KIND_VOICE_NOTE -> {
                 val p = json.decodeFromString(VoiceNotePayloadV1.serializer(), text)
                 // Same defensive parent-existence check as
@@ -615,6 +806,11 @@ class QuickInkSyncDataSource(
             DrivePath.KIND_VOICE_NOTE -> voiceNoteDao.softDelete(tombstone.id, nowIso)
             DrivePath.KIND_LOCATION -> locationDao.softDelete(tombstone.id, nowIso)
             DrivePath.KIND_CAPTURE_LOCATION -> captureLocationDao.softDeleteById(tombstone.id, nowIso)
+            DrivePath.KIND_PERSON -> personDao.softDelete(tombstone.id, nowIso)
+            DrivePath.KIND_CAPTURE_PERSON -> capturePersonDao.softDeleteById(tombstone.id, nowIso)
+            DrivePath.KIND_STORY            -> storyDao.softDelete(tombstone.id, nowIso)
+            DrivePath.KIND_STORY_ITEM       -> storyItemDao.softDelete(tombstone.id, nowIso)
+            DrivePath.KIND_STORY_VOICE_CLIP -> storyVoiceClipDao.softDelete(tombstone.id, nowIso)
         }
     }
 
@@ -669,6 +865,14 @@ class QuickInkSyncDataSource(
                 DrivePath.KIND_CAPTURE_LOCATION -> {
                     captureLocationDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
                     captureLocationDao.markTombstoneSynced(ack.id)
+                }
+                DrivePath.KIND_PERSON -> {
+                    personDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
+                    personDao.markTombstoneSynced(ack.id)
+                }
+                DrivePath.KIND_CAPTURE_PERSON -> {
+                    capturePersonDao.markSynced(ack.id, ack.driveFileId, ack.updatedAt)
+                    capturePersonDao.markTombstoneSynced(ack.id)
                 }
                 // else: forward-compat — unknown kind, skip silently.
             }

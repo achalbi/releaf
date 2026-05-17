@@ -47,12 +47,22 @@ import app.quickink.mobile.data.ocr.OcrResultDao
 import app.quickink.mobile.data.ocr.OcrResultEntity
 import app.quickink.mobile.data.panchanga.PanchangaDao
 import app.quickink.mobile.data.panchanga.PanchangaEntity
+import app.quickink.mobile.data.captureperson.CapturePersonDao
+import app.quickink.mobile.data.captureperson.CapturePersonEntity
+import app.quickink.mobile.data.person.PersonDao
+import app.quickink.mobile.data.person.PersonEntity
 import app.quickink.mobile.data.profile.ProfileSettingsDao
 import app.quickink.mobile.data.profile.ProfileSettingsEntity
 import app.quickink.mobile.data.smartcollection.SmartCollectionDao
 import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
 import app.quickink.mobile.data.tag.TagDao
 import app.quickink.mobile.data.tag.TagEntity
+import app.quickink.mobile.data.story.StoryDao
+import app.quickink.mobile.data.story.StoryEntity
+import app.quickink.mobile.data.storyitem.StoryItemDao
+import app.quickink.mobile.data.storyitem.StoryItemEntity
+import app.quickink.mobile.data.storyvoiceclip.StoryVoiceClipDao
+import app.quickink.mobile.data.storyvoiceclip.StoryVoiceClipEntity
 import app.quickink.mobile.data.voicenote.VoiceNoteDao
 import app.quickink.mobile.data.voicenote.VoiceNoteEntity
 import app.releaf.mobile.data.notepad.NotepadDao
@@ -90,7 +100,37 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         // and "Work" on first launch (LocationRepository.seedDefaultsIfEmpty).
         LocationEntity::class,
         CaptureLocationEntity::class,
+        // User-defined people ("Me", "Mom", "Dr. Rao", etc.) plus
+        // the many-to-many `capture_people` join. Seeded with "Me"
+        // on first launch (PersonRepository.seedDefaultsIfEmpty).
+        PersonEntity::class,
+        CapturePersonEntity::class,
+        // Stories Phase 1 — curated narratives. `story` carries the
+        // story-level metadata (title, cover, theme, share state);
+        // `story_item` holds the ordered children. See design/
+        // STORIES_HANDOFF.md. Mirror of iOS GRDB v14_stories.
+        StoryEntity::class,
+        StoryItemEntity::class,
+        // Stories Phase 2 — inline voice clips, one per `story_item`
+        // of `kind = 'voice_clip'`. Mirror of `voice_notes` keyed off
+        // story_item_id. iOS GRDB v15_story_voice_clips.
+        StoryVoiceClipEntity::class,
     ],
+    // v21 — Stories Phase 2. Adds `story_voice_clip` table for
+    // inline voice clips attached to a `story_item` of
+    // `kind = 'voice_clip'`. Mirror of the existing `voice_notes`
+    // table but keyed off `story_item_id`. CASCADE on item delete.
+    // Mirror of iOS GRDB v15_story_voice_clips.
+    //
+    // v20 — Stories Phase 1. Adds `story` + `story_item` tables for
+    // the curated-narrative feature (see design/STORIES_HANDOFF.md).
+    // `story_item.story_id` cascades on delete so removing a story
+    // cleans up its items. `story.cover_item_id` is intentionally
+    // NOT a Room foreign key — see the entity file for why.
+    // Mirror of iOS GRDB v14_stories. Room rebuilds destructively
+    // under `fallbackToDestructiveMigration` until real users have
+    // data.
+    //
     // v14 — Voice notes. Adds the `voice_notes` table that the
     // Document detail screen's "Voice notes" section persists into.
     // Mirror of iOS GRDB v12_voice_notes migration. Room rebuilds
@@ -154,6 +194,21 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // captures.category column. `fallbackToDestructiveMigration`
     // below handles the rebuild; when real users have data we'll
     // register real Migration objects.
+    // v19 — Adds `contact_lookup_key`, `contact_phone`,
+    // `contact_email`, `contact_photo_uri` to `people` so each
+    // person row can optionally link to a device contact and cache
+    // the snapshot fields needed to render + share without hitting
+    // the contacts ContentProvider on every read. `lookup_key` +
+    // `photo_uri` are device-local and stay off the wire; phone +
+    // email travel in the sync payload.
+    //
+    // v18 — People. Adds `people` and `capture_people` tables for
+    // the Home-screen people chip rail + the document-detail
+    // people picker. Mirror of the location / capture_locations
+    // shape: many-to-many between captures and user-defined
+    // people, each row syncs independently, seeded with "Me" on
+    // first launch.
+    //
     // v17 — Adds `latitude`, `longitude`, `address` to `locations`
     // so each user-defined place can carry a real GPS / reverse-
     // geocoded address. Populated by the location editor's "Use
@@ -176,7 +231,7 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // Free-form TEXT, nullable, no index — read pattern is "load the
     // whole field for the detail screen" so a full-text index isn't
     // useful yet.
-    version       = 17,
+    version       = 21,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {
@@ -203,6 +258,15 @@ abstract class QuickInkDatabase : RoomDatabase() {
     // ─── Locations ───────────────────────────────────────────────
     abstract fun locationDao():          LocationDao
     abstract fun captureLocationDao():   CaptureLocationDao
+
+    // ─── People ──────────────────────────────────────────────────
+    abstract fun personDao():            PersonDao
+    abstract fun capturePersonDao():     CapturePersonDao
+
+    // ─── Stories ─────────────────────────────────────────────────
+    abstract fun storyDao():             StoryDao
+    abstract fun storyItemDao():         StoryItemDao
+    abstract fun storyVoiceClipDao():    StoryVoiceClipDao
 
     companion object {
         @Volatile

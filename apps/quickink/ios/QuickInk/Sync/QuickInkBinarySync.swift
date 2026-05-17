@@ -63,7 +63,14 @@ public final class QuickInkBinarySync: @unchecked Sendable {
         let voiceUploads = try await pendingVoiceUploads(userId: userId)
         let voiceTombstones = try await pendingVoiceTombstones(userId: userId)
 
-        if pending.isEmpty && voiceUploads.isEmpty && voiceTombstones.isEmpty { return }
+        // Story voice clips — same shape as voice notes, keyed off
+        // story_item_id rather than capture_id.
+        let storyVoiceUploads = try await pendingStoryVoiceUploads(userId: userId)
+        let storyVoiceTombstones = try await pendingStoryVoiceTombstones(userId: userId)
+
+        if pending.isEmpty &&
+            voiceUploads.isEmpty && voiceTombstones.isEmpty &&
+            storyVoiceUploads.isEmpty && storyVoiceTombstones.isEmpty { return }
 
         let root = try await driveClient.ensureRootFolder(
             named: driveRootFolderName,
@@ -89,6 +96,28 @@ public final class QuickInkBinarySync: @unchecked Sendable {
             if let audioId = row.audioDriveFileId {
                 try? await driveClient.trash(fileId: audioId, accessToken: accessToken)
                 try? await markVoiceAudioSynced(id: row.id, driveFileId: nil)
+            }
+        }
+
+        // ---- story voice clips ----
+        for row in storyVoiceUploads {
+            guard row.audioDriveFileId == nil else { continue }
+            guard let bytes = readLocalFile(uri: row.audioUri) else { continue }
+            let path = "\(dateBucket(row.createdAt))/\(row.storyItemId)/storyvoice-\(row.id).m4a"
+            if let driveFile = try? await driveClient.uploadBinaryAtPath(
+                bytes,
+                contentType: "audio/mp4",
+                relativePath: path,
+                rootFolderId: root.id,
+                accessToken: accessToken
+            ) {
+                try? await markStoryVoiceAudioSynced(id: row.id, driveFileId: driveFile.id)
+            }
+        }
+        for row in storyVoiceTombstones {
+            if let audioId = row.audioDriveFileId {
+                try? await driveClient.trash(fileId: audioId, accessToken: accessToken)
+                try? await markStoryVoiceAudioSynced(id: row.id, driveFileId: nil)
             }
         }
 
@@ -231,6 +260,31 @@ public final class QuickInkBinarySync: @unchecked Sendable {
         }
     }
 
+    /// Pull story voice-clip .m4a binaries from Drive for any active
+    /// row whose `audio_drive_file_id` is set but whose local file is
+    /// missing. Mirror of [restorePendingVoiceNotes].
+    public func restorePendingStoryVoiceClips(userId: String, accessToken: String) async throws {
+        let dbQueue = database.dbQueue
+        let rows: [StoryVoiceClip] = try await dbQueue.read { db in
+            try StoryVoiceClip
+                .filter(Column("user_id") == userId)
+                .filter(Column("deleted_at") == nil)
+                .filter(Column("audio_drive_file_id") != nil)
+                .fetchAll(db)
+        }
+        for row in rows {
+            guard !localFileExists(uri: row.audioUri),
+                  let driveId = row.audioDriveFileId else { continue }
+            if let bytes = try? await driveClient.downloadBytes(
+                fileId: driveId,
+                accessToken: accessToken
+            ),
+               let url = AttachmentStorage.write(bytes, ext: "m4a") {
+                try? await setStoryVoiceAudioUri(id: row.id, uri: url.absoluteString)
+            }
+        }
+    }
+
     // MARK: - Voice helpers
 
     private func pendingVoiceUploads(userId: String) async throws -> [VoiceNoteEntity] {
@@ -266,6 +320,45 @@ public final class QuickInkBinarySync: @unchecked Sendable {
         try await database.dbQueue.write { db in
             try db.execute(sql: """
                 UPDATE voice_notes SET audio_uri = ? WHERE id = ?
+                """, arguments: [uri, id])
+        }
+    }
+
+    // MARK: - Story voice-clip helpers
+
+    private func pendingStoryVoiceUploads(userId: String) async throws -> [StoryVoiceClip] {
+        try await database.dbQueue.read { db in
+            try StoryVoiceClip
+                .filter(Column("user_id") == userId)
+                .filter(Column("deleted_at") == nil)
+                .filter(Column("audio_drive_file_id") == nil)
+                .fetchAll(db)
+        }
+    }
+
+    private func pendingStoryVoiceTombstones(userId: String) async throws -> [StoryVoiceClip] {
+        try await database.dbQueue.read { db in
+            try StoryVoiceClip
+                .filter(Column("user_id") == userId)
+                .filter(Column("deleted_at") != nil)
+                .filter(Column("dirty") == true)
+                .filter(Column("audio_drive_file_id") != nil)
+                .fetchAll(db)
+        }
+    }
+
+    private func markStoryVoiceAudioSynced(id: String, driveFileId: String?) async throws {
+        try await database.dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE story_voice_clip SET audio_drive_file_id = ? WHERE id = ?
+                """, arguments: [driveFileId, id])
+        }
+    }
+
+    private func setStoryVoiceAudioUri(id: String, uri: String) async throws {
+        try await database.dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE story_voice_clip SET audio_uri = ? WHERE id = ?
                 """, arguments: [uri, id])
         }
     }

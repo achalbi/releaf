@@ -671,3 +671,109 @@ public struct VoiceNotePayloadV1: Codable, Equatable, Sendable {
         case updatedAt           = "updated_at"
     }
 }
+
+// =====================================================================
+// Stories (Phase 1 + Phase 2) — see design/STORIES_HANDOFF.md.
+//
+// `story`           → metadata for one curated narrative.
+// `story_item`      → one entry in a story's ordered child list.
+// `story_voice_clip`→ inline voice clip attached to a story_item of
+//                     kind = 'voice_clip'. JSON carries metadata +
+//                     `audio_drive_file_id`; the .m4a binary
+//                     travels via `QuickInkBinarySync` mirroring
+//                     voice_notes.
+// =====================================================================
+
+public struct StoryPayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let userId: String
+    public let title: String
+    public let subtitle: String?
+    public let coverItemId: String?
+    public let coverStyle: String
+    public let themeStyle: String
+    public let groupingMode: String
+    public let timeRangeStart: String?
+    public let timeRangeEnd: String?
+    public let status: String
+    public let shareMode: String
+    public let shareSlug: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case userId         = "user_id"
+        case title
+        case subtitle
+        case coverItemId    = "cover_item_id"
+        case coverStyle     = "cover_style"
+        case themeStyle     = "theme_style"
+        case groupingMode   = "grouping_mode"
+        case timeRangeStart = "time_range_start"
+        case timeRangeEnd   = "time_range_end"
+        case status
+        case shareMode      = "share_mode"
+        case shareSlug      = "share_slug"
+        case createdAt      = "created_at"
+        case updatedAt      = "updated_at"
+    }
+}
+
+public struct StoryItemPayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let storyId: String
+    public let position: Int
+    public let kind: String
+    public let refId: String?
+    public let text: String?
+    public let caption: String?
+    public let occurredAt: String?
+    public let layout: String
+    public let createdAt: String
+    public let updatedAt: String
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case storyId    = "story_id"
+        case position
+        case kind
+        case refId      = "ref_id"
+        case text
+        case caption
+        case occurredAt = "occurred_at"
+        case layout
+        case createdAt  = "created_at"
+        case updatedAt  = "updated_at"
+    }
+}
+
+public struct StoryVoiceClipPayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let storyItemId: String
+    public let userId: String
+    /// Source device's local file:// URI — same caveat as
+    /// `VoiceNotePayloadV1.audioUri`. The receive side keeps the URI
+    /// when the file exists locally; otherwise blanks it and waits for
+    /// the binary-restore pass.
+    public let audioUri: String
+    public let durationMs: Int
+    public let transcription: String?
+    public let transcriptionSource: String?
+    public let audioDriveFileId: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case storyItemId         = "story_item_id"
+        case userId              = "user_id"
+        case audioUri            = "audio_uri"
+        case durationMs          = "duration_ms"
+        case transcription
+        case transcriptionSource = "transcription_source"
+        case audioDriveFileId    = "audio_drive_file_id"
+        case createdAt           = "created_at"
+        case updatedAt           = "updated_at"
+    }
+}

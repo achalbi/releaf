@@ -65,6 +65,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Search
@@ -94,10 +95,12 @@ import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capturelocation.LocationCount
+import app.quickink.mobile.data.captureperson.PersonCount
 import app.quickink.mobile.data.capturetag.TagCount
 import app.quickink.mobile.data.folder.FolderEntity
 import app.quickink.mobile.data.folder.FolderRepository
 import app.quickink.mobile.data.location.LocationEntity
+import app.quickink.mobile.data.person.PersonEntity
 import app.quickink.mobile.data.smartcollection.RuleClause
 import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
 import app.quickink.mobile.data.smartcollection.SmartCollectionRule
@@ -121,6 +124,8 @@ fun WorkspaceHomeScreen(
     onOpenProfile: () -> Unit,
     onOpenTag: (TagEntity) -> Unit,
     onOpenSmartCollection: (SmartCollectionEntity) -> Unit,
+    onOpenLocation: (LocationEntity) -> Unit,
+    onOpenPerson: (PersonEntity) -> Unit,
     onBrowseTags: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -218,6 +223,28 @@ fun WorkspaceHomeScreen(
     // create mode; a non-null row opens it in edit mode.
     var locationEditorOpen by remember { mutableStateOf(false) }
     var locationEditorExisting by remember { mutableStateOf<LocationEntity?>(null) }
+
+    // People observers + editor state — same shape as Locations.
+    val people by produceState(
+        initialValue = emptyList<PersonEntity>(),
+        key1         = userId,
+    ) {
+        app.database.personDao()
+            .observeActive(userId)
+            .collect { value = it }
+    }
+
+    val personCounts by produceState(
+        initialValue = emptyList<PersonCount>(),
+        key1         = userId,
+    ) {
+        app.database.capturePersonDao()
+            .observePersonCounts(userId)
+            .collect { value = it }
+    }
+
+    var personEditorOpen by remember { mutableStateOf(false) }
+    var personEditorExisting by remember { mutableStateOf<PersonEntity?>(null) }
 
     val recentlyOpened by produceState<List<CaptureEntity>>(
         initialValue = emptyList(),
@@ -325,13 +352,22 @@ fun WorkspaceHomeScreen(
             LocationsSection(
                 locations      = locations,
                 locationCounts = locationCounts,
-                onOpenLocation = { loc ->
-                    locationEditorExisting = loc
-                    locationEditorOpen     = true
-                },
+                onOpenLocation = onOpenLocation,
                 onNewLocation  = {
                     locationEditorExisting = null
                     locationEditorOpen     = true
+                },
+            )
+
+            Spacer(Modifier.height(QuickInkSpacing.s4))
+
+            PeopleSection(
+                people       = people,
+                personCounts = personCounts,
+                onOpenPerson = onOpenPerson,
+                onNewPerson  = {
+                    personEditorExisting = null
+                    personEditorOpen     = true
                 },
             )
 
@@ -350,6 +386,16 @@ fun WorkspaceHomeScreen(
             existing  = locationEditorExisting,
             onDismiss = { locationEditorOpen = false },
             onSaved   = { locationEditorOpen = false },
+        )
+    }
+
+    // People editor — same shape as the locations editor above.
+    if (personEditorOpen) {
+        PersonEditorDialog(
+            userId    = userId,
+            existing  = personEditorExisting,
+            onDismiss = { personEditorOpen = false },
+            onSaved   = { personEditorOpen = false },
         )
     }
 
@@ -1455,13 +1501,184 @@ private fun LocationRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.height(2.dp))
+        }
+
+        DocCountBadge(count = captureCount)
+
+        Spacer(Modifier.width(QuickInkSpacing.s2))
+
+        Icon(
+            imageVector        = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint               = colors.muted,
+            modifier           = Modifier.size(18.dp),
+        )
+    }
+}
+
+/**
+ * Right-aligned numeric badge for the row's attached-document count.
+ * Mirror of the "N new" pill on FolderRow — small accent-soft pill
+ * with the integer in semibold. Renders an empty-state "0" pill in
+ * muted tone when nothing's attached.
+ */
+@Composable
+private fun DocCountBadge(count: Int) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val active = count > 0
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                if (active) colors.accentSoft else colors.borderSoft,
+            )
+            .padding(horizontal = 9.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text  = count.toString(),
+            style = type.label.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+            color = if (active) colors.accentDeep else colors.muted,
+        )
+        Spacer(Modifier.width(3.dp))
+        Text(
+            text  = if (count == 1) "doc" else "docs",
+            style = type.label.copy(fontSize = 10.5.sp),
+            color = if (active) colors.accentDeep else colors.muted,
+        )
+    }
+}
+
+// ─── People section ──────────────────────────────────────────────
+
+/**
+ * People section — one row per user-defined person. Mirror of the
+ * LocationsSection above. Tap a row to edit; "NEW PERSON" in the
+ * header opens the editor in create mode. Counts come from
+ * `capture_people`, so the "N items" badge reflects active
+ * attachments only.
+ */
+@Composable
+private fun PeopleSection(
+    people: List<PersonEntity>,
+    personCounts: List<PersonCount>,
+    onOpenPerson: (PersonEntity) -> Unit,
+    onNewPerson: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    val countById = remember(personCounts) {
+        personCounts.associate { it.personId to it.docCount }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text  = "People",
+            style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
+            color = colors.ink,
+        )
+        Text(
+            text     = "NEW PERSON",
+            style    = type.label.copy(
+                letterSpacing = 1.2.sp,
+                fontSize      = 10.5.sp,
+                fontWeight    = FontWeight.SemiBold,
+            ),
+            color    = colors.accent,
+            modifier = Modifier.clickable(onClick = onNewPerson),
+        )
+    }
+
+    Spacer(Modifier.height(QuickInkSpacing.s2))
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4),
+    ) {
+        if (people.isEmpty()) {
             Text(
-                text  = "$captureCount ${if (captureCount == 1) "item" else "items"}",
-                style = type.meta.copy(fontSize = 11.5.sp),
-                color = colors.muted,
+                text     = "No people yet.",
+                style    = type.meta,
+                color    = colors.muted,
+                modifier = Modifier.padding(vertical = QuickInkSpacing.s3),
+            )
+        } else {
+            people.forEach { person ->
+                PersonRow(
+                    person       = person,
+                    captureCount = countById[person.id] ?: 0,
+                    onClick      = { onOpenPerson(person) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PersonRow(
+    person: PersonEntity,
+    captureCount: Int,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(colors.accentSoft.copy(alpha = 0.7f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.Person,
+                contentDescription = null,
+                tint               = colors.accent,
+                modifier           = Modifier.size(14.dp),
             )
         }
+
+        Spacer(Modifier.width(QuickInkSpacing.s3))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text  = person.name,
+                style = type.body.copy(fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
+                color = colors.ink,
+            )
+            val sub = person.contactPhone?.takeIf { it.isNotBlank() }
+                ?: person.contactEmail?.takeIf { it.isNotBlank() }
+            if (sub != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text     = sub,
+                    style    = type.meta.copy(fontSize = 11.5.sp),
+                    color    = colors.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        DocCountBadge(count = captureCount)
+
+        Spacer(Modifier.width(QuickInkSpacing.s2))
 
         Icon(
             imageVector        = Icons.AutoMirrored.Filled.KeyboardArrowRight,

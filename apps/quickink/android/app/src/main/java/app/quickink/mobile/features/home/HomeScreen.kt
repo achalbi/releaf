@@ -72,6 +72,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Park
 import androidx.compose.material.icons.filled.Schedule
@@ -130,8 +131,11 @@ import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capture.displayTitle
 import app.quickink.mobile.data.location.LocationEntity
 import app.quickink.mobile.data.location.LocationRepository
+import app.quickink.mobile.data.person.PersonEntity
+import app.quickink.mobile.data.person.PersonRepository
 import app.quickink.mobile.data.tag.TagEntity
 import app.quickink.mobile.features.workspace.LocationEditorDialog
+import app.quickink.mobile.features.workspace.PersonEditorDialog
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.data.sync.QuickInkSyncWorker
 import app.quickink.mobile.features.scan.PaperSize
@@ -262,6 +266,17 @@ fun HomeScreen(
     // `editorExisting` chooses create (null) vs edit (a row).
     var editorOpen by remember { mutableStateOf(false) }
     var editorExisting by remember { mutableStateOf<LocationEntity?>(null) }
+
+    // People rail — mirror of the Locations rail. Seeded with "Me"
+    // on first launch via [PersonRepository.seedDefaultsIfEmpty].
+    val personDao  = remember(app) { app.database.personDao() }
+    val personRepo = remember(personDao) { PersonRepository(personDao) }
+    val people by remember(userId, personDao) {
+        personRepo.observe(userId)
+    }.collectAsState(initial = emptyList())
+    var showPeopleSheet by remember { mutableStateOf(false) }
+    var personEditorOpen by remember { mutableStateOf(false) }
+    var personEditorExisting by remember { mutableStateOf<PersonEntity?>(null) }
 
     // System status-bar inset — without this, the greeting crowds the
     // notch / clock area on edge-to-edge devices (target SDK 35+
@@ -455,6 +470,12 @@ fun HomeScreen(
                 onChipTap  = { showLocationsSheet = true },
             )
             Spacer(Modifier.size(QuickInkSpacing.s4))
+            PeopleRail(
+                people    = people,
+                onAddTap  = { showPeopleSheet = true },
+                onChipTap = { showPeopleSheet = true },
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s4))
             RecentActivityPill(
                 pendingReviewCount = pendingCount,
                 pendingSyncCount   = localDirtyCount,
@@ -492,6 +513,36 @@ fun HomeScreen(
                 existing = editorExisting,
                 onDismiss = { editorOpen = false },
                 onSaved   = { editorOpen = false },
+            )
+        }
+
+        // People manage sheet + editor — same shape as the Locations
+        // pair above. Add opens the editor in create mode; tapping
+        // a row opens it in edit mode.
+        if (showPeopleSheet) {
+            PeopleManageSheet(
+                people    = people,
+                onDismiss = { showPeopleSheet = false },
+                onAdd     = {
+                    personEditorExisting = null
+                    personEditorOpen     = true
+                },
+                onEditRow = { person ->
+                    personEditorExisting = person
+                    personEditorOpen     = true
+                },
+                onDelete  = { id ->
+                    locationScope.launch { personRepo.softDelete(id) }
+                },
+            )
+        }
+
+        if (personEditorOpen) {
+            PersonEditorDialog(
+                userId    = userId,
+                existing  = personEditorExisting,
+                onDismiss = { personEditorOpen = false },
+                onSaved   = { personEditorOpen = false },
             )
         }
 
@@ -2238,6 +2289,253 @@ private fun LocationsManageSheet(
                                 modifier           = Modifier
                                     .size(20.dp)
                                     .clickable { onDelete(loc.id) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - People rail
+
+/**
+ * Horizontal chip rail of user-defined people ("Me", "Mom", "Dr.
+ * Rao", etc.) with a trailing "+" chip that opens the create /
+ * manage sheet. Seeded with "Me" on first launch
+ * (PersonRepository.seedDefaultsIfEmpty in QuickInkRoot). Mirror of
+ * the LocationsRail above.
+ */
+@Composable
+private fun PeopleRail(
+    people: List<PersonEntity>,
+    onAddTap: () -> Unit,
+    onChipTap: (PersonEntity) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    Column {
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text  = "People",
+                style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
+                color = colors.ink,
+            )
+            Text(
+                text     = "MANAGE",
+                style    = type.label.copy(
+                    letterSpacing = 1.2.sp,
+                    fontSize      = 10.5.sp,
+                    fontWeight    = FontWeight.SemiBold,
+                ),
+                color    = colors.accent,
+                modifier = Modifier.clickable(onClick = onAddTap),
+            )
+        }
+        Spacer(Modifier.size(QuickInkSpacing.s2))
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+            items(people, key = { it.id }) { person ->
+                PersonChip(person = person, onClick = { onChipTap(person) })
+            }
+            item {
+                AddPersonChip(onClick = onAddTap)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PersonChip(
+    person: PersonEntity,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val shape  = RoundedCornerShape(999.dp)
+    Row(
+        modifier = Modifier
+            .clip(shape)
+            .background(colors.surface, shape)
+            .border(1.dp, colors.border, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector        = Icons.Filled.Person,
+            contentDescription = null,
+            tint               = colors.accent,
+            modifier           = Modifier.size(13.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text  = person.name,
+            style = type.label.copy(fontSize = 12.sp),
+            color = colors.inkSoft,
+        )
+    }
+}
+
+@Composable
+private fun AddPersonChip(onClick: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val shape  = RoundedCornerShape(999.dp)
+    Row(
+        modifier = Modifier
+            .clip(shape)
+            .background(colors.borderSoft, shape)
+            .border(1.dp, colors.border, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector        = Icons.Filled.Add,
+            contentDescription = "Add person",
+            tint               = colors.inkSoft,
+            modifier           = Modifier.size(13.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text  = "Add",
+            style = type.label.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+            color = colors.inkSoft,
+        )
+    }
+}
+
+/**
+ * Bottom sheet for creating, renaming, and removing people. Mirror
+ * of [LocationsManageSheet]. Linking a person to a document lives
+ * on the capture-detail picker.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PeopleManageSheet(
+    people: List<PersonEntity>,
+    onDismiss: () -> Unit,
+    onAdd: () -> Unit,
+    onEditRow: (PersonEntity) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    val colors     = LocalQuickInkColors.current
+    val type       = LocalQuickInkTypography.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = colors.bg,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start  = QuickInkSpacing.s5,
+                    end    = QuickInkSpacing.s5,
+                    bottom = QuickInkSpacing.s5,
+                ),
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+        ) {
+            Text(
+                text  = "People",
+                style = type.heading,
+                color = colors.ink,
+            )
+            Text(
+                text  = "People you scan documents about. Tap a row to rename; attach a person to a document from the document's detail screen.",
+                style = type.meta,
+                color = colors.inkSoft,
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(QuickInkRadius.md))
+                    .background(colors.accent)
+                    .clickable(onClick = onAdd)
+                    .padding(vertical = QuickInkSpacing.s3),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector        = Icons.Filled.Add,
+                        contentDescription = null,
+                        tint               = colors.textOnAccent,
+                        modifier           = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text  = "Add person",
+                        style = type.label.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.textOnAccent,
+                    )
+                }
+            }
+
+            if (people.isEmpty()) {
+                Text(
+                    text  = "No people yet. Add one to get started.",
+                    style = type.meta,
+                    color = colors.muted,
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+                    people.forEach { person ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(QuickInkRadius.md))
+                                .background(colors.surface)
+                                .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.md))
+                                .clickable { onEditRow(person) }
+                                .padding(
+                                    horizontal = QuickInkSpacing.s3,
+                                    vertical   = QuickInkSpacing.s2,
+                                ),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector        = Icons.Filled.Person,
+                                contentDescription = null,
+                                tint               = colors.accent,
+                                modifier           = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(QuickInkSpacing.s2))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text  = person.name,
+                                    style = type.body,
+                                    color = colors.ink,
+                                )
+                                val sub = person.contactPhone?.takeIf { it.isNotBlank() }
+                                    ?: person.contactEmail?.takeIf { it.isNotBlank() }
+                                if (sub != null) {
+                                    Text(
+                                        text     = sub,
+                                        style    = type.caption.copy(fontSize = 11.sp),
+                                        color    = colors.muted,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector        = Icons.Filled.Delete,
+                                contentDescription = "Delete ${person.name}",
+                                tint               = colors.muted,
+                                modifier           = Modifier
+                                    .size(20.dp)
+                                    .clickable { onDelete(person.id) },
                             )
                         }
                     }

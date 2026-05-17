@@ -41,6 +41,13 @@ enum ScanPageMode: String, CaseIterable {
 struct DocumentCaptureSurface: View {
     let controller: ScanFlowController
     let onDismiss: () -> Void
+    /// Callback fired when the user taps the Photo icon in the
+    /// shutter row's left slot. Threaded up through the
+    /// `QuickCaptureScreen` parent so the coordinator (which
+    /// owns mode state) can flip to `.photo` and SwiftUI swaps
+    /// in `PhotoCaptureSurface`. Defaults to a no-op so callers
+    /// that don't host a coordinator (previews) keep compiling.
+    var onSelectPhoto: () -> Void = {}
 
     @State private var pageMode: ScanPageMode = .single
     @State private var sweepOffset: CGFloat = -50
@@ -145,7 +152,11 @@ struct DocumentCaptureSurface: View {
     @ViewBuilder
     private var shutterRow: some View {
         HStack(alignment: .center) {
-            Spacer().frame(width: 64)
+            // Left slot — Photo icon (was a spacer pre-Photo
+            // capture). Same 48pt disc styling as the right-
+            // side import button so the row reads as a
+            // symmetric two-button frame around the shutter.
+            photoModeButton.frame(width: 64, height: 64)
             Spacer()
             documentShutterButton
             Spacer()
@@ -153,6 +164,23 @@ struct DocumentCaptureSurface: View {
         }
         .padding(.horizontal, QuickInkSpacing.s5)
         .padding(.bottom, QuickInkSpacing.s4)
+    }
+
+    @ViewBuilder
+    private var photoModeButton: some View {
+        Button(action: {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            onSelectPhoto()
+        }) {
+            Image(systemName: "camera")
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.85))
+                .frame(width: 48, height: 48)
+                .background(Color.white.opacity(0.10))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Take a photo")
     }
 
     @ViewBuilder

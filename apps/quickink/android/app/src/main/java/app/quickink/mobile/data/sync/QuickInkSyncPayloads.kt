@@ -32,10 +32,12 @@ package app.quickink.mobile.data.sync
 
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capturelocation.CaptureLocationEntity
+import app.quickink.mobile.data.captureperson.CapturePersonEntity
 import app.quickink.mobile.data.capturetag.CaptureTagEntity
 import app.quickink.mobile.data.folder.FolderEntity
 import app.quickink.mobile.data.location.LocationEntity
 import app.quickink.mobile.data.ocr.OcrResultEntity
+import app.quickink.mobile.data.person.PersonEntity
 import app.quickink.mobile.data.profile.ProfileSettingsEntity
 import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
 import app.quickink.mobile.data.tag.TagEntity
@@ -631,6 +633,162 @@ fun VoiceNotePayloadV1.toEntity(driveFileId: String?): app.quickink.mobile.data.
     )
 
 // =====================================================================
+// Stories (Phase 1 + Phase 2) — see design/STORIES_HANDOFF.md. Mirror
+// of iOS `StoryPayloadV1` / `StoryItemPayloadV1` / `StoryVoiceClipPayloadV1`.
+// =====================================================================
+
+@kotlinx.serialization.Serializable
+data class StoryPayloadV1(
+    @kotlinx.serialization.SerialName("id")               val id: String,
+    @kotlinx.serialization.SerialName("user_id")          val userId: String,
+    @kotlinx.serialization.SerialName("title")            val title: String,
+    @kotlinx.serialization.SerialName("subtitle")         val subtitle: String? = null,
+    @kotlinx.serialization.SerialName("cover_item_id")    val coverItemId: String? = null,
+    @kotlinx.serialization.SerialName("cover_style")      val coverStyle: String,
+    @kotlinx.serialization.SerialName("theme_style")      val themeStyle: String,
+    @kotlinx.serialization.SerialName("grouping_mode")    val groupingMode: String,
+    @kotlinx.serialization.SerialName("time_range_start") val timeRangeStart: String? = null,
+    @kotlinx.serialization.SerialName("time_range_end")   val timeRangeEnd: String? = null,
+    @kotlinx.serialization.SerialName("status")           val status: String,
+    @kotlinx.serialization.SerialName("share_mode")       val shareMode: String,
+    @kotlinx.serialization.SerialName("share_slug")       val shareSlug: String? = null,
+    @kotlinx.serialization.SerialName("created_at")       val createdAt: String,
+    @kotlinx.serialization.SerialName("updated_at")       val updatedAt: String,
+)
+
+fun app.quickink.mobile.data.story.StoryEntity.toV1Payload(): StoryPayloadV1 =
+    StoryPayloadV1(
+        id             = id,
+        userId         = userId,
+        title          = title,
+        subtitle       = subtitle,
+        coverItemId    = coverItemId,
+        coverStyle     = coverStyle,
+        themeStyle     = themeStyle,
+        groupingMode   = groupingMode,
+        timeRangeStart = timeRangeStart,
+        timeRangeEnd   = timeRangeEnd,
+        status         = status,
+        shareMode      = shareMode,
+        shareSlug      = shareSlug,
+        createdAt      = createdAt,
+        updatedAt      = updatedAt,
+    )
+
+fun StoryPayloadV1.toEntity(): app.quickink.mobile.data.story.StoryEntity =
+    app.quickink.mobile.data.story.StoryEntity(
+        id             = id,
+        userId         = userId,
+        title          = title,
+        subtitle       = subtitle,
+        coverItemId    = coverItemId,
+        coverStyle     = coverStyle,
+        themeStyle     = themeStyle,
+        groupingMode   = groupingMode,
+        timeRangeStart = timeRangeStart,
+        timeRangeEnd   = timeRangeEnd,
+        status         = status,
+        shareMode      = shareMode,
+        shareSlug      = shareSlug,
+        createdAt      = createdAt,
+        updatedAt      = updatedAt,
+        dirty          = false,
+        deletedAt      = null,
+    )
+
+@kotlinx.serialization.Serializable
+data class StoryItemPayloadV1(
+    @kotlinx.serialization.SerialName("id")          val id: String,
+    @kotlinx.serialization.SerialName("story_id")    val storyId: String,
+    @kotlinx.serialization.SerialName("position")    val position: Int,
+    @kotlinx.serialization.SerialName("kind")        val kind: String,
+    @kotlinx.serialization.SerialName("ref_id")      val refId: String? = null,
+    @kotlinx.serialization.SerialName("text")        val text: String? = null,
+    @kotlinx.serialization.SerialName("caption")     val caption: String? = null,
+    @kotlinx.serialization.SerialName("occurred_at") val occurredAt: String? = null,
+    @kotlinx.serialization.SerialName("layout")      val layout: String,
+    @kotlinx.serialization.SerialName("created_at")  val createdAt: String,
+    @kotlinx.serialization.SerialName("updated_at")  val updatedAt: String,
+)
+
+fun app.quickink.mobile.data.storyitem.StoryItemEntity.toV1Payload(): StoryItemPayloadV1 =
+    StoryItemPayloadV1(
+        id         = id,
+        storyId    = storyId,
+        position   = position,
+        kind       = kind,
+        refId      = refId,
+        text       = text,
+        caption    = caption,
+        occurredAt = occurredAt,
+        layout     = layout,
+        createdAt  = createdAt,
+        updatedAt  = updatedAt,
+    )
+
+fun StoryItemPayloadV1.toEntity(): app.quickink.mobile.data.storyitem.StoryItemEntity =
+    app.quickink.mobile.data.storyitem.StoryItemEntity(
+        id         = id,
+        storyId    = storyId,
+        position   = position,
+        kind       = kind,
+        refId      = refId,
+        text       = text,
+        caption    = caption,
+        occurredAt = occurredAt,
+        layout     = layout,
+        createdAt  = createdAt,
+        updatedAt  = updatedAt,
+        dirty      = false,
+        deletedAt  = null,
+    )
+
+@kotlinx.serialization.Serializable
+data class StoryVoiceClipPayloadV1(
+    @kotlinx.serialization.SerialName("id")                   val id: String,
+    @kotlinx.serialization.SerialName("story_item_id")        val storyItemId: String,
+    @kotlinx.serialization.SerialName("user_id")              val userId: String,
+    @kotlinx.serialization.SerialName("audio_uri")            val audioUri: String,
+    @kotlinx.serialization.SerialName("duration_ms")          val durationMs: Long,
+    @kotlinx.serialization.SerialName("transcription")        val transcription: String? = null,
+    @kotlinx.serialization.SerialName("transcription_source") val transcriptionSource: String? = null,
+    @kotlinx.serialization.SerialName("audio_drive_file_id")  val audioDriveFileId: String? = null,
+    @kotlinx.serialization.SerialName("created_at")           val createdAt: String,
+    @kotlinx.serialization.SerialName("updated_at")           val updatedAt: String,
+)
+
+fun app.quickink.mobile.data.storyvoiceclip.StoryVoiceClipEntity.toV1Payload(): StoryVoiceClipPayloadV1 =
+    StoryVoiceClipPayloadV1(
+        id                  = id,
+        storyItemId         = storyItemId,
+        userId              = userId,
+        audioUri            = audioUri,
+        durationMs          = durationMs,
+        transcription       = transcription,
+        transcriptionSource = transcriptionSource,
+        audioDriveFileId    = audioDriveFileId,
+        createdAt           = createdAt,
+        updatedAt           = updatedAt,
+    )
+
+fun StoryVoiceClipPayloadV1.toEntity(driveFileId: String?): app.quickink.mobile.data.storyvoiceclip.StoryVoiceClipEntity =
+    app.quickink.mobile.data.storyvoiceclip.StoryVoiceClipEntity(
+        id                  = id,
+        storyItemId         = storyItemId,
+        userId              = userId,
+        audioUri            = audioUri,
+        durationMs          = durationMs,
+        transcription       = transcription,
+        transcriptionSource = transcriptionSource,
+        driveFileId         = driveFileId,
+        audioDriveFileId    = audioDriveFileId,
+        createdAt           = createdAt,
+        updatedAt           = updatedAt,
+        dirty               = false,
+        deletedAt           = null,
+    )
+
+// =====================================================================
 // locations — QuickInk-only. User-defined places ("Home", "Work", …)
 // surfaced as the Home-screen chip rail. Mirror of `tags` on the
 // wire; lives under `locations/` per DrivePath.
@@ -710,6 +868,99 @@ fun CaptureLocationPayloadV1.toEntity(driveFileId: String?): CaptureLocationEnti
         id          = id,
         captureId   = captureId,
         locationId  = locationId,
+        source      = source,
+        driveFileId = driveFileId,
+        createdAt   = createdAt,
+        updatedAt   = updatedAt,
+        dirty       = false,
+        deletedAt   = null,
+    )
+
+// =====================================================================
+// people — QuickInk-only. User-defined people ("Me", "Mom", "Dr. Rao", …)
+// surfaced as the Home-screen people chip rail. Mirror of `locations`
+// on the wire (minus the geo columns); lives under `people/` per
+// DrivePath.
+// =====================================================================
+
+@Serializable
+data class PersonPayloadV1(
+    @SerialName("id")            val id: String,
+    @SerialName("user_id")       val userId: String,
+    @SerialName("name")          val name: String,
+    @SerialName("position")      val position: Int,
+    @SerialName("color")         val color: String? = null,
+    /**
+     * Portable cached contact fields. `contact_lookup_key` and
+     * `contact_photo_uri` are deliberately omitted — both are
+     * device-local handles that wouldn't resolve on a different
+     * device. Phone + email are the real-world identifiers that
+     * round-trip cleanly.
+     */
+    @SerialName("contact_phone") val contactPhone: String? = null,
+    @SerialName("contact_email") val contactEmail: String? = null,
+    @SerialName("created_at")    val createdAt: String,
+    @SerialName("updated_at")    val updatedAt: String,
+)
+
+fun PersonEntity.toV1Payload(): PersonPayloadV1 = PersonPayloadV1(
+    id           = id,
+    userId       = userId,
+    name         = name,
+    position     = position,
+    color        = color,
+    contactPhone = contactPhone,
+    contactEmail = contactEmail,
+    createdAt    = createdAt,
+    updatedAt    = updatedAt,
+)
+
+fun PersonPayloadV1.toEntity(driveFileId: String?): PersonEntity = PersonEntity(
+    id               = id,
+    userId           = userId,
+    name             = name,
+    position         = position,
+    color            = color,
+    contactLookupKey = null,
+    contactPhone     = contactPhone,
+    contactEmail     = contactEmail,
+    contactPhotoUri  = null,
+    driveFileId      = driveFileId,
+    createdAt        = createdAt,
+    updatedAt        = updatedAt,
+    dirty            = false,
+    deletedAt        = null,
+)
+
+// =====================================================================
+// capture_people — QuickInk-only. Many-to-many join between captures
+// and user-defined people. Mirror of `capture_locations`.
+// =====================================================================
+
+@Serializable
+data class CapturePersonPayloadV1(
+    @SerialName("id")           val id: String,
+    @SerialName("capture_id")   val captureId: String,
+    @SerialName("person_id")    val personId: String,
+    @SerialName("source")       val source: String = "manual",
+    @SerialName("created_at")   val createdAt: String,
+    @SerialName("updated_at")   val updatedAt: String,
+)
+
+fun CapturePersonEntity.toV1Payload(): CapturePersonPayloadV1 = CapturePersonPayloadV1(
+    id         = id,
+    captureId  = captureId,
+    personId   = personId,
+    source     = source,
+    createdAt  = createdAt,
+    updatedAt  = updatedAt,
+)
+
+fun CapturePersonPayloadV1.toEntity(driveFileId: String?): CapturePersonEntity =
+    CapturePersonEntity(
+        id          = id,
+        captureId   = captureId,
+        personId    = personId,
         source      = source,
         driveFileId = driveFileId,
         createdAt   = createdAt,

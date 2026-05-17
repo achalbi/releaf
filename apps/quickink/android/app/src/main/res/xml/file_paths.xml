@@ -49,4 +49,14 @@
     <files-path
         name="attachments"
         path="quickink/attachments/" />
+    <!--
+      Stories export temp dir. Phase 4 — the share sheet renders
+      the story as a PDF or PNG into
+      `<cacheDir>/stories-exports/<sanitized-title>.<ext>` and hands
+      that URI to the system share sheet via this provider. Cache
+      dir so the OS can evict on its own.
+    -->
+    <cache-path
+        name="stories-exports"
+        path="stories-exports/" />
 </paths>

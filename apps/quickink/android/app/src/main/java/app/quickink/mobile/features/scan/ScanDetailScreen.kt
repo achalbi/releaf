@@ -55,7 +55,9 @@ import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.LocalOffer
 import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PersonAdd
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.PictureAsPdf
 import app.quickink.mobile.features.scan.businesscard.AddContactReviewSheet
 import app.quickink.mobile.features.scan.businesscard.launchAddContactIntent
@@ -104,6 +106,8 @@ import androidx.core.content.FileProvider
 import app.releaf.mobile.auth.AuthState
 import app.quickink.mobile.features.workspace.FolderPickerSheet
 import app.quickink.mobile.features.workspace.LocationPickerSheet
+import app.quickink.mobile.features.workspace.PeoplePickerSheet
+import app.quickink.mobile.features.workspace.PersonEditorDialog
 import app.quickink.mobile.features.workspace.TagPickerSheet
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.sync.DeviceIdentity
@@ -148,6 +152,9 @@ fun ScanDetailScreen(
     // it. Mirrors the tag-picker contract; commits diffs against
     // `capture_locations` on Save.
     var showLocationPicker by remember(captureId) { mutableStateOf(false) }
+    // People picker — Manage people row in the more-menu opens it.
+    // Same contract, commits diffs against `capture_people` on Save.
+    var showPeoplePicker by remember(captureId) { mutableStateOf(false) }
     val folders by remember(userId, folderDao) {
         folderDao.observeActive(userId)
     }.collectAsState(initial = emptyList())
@@ -235,6 +242,33 @@ fun ScanDetailScreen(
         val byId = allLocations.associateBy { it.id }
         attachedLocationIds.mapNotNull { byId[it]?.name }
     }
+
+    // Same shape for people — observe the join + the active people
+    // list, derive the attached entities for the inline chip strip.
+    val capturePersonDao = remember(app) { app.database.capturePersonDao() }
+    val personDao        = remember(app) { app.database.personDao() }
+    val allPeople by remember(userId, personDao) {
+        personDao.observeActive(userId)
+    }.collectAsState(initial = emptyList())
+    val attachedPersonIds by remember(captureId, capturePersonDao) {
+        capturePersonDao.observePersonIdsForCapture(captureId)
+    }.collectAsState(initial = emptyList())
+    val attachedPeople: List<app.quickink.mobile.data.person.PersonEntity> =
+        remember(attachedPersonIds, allPeople) {
+            val byId = allPeople.associateBy { it.id }
+            attachedPersonIds.mapNotNull { byId[it] }
+        }
+
+    // Per-person action sheet — opened by tapping a chip on the
+    // Details card. Offers Share (system share sheet with pre-fill)
+    // and Edit (opens the person editor).
+    var personActionTarget by remember(captureId) {
+        mutableStateOf<app.quickink.mobile.data.person.PersonEntity?>(null)
+    }
+    var personEditorExisting by remember(captureId) {
+        mutableStateOf<app.quickink.mobile.data.person.PersonEntity?>(null)
+    }
+    var personEditorOpen by remember(captureId) { mutableStateOf(false) }
     val captureRepository = remember(app) {
         CaptureRepository(
             captureDao    = captureDao,
@@ -403,6 +437,7 @@ fun ScanDetailScreen(
                     captureDao         = captureDao,
                     profileSettingsDao = app.database.profileSettingsDao(),
                     voiceNoteDao       = app.database.voiceNoteDao(),
+                    storyVoiceClipDao  = app.database.storyVoiceClipDao(),
                     driveClient        = app.driveClient,
                 )
                 binarySync.restorePending(row.userId, accessToken)
@@ -567,6 +602,10 @@ fun ScanDetailScreen(
                                 moreMenuExpanded = false
                                 showLocationPicker = true
                             },
+                            onManagePeople        = {
+                                moreMenuExpanded = false
+                                showPeoplePicker = true
+                            },
                             onDelete              = {
                                 moreMenuExpanded = false
                                 showDeleteConfirm = true
@@ -598,6 +637,9 @@ fun ScanDetailScreen(
                     onAddTag               = { showRetagSheet = true },
                     attachedLocationNames  = attachedLocationNames,
                     onAddLocation          = { showLocationPicker = true },
+                    attachedPeople         = attachedPeople,
+                    onAddPerson            = { showPeoplePicker = true },
+                    onPersonChipTap        = { person -> personActionTarget = person },
                     modifier               = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = QuickInkSpacing.s5),
@@ -877,6 +919,46 @@ fun ScanDetailScreen(
             captureId = captureId,
             userId    = userId,
             onDismiss = { showLocationPicker = false },
+        )
+    }
+
+    // People picker — opened by the more-menu's "Manage people"
+    // row. Writes diffs to `capture_people` on Save.
+    if (showPeoplePicker) {
+        PeoplePickerSheet(
+            captureId = captureId,
+            userId    = userId,
+            onDismiss = { showPeoplePicker = false },
+        )
+    }
+
+    // Per-person action sheet — opens when a chip on the Details
+    // card is tapped. Routes to either the system share sheet
+    // (pre-filled with the person's contact info) or the editor.
+    personActionTarget?.let { target ->
+        val pdfUri = capture?.pdfUri
+        PersonChipActionsSheet(
+            person    = target,
+            canShare  = pdfUri != null && pdfUri.isNotBlank() && localFileExists(pdfUri),
+            onShare   = {
+                personActionTarget = null
+                shareCapturePdfWithPerson(context, pdfUri, target)
+            },
+            onEdit    = {
+                personActionTarget    = null
+                personEditorExisting  = target
+                personEditorOpen      = true
+            },
+            onDismiss = { personActionTarget = null },
+        )
+    }
+
+    if (personEditorOpen) {
+        PersonEditorDialog(
+            userId    = userId,
+            existing  = personEditorExisting,
+            onDismiss = { personEditorOpen = false },
+            onSaved   = { personEditorOpen = false },
         )
     }
 
@@ -1360,6 +1442,164 @@ private fun exportAsPdf(
     }
 }
 
+/**
+ * Per-person action sheet — opens from tapping a chip on the
+ * Details card. Lists the two contextual actions: share the
+ * document (system share sheet, with the person's email
+ * pre-filled when available) and edit the person row.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun PersonChipActionsSheet(
+    person: app.quickink.mobile.data.person.PersonEntity,
+    canShare: Boolean,
+    onShare: () -> Unit,
+    onEdit: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors     = LocalQuickInkColors.current
+    val type       = LocalQuickInkTypography.current
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+    )
+
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = colors.surface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start  = QuickInkSpacing.s4,
+                    end    = QuickInkSpacing.s4,
+                    bottom = QuickInkSpacing.s4,
+                ),
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+            Text(
+                text  = person.name,
+                style = type.heading,
+                color = colors.ink,
+            )
+            val subtitle = person.contactPhone?.takeIf { it.isNotBlank() }
+                ?: person.contactEmail?.takeIf { it.isNotBlank() }
+            if (subtitle != null) {
+                Text(
+                    text  = subtitle,
+                    style = type.meta,
+                    color = colors.muted,
+                )
+            }
+            Spacer(modifier = Modifier.height(QuickInkSpacing.s1))
+            PersonActionRow(
+                icon    = androidx.compose.material.icons.Icons.Outlined.Share,
+                label   = "Share document",
+                enabled = canShare,
+                onClick = onShare,
+            )
+            PersonActionRow(
+                icon    = androidx.compose.material.icons.Icons.Outlined.Edit,
+                label   = "Edit person",
+                onClick = onEdit,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PersonActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = QuickInkSpacing.s2),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        Icon(
+            imageVector        = icon,
+            contentDescription = null,
+            tint               = if (enabled) colors.accent else colors.muted,
+            modifier           = Modifier.size(20.dp),
+        )
+        Text(
+            text  = label,
+            style = type.body,
+            color = if (enabled) colors.ink else colors.muted,
+        )
+    }
+}
+
+/**
+ * Share a capture's PDF via the system share sheet, pre-filled with
+ * a person's contact info when available. Routes through email
+ * (`mailto:` chooser) when only an email is on file, SMS
+ * (`smsto:`) when only a phone is on file, and the generic
+ * ACTION_SEND otherwise so the user can pick any app (WhatsApp,
+ * etc.). Always falls back to the generic chooser when a more
+ * specific intent has no handler installed.
+ */
+private fun shareCapturePdfWithPerson(
+    context: android.content.Context,
+    pdfUri: String?,
+    person: app.quickink.mobile.data.person.PersonEntity,
+) {
+    if (pdfUri.isNullOrBlank() || !localFileExists(pdfUri)) {
+        android.widget.Toast.makeText(
+            context, "PDF isn't available for this scan",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+        return
+    }
+    val shareUri = shareableUri(context, pdfUri)
+    if (shareUri == null) {
+        android.widget.Toast.makeText(
+            context, "Couldn't prepare PDF for sharing",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+        return
+    }
+    val email = person.contactEmail?.takeIf { it.isNotBlank() }
+    val phone = person.contactPhone?.takeIf { it.isNotBlank() }
+
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "application/pdf"
+        putExtra(Intent.EXTRA_STREAM, shareUri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        clipData = android.content.ClipData.newRawUri(null, shareUri)
+        if (email != null) {
+            putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
+        }
+        // No standard EXTRA for phone numbers on ACTION_SEND, but
+        // many apps (WhatsApp / Signal) pick up the recipient when
+        // the user picks the contact in their own UI. Title hint
+        // helps the user find the right contact in the chooser.
+        putExtra(
+            Intent.EXTRA_SUBJECT,
+            "Document for ${person.name}",
+        )
+    }
+    val title = "Share with ${person.name}" +
+        if (phone != null && email == null) "  ($phone)" else ""
+    try {
+        context.startActivity(Intent.createChooser(intent, title))
+    } catch (_: Exception) {
+        android.widget.Toast.makeText(
+            context, "Couldn't open the share sheet",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+    }
+}
+
 /// Translate a stored capture URI string into something the share
 /// sheet's receivers can actually read. `file://` URIs go through
 /// FileProvider so the receiver gets a content:// URI with a usable
@@ -1699,6 +1939,9 @@ private fun DetailsCard(
     onAddTag: () -> Unit,
     attachedLocationNames: List<String>,
     onAddLocation: () -> Unit,
+    attachedPeople: List<app.quickink.mobile.data.person.PersonEntity>,
+    onAddPerson: () -> Unit,
+    onPersonChipTap: (app.quickink.mobile.data.person.PersonEntity) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalQuickInkColors.current
@@ -1777,6 +2020,11 @@ private fun DetailsCard(
                 names         = attachedLocationNames,
                 onAddLocation = onAddLocation,
             )
+            PeopleRow(
+                people          = attachedPeople,
+                onAddPerson     = onAddPerson,
+                onPersonChipTap = onPersonChipTap,
+            )
         }
     }
 }
@@ -1852,6 +2100,60 @@ private fun TagsRow(primaryTagName: String?, onAddTag: () -> Unit) {
                 Icon(
                     imageVector        = Icons.Outlined.Add,
                     contentDescription = "Add tag",
+                    tint               = colors.inkSoft,
+                    modifier           = Modifier.size(14.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Read-only chip strip showing every person currently attached to
+ * this capture, with a trailing "+" affordance that opens the
+ * [PeoplePickerSheet]. Mirror of [LocationsRow].
+ */
+@Composable
+private fun PeopleRow(
+    people: List<app.quickink.mobile.data.person.PersonEntity>,
+    onAddPerson: () -> Unit,
+    onPersonChipTap: (app.quickink.mobile.data.person.PersonEntity) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val rowStyle = type.caption.copy(fontSize = 11.sp)
+    Row(
+        modifier          = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = "People", style = rowStyle, color = colors.inkSoft)
+        Spacer(modifier = Modifier.weight(1f))
+        Row(
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1),
+        ) {
+            people.forEach { person ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(QuickInkRadius.pill))
+                        .background(colors.accentSoft)
+                        .clickable { onPersonChipTap(person) }
+                        .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
+                ) {
+                    Text(text = person.name, style = rowStyle, color = colors.accent)
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(colors.borderSoft)
+                    .clickable(onClick = onAddPerson),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.Outlined.Add,
+                    contentDescription = "Add person",
                     tint               = colors.inkSoft,
                     modifier           = Modifier.size(14.dp),
                 )
@@ -2273,6 +2575,7 @@ private fun ScanActionsDropdown(
     onMoveToFolder: () -> Unit,
     onManageTags: () -> Unit,
     onManageLocations: () -> Unit,
+    onManagePeople: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
@@ -2318,6 +2621,12 @@ private fun ScanActionsDropdown(
             label   = "Manage locations",
             icon    = androidx.compose.material.icons.Icons.Outlined.LocationOn,
             onClick = onManageLocations,
+        )
+        ScanActionDivider()
+        ScanActionRow(
+            label   = "Manage people",
+            icon    = androidx.compose.material.icons.Icons.Outlined.Person,
+            onClick = onManagePeople,
         )
         ScanActionDivider()
         ScanActionRow(
