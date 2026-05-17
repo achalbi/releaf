@@ -601,6 +601,9 @@ private struct ActivePhotoSurface: View {
         durationMs: Int,
     ) async {
         let repo = VoiceNoteRepository()
+        let audioSize = (try? FileManager.default.attributesOfItem(atPath: audioFileURL.path)[.size] as? Int) ?? 0
+        NSLog("[PhotoCapture] attachVoiceNote captureId=%@ audio=%@ size=%dB durationMs=%d",
+              captureId, audioFileURL.path, audioSize, durationMs)
         do {
             let row = try await repo.insert(
                 captureId:  captureId,
@@ -608,21 +611,32 @@ private struct ActivePhotoSurface: View {
                 audioUri:   audioFileURL.absoluteString,
                 durationMs: durationMs,
             )
+            NSLog("[PhotoCapture] attachVoiceNote insert ok rowId=%@", row.id)
             Task.detached(priority: .userInitiated) {
                 let granted = await VoiceTranscriber.requestPermission()
+                NSLog("[PhotoCapture] speech permission granted=%@", granted ? "true" : "false")
                 guard granted else { return }
-                guard let transcript = await VoiceTranscriber.transcribe(fileURL: audioFileURL) else { return }
-                try? await VoiceNoteRepository().setTranscription(
-                    id:            row.id,
-                    transcription: transcript.text,
-                    source:        transcript.source,
-                )
+                guard let transcript = await VoiceTranscriber.transcribe(fileURL: audioFileURL) else {
+                    NSLog("[PhotoCapture] VoiceTranscriber returned nil for %@", audioFileURL.path)
+                    return
+                }
+                NSLog("[PhotoCapture] transcript ok source=%@ chars=%d",
+                      transcript.source, transcript.text.count)
+                do {
+                    try await VoiceNoteRepository().setTranscription(
+                        id:            row.id,
+                        transcription: transcript.text,
+                        source:        transcript.source,
+                    )
+                } catch {
+                    NSLog("[PhotoCapture] setTranscription failed: %@", "\(error)")
+                }
             }
         } catch {
             // Soft failure — the capture lands without a voice
             // note. The user can record one manually from the
             // detail screen.
-            print("PhotoCaptureSurface attachVoiceNote failed: \(error)")
+            NSLog("[PhotoCapture] attachVoiceNote insert failed: %@", "\(error)")
         }
     }
 }

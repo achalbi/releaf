@@ -141,21 +141,26 @@ object SpeechTranscriber {
                 }
             }
 
-            val pcm = runCatching { decodeToPcm(file) }
+            val decoded = runCatching { decodeToPcm(file) }
                 .onFailure { Log.w(TAG, "ML Kit: decodeToPcm failed", it) }
                 .getOrNull()
-            if (pcm == null || pcm.isEmpty()) {
+            if (decoded == null || decoded.pcm.isEmpty()) {
                 Log.w(TAG, "ML Kit: empty PCM, falling back")
                 null
             } else {
                 val wavFile = File.createTempFile("mlkit-", ".wav", context.cacheDir)
                 try {
+                    // Write the WAV header with the SOURCE audio's
+                    // actual sample rate + channel count rather
+                    // than the hardcoded 16kHz mono — otherwise a
+                    // 44.1kHz stereo recording would be read by
+                    // ML Kit at 2.75× speed with mixed channels.
                     writeWav(
-                        pcm = pcm,
-                        sampleRate = SAMPLE_RATE_HZ,
-                        channels = 1,
+                        pcm           = decoded.pcm,
+                        sampleRate    = decoded.sampleRate,
+                        channels      = decoded.channelCount,
                         bitsPerSample = 16,
-                        out = wavFile,
+                        out           = wavFile,
                     )
 
                     ParcelFileDescriptor.open(
@@ -323,22 +328,29 @@ object SpeechTranscriber {
                 "Could not download speech model — check network"
             )
 
-        val pcm = runCatching { decodeToPcm(file) }
+        val decoded = runCatching { decodeToPcm(file) }
             .onFailure { Log.e(TAG, "decode failed", it) }
             .getOrNull()
             ?: return TranscribeResult.Failure("Could not decode audio file")
 
-        if (pcm.isEmpty()) {
+        if (decoded.pcm.isEmpty()) {
             return TranscribeResult.Failure("Audio file was empty")
         }
 
-        val samples = pcmBytesToFloats(pcm)
-        val text = runCatching { runSherpaRecognizer(recognizer, samples) }
+        val samples = pcmBytesToMonoFloats(decoded.pcm, decoded.channelCount)
+        val text = runCatching {
+            runSherpaRecognizer(recognizer, samples, decoded.sampleRate)
+        }
             .onFailure { Log.e(TAG, "sherpa-onnx recognizer failed", it) }
             .getOrNull()
             ?: return TranscribeResult.Failure("Transcription failed")
 
-        Log.d(TAG, "sherpa transcribe: pcm=${pcm.size}B, text='${text.take(80)}'")
+        Log.d(
+            TAG,
+            "sherpa transcribe: samples=${samples.size} " +
+                "rate=${decoded.sampleRate}Hz channels=${decoded.channelCount} " +
+                "text='${text.take(80)}'",
+        )
         return if (text.isBlank()) TranscribeResult.Failure("No speech detected")
         else TranscribeResult.Success(text, BACKEND_SHERPA)
     }
@@ -468,7 +480,27 @@ object SpeechTranscriber {
         }
     }
 
-    private fun decodeToPcm(file: File): ByteArray {
+    /**
+     * Raw PCM bytes + the actual format the source audio was
+     * decoded into (sample rate + channel count). Both transcribe
+     * backends need this metadata: sherpa converts the bytes into
+     * mono floats and passes the rate to `acceptWaveform`
+     * (sherpa-onnx resamples internally), while the ML Kit path
+     * writes a WAV header with the same rate + channel count.
+     * Without these, we silently mis-interpreted 44.1kHz stereo
+     * CameraX-recorded audio as 16kHz mono — Whisper saw a 2.75×
+     * time-stretched, channel-interleaved soup and produced empty
+     * / nonsense output, and ML Kit's WAV file claimed 16kHz when
+     * the bytes were at 44.1kHz. Manual voice notes weren't
+     * affected because the recorder writes 16kHz mono directly.
+     */
+    private data class DecodedAudio(
+        val pcm: ByteArray,
+        val sampleRate: Int,
+        val channelCount: Int,
+    )
+
+    private fun decodeToPcm(file: File): DecodedAudio {
         val extractor = MediaExtractor()
         extractor.setDataSource(file.absolutePath)
 
@@ -488,6 +520,13 @@ object SpeechTranscriber {
             throw IOException("No audio track in file")
         }
         extractor.selectTrack(audioTrackIdx)
+
+        // Initial format hints — superseded by the decoder's
+        // negotiated output format once `INFO_OUTPUT_FORMAT_CHANGED`
+        // fires (which is the authoritative source for sample rate
+        // + channel count post-decode).
+        var sampleRate = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+        var channelCount = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
 
         val mime = inputFormat.getString(MediaFormat.KEY_MIME)!!
         val codec = MediaCodec.createDecoderByType(mime)
@@ -539,7 +578,15 @@ object SpeechTranscriber {
                             sawOutputEOS = true
                         }
                     }
-                    outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> Unit
+                    outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val outFmt = codec.outputFormat
+                        if (outFmt.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                            sampleRate = outFmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                        }
+                        if (outFmt.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                            channelCount = outFmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                        }
+                    }
                     outIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
                 }
             }
@@ -549,14 +596,36 @@ object SpeechTranscriber {
             runCatching { extractor.release() }
         }
 
-        return output.toByteArray()
+        return DecodedAudio(
+            pcm          = output.toByteArray(),
+            sampleRate   = sampleRate,
+            channelCount = channelCount.coerceAtLeast(1),
+        )
     }
 
-    private fun pcmBytesToFloats(pcm: ByteArray): FloatArray {
+    /**
+     * Convert little-endian 16-bit PCM bytes to a mono FloatArray
+     * in [-1.0, 1.0]. Multi-channel input is downmixed by averaging
+     * the channels per frame — sherpa-onnx Whisper expects mono and
+     * silently mis-interprets interleaved stereo as time-domain
+     * samples (twice the duration, half the content).
+     */
+    private fun pcmBytesToMonoFloats(pcm: ByteArray, channelCount: Int): FloatArray {
         val shorts = ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-        val samples = FloatArray(shorts.remaining())
-        for (i in samples.indices) {
-            samples[i] = shorts.get().toInt() / 32768.0f
+        val totalSamples = shorts.remaining()
+        if (channelCount <= 1) {
+            val samples = FloatArray(totalSamples)
+            for (i in samples.indices) {
+                samples[i] = shorts.get().toInt() / 32768.0f
+            }
+            return samples
+        }
+        val frames = totalSamples / channelCount
+        val samples = FloatArray(frames)
+        for (i in 0 until frames) {
+            var sum = 0
+            for (c in 0 until channelCount) sum += shorts.get().toInt()
+            samples[i] = (sum.toFloat() / channelCount) / 32768.0f
         }
         return samples
     }
@@ -564,10 +633,15 @@ object SpeechTranscriber {
     private fun runSherpaRecognizer(
         recognizer: OfflineRecognizer,
         samples: FloatArray,
+        sampleRate: Int,
     ): String {
         val stream = recognizer.createStream()
         return try {
-            stream.acceptWaveform(samples, SAMPLE_RATE_HZ)
+            // `acceptWaveform` takes the actual sample rate of the
+            // input — sherpa resamples internally to the recognizer's
+            // configured feature rate. Passing the wrong rate
+            // produces a time-stretched / nonsense transcription.
+            stream.acceptWaveform(samples, sampleRate)
             recognizer.decode(stream)
             recognizer.getResult(stream).text.trim()
         } finally {
