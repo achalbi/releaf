@@ -564,6 +564,42 @@ public struct SmartCollectionPayloadV1: Codable, Equatable, Sendable {
     }
 }
 
+// =====================================================================
+// profile_settings — QuickInk-only. One row per user; carries the
+// custom display-name override, phone, personality punchline, and
+// the photo's Drive-file linkage. The actual photo binary travels
+// via QuickInkBinarySync under `profile_settings/{id}.jpg` (same
+// blob path scan previews use — no base64 inline).
+// `photo_local_uri` is deliberately NOT in the wire shape — it's a
+// device-local file:// URI that won't resolve on a different device.
+// The restore side fills it in after re-downloading the binary.
+// Mirror of Android's `ProfileSettingsPayloadV1`.
+// =====================================================================
+
+public struct ProfileSettingsPayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let userId: String
+    public let displayName: String?
+    public let phoneNumber: String?
+    public let personalityPunchline: String?
+    public let photoDriveFileId: String?
+    public let photoUpdatedAt: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case userId               = "user_id"
+        case displayName          = "display_name"
+        case phoneNumber          = "phone_number"
+        case personalityPunchline = "personality_punchline"
+        case photoDriveFileId     = "photo_drive_file_id"
+        case photoUpdatedAt       = "photo_updated_at"
+        case createdAt            = "created_at"
+        case updatedAt            = "updated_at"
+    }
+}
+
 public struct OcrResultPayloadV2: Codable, Equatable, Sendable {
     public let id: String
     public let captureId: String

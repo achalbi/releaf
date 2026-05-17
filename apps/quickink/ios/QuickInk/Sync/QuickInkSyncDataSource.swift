@@ -33,6 +33,7 @@
 
 import Foundation
 import GRDB
+import ReleafCoreData
 import ReleafCoreNotes
 import ReleafCoreSync
 
@@ -283,6 +284,32 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 ) { out.append(entry) }
             }
 
+            // ---- profile_settings (single row per user) ----
+            let profileRows = try Row.fetchAll(db, sql: """
+                SELECT * FROM profile_settings
+                WHERE user_id = ? AND dirty = 1 AND deleted_at IS NULL
+                """, arguments: [userId])
+            for row in profileRows {
+                let payload = ProfileSettingsPayloadV1(
+                    id:                   row["id"],
+                    userId:               row["user_id"],
+                    displayName:          row["display_name"] as String?,
+                    phoneNumber:          row["phone_number"] as String?,
+                    personalityPunchline: row["personality_punchline"] as String?,
+                    photoDriveFileId:     row["photo_drive_file_id"] as String?,
+                    photoUpdatedAt:       row["photo_updated_at"] as String?,
+                    createdAt:            row["created_at"],
+                    updatedAt:            row["updated_at"]
+                )
+                if let entry = try Self.makeEntry(
+                    id:        row["id"],
+                    kind:      DrivePath.kindProfileSettings,
+                    drivePath: DrivePath.profileSettings(id: row["id"]),
+                    updatedAt: row["updated_at"],
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
             // ---- ocr_results (raw SQL; not user-scoped — FK to captures) ----
             let ocrRows = try Row.fetchAll(db, sql: """
                 SELECT * FROM ocr_results
@@ -418,6 +445,19 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 ))
             }
 
+            // profile_settings — user-scoped.
+            let profileTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM profile_settings
+                WHERE user_id = ? AND deleted_at IS NOT NULL AND dirty = 1
+                """, arguments: [userId])
+            for row in profileTombstones {
+                out.append(PendingTombstone(
+                    kind:      DrivePath.kindProfileSettings,
+                    id:        row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+
             // ocr_results — not user-scoped at the row level.
             let ocrRows = try Row.fetchAll(db, sql: """
                 SELECT id, deleted_at, updated_at FROM ocr_results
@@ -478,6 +518,14 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             case DrivePath.kindVoiceNote:
                 let p = try decoder.decode(VoiceNotePayloadV1.self, from: change.payload)
                 try Self.upsertVoiceNoteRow(db, payload: p, driveFileId: driveFileId)
+
+            case DrivePath.kindProfileSettings:
+                let p = try decoder.decode(ProfileSettingsPayloadV1.self, from: change.payload)
+                // photo_local_uri is intentionally not in the wire payload;
+                // leave the existing local URI intact (the binary-restore
+                // pass fills it in when needed). Only the metadata fields
+                // and the photo Drive-file reference travel on the wire.
+                try Self.upsertProfileSettingsRow(db, payload: p, driveFileId: driveFileId)
 
             default:
                 // Forward-compat: unknown kind, skip.
@@ -571,7 +619,11 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 SELECT COUNT(*) FROM tags
                 WHERE user_id = ? AND dirty = 1
                 """, arguments: [userId])) ?? 0
-            return notepad + captures + ocr + categories
+            let profileSettings: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM profile_settings
+                WHERE user_id = ? AND dirty = 1
+                """, arguments: [userId])) ?? 0
+            return notepad + captures + ocr + categories + profileSettings
         }
     }
 
@@ -586,7 +638,8 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
         case DrivePath.kindFolder:          return "folders"
         case DrivePath.kindCaptureTag:      return "capture_tags"
         case DrivePath.kindSmartCollection: return "smart_collections"
-        case DrivePath.kindVoiceNote:       return "voice_notes"
+        case DrivePath.kindVoiceNote:          return "voice_notes"
+        case DrivePath.kindProfileSettings:   return "profile_settings"
         default: return ""
         }
     }
@@ -843,6 +896,138 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 driveFileId, payload.audioDriveFileId,
                 payload.createdAt, payload.updatedAt,
             ])
+    }
+
+    /// Upsert a profile_settings row from a remote payload. Last-write-
+    /// wins on `updated_at`. `photo_local_uri` is kept intact from the
+    /// existing local row (or left NULL on a fresh insert) — the
+    /// binary-restore pass fills it in separately from `photo_drive_file_id`.
+    private static func upsertProfileSettingsRow(
+        _ db: Database,
+        payload: ProfileSettingsPayloadV1,
+        driveFileId: String?
+    ) throws {
+        let existingPhotoLocalUri: String? = try Row.fetchOne(
+            db,
+            sql: "SELECT photo_local_uri FROM profile_settings WHERE id = ? LIMIT 1",
+            arguments: [payload.id]
+        ).map { $0["photo_local_uri"] as String? } ?? nil
+
+        try db.execute(sql: """
+            INSERT INTO profile_settings (
+                id, user_id, display_name, phone_number, personality_punchline,
+                photo_local_uri, photo_drive_file_id, photo_updated_at,
+                drive_file_id, created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                user_id               = excluded.user_id,
+                display_name          = excluded.display_name,
+                phone_number          = excluded.phone_number,
+                personality_punchline = excluded.personality_punchline,
+                photo_local_uri       = excluded.photo_local_uri,
+                photo_drive_file_id   = excluded.photo_drive_file_id,
+                photo_updated_at      = excluded.photo_updated_at,
+                drive_file_id         = excluded.drive_file_id,
+                updated_at            = excluded.updated_at,
+                dirty                 = 0
+            WHERE profile_settings.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.userId,
+                payload.displayName, payload.phoneNumber, payload.personalityPunchline,
+                existingPhotoLocalUri,
+                payload.photoDriveFileId, payload.photoUpdatedAt,
+                driveFileId, payload.createdAt, payload.updatedAt,
+            ])
+    }
+
+    // MARK: - Profile bootstrap / upload-on-edit hook
+
+    /// Seed or refresh the `profile_settings` row from the current
+    /// `UserDefaults` values (same keyspace as `SettingsState`) before
+    /// each upload pass. Acts as both the first-sync bootstrap and the
+    /// upload-on-edit hook:
+    ///   - First sync:  inserts the row if absent, marking `dirty = 1`.
+    ///   - Subsequent:  updates the row if any of the four fields changed
+    ///                  since the last sync, marking `dirty = 1` so the
+    ///                  next metadata push carries the fresh values.
+    /// Clears `photo_drive_file_id` when `photo_local_uri` changes so
+    /// the binary-upload pass re-uploads the new image.
+    ///
+    /// Never throws — failures are swallowed so a transient DB write
+    /// doesn't abort the enclosing sync pass.
+    func upsertProfileFromDefaults(defaults: UserDefaults) async {
+        let displayName   = defaults.string(forKey: "quickink.settings.custom_display_name")
+        let phoneNumber   = defaults.string(forKey: "quickink.settings.phone_number")
+        let punchline     = defaults.string(forKey: "quickink.settings.personality_punchline")
+        let photoLocalUri = defaults.string(forKey: "quickink.settings.profile_photo_uri")
+
+        let uid = userId
+        try? await database.dbQueue.write { db in
+            let existing = try Row.fetchOne(db, sql: """
+                SELECT id, display_name, phone_number, personality_punchline,
+                       photo_local_uri, photo_drive_file_id, photo_updated_at
+                FROM profile_settings WHERE user_id = ? LIMIT 1
+                """, arguments: [uid])
+            let now = IsoClock.nowIso()
+
+            if existing == nil {
+                // First sync for this user — seed the row from UserDefaults
+                // and mark dirty so the next metadata push uploads it.
+                let rowId = Uuidv7.generate()
+                try db.execute(sql: """
+                    INSERT INTO profile_settings (
+                        id, user_id, display_name, phone_number,
+                        personality_punchline, photo_local_uri,
+                        photo_drive_file_id, photo_updated_at,
+                        drive_file_id, created_at, updated_at, dirty, deleted_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, 1, NULL)
+                    """, arguments: [
+                        rowId, uid, displayName, phoneNumber,
+                        punchline, photoLocalUri,
+                        photoLocalUri != nil ? now : nil as String?,
+                        now, now,
+                    ])
+            } else {
+                let existingDisplayName  = existing?["display_name"]          as String?
+                let existingPhoneNumber  = existing?["phone_number"]          as String?
+                let existingPunchline    = existing?["personality_punchline"] as String?
+                let existingPhotoUri     = existing?["photo_local_uri"]       as String?
+                let existingPhotoDriveId = existing?["photo_drive_file_id"]   as String?
+                let existingPhotoUpdAt   = existing?["photo_updated_at"]      as String?
+                let profileId            = existing?["id"]                    as String? ?? ""
+
+                let textChanged  = existingDisplayName != displayName
+                                || existingPhoneNumber != phoneNumber
+                                || existingPunchline   != punchline
+                let photoChanged = existingPhotoUri    != photoLocalUri
+                guard textChanged || photoChanged else { return }
+
+                // When photo URI changes: clear photo_drive_file_id so
+                // the binary-upload pass re-uploads the new image and
+                // stamps a fresh Drive file id onto the row.
+                let newPhotoDriveId = photoChanged ? nil : existingPhotoDriveId
+                let newPhotoUpdAt   = photoChanged && photoLocalUri != nil
+                    ? now : existingPhotoUpdAt
+
+                let rowId = profileId
+                try db.execute(sql: """
+                    UPDATE profile_settings SET
+                        display_name          = ?,
+                        phone_number          = ?,
+                        personality_punchline = ?,
+                        photo_local_uri       = ?,
+                        photo_drive_file_id   = ?,
+                        photo_updated_at      = ?,
+                        updated_at            = ?,
+                        dirty                 = 1
+                    WHERE id = ?
+                    """, arguments: [
+                        displayName, phoneNumber, punchline,
+                        photoLocalUri, newPhotoDriveId, newPhotoUpdAt,
+                        now, rowId,
+                    ])
+            }
+        }
     }
 
     /// Best-effort filesystem-resolution check used by the cross-
