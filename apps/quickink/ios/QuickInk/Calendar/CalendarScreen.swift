@@ -423,7 +423,13 @@ private struct CaptureRow: View {
                     .foregroundStyle(QuickInkColors.ink)
                     .lineLimit(1)
                 HStack(spacing: 4) {
-                    Text(capture.source == "import" ? "Import" : "Scan")
+                    Text({
+                            switch capture.source {
+                            case "import": return "Import"
+                            case "photo":  return "Photo"
+                            default:       return "Scan"
+                            }
+                        }())
                         .font(QuickInkText.caption)
                         .foregroundStyle(QuickInkColors.accentDeep)
                     Text("·")

@@ -761,8 +761,17 @@ private fun LibraryNoteCard(
 
             if (hasImage) {
                 val isImport = capture.source == "import"
+                val isPhoto  = capture.source == "photo"
+                // Photo source uses the same neutral chrome as
+                // Scan (both came from the camera) — only the
+                // label disambiguates a one-shot photo from a
+                // multi-page document scan.
                 val badgeIcon = if (isImport) Icons.Filled.Image else Icons.Filled.PhotoCamera
-                val badgeLabel = if (isImport) "Import" else "Scan"
+                val badgeLabel = when {
+                    isImport -> "Import"
+                    isPhoto  -> "Photo"
+                    else     -> "Scan"
+                }
                 val badgeBg = if (isImport) colors.accent else colors.surface.copy(alpha = 0.9f)
                 val badgeFg = if (isImport) colors.textOnAccent else colors.ink.copy(alpha = 0.7f)
 
@@ -1020,13 +1029,19 @@ private fun LibraryScanListRow(
                 horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                val rowIsImport = capture.source == "import"
+                val rowLabel = when (capture.source) {
+                    "import" -> "Import"
+                    "photo"  -> "Photo"
+                    else     -> "Scan"
+                }
                 Text(
-                    text = if (capture.source == "import") "Import" else "Scan",
+                    text = rowLabel,
                     style = type.caption,
-                    color = if (capture.source == "import") colors.textOnAccent else colors.muted,
+                    color = if (rowIsImport) colors.textOnAccent else colors.muted,
                     modifier = Modifier
                         .background(
-                            color = if (capture.source == "import") colors.accent else colors.borderSoft,
+                            color = if (rowIsImport) colors.accent else colors.borderSoft,
                             shape = RoundedCornerShape(QuickInkRadius.sm),
                         )
                         .padding(horizontal = QuickInkSpacing.s2, vertical = 1.dp),

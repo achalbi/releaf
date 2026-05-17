@@ -877,21 +877,40 @@ struct RecentScanThumb: View {
             )
     }
 
+    /// Resolved (icon, label, fg, bg) for the source chip. Three-
+    /// way: "scan" (document scanner — neutral chip, the default),
+    /// "import" (gallery-picked photos — coral accent), "photo"
+    /// (in-app camera shot — neutral chip with a distinct "Photo"
+    /// label so the Library lists distinguish a one-shot photo
+    /// from a multi-page scan). Photo and Scan share the neutral
+    /// chrome on purpose — both came from the camera; only the
+    /// label disambiguates.
+    private var sourceChipInfo: (icon: String, label: String, fg: Color, bg: Color) {
+        switch capture.source {
+        case "import":
+            return ("photo", "Import", QuickInkColors.textOnAccent, QuickInkColors.accent)
+        case "photo":
+            return ("camera.fill", "Photo", QuickInkColors.ink.opacity(0.7), QuickInkColors.surface.opacity(0.9))
+        default:
+            return ("camera.fill", "Scan", QuickInkColors.ink.opacity(0.7), QuickInkColors.surface.opacity(0.9))
+        }
+    }
+
     @ViewBuilder
     private var sourceChip: some View {
-        let isImport = capture.source == "import"
+        let info = sourceChipInfo
         HStack(spacing: 4) {
-            Image(systemName: isImport ? "photo" : "camera.fill")
+            Image(systemName: info.icon)
                 .font(.system(size: 10))
-            Text(isImport ? "Import" : "Scan")
+            Text(info.label)
                 .font(QuickInkText.caption)
         }
-        .foregroundStyle(isImport ? QuickInkColors.textOnAccent : QuickInkColors.ink.opacity(0.7))
+        .foregroundStyle(info.fg)
         .padding(.horizontal, QuickInkSpacing.s2)
         .padding(.vertical, 2)
         .background(
             RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
-                .fill(isImport ? QuickInkColors.accent : QuickInkColors.surface.opacity(0.9))
+                .fill(info.bg)
         )
     }
 

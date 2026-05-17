@@ -32,6 +32,27 @@ import SwiftUI
 import Combine
 import GRDB
 
+/// Resolved visual + label for the source chip rendered on every
+/// capture card / row. Three-way: "scan" (document scanner — the
+/// default neutral chip), "import" (gallery-picked photos — coral
+/// accent), and "photo" (in-app camera shot — neutral chip with
+/// `camera.fill` icon and a distinct "Photo" label). Photo and
+/// Scan share the neutral chrome on purpose — both came from the
+/// camera; only the label disambiguates a one-shot photo from a
+/// multi-page document scan.
+private func sourceChipInfo(
+    for source: String,
+) -> (icon: String, label: String, fg: Color, bg: Color) {
+    switch source {
+    case "import":
+        return ("photo", "Import", QuickInkColors.textOnAccent, QuickInkColors.accent)
+    case "photo":
+        return ("camera.fill", "Photo", QuickInkColors.ink.opacity(0.7), QuickInkColors.surface.opacity(0.9))
+    default:
+        return ("camera.fill", "Scan", QuickInkColors.ink.opacity(0.7), QuickInkColors.surface.opacity(0.9))
+    }
+}
+
 struct NotesListScreen: View {
 
     let userId: String
@@ -477,16 +498,17 @@ struct LibraryNoteCard: View {
                     .padding(.top, QuickInkSpacing.s3)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
 
+                let sourceInfo = sourceChipInfo(for: capture.source)
                 HStack(spacing: 4) {
-                    Image(systemName: capture.source == "import" ? "photo" : "camera.fill")
+                    Image(systemName: sourceInfo.icon)
                         .font(.system(size: 10))
-                    Text(capture.source == "import" ? "Import" : "Scan")
+                    Text(sourceInfo.label)
                         .font(QuickInkText.caption)
                 }
-                .foregroundStyle(capture.source == "import" ? QuickInkColors.textOnAccent : QuickInkColors.ink.opacity(0.7))
+                .foregroundStyle(sourceInfo.fg)
                 .padding(.horizontal, QuickInkSpacing.s2)
                 .padding(.vertical, 3)
-                .background(capture.source == "import" ? QuickInkColors.accent : QuickInkColors.surface.opacity(0.9))
+                .background(sourceInfo.bg)
                 .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous))
                 .padding(QuickInkSpacing.s2)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -661,15 +683,20 @@ struct LibraryScanListRow: View {
                     .foregroundStyle(QuickInkColors.ink)
                     .lineLimit(1)
 
+                let rowSourceInfo = sourceChipInfo(for: capture.source)
                 HStack(spacing: QuickInkSpacing.s2) {
-                    Text(capture.source == "import" ? "Import" : "Scan")
+                    Text(rowSourceInfo.label)
                         .font(QuickInkText.caption)
-                        .foregroundStyle(capture.source == "import" ? QuickInkColors.textOnAccent : QuickInkColors.muted)
+                        .foregroundStyle(
+                            capture.source == "import" ? QuickInkColors.textOnAccent : QuickInkColors.muted,
+                        )
                         .padding(.horizontal, QuickInkSpacing.s2)
                         .padding(.vertical, 1)
                         .background(
                             RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
-                                .fill(capture.source == "import" ? QuickInkColors.accent : QuickInkColors.borderSoft)
+                                .fill(
+                                    capture.source == "import" ? QuickInkColors.accent : QuickInkColors.borderSoft,
+                                )
                         )
                     Text(relativeDate(capture.createdAt))
                         .font(QuickInkText.caption)

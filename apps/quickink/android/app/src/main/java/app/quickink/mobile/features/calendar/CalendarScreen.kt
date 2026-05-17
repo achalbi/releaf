@@ -537,7 +537,13 @@ private fun SelectedDayCapturesList(
                     )
                     Text(
                         text = buildString {
-                            append(if (capture.source == "import") "Import" else "Scan")
+                            append(
+                                when (capture.source) {
+                                    "import" -> "Import"
+                                    "photo"  -> "Photo"
+                                    else     -> "Scan"
+                                },
+                            )
                             append(" · ")
                             append(if (capture.pageCount == 1) "1 page" else "${capture.pageCount} pages")
                         },

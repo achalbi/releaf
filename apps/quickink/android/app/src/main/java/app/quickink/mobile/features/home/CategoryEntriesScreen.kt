@@ -243,19 +243,34 @@ private fun TimelineRow(
                 horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
                 verticalAlignment     = Alignment.CenterVertically,
             ) {
-                // Import chip — flags captures sourced from the
-                // system photo picker rather than the document
-                // scanner. Renders inline with time/page-count
-                // because the thumbnail is too narrow (56dp) to
-                // host a corner pill cleanly.
-                if (capture.source == "import") {
-                    Text(
+                // Source chip — flags captures sourced from the
+                // system photo picker ("Import") or the in-app
+                // photo capture ("Photo") so they stand apart
+                // from the default Document scanner pass. Renders
+                // inline with time/page-count because the
+                // thumbnail is too narrow (56dp) to host a corner
+                // pill cleanly. Imports get the coral accent fill;
+                // Photo uses the neutral borderSoft variant so it
+                // sits closer to the default Scan visual (both
+                // came from the camera, only the label
+                // disambiguates).
+                when (capture.source) {
+                    "import" -> Text(
                         text  = "Import",
                         style = type.caption,
                         color = colors.textOnAccent,
                         modifier = Modifier
                             .clip(RoundedCornerShape(QuickInkRadius.sm))
                             .background(colors.accent)
+                            .padding(horizontal = QuickInkSpacing.s2, vertical = 1.dp),
+                    )
+                    "photo" -> Text(
+                        text  = "Photo",
+                        style = type.caption,
+                        color = colors.ink.copy(alpha = 0.75f),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(QuickInkRadius.sm))
+                            .background(colors.borderSoft)
                             .padding(horizontal = QuickInkSpacing.s2, vertical = 1.dp),
                     )
                 }

@@ -1892,6 +1892,7 @@ private fun RecentScanThumb(
         bottomEnd   = 0.dp,
     )
     val isImport   = capture.source == "import"
+    val isPhoto    = capture.source == "photo"
 
     Column(
         modifier = Modifier
@@ -1939,9 +1940,20 @@ private fun RecentScanThumb(
                 )
             }
 
-            // Source badge — viewfinder glyph + "Scan" / "Import"
-            // text on a soft surface chip. Coral fill for imports
-            // so the source distinction reads at a glance.
+            // Source badge — three-way: "scan" (document scanner —
+            // neutral chip, default), "import" (gallery-picked photos
+            // — coral accent), "photo" (in-app camera shot — neutral
+            // chip with a distinct "Photo" label so the Library lists
+            // distinguish a one-shot photo from a multi-page document
+            // scan). Photo and Scan share the neutral chrome on
+            // purpose; only the label disambiguates.
+            val label = when {
+                isImport -> "Import"
+                isPhoto  -> "Photo"
+                else     -> "Scan"
+            }
+            val chipBg = if (isImport) colors.accent else colors.surface.copy(alpha = 0.92f)
+            val chipFg = if (isImport) colors.textOnAccent else colors.ink.copy(alpha = 0.75f)
             Row(
                 verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -1949,7 +1961,7 @@ private fun RecentScanThumb(
                     .align(Alignment.TopStart)
                     .padding(QuickInkSpacing.s2)
                     .background(
-                        color = if (isImport) colors.accent else colors.surface.copy(alpha = 0.92f),
+                        color = chipBg,
                         shape = RoundedCornerShape(4.dp),
                     )
                     .padding(horizontal = QuickInkSpacing.s2, vertical = 3.dp),
@@ -1957,13 +1969,13 @@ private fun RecentScanThumb(
                 Icon(
                     imageVector        = Icons.Filled.CenterFocusWeak,
                     contentDescription = null,
-                    tint               = if (isImport) colors.textOnAccent else colors.ink.copy(alpha = 0.75f),
+                    tint               = chipFg,
                     modifier           = Modifier.size(12.dp),
                 )
                 Text(
-                    text  = if (isImport) "Import" else "Scan",
+                    text  = label,
                     style = type.caption,
-                    color = if (isImport) colors.textOnAccent else colors.ink.copy(alpha = 0.75f),
+                    color = chipFg,
                 )
             }
 
