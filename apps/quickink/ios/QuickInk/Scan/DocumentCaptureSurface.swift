@@ -5,13 +5,18 @@
  * existing VisionKit `VNDocumentCameraViewController` flow
  * verbatim. Owned by `QuickCaptureScreen`, which mounts this
  * view when `CaptureMode.document` is active and tears it
- * down on a flip to `.businessCard`.
+ * down on a flip to `.businessCard` (pill) or `.photo`
+ * (shutter-row Photo icon → `onSelectPhoto` callback).
  *
  * Behavior is the same as the previous all-in-one
  * QuickCaptureScreen body: page-mode pill (Single /
  * Multi-page) + tilted lined-paper page mock + shutter
  * that presents the system scanner + Import button that opens
- * PhotosPicker. The scanner result flows through
+ * PhotosPicker. The shutter row's left slot now hosts a
+ * Photo icon that fires `onSelectPhoto` so the user can jump
+ * into the Photo capture surface from inside the Document
+ * flow (a discoverability mirror of the FAB long-press
+ * shortcut). The scanner result flows through
  * `ScanFlowController.onScanComplete` exactly as before — no
  * detector swap, no overlay, no in-app camera.
  *

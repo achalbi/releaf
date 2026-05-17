@@ -3,7 +3,7 @@
  *
  * Top-level capture surface. Owns the cross-surface chrome —
  * close button, the Document/Business-Card mode pill — and
- * dispatches the live area below the top bar to one of two
+ * dispatches the live area below the top bar to one of three
  * child surfaces:
  *
  *   - `DocumentCaptureSurface`     — the existing VisionKit
@@ -18,6 +18,20 @@
  *                                    overlay and a custom
  *                                    detector that auto-captures
  *                                    on a stable quad.
+ *   - `PhotoCaptureSurface`        — a plain single-shot still
+ *                                    camera. No pill slot —
+ *                                    entered transiently via
+ *                                    the bottom-nav ⚡ FAB's
+ *                                    long-press (`initialMode:
+ *                                    .photo` on this screen)
+ *                                    or via the Photo icon in
+ *                                    the other two surfaces'
+ *                                    shutter rows. The pill
+ *                                    keeps highlighting the
+ *                                    last pill-selected mode
+ *                                    while the photo surface
+ *                                    is up, so tapping a pill
+ *                                    flips back with one tap.
  *
  * Why two surfaces instead of one shared camera session:
  * Document mode is hosted by Apple's
@@ -25,7 +39,7 @@
  * `AVCaptureSession` internally — we can't share it with an
  * in-process camera. The toggle picks the surface; mode-switch
  * latency is dominated by SwiftUI's mount/unmount of one of
- * two child views, which is well under the spec's 100 ms
+ * the child views, which is well under the spec's 100 ms
  * budget.
  *
  * The mode pill lives in the top bar (where the "Capture"
@@ -51,6 +65,19 @@ struct QuickCaptureScreen: View {
     /// CaptureModeCoordinator.
     @StateObject private var coordinator: CaptureModeCoordinator
 
+    /// The most recent pill-selected mode (Document or Business
+    /// Card — never `.photo`). Drives the highlighted option in
+    /// the top-bar pill. Diverges from `coordinator.mode` when
+    /// the user enters `.photo` transiently via the FAB long-
+    /// press or the shutter-row Photo icon: the pill keeps
+    /// showing whatever pill choice the user last made, so on
+    /// the photo surface the user still sees "Document" or
+    /// "Business Card" highlighted and can flip back with one
+    /// tap. Matches spec test #5 ("top-bar pill should still
+    /// read 'Document'") and spec §11 ("the user can switch to
+    /// Document mode via the pill without re-granting").
+    @State private var lastPillMode: CaptureMode
+
     /// Optional override for the starting surface. `nil` (the
     /// default) reads `quickink.capture.last_mode` from
     /// UserDefaults as before. Passing `.photo` lets the bottom-
@@ -66,9 +93,16 @@ struct QuickCaptureScreen: View {
     ) {
         self.controller = controller
         self.onDismiss = onDismiss
-        let starting: CaptureMode = initialMode ?? CaptureMode.fromAnalyticsKey(
+        let persistedPillMode = CaptureMode.fromAnalyticsKey(
             UserDefaults.standard.string(forKey: "quickink.capture.last_mode")
         )
+        let starting: CaptureMode = initialMode ?? persistedPillMode
+        // `lastPillMode` always tracks a pill-eligible mode
+        // (Document / Business Card). On long-press entry the
+        // surface starts on `.photo` but the pill still shows
+        // the persisted pill choice — never highlight `.photo`
+        // in the pill, since `.photo` doesn't have a pill slot.
+        _lastPillMode = State(initialValue: persistedPillMode == .photo ? .document : persistedPillMode)
         // Long-press → `.photo` is transient: it should NOT
         // overwrite the user's last pill choice. Gate the
         // persist hook so only pill-eligible modes round-trip
@@ -148,29 +182,23 @@ struct QuickCaptureScreen: View {
 
             Spacer()
 
-            // Pill stays two-wide (Document / Business Card).
-            // `.photo` is a transient surface reached via long-
-            // press on the FAB or the in-shutter-row Photo icon,
-            // not via the pill — so on the photo surface we hide
-            // the pill rather than paint it with no active state.
-            // The user exits photo mode by tapping the close
-            // button or completing the capture.
-            if coordinator.mode != .photo {
-                ModeTogglePill(
-                    current:  coordinator.mode,
-                    onSelect: { coordinator.select($0) },
-                )
-            } else {
-                Text("Photo")
-                    .font(QuickInkText.label)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, QuickInkSpacing.s4)
-                    .padding(.vertical, QuickInkSpacing.s2)
-                    .background(
-                        RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous)
-                            .fill(Color.white.opacity(0.10))
-                    )
-            }
+            // Pill stays two-wide (Document / Business Card)
+            // AND stays visible on every surface — including
+            // `.photo`. `current:` reads from `lastPillMode`,
+            // not `coordinator.mode`, so on the photo surface
+            // the user still sees their previous pill choice
+            // highlighted (per spec test #5) and can flip back
+            // to Document / Business Card with one tap (per
+            // spec §11, which expects the pill to be available
+            // as an escape hatch when camera permission is
+            // denied for photo mode).
+            ModeTogglePill(
+                current:  lastPillMode,
+                onSelect: { mode in
+                    lastPillMode = mode
+                    coordinator.select(mode)
+                },
+            )
 
             Spacer()
 

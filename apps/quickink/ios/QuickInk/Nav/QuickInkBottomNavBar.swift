@@ -66,14 +66,18 @@ public struct QuickInkBottomNavBar: View {
     public let onLongPressScan: () -> Void
     public let onStories: () -> Void
     public let onSettings: () -> Void
-    /// First-launch discoverability hint above the ⚡ FAB —
-    /// renders the floating "Hold ⚡ for a quick photo" chip
-    /// when `true`. The caller (MainShell) computes this from
-    /// two `@AppStorage` bools managed via `PhotoFabHint`:
-    /// hint shows after the user's first completed scan and
-    /// hides permanently after their first FAB long-press.
+    /// Discoverability hint above the ⚡ FAB — renders the
+    /// floating "Hold ⚡ for a quick photo" chip when `true`.
+    /// The caller (MainShell) reads this from `PhotoFabHint`'s
+    /// `@StateObject` (`!dismissed`): the chip shows on every
+    /// launch until the user long-presses the FAB once, after
+    /// which it stays dismissed permanently across launches.
     /// Defaults to `false` so legacy hosts / previews opt in
-    /// explicitly. Spec §3.1.
+    /// explicitly. Spec §3.1 (the spec also gated this on
+    /// "after the user has scanned at least once"; we dropped
+    /// that gate so existing users upgrading into this build
+    /// see the chip immediately rather than after one more
+    /// scan — see `PhotoFabHint` docblock).
     public let showPhotoHint: Bool
 
     public init(

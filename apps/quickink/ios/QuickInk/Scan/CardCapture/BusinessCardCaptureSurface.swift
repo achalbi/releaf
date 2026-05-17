@@ -38,7 +38,11 @@
  *      surface. Tap fires `capturePhoto` immediately,
  *      regardless of detection state; the post-processor
  *      falls back to the guide rect as the quad when no
- *      valid detection is in flight.
+ *      valid detection is in flight. The shutter row's
+ *      left slot also hosts a Photo icon that fires
+ *      `onSelectPhoto` so the user can jump into the Photo
+ *      capture surface from inside the card flow (matches
+ *      the same affordance Document mode exposes).
  *
  * Threading: the AVCapture delegates fire on a dedicated
  * `DispatchQueue` (sessionQueue / sampleBufferQueue); state
