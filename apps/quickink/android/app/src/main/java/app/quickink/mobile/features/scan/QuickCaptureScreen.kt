@@ -97,6 +97,13 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
 @Composable
 fun QuickCaptureScreen(
     controller: ScanFlowController,
+    /**
+     * Owning user — only consumed by the `.Photo` branch today
+     * (to attach the extracted-audio voice note after a video
+     * recording), but threaded through every surface for
+     * symmetry with iOS.
+     */
+    userId: String,
     onDismiss: () -> Unit,
     /**
      * Optional override for the starting surface. `null` (the
@@ -247,6 +254,7 @@ fun QuickCaptureScreen(
                 )
                 CaptureMode.Photo -> PhotoCaptureSurface(
                     controller = controller,
+                    userId     = userId,
                     onDismiss  = onDismiss,
                     modifier   = Modifier.weight(1f),
                 )

@@ -595,6 +595,7 @@ private fun MainShell(
         }
         QuickCaptureScreen(
             controller   = controller,
+            userId       = userId,
             onDismiss    = {
                 showQuickCapture = false
                 // Reset to null on dismiss so a subsequent

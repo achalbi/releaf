@@ -1,8 +1,8 @@
 /*
  * PhotoCaptureSurface.swift
  *
- * Third capture surface — a single-shot still-photo camera that
- * plugs into the existing scan pipeline. Sibling to
+ * Third capture surface — a single-shot still camera that ALSO
+ * doubles as a hold-to-record video recorder. Sibling to
  * `DocumentCaptureSurface` (VisionKit) and
  * `BusinessCardCaptureSurface` (AVCaptureSession + quad detector).
  * Reached two ways:
@@ -16,46 +16,39 @@
  *
  *   2. A Photo icon in the shutter row of `DocumentCaptureSurface`
  *      / `BusinessCardCaptureSurface`, which calls back through
- *      the coordinator to flip `mode = .photo`. Pill stays two-
- *      wide on the top bar; QuickCaptureScreen swaps in a static
- *      "Photo" chip while this surface is mounted.
+ *      the coordinator to flip `mode = .photo`.
  *
- * Top-down structure mirrors `BusinessCardCaptureSurface` minus
- * the detector / stability gate / overlay:
+ * Shutter gesture (per Instagram / WhatsApp camera convention):
  *
- *   1. Camera-permission gate — AVAuthorizationStatus pre-flight
- *      with rationale + Grant / Open Settings CTA. The mode pill
- *      stays on the parent so the user can switch back to
- *      Document mode without granting.
+ *   - Quick tap        → still photo capture
+ *                        (`AVCapturePhotoOutput.capturePhoto`).
+ *   - Press-and-hold   → video recording starts after a 0.3s
+ *                        threshold (so a normal tap doesn't
+ *                        accidentally start a 1-frame video).
+ *                        Release stops the recording; a hard 2:00
+ *                        cap is enforced by
+ *                        `AVCaptureMovieFileOutput.maxRecordedDuration`
+ *                        so the user can hold forever without
+ *                        blowing up a transcription pass downstream.
  *
- *   2. UIViewRepresentable-wrapped AVCaptureVideoPreviewLayer
- *      bound to a session preset of `.photo` with a single
- *      `AVCapturePhotoOutput`. No video-data delegate — photo
- *      mode has no per-frame work to do, so we skip the
- *      sample-buffer plumbing the card surface needs.
+ * After capture (still OR video), the surface lands on the same
+ * captured-preview UI: a frozen first frame (or the still) +
+ * Retake / Use Photo. Use Photo writes the JPEG via
+ * `ImportArtifacts.build(from: [image])`, fires
+ * `controller.onScanComplete(source: "photo", paperSize: .custom)`,
+ * and — when the capture was a video — inserts the extracted
+ * audio track as a voice note against the freshly-created
+ * captureId. The voice-note capture pane downstream sees the
+ * pre-attached note and auto-advances to the review screen so
+ * the user doesn't get prompted to record a voice note for a
+ * clip we already extracted from their own audio.
  *
- *   3. Shutter row — same 78pt coral disc + white ring as the
- *      Document / Business Card surfaces, SF Symbol swapped to
- *      `camera.fill`. Tap fires `AVCapturePhotoOutput.capturePhoto`
- *      and flips the surface to the `.captured` state.
- *
- *   4. Captured-state preview — frozen still + Retake / Use Photo
- *      buttons. Use Photo runs `ImportArtifacts.build(from:
- *      [image])` (same helper the PhotosPicker import path uses)
- *      and calls `controller.onScanComplete(source: "photo",
- *      paperSize: .custom)`, then `onDismiss()` to collapse the
- *      capture cover. QuickInkRoot is already observing the
- *      controller and mounts `ScanCaptureSurface` (voice note →
- *      review) on the next render — the post-capture sequencing
- *      is source-agnostic, so the photo path lands on the same
- *      VoiceNoteCapturePane → ScanReviewScreen Document and
- *      Business Card surfaces already drive.
- *
- * Why no flash / flip / focus controls in v1: the spec calls
- * them out as nice-to-have but the basic shutter + retake +
- * commit path is the load-bearing piece. Adding them later is
- * an additive change to the `.preview` state's chrome row and
- * the `AVCapturePhotoSettings` builder — no scaffolding change.
+ * The raw .mov video file is NOT persisted to AttachmentStorage —
+ * only the first-frame JPEG (as the page) and the .m4a (as the
+ * voice note) survive. Spec §6 calls out `paperSize=.custom` for
+ * photo mode; video clips inherit the same since the first frame
+ * is still an arbitrary phone-camera frame whose aspect ratio
+ * tells us nothing about A4 / Letter / card bands.
  *
  * Mirror of Android `PhotoCaptureSurface.kt`.
  */
@@ -63,12 +56,13 @@
 import SwiftUI
 import AVFoundation
 import UIKit
+import ReleafCoreData
 import ReleafCoreScan
 
-/// Discoverability state for the Photo-capture long-press
-/// shortcut on the bottom-nav ⚡ FAB. Owns the single persisted
-/// `dismissed` flag that gates the "Hold ⚡ for a quick photo"
-/// chip above the FAB.
+/// Discoverability state for the Photo-capture long-press shortcut
+/// on the bottom-nav ⚡ FAB. Owns the single persisted `dismissed`
+/// flag that gates the "Hold ⚡ for a quick photo" chip above the
+/// FAB.
 ///
 /// Why this is an `ObservableObject` rather than a plain enum
 /// of statics on top of `@AppStorage`: in practice `@AppStorage`
@@ -114,9 +108,30 @@ public final class PhotoFabHint: ObservableObject {
     }
 }
 
+/// Hard cap on a single hold-to-record video clip. Past this the
+/// recording auto-stops via
+/// `AVCaptureMovieFileOutput.maxRecordedDuration` and lands on
+/// the captured-preview state. Two minutes is long enough for a
+/// realistic dictation-while-capturing scenario and short enough
+/// that the m4a transcription pass downstream stays bounded.
+private let maxVideoRecordingSeconds: Int = 120
+
+/// Threshold after touch-down before we commit to recording a
+/// video. Releases shorter than this fire the still capture path
+/// instead. 0.3s matches the FAB long-press feel and gives the
+/// user a clear "tap vs hold" affordance.
+private let videoHoldThresholdMs: Int = 300
+
 struct PhotoCaptureSurface: View {
 
     let controller: ScanFlowController
+    /// Owning user — required so the post-video voice-note insert
+    /// can populate `voice_notes.user_id`. Threaded down from
+    /// `QuickInkRoot`'s `MainShell` → `QuickCaptureScreen` →
+    /// here. Kept as a stored property rather than an environment
+    /// value because the host already passes it explicitly to
+    /// every other capture surface for symmetry.
+    let userId: String
     let onDismiss: () -> Void
 
     @State private var permissionStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
@@ -125,11 +140,11 @@ struct PhotoCaptureSurface: View {
         ZStack {
             switch permissionStatus {
             case .authorized:
-                ActivePhotoSurface(controller: controller, onDismiss: onDismiss)
+                ActivePhotoSurface(controller: controller, userId: userId, onDismiss: onDismiss)
             case .notDetermined:
                 PhotoPermissionRationale(
                     title:     "Allow camera to take photos",
-                    message:   "Photo mode uses your camera to capture a still image. You can still scan documents and import from your library without it.",
+                    message:   "Photo mode uses your camera to capture a still image or a quick video. You can still scan documents and import from your library without it.",
                     onRequest: requestPermission,
                 )
             case .denied, .restricted:
@@ -141,7 +156,7 @@ struct PhotoCaptureSurface: View {
             @unknown default:
                 PhotoPermissionRationale(
                     title:     "Allow camera to take photos",
-                    message:   "Photo mode uses your camera to capture a still image.",
+                    message:   "Photo mode uses your camera to capture a still image or a quick video.",
                     onRequest: requestPermission,
                 )
             }
@@ -150,6 +165,9 @@ struct PhotoCaptureSurface: View {
             // Auto-prompt on first mount when permission status
             // is still .notDetermined. Subsequent mounts skip
             // the request because the OS persists the decision.
+            // Microphone permission is requested lazily at the
+            // moment the user starts a video recording — keeps
+            // the permission ask tightly coupled to the action.
             if permissionStatus == .notDetermined {
                 let granted = await AVCaptureDevice.requestAccess(for: .video)
                 permissionStatus = granted ? .authorized : .denied
@@ -177,6 +195,7 @@ struct PhotoCaptureSurface: View {
 private struct ActivePhotoSurface: View {
 
     let controller: ScanFlowController
+    let userId: String
     let onDismiss: () -> Void
 
     @StateObject private var session: PhotoCaptureSession = PhotoCaptureSession()
@@ -186,21 +205,36 @@ private struct ActivePhotoSurface: View {
     /// Shown as a toast above the Use Photo CTA so the user can
     /// retry without losing the buffer.
     @State private var commitError: String? = nil
+    @State private var isCommitting: Bool = false
+
+    /// Touch-down timestamp for the shutter button. Used by the
+    /// DragGesture-based shutter to discriminate quick taps (fire
+    /// the still capture) from holds (fire the video recording).
+    /// Nil when the user isn't currently touching the shutter.
+    @State private var pressStart: Date? = nil
+
+    /// Outstanding timer that promotes a press into a recording
+    /// at the `videoHoldThresholdMs` mark. Cancelled if the user
+    /// releases early (→ still photo) or once recording starts.
+    @State private var pendingRecordingStart: DispatchWorkItem? = nil
 
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
                 switch session.state {
-                case .preview, .capturing:
+                case .preview, .recording, .capturing, .processing:
                     PhotoSessionView(session: session)
                         .ignoresSafeArea(edges: .horizontal)
-                    if session.state == .capturing {
+                    if case .recording(let elapsed) = session.state {
+                        recordingOverlay(elapsedSeconds: elapsed)
+                    }
+                    if session.state == .capturing || session.state == .processing {
                         Color.black.opacity(0.25).ignoresSafeArea(edges: .horizontal)
                         ProgressView()
                             .progressViewStyle(.circular)
                             .tint(.white)
                     }
-                case .captured(let image):
+                case .captured(let image, _, _):
                     capturedPreview(image: image)
                 }
             }
@@ -209,10 +243,10 @@ private struct ActivePhotoSurface: View {
             // Bottom action row swaps based on state. Live preview
             // shows the shutter; captured shows Retake / Use Photo.
             switch session.state {
-            case .preview, .capturing:
+            case .preview, .capturing, .processing, .recording:
                 shutterRow
-            case .captured(let image):
-                commitRow(image: image)
+            case .captured:
+                commitRow
             }
         }
         .background(Color.black)
@@ -221,6 +255,7 @@ private struct ActivePhotoSurface: View {
         }
         .onDisappear {
             session.stop()
+            cancelPendingRecordingStart()
             // Drop the captured buffer on disappear (e.g. app
             // backgrounded during `.captured`). The spec marks
             // the buffer volatile by design — preserving it
@@ -230,15 +265,61 @@ private struct ActivePhotoSurface: View {
         }
     }
 
+    // MARK: - Recording overlay
+
+    @ViewBuilder
+    private func recordingOverlay(elapsedSeconds: Int) -> some View {
+        VStack {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 8, height: 8)
+                Text(formatRecordingTime(elapsedSeconds))
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            .padding(.horizontal, QuickInkSpacing.s3)
+            .padding(.vertical, QuickInkSpacing.s2)
+            .background(Capsule().fill(Color.black.opacity(0.55)))
+            .padding(.top, QuickInkSpacing.s5)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func formatRecordingTime(_ seconds: Int) -> String {
+        let mm = seconds / 60
+        let ss = seconds % 60
+        return String(format: "%01d:%02d", mm, ss)
+    }
+
     // MARK: - Captured-state preview
 
     @ViewBuilder
     private func capturedPreview(image: UIImage) -> some View {
-        Image(uiImage: image)
-            .resizable()
-            .scaledToFit()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black)
+        ZStack(alignment: .topLeading) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+            // Small video badge so the user can tell a tap-still
+            // from a hold-video at a glance on the Retake/Use Photo
+            // screen (the bottom row doesn't disambiguate).
+            if case .captured(_, let audioURL, _) = session.state, audioURL != nil {
+                HStack(spacing: 4) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("With audio")
+                        .font(QuickInkText.caption)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, QuickInkSpacing.s3)
+                .padding(.vertical, QuickInkSpacing.s2)
+                .background(Capsule().fill(Color.black.opacity(0.55)))
+                .padding(QuickInkSpacing.s4)
+            }
+        }
     }
 
     // MARK: - Shutter row (live)
@@ -248,21 +329,102 @@ private struct ActivePhotoSurface: View {
         VStack(spacing: QuickInkSpacing.s2) {
             HStack {
                 Spacer()
-                PhotoShutterButton(onTap: triggerShutter)
-                    .disabled(session.state == .capturing)
-                    .opacity(session.state == .capturing ? 0.5 : 1.0)
+                PhotoShutterButton(
+                    isRecording: {
+                        if case .recording = session.state { return true }
+                        return false
+                    }(),
+                )
+                .gesture(shutterGesture)
+                .disabled(session.state == .capturing || session.state == .processing)
+                .opacity((session.state == .capturing || session.state == .processing) ? 0.5 : 1.0)
                 Spacer()
             }
+            shutterHint
         }
         .padding(.horizontal, QuickInkSpacing.s5)
         .padding(.vertical, QuickInkSpacing.s4)
         .padding(.bottom, QuickInkSpacing.s7)
     }
 
+    /// Subtle copy under the shutter in the live state. Surfaces
+    /// the dual gesture so a first-time user doesn't have to
+    /// discover the hold-to-record behaviour through trial and
+    /// error. Hidden during recording so the gesture-elapsed
+    /// chip up top owns the chrome.
+    @ViewBuilder
+    private var shutterHint: some View {
+        if case .recording = session.state {
+            EmptyView()
+        } else {
+            Text("Tap for photo · hold for video")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.55))
+        }
+    }
+
+    // MARK: - Shutter gesture (tap vs hold)
+
+    /// DragGesture with `minimumDistance: 0` is the canonical
+    /// Compose-like "press detector" in SwiftUI. We don't care
+    /// about the drag itself — just the touch-down (onChanged
+    /// first fire) and touch-up (onEnded) events — so we use the
+    /// gesture as a stand-in for a `PointerInput` press listener.
+    /// At touch-down we schedule a 0.3s timer; if it fires while
+    /// the finger is still down, recording starts. Touch-up
+    /// before the timer → still photo; touch-up after the timer
+    /// → stop recording.
+    private var shutterGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .onChanged { _ in
+                if pressStart != nil { return }
+                pressStart = Date()
+                scheduleRecordingStart()
+            }
+            .onEnded { _ in
+                defer { pressStart = nil }
+                cancelPendingRecordingStart()
+                if case .recording = session.state {
+                    session.stopVideoRecording()
+                } else if session.state == .preview {
+                    // Released before the 0.3s threshold without
+                    // the recording having kicked in → still
+                    // photo.
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    CaptureAnalytics.manualFired(mode: .photo)
+                    session.triggerCapture()
+                }
+            }
+    }
+
+    private func scheduleRecordingStart() {
+        cancelPendingRecordingStart()
+        let work = DispatchWorkItem {
+            // If the user is still pressing AND the session is
+            // still in preview (i.e. they haven't already
+            // triggered something), promote the press into a
+            // recording.
+            guard pressStart != nil, session.state == .preview else { return }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            CaptureAnalytics.manualFired(mode: .photo)
+            session.startVideoRecording()
+        }
+        pendingRecordingStart = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + .milliseconds(videoHoldThresholdMs),
+            execute: work,
+        )
+    }
+
+    private func cancelPendingRecordingStart() {
+        pendingRecordingStart?.cancel()
+        pendingRecordingStart = nil
+    }
+
     // MARK: - Commit row (captured)
 
     @ViewBuilder
-    private func commitRow(image: UIImage) -> some View {
+    private var commitRow: some View {
         VStack(spacing: QuickInkSpacing.s3) {
             if let commitError = commitError {
                 Text(commitError)
@@ -289,14 +451,21 @@ private struct ActivePhotoSurface: View {
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Retake photo")
+                .disabled(isCommitting)
+                .accessibilityLabel("Retake")
 
                 Spacer()
 
-                Button(action: { commit(image: image) }) {
+                Button(action: commit) {
                     HStack(spacing: 6) {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .semibold))
+                        if isCommitting {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
                         Text("Use Photo")
                             .font(QuickInkText.label)
                     }
@@ -308,7 +477,8 @@ private struct ActivePhotoSurface: View {
                     .shadow(color: QuickInkColors.accent.opacity(0.5), radius: 12, x: 0, y: 4)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Use this photo")
+                .disabled(isCommitting)
+                .accessibilityLabel("Use this capture")
             }
         }
         .padding(.horizontal, QuickInkSpacing.s5)
@@ -316,22 +486,25 @@ private struct ActivePhotoSurface: View {
         .padding(.bottom, QuickInkSpacing.s7)
     }
 
-    private func triggerShutter() {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        CaptureAnalytics.manualFired(mode: .photo)
-        session.triggerCapture()
-    }
-
     private func retake() {
         commitError = nil
         session.discardBuffer()
     }
 
-    private func commit(image: UIImage) {
+    /// Use Photo handler. Builds the photo artifacts (PDF + JPEG)
+    /// from the captured frame, runs the controller's scan-
+    /// complete pass, and — when the capture was a video — pins
+    /// the extracted audio as a voice note against the freshly
+    /// created captureId. The voice-note pane downstream auto-
+    /// advances when it sees the pre-attached row, so the user
+    /// flows straight to the review screen.
+    private func commit() {
+        guard case .captured(let image, let audioURL, let durationMs) = session.state else { return }
         guard let result = ImportArtifacts.build(from: [image]) else {
             commitError = "Couldn't save photo — try again"
             return
         }
+        isCommitting = true
         controller.onScanComplete(
             pdfURL:     result.pdfURL,
             previewURL: result.previewURL,
@@ -339,31 +512,96 @@ private struct ActivePhotoSurface: View {
             source:     "photo",
             paperSize:  .custom,
         )
-        onDismiss()
+        // `onScanComplete` flips the controller into
+        // `.recognizing` synchronously, so the captureId is
+        // already on the state object by the time we read it
+        // back. Insert the voice note BEFORE dismissing so the
+        // `VoiceNoteCapturePane` downstream sees an existing
+        // row on its first query and auto-advances.
+        let captureId: String? = {
+            if case .recognizing(let id, _, _) = controller.state { return id }
+            return nil
+        }()
+        let pendingAudioURL = audioURL
+        let pendingDuration = durationMs
+        let pendingUserId   = userId
+        Task {
+            if let captureId = captureId,
+               let audioURL  = pendingAudioURL,
+               let duration  = pendingDuration {
+                await Self.attachVoiceNote(
+                    captureId:    captureId,
+                    userId:       pendingUserId,
+                    audioFileURL: audioURL,
+                    durationMs:   duration,
+                )
+            }
+            await MainActor.run { onDismiss() }
+        }
+    }
+
+    /// Persist the extracted audio as a voice note attached to
+    /// the just-created capture, then kick off the existing
+    /// background transcription pass. Mirrors the pre-commit
+    /// hand-off in `VoiceNoteCapturePane.commit(uri:durationMs:)`.
+    private static func attachVoiceNote(
+        captureId: String,
+        userId: String,
+        audioFileURL: URL,
+        durationMs: Int,
+    ) async {
+        let repo = VoiceNoteRepository()
+        do {
+            let row = try await repo.insert(
+                captureId:  captureId,
+                userId:     userId,
+                audioUri:   audioFileURL.absoluteString,
+                durationMs: durationMs,
+            )
+            Task.detached(priority: .userInitiated) {
+                let granted = await VoiceTranscriber.requestPermission()
+                guard granted else { return }
+                guard let transcript = await VoiceTranscriber.transcribe(fileURL: audioFileURL) else { return }
+                try? await VoiceNoteRepository().setTranscription(
+                    id:            row.id,
+                    transcription: transcript.text,
+                    source:        transcript.source,
+                )
+            }
+        } catch {
+            // Soft failure — the capture lands without a voice
+            // note. The user can record one manually from the
+            // detail screen.
+            print("PhotoCaptureSurface attachVoiceNote failed: \(error)")
+        }
     }
 }
 
 // MARK: - Shutter button
 
+/// 78pt coral disc, swapped to a red recording-stop variant
+/// while a video recording is in flight. The button itself has
+/// no gesture wiring — the parent's `DragGesture` handles tap
+/// vs hold so the shutter button just paints state.
 private struct PhotoShutterButton: View {
-    let onTap: () -> Void
+    let isRecording: Bool
     var body: some View {
-        Button(action: onTap) {
-            ZStack {
-                Circle()
-                    .stroke(Color.white.opacity(0.6), lineWidth: 3)
-                    .frame(width: 78, height: 78)
-                Circle()
-                    .fill(QuickInkColors.accent)
-                    .frame(width: 64, height: 64)
-                Image(systemName: "camera.fill")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .shadow(color: QuickInkColors.accent.opacity(0.5), radius: 16, x: 0, y: 6)
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.6), lineWidth: 3)
+                .frame(width: 78, height: 78)
+            Circle()
+                .fill(isRecording ? Color.red : QuickInkColors.accent)
+                .frame(width: 64, height: 64)
+            Image(systemName: isRecording ? "stop.fill" : "camera.fill")
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(.white)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Take photo")
+        .shadow(
+            color: (isRecording ? Color.red : QuickInkColors.accent).opacity(0.5),
+            radius: 16, x: 0, y: 6,
+        )
+        .accessibilityLabel(isRecording ? "Stop recording" : "Take photo or hold to record")
     }
 }
 
@@ -448,40 +686,66 @@ private final class PhotoPreviewUIView: UIView {
 
 // MARK: - Session coordinator
 
-/// Minimal AVCaptureSession wrapper for the photo surface. Unlike
-/// `CardCaptureSession` we don't bind a video-data output — photo
-/// mode has no per-frame detection work, so the session has only
-/// a back-camera input + a single `AVCapturePhotoOutput`. State
-/// transitions:
+/// AVCaptureSession wrapper for the photo surface. Has THREE
+/// outputs:
+///   - `AVCapturePhotoOutput`       — still capture on tap.
+///   - `AVCaptureMovieFileOutput`   — hold-to-record video.
+///   - (audio input)                — feeds the movie output's
+///                                    audio track for downstream
+///                                    transcription.
 ///
-///   .preview    ─ live AVCaptureSession running, shutter armed
+/// State transitions:
+///
+///   .preview         ─ live AVCaptureSession running, shutter
+///                      armed (both still + video paths).
 ///        │ triggerCapture()
 ///        ▼
-///   .capturing  ─ photo output in flight; preview frozen
+///   .capturing       ─ still photo output in flight; preview
+///                      frozen behind a dim scrim.
 ///        │ photoOutput delegate fires
 ///        ▼
-///   .captured(UIImage)
+///   .captured(UIImage, audioURL: nil, durationMs: nil)
 ///        │ discardBuffer() (Retake or .onDisappear)
 ///        ▼
 ///   .preview
+///
+///   .preview
+///        │ startVideoRecording()
+///        ▼
+///   .recording(elapsedSeconds: Int)
+///        │ stopVideoRecording() OR max-2:00 cap fires
+///        ▼
+///   .processing      ─ extracting first frame + audio from the
+///                      saved .mov so the captured-preview UI
+///                      has a stable frozen-still and a separate
+///                      .m4a path to hand the voice-note pipeline.
+///        │ extraction completes
+///        ▼
+///   .captured(UIImage, audioURL: .some, durationMs: .some)
 @MainActor
 private final class PhotoCaptureSession: NSObject, ObservableObject,
-    AVCapturePhotoCaptureDelegate
+    AVCapturePhotoCaptureDelegate,
+    AVCaptureFileOutputRecordingDelegate
 {
     enum State: Equatable {
         case preview
+        case recording(elapsedSeconds: Int)
         case capturing
-        case captured(UIImage)
+        case processing
+        case captured(UIImage, audioURL: URL?, durationMs: Int?)
 
         /// Equatable conformance — UIImage isn't Equatable by
-        /// reference identity, so compare by case only. We don't
-        /// need fine-grained diffing on the captured image since
-        /// it doesn't change once it lands.
+        /// reference identity, so compare by case only (with
+        /// nested-value match for recording so the elapsed-
+        /// seconds tick re-publishes a distinct value).
         static func == (lhs: State, rhs: State) -> Bool {
             switch (lhs, rhs) {
             case (.preview, .preview),
-                 (.capturing, .capturing):
+                 (.capturing, .capturing),
+                 (.processing, .processing):
                 return true
+            case (.recording(let l), .recording(let r)):
+                return l == r
             case (.captured, .captured):
                 return true
             default:
@@ -496,6 +760,21 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
     private let sessionQueue = DispatchQueue(label: "app.quickink.photocapture.session")
 
     private let photoOutput = AVCapturePhotoOutput()
+    private let movieOutput = AVCaptureMovieFileOutput()
+    private var audioInput: AVCaptureDeviceInput?
+
+    /// File URL the in-flight video recording is writing to.
+    /// Lives in the app's cache dir; deleted after we extract
+    /// the first frame + audio in `handleVideo(...)`. Set to nil
+    /// once recording starts → completes → finishes processing.
+    private var pendingVideoURL: URL? = nil
+
+    /// Wall-clock start of the current recording. Used to tick
+    /// the on-screen elapsed-seconds counter via a 1Hz timer; we
+    /// don't rely on `AVCaptureMovieFileOutput.recordedDuration`
+    /// because that read crosses the session queue.
+    private var recordingStartedAt: Date? = nil
+    private var recordingTicker: Timer? = nil
 
     func start() {
         sessionQueue.async { [weak self] in
@@ -514,6 +793,8 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
         }
     }
 
+    // MARK: Still capture
+
     func triggerCapture() {
         guard state == .preview else { return }
         state = .capturing
@@ -525,7 +806,89 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
         }
     }
 
+    // MARK: Video recording
+
+    func startVideoRecording() {
+        guard state == .preview else { return }
+        // Microphone permission is lazy: ask the moment the
+        // user actually starts a recording. If denied the
+        // movie output still records video; the audio track
+        // will be empty and the transcription pass will land
+        // with no usable signal.
+        Task {
+            _ = await AVCaptureDevice.requestAccess(for: .audio)
+            await MainActor.run { self.beginVideoRecording() }
+        }
+    }
+
+    private func beginVideoRecording() {
+        guard state == .preview else { return }
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("photo_capture_video", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("buffer-\(Int(Date().timeIntervalSince1970 * 1000)).mov")
+        try? FileManager.default.removeItem(at: url)
+        pendingVideoURL = url
+        recordingStartedAt = Date()
+        state = .recording(elapsedSeconds: 0)
+        startRecordingTicker()
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            // Cap at 2:00 even if the host forgets to stop —
+            // a 30-minute hold would otherwise OOM the transcript
+            // backend downstream.
+            self.movieOutput.maxRecordedDuration = CMTime(
+                seconds: Double(maxVideoRecordingSeconds),
+                preferredTimescale: 600,
+            )
+            self.movieOutput.startRecording(to: url, recordingDelegate: self)
+        }
+    }
+
+    func stopVideoRecording() {
+        guard case .recording = state else { return }
+        stopRecordingTicker()
+        // Flip immediately to `.processing` so the shutter UI
+        // disables and the user can't double-trigger. The actual
+        // stop happens on the session queue; the delegate fires
+        // shortly after.
+        state = .processing
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            if self.movieOutput.isRecording {
+                self.movieOutput.stopRecording()
+            }
+        }
+    }
+
+    private func startRecordingTicker() {
+        recordingTicker?.invalidate()
+        recordingTicker = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self,
+                      let started = self.recordingStartedAt,
+                      case .recording = self.state
+                else { return }
+                let elapsed = max(0, Int(Date().timeIntervalSince(started)))
+                self.state = .recording(elapsedSeconds: min(elapsed, maxVideoRecordingSeconds))
+            }
+        }
+    }
+
+    private func stopRecordingTicker() {
+        recordingTicker?.invalidate()
+        recordingTicker = nil
+        recordingStartedAt = nil
+    }
+
     func discardBuffer() {
+        if case .captured(_, let audioURL, _) = state, let audioURL = audioURL {
+            // Best-effort cleanup of the extracted audio file
+            // when the user hits Retake. Commit() copies the
+            // file into the persistent voice-note location, so
+            // this only deletes the cache copy.
+            try? FileManager.default.removeItem(at: audioURL)
+        }
         state = .preview
     }
 
@@ -537,7 +900,14 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
         configured = true
 
         captureSession.beginConfiguration()
-        captureSession.sessionPreset = .photo
+        // `.high` instead of `.photo` because adding a
+        // `AVCaptureMovieFileOutput` to a `.photo` preset
+        // session is a runtime error on some devices — the
+        // photo preset doesn't promise an audio-compatible
+        // configuration. `.high` lets both photo + movie
+        // outputs coexist while still producing a quality
+        // still on the photo path.
+        captureSession.sessionPreset = .high
 
         if let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
            let input  = try? AVCaptureDeviceInput(device: camera),
@@ -545,15 +915,28 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
         {
             captureSession.addInput(input)
         }
+        if let mic = AVCaptureDevice.default(for: .audio),
+           let input = try? AVCaptureDeviceInput(device: mic),
+           captureSession.canAddInput(input)
+        {
+            captureSession.addInput(input)
+            self.audioInput = input
+        }
 
         photoOutput.maxPhotoQualityPrioritization = .quality
         if captureSession.canAddOutput(photoOutput) {
             captureSession.addOutput(photoOutput)
         }
-        // Lock to portrait — host activity is portrait-only,
-        // matching the card surface. Pixel-buffer orientation
-        // stays predictable for downstream code.
         if let conn = photoOutput.connection(with: .video),
+           conn.isVideoOrientationSupported
+        {
+            conn.videoOrientation = .portrait
+        }
+
+        if captureSession.canAddOutput(movieOutput) {
+            captureSession.addOutput(movieOutput)
+        }
+        if let conn = movieOutput.connection(with: .video),
            conn.isVideoOrientationSupported
         {
             conn.videoOrientation = .portrait
@@ -562,7 +945,7 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
         captureSession.commitConfiguration()
     }
 
-    // MARK: Photo delegate
+    // MARK: Photo delegate (still)
 
     nonisolated func photoOutput(
         _ output: AVCapturePhotoOutput,
@@ -570,11 +953,6 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
         error: Error?,
     ) {
         if let error = error {
-            // Fallback path — return to preview rather than
-            // stranding the surface in `.capturing`. We don't
-            // surface a toast for the capture itself (a system
-            // shutter that drops a frame is rare and recoverable
-            // by retap); only commit-time errors warrant UI.
             print("Photo capturePhoto failed: \(error)")
             Task { @MainActor in self.state = .preview }
             return
@@ -585,7 +963,137 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
             return
         }
         Task { @MainActor in
-            self.state = .captured(image)
+            self.state = .captured(image, audioURL: nil, durationMs: nil)
         }
+    }
+
+    // MARK: Movie file delegate (video)
+
+    nonisolated func fileOutput(
+        _ output: AVCaptureFileOutput,
+        didStartRecordingTo fileURL: URL,
+        from connections: [AVCaptureConnection],
+    ) {
+        // No-op — UI flip to `.recording` already happened in
+        // `beginVideoRecording`.
+    }
+
+    nonisolated func fileOutput(
+        _ output: AVCaptureFileOutput,
+        didFinishRecordingTo outputFileURL: URL,
+        from connections: [AVCaptureConnection],
+        error: Error?,
+    ) {
+        // The max-duration cap surfaces as an
+        // `AVErrorMaximumDurationReached` here even though the
+        // recording itself completed successfully — treat as a
+        // soft error and still process the file.
+        let isMaxDurationError: Bool = {
+            guard let nsErr = error as? NSError else { return false }
+            return nsErr.domain == AVFoundationErrorDomain
+                && nsErr.code == AVError.maximumDurationReached.rawValue
+        }()
+        if let error = error, !isMaxDurationError {
+            print("PhotoCapture video recording failed: \(error)")
+            try? FileManager.default.removeItem(at: outputFileURL)
+            Task { @MainActor in
+                self.pendingVideoURL = nil
+                self.state = .preview
+            }
+            return
+        }
+        Task { @MainActor in
+            await self.handleVideo(outputFileURL: outputFileURL)
+        }
+    }
+
+    /// Extract the first video frame + audio track from the
+    /// recorded .mov, then transition to `.captured` with the
+    /// audio URL pinned for the commit path. The raw .mov gets
+    /// deleted immediately afterwards — we never persist the
+    /// video itself, only its first frame (as the page) and
+    /// its audio (as the voice note).
+    private func handleVideo(outputFileURL: URL) async {
+        defer {
+            pendingVideoURL = nil
+            try? FileManager.default.removeItem(at: outputFileURL)
+        }
+        let asset = AVURLAsset(url: outputFileURL)
+        let firstFrame = await Self.extractFirstFrame(from: asset)
+        let durationMs = Int((CMTimeGetSeconds(asset.duration) * 1000.0).rounded())
+
+        // Extract audio to a stable AttachmentStorage URL —
+        // VoiceNoteRepository expects a file:// path it can
+        // serve up to the transcriber and sync workers later.
+        let audioURL = await Self.extractAudio(from: asset)
+
+        guard let image = firstFrame else {
+            // No frames at all (very short or malformed recording)
+            // → drop everything and return to preview.
+            if let audioURL = audioURL { try? FileManager.default.removeItem(at: audioURL) }
+            state = .preview
+            return
+        }
+        state = .captured(image, audioURL: audioURL, durationMs: durationMs)
+    }
+
+    /// Pull the first frame of the asset as a `UIImage`. Uses
+    /// `AVAssetImageGenerator` with `appliesPreferredTrackTransform`
+    /// so the captured-preview UI sees a frame oriented the way
+    /// the user held the phone (portrait) — without the transform
+    /// flag the raw track is landscape with a 90° transform set
+    /// in metadata.
+    private static func extractFirstFrame(from asset: AVURLAsset) async -> UIImage? {
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        // Snap to the first sample exactly — `kCMTimeZero` rounds
+        // to the nearest keyframe by default which on some codecs
+        // means the very first frame.
+        let time = CMTime(seconds: 0, preferredTimescale: 600)
+        do {
+            let cgImage = try generator.copyCGImage(at: time, actualTime: nil)
+            return UIImage(cgImage: cgImage)
+        } catch {
+            print("PhotoCapture first-frame extract failed: \(error)")
+            return nil
+        }
+    }
+
+    /// Strip the audio track into a standalone `.m4a` written into
+    /// `AttachmentStorage`. Returns nil when the recording had no
+    /// audio track (mic permission denied, hardware unavailable)
+    /// — in that case the captured-preview shows up without the
+    /// "With audio" badge and the commit path skips the voice-note
+    /// attach.
+    private static func extractAudio(from asset: AVURLAsset) async -> URL? {
+        let audioTracks = asset.tracks(withMediaType: .audio)
+        guard !audioTracks.isEmpty else { return nil }
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            return nil
+        }
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("photo_capture_audio", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let outURL = dir.appendingPathComponent("buffer-\(Int(Date().timeIntervalSince1970 * 1000)).m4a")
+        try? FileManager.default.removeItem(at: outURL)
+        export.outputURL = outURL
+        export.outputFileType = .m4a
+        await export.export()
+        if export.status != .completed {
+            print("PhotoCapture audio extract failed: \(String(describing: export.error))")
+            return nil
+        }
+        // Move into AttachmentStorage so the file's lifecycle
+        // matches every other voice note (synced to Drive,
+        // pulled into thumbnails, etc.). Reading via
+        // `Data(contentsOf:)` + `AttachmentStorage.write` is the
+        // shared helper the import / scan paths already use.
+        guard let data = try? Data(contentsOf: outURL),
+              let stored = AttachmentStorage.write(data, ext: "m4a") else {
+            try? FileManager.default.removeItem(at: outURL)
+            return nil
+        }
+        try? FileManager.default.removeItem(at: outURL)
+        return stored
     }
 }

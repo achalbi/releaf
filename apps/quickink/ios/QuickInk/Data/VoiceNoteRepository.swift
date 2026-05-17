@@ -60,6 +60,20 @@ public final class VoiceNoteRepository: @unchecked Sendable {
         }
     }
 
+    /// Cheap point-in-time existence check used by
+    /// `VoiceNoteCapturePane` to auto-advance past the recorder
+    /// when a voice note has already been pre-attached (e.g. the
+    /// audio track extracted from a Photo-mode video capture).
+    /// Read-only, single query, no observation overhead.
+    public func anyForCapture(_ captureId: String) async throws -> Bool {
+        try await dbQueue.read { db in
+            try VoiceNoteEntity
+                .filter(VoiceNoteEntity.Columns.captureId == captureId)
+                .filter(VoiceNoteEntity.Columns.deletedAt == nil)
+                .fetchCount(db) > 0
+        }
+    }
+
     // MARK: - Writes
 
     /// Append a fresh voice note. Generates a UUIDv7 id and current

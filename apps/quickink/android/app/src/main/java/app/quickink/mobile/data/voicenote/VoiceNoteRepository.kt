@@ -29,6 +29,16 @@ class VoiceNoteRepository(
     suspend fun findById(id: String): VoiceNoteEntity? =
         voiceNoteDao.findById(id)
 
+    /**
+     * True when at least one active (non-tombstoned) voice note
+     * is already attached to [captureId]. Used by the capture
+     * pane to auto-skip past the recorder when a voice note was
+     * pre-attached upstream (e.g. extracted from a Photo-mode
+     * video).
+     */
+    suspend fun anyForCapture(captureId: String): Boolean =
+        voiceNoteDao.countForCapture(captureId) > 0
+
     suspend fun insert(
         captureId: String,
         userId: String,

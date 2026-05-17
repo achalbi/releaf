@@ -31,6 +31,15 @@ struct VoiceNoteCapturePane: View {
 
     @StateObject private var model: VoiceNoteCapturePaneModel
     @StateObject private var engine = VoicePageRecorderEngine()
+    /// Auto-skip guard. On first mount we query the repository
+    /// for any existing voice note attached to the captureId; if
+    /// one is already there (e.g. Photo-mode video capture pre-
+    /// attached the extracted audio), advance straight to the
+    /// review screen so the user isn't prompted to record over
+    /// audio we already have. `checkComplete` flips to true once
+    /// the query lands; `body` shows a brief progress view in the
+    /// meantime so we don't flash the recorder for a frame.
+    @State private var checkComplete: Bool = false
 
     init(
         captureId: String,
@@ -51,6 +60,42 @@ struct VoiceNoteCapturePane: View {
     }
 
     var body: some View {
+        if !checkComplete {
+            preCheckLoader
+                .task {
+                    await runExistenceCheck()
+                }
+        } else {
+            mainPane
+        }
+    }
+
+    @ViewBuilder
+    private var preCheckLoader: some View {
+        ZStack {
+            QuickInkColors.bg.ignoresSafeArea()
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(QuickInkColors.accent)
+        }
+    }
+
+    /// Hit the voice-note repository once on mount. If a row
+    /// already exists for this captureId, skip the pane entirely
+    /// and let the parent surface advance to the review screen.
+    /// Failures (DB read error) fall through to showing the pane
+    /// so the user isn't stranded.
+    private func runExistenceCheck() async {
+        let exists: Bool = (try? await VoiceNoteRepository().anyForCapture(captureId)) ?? false
+        if exists {
+            await MainActor.run { onContinue() }
+        } else {
+            await MainActor.run { checkComplete = true }
+        }
+    }
+
+    @ViewBuilder
+    private var mainPane: some View {
         VStack(spacing: 0) {
             header
                 .padding(.horizontal, QuickInkSpacing.s4)

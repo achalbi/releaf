@@ -48,6 +48,18 @@ interface VoiceNoteDao {
     suspend fun findById(id: String): VoiceNoteEntity?
 
     /**
+     * Cheap point-in-time existence check used by
+     * [VoiceNoteCapturePane] to auto-advance past the recorder
+     * when a voice note has already been pre-attached (e.g. the
+     * audio track extracted from a Photo-mode video capture).
+     */
+    @Query("""
+        SELECT COUNT(*) FROM voice_notes
+        WHERE capture_id = :captureId AND deleted_at IS NULL
+    """)
+    suspend fun countForCapture(captureId: String): Int
+
+    /**
      * Live, oldest-first list of active voice notes for a capture.
      * Powers the section under the document detail screen.
      */

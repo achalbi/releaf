@@ -58,6 +58,12 @@ import ReleafCoreScan
 struct QuickCaptureScreen: View {
 
     let controller: ScanFlowController
+    /// Owning user — only consumed by the `.photo` branch today
+    /// (to attach the extracted-audio voice note after a video
+    /// recording), but threaded through every surface for
+    /// symmetry. Optional so existing callers / previews that
+    /// don't care about voice-note attach keep compiling.
+    let userId: String
     let onDismiss: () -> Void
 
     /// Persisted starting mode. Read once from SettingsState
@@ -88,10 +94,12 @@ struct QuickCaptureScreen: View {
     /// previously-selected pill mode (Document or Business Card).
     init(
         controller: ScanFlowController,
+        userId: String,
         initialMode: CaptureMode? = nil,
         onDismiss: @escaping () -> Void,
     ) {
         self.controller = controller
+        self.userId = userId
         self.onDismiss = onDismiss
         let persistedPillMode = CaptureMode.fromAnalyticsKey(
             UserDefaults.standard.string(forKey: "quickink.capture.last_mode")
@@ -148,6 +156,7 @@ struct QuickCaptureScreen: View {
                     case .photo:
                         PhotoCaptureSurface(
                             controller: controller,
+                            userId:     userId,
                             onDismiss:  onDismiss,
                         )
                     }

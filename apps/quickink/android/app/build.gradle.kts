@@ -332,6 +332,7 @@ dependencies {
     implementation(libs.camerax.camera2)
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
+    implementation(libs.camerax.video)
 
     // commons-suncalc — pure-JVM sunrise/sunset/twilight calculator.
     // Drives the Calendar feature's Rahu Kala + sunrise/sunset rows

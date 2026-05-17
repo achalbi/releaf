@@ -46,8 +46,12 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -88,6 +92,39 @@ fun VoiceNoteCapturePane(
     // cancelled on disposal — jobs launched on it run to completion.
     val backgroundScope = remember {
         CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    }
+
+    // Auto-skip guard. On first mount we query the repository
+    // for any existing voice note attached to this captureId; if
+    // one is already there (e.g. Photo-mode video capture pre-
+    // attached the extracted audio), advance straight to the
+    // review screen so the user isn't prompted to record over
+    // audio we already have. `checkComplete` flips to true once
+    // the query lands; while it's false we render nothing (just
+    // the warm bg) so the recorder UI doesn't flash for a frame.
+    var checkComplete by remember { mutableStateOf(false) }
+    LaunchedEffect(captureId) {
+        val exists = runCatching { repo.anyForCapture(captureId) }.getOrNull() ?: false
+        if (exists) {
+            // Pass null — the parent only uses the voiceNoteId
+            // to decide whether to mount the transcript-edit
+            // pane. For auto-skip the pre-attached note's
+            // transcript lives on the scan-detail screen, not
+            // on the transient pane.
+            onContinue(null)
+        } else {
+            checkComplete = true
+        }
+    }
+    if (!checkComplete) {
+        Box(
+            modifier         = Modifier.fillMaxSize().background(colors.bg),
+            contentAlignment = Alignment.Center,
+        ) {
+            // Empty surface — the query is cheap; flashing a
+            // spinner would be noisier than a brief blank frame.
+        }
+        return
     }
 
     // Engine is owned here so the bottom bar can observe

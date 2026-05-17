@@ -614,6 +614,7 @@ private struct MainShell: View {
         .fullScreenCover(isPresented: $showQuickCapture) {
             QuickCaptureScreen(
                 controller:  controller,
+                userId:      userId,
                 initialMode: pendingInitialMode,
                 onDismiss:   {
                     showQuickCapture = false
