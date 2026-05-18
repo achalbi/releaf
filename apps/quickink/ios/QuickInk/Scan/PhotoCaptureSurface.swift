@@ -39,9 +39,17 @@
  * tearing down the video input mid-take would corrupt the
  * in-flight `.mov` and race the photo/movie delegate callbacks.
  *
- * A vertical chip strip on the bottom-left lets the user pick
- * one of six color filters (None / B&W / Sepia / Vivid / Cool /
- * Warm). The selection drives both the live preview (via cheap
+ * A collapse-by-default chip strip sits to the left of the
+ * shutter and lets the user pick one of six color filters
+ * (None / B&W / Sepia / Vivid / Cool / Warm). Collapsed → only
+ * the active chip is visible. Tap → the column expands upward
+ * into the preview area with all 6 chips; each chip carries a
+ * live mini-preview of the camera with that filter pre-applied
+ * (multiple `AVCaptureVideoPreviewLayer`s share the single
+ * `captureSession` — GPU-rendered, cost is negligible). Tap a
+ * chip → it's selected and the strip collapses again.
+ *
+ * The selection drives both the main live preview (via cheap
  * SwiftUI `.saturation` / `.contrast` / `.colorMultiply`
  * modifiers — no per-frame CIFilter pass) and the saved still
  * (via `CIFilter` applied to the captured `UIImage`). Video
@@ -376,6 +384,15 @@ private struct ActivePhotoSurface: View {
     /// down.
     @State private var startedRecordingThisPress: Bool = false
 
+    /// Filter strip expand/collapse state. Default `false` →
+    /// only the active filter chip is visible (anchored left of
+    /// the shutter button). Tap that chip → expands upward into
+    /// the full 6-chip column. Tap any chip while expanded →
+    /// selects + collapses. Resets to false on every fresh
+    /// mount and any time the user picks a chip — the strip is
+    /// never "stuck open."
+    @State private var isFilterStripExpanded: Bool = false
+
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
@@ -396,9 +413,6 @@ private struct ActivePhotoSurface: View {
                         .colorMultiply(effectiveLiveFilter.liveTint)
                     if case .recording(let elapsed) = session.state {
                         recordingOverlay(elapsedSeconds: elapsed)
-                    }
-                    if session.state == .preview {
-                        filterStrip
                     }
                     if session.state == .capturing || session.state == .processing {
                         Color.black.opacity(0.25).ignoresSafeArea(edges: .horizontal)
@@ -477,45 +491,78 @@ private struct ActivePhotoSurface: View {
         return session.activeFilter
     }
 
-    /// Vertical chip strip on the bottom-left of the preview.
-    /// Each chip toggles `session.activeFilter`; the selected
-    /// chip flips to the coral accent so the active filter is
-    /// always identifiable at a glance. Hidden outside
-    /// `.preview` because (a) during recording the filter is
-    /// disabled anyway, and (b) once the user has captured a
-    /// still the filter is already baked in and the strip would
-    /// just be dead weight.
+    /// Collapse-aware filter strip. Default `isFilterStripExpanded
+    /// == false` renders only the active filter chip; tapping
+    /// expands the column upward with the other 5 chips above
+    /// it. The active chip is always the last child in the
+    /// VStack so its on-screen position is fixed (it stays put
+    /// at the bottom-leading anchor while siblings appear/
+    /// disappear above). Tap any chip while expanded → select
+    /// it and collapse.
     @ViewBuilder
     private var filterStrip: some View {
-        VStack(spacing: 6) {
-            ForEach(PhotoFilter.allCases, id: \.self) { filter in
-                Button(action: { session.activeFilter = filter }) {
-                    Text(filter.displayName)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(
-                            session.activeFilter == filter
-                                ? Color.white
-                                : Color.white.opacity(0.75),
-                        )
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .frame(minWidth: 56)
-                        .background(
-                            Capsule().fill(
-                                session.activeFilter == filter
-                                    ? QuickInkColors.accent
-                                    : Color.black.opacity(0.55),
-                            ),
-                        )
+        VStack(alignment: .leading, spacing: 6) {
+            if isFilterStripExpanded {
+                ForEach(PhotoFilter.allCases.filter { $0 != session.activeFilter }, id: \.self) { filter in
+                    filterChip(filter)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(filter.displayName) filter")
-                .accessibilityAddTraits(session.activeFilter == filter ? [.isSelected] : [])
             }
+            filterChip(session.activeFilter)
         }
-        .padding(.leading, QuickInkSpacing.s4)
-        .padding(.bottom, QuickInkSpacing.s4)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .animation(.easeOut(duration: 0.18), value: isFilterStripExpanded)
+    }
+
+    /// Single chip in the strip — live mini-preview of the camera
+    /// with this filter applied, plus the filter's display name.
+    /// The preview is a sibling `AVCaptureVideoPreviewLayer`
+    /// attached to the same `captureSession`; AVFoundation
+    /// supports any number of preview layers on a single session
+    /// and each is GPU-rendered, so the cost of 6 live thumbnails
+    /// (only while expanded) is negligible.
+    @ViewBuilder
+    private func filterChip(_ filter: PhotoFilter) -> some View {
+        let isActive = filter == session.activeFilter
+        Button(action: {
+            if isFilterStripExpanded {
+                // Expanded → tap any chip selects it and collapses.
+                // Tapping the active chip while expanded also
+                // collapses (natural "I'm done" gesture).
+                session.activeFilter = filter
+                isFilterStripExpanded = false
+            } else {
+                isFilterStripExpanded = true
+            }
+        }) {
+            HStack(spacing: 6) {
+                PhotoSessionView(session: session)
+                    .saturation(filter.liveSaturation)
+                    .contrast(filter.liveContrast)
+                    .colorMultiply(filter.liveTint)
+                    .frame(width: 32, height: 32)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(
+                                isActive ? Color.white : Color.white.opacity(0.35),
+                                lineWidth: isActive ? 2 : 1,
+                            ),
+                    )
+                Text(filter.displayName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(
+                Capsule().fill(
+                    isActive ? QuickInkColors.accent.opacity(0.85) : Color.black.opacity(0.55),
+                ),
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(filter.displayName) filter")
+        .accessibilityAddTraits(isActive ? [.isSelected] : [])
     }
 
     // MARK: - Camera flip button
@@ -597,6 +644,19 @@ private struct ActivePhotoSurface: View {
                 }
             }
             .frame(maxWidth: .infinity)
+            // Filter strip overlay sits at the bottom-leading of
+            // the shutter ZStack — mirror of `cameraFlipButton`'s
+            // trailing position. Anchored at the bottom so the
+            // active chip stays put while the column expands
+            // upward into the preview area above. Overlay (not a
+            // ZStack child) so the expanded column's height
+            // doesn't grow the row and push the shutter off
+            // center.
+            .overlay(alignment: .bottomLeading) {
+                if session.state == .preview {
+                    filterStrip
+                }
+            }
             shutterHint
         }
         .padding(.horizontal, QuickInkSpacing.s5)

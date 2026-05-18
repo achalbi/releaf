@@ -40,9 +40,17 @@
  * tearing down the [VideoCapture] use case mid-take would
  * corrupt the in-flight `.mp4` and stop the recording.
  *
- * A vertical chip strip on the bottom-left lets the user pick
- * one of six color filters (None / B&W / Sepia / Vivid / Cool /
- * Warm). The selection drives both the live preview (via a
+ * A collapse-by-default chip strip sits to the left of the
+ * shutter and lets the user pick one of six color filters
+ * (None / B&W / Sepia / Vivid / Cool / Warm). Collapsed → only
+ * the active chip is visible. Tap → the column expands upward
+ * into the preview area with all 6 chips; each chip carries a
+ * live mini-preview rendered from [TextureView.getBitmap]
+ * polled at 5fps and re-tinted per chip via Compose
+ * [ColorFilter.colorMatrix]. Tap a chip → it's selected and
+ * the strip collapses again.
+ *
+ * The selection drives both the main live preview (via a
  * Compose [Canvas] overlay with an HSL [BlendMode] against the
  * COMPATIBLE-mode [PreviewView]'s TextureView pixels — no per-
  * frame Bitmap copy) and the captured still (via
@@ -92,6 +100,9 @@ import android.net.Uri
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.Surface
+import android.view.TextureView
+import android.view.View
+import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -153,10 +164,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix as ComposeColorMatrix
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
@@ -307,6 +321,26 @@ internal enum class PhotoFilter(
             0f,    0f,    0f,    1f, 0f,
         ),
     ),
+}
+
+/**
+ * Walk the view tree under [root] and return the first
+ * [TextureView] found, or `null` if none exists. PreviewView in
+ * COMPATIBLE mode hosts a TextureView as a child; we need a
+ * reference to it so the filter-strip polling effect can call
+ * `getBitmap(w, h)` for the live mini-previews. The TextureView
+ * isn't part of PreviewView's public API, so walking the tree is
+ * the supported way to reach it.
+ */
+private fun findTextureView(root: View): TextureView? {
+    if (root is TextureView) return root
+    if (root is ViewGroup) {
+        for (i in 0 until root.childCount) {
+            val hit = findTextureView(root.getChildAt(i))
+            if (hit != null) return hit
+        }
+    }
+    return null
 }
 
 /**
@@ -523,6 +557,17 @@ private fun ActivePhotoSurface(
     // user. See `PhotoFilter` docblock for the live-preview vs
     // capture-time pipeline.
     var activeFilter by remember { mutableStateOf(PhotoFilter.None) }
+    // Filter strip expand/collapse state. Default `false` →
+    // only the active chip is visible (anchored left of the
+    // shutter). Tap → expands upward into the 6-chip column;
+    // tap any chip → selects + collapses. Resets each mount.
+    var isFilterStripExpanded by remember { mutableStateOf(false) }
+    // Latest 96x96 RGBA bitmap from the live PreviewView's
+    // TextureView, polled while the strip is expanded so each
+    // chip can show a real-time mini-preview with its filter
+    // applied (via Compose `ColorFilter.colorMatrix`). `null`
+    // when collapsed / before the first poll lands.
+    var thumbnailBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -573,6 +618,47 @@ private fun ActivePhotoSurface(
         )
     }
 
+    // Thumbnail polling. Runs only while the filter strip is
+    // expanded — when collapsed we drop the cached bitmap so the
+    // GC can reclaim it and we don't burn CPU on a stream
+    // nobody is looking at. 5fps (200ms) gives the chips a
+    // "live" feel without thrashing — TextureView.getBitmap is
+    // not free (it does a GPU → CPU readback) so we don't want
+    // to do it 30 times a second for six tiny preview boxes.
+    //
+    // The polled bitmap is a single fresh allocation per tick
+    // (TextureView.getBitmap(w,h) returns a new ARGB_8888 bitmap
+    // at the requested size). Compose sees a new instance →
+    // recomposes the chips → each chip re-draws with its own
+    // ColorFilter applied to the same source pixels.
+    LaunchedEffect(isFilterStripExpanded, previewViewRef) {
+        if (!isFilterStripExpanded) {
+            thumbnailBitmap = null
+            return@LaunchedEffect
+        }
+        val pv = previewViewRef ?: return@LaunchedEffect
+        while (isActive && isFilterStripExpanded) {
+            val tv = findTextureView(pv)
+            if (tv != null) {
+                // 96x96 is enough resolution for a 32dp chip
+                // thumbnail at any reasonable display density;
+                // smaller would alias badly when the chip is
+                // scaled up on an XXHDPI screen.
+                val frame = runCatching { tv.getBitmap(96, 96) }.getOrNull()
+                if (frame != null) {
+                    thumbnailBitmap = frame
+                }
+            }
+            delay(200)
+        }
+    }
+
+    // Outer Box hosts the preview/shutter Column AND the
+    // filter-strip overlay as siblings, so the expanded strip
+    // can extend upward into the preview area without growing
+    // the Column's layout (and pushing the shutter row down).
+    // Same pattern as iOS's `.overlay(alignment: .bottomLeading)`.
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
@@ -646,20 +732,6 @@ private fun ActivePhotoSurface(
                                     drawRect(color = color, blendMode = blend)
                                 }
                             }
-                        }
-                        // Vertical filter strip on the bottom-left
-                        // of the preview area. Only shown in idle
-                        // Preview — hidden once a capture is in
-                        // flight or recording is running so the
-                        // surface isn't cluttered.
-                        if (state is PhotoUiState.Preview) {
-                            FilterStrip(
-                                activeFilter = activeFilter,
-                                onSelect     = { activeFilter = it },
-                                modifier     = Modifier
-                                    .align(Alignment.BottomStart)
-                                    .padding(start = QuickInkSpacing.s4, bottom = QuickInkSpacing.s4),
-                            )
                         }
                     }
                     if (state is PhotoUiState.Recording) {
@@ -882,6 +954,29 @@ private fun ActivePhotoSurface(
                         }
                     }
                 },
+            )
+        }
+    }
+        // Filter strip overlay — anchored bottom-start of the
+        // screen with bottom padding tuned to put the active
+        // chip's vertical center roughly at the shutter
+        // button's center (~105dp from screen bottom, chip is
+        // ~38dp tall → bottom anchor at ~86dp). Same suppression
+        // rule as the camera-flip button: only visible in idle
+        // Preview, hidden during recording / capturing / etc.
+        if (uiState is PhotoUiState.Preview) {
+            FilterStrip(
+                isExpanded      = isFilterStripExpanded,
+                activeFilter    = activeFilter,
+                thumbnailBitmap = thumbnailBitmap,
+                onToggleExpand  = { isFilterStripExpanded = !isFilterStripExpanded },
+                onSelect        = { picked ->
+                    activeFilter = picked
+                    isFilterStripExpanded = false
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = QuickInkSpacing.s4, bottom = 86.dp),
             )
         }
     }
@@ -1195,47 +1290,116 @@ private fun CameraFlipButton(
 }
 
 /**
- * Vertical chip strip on the bottom-left of the live preview.
- * Each chip selects one of the six [PhotoFilter] presets. The
- * active chip flips to the coral accent so the current filter
- * is identifiable at a glance. Hidden outside [PhotoUiState.Preview]
- * by the caller — during recording the filter is disabled, and
- * once the user has captured the filter is already baked in.
+ * Collapse-aware filter strip — anchored to the bottom-left of
+ * the screen by the caller, mirror of the camera-flip button on
+ * the right. When [isExpanded] is false (default on every fresh
+ * mount), only the active chip renders. Tapping it flips
+ * [isExpanded] true via [onToggleExpand] and the column reveals
+ * five additional chips above (each with its filter pre-applied
+ * as a live mini-preview of [thumbnailBitmap]). Tapping any
+ * chip during expanded state selects via [onSelect] and the
+ * caller is responsible for collapsing again.
+ *
+ * The active chip is always the LAST child in the Column so its
+ * on-screen position stays fixed across collapse / expand —
+ * siblings appear / disappear above it.
  */
 @Composable
 private fun FilterStrip(
+    isExpanded: Boolean,
     activeFilter: PhotoFilter,
+    thumbnailBitmap: Bitmap?,
+    onToggleExpand: () -> Unit,
     onSelect: (PhotoFilter) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colors = LocalQuickInkColors.current
-    val type   = LocalQuickInkTypography.current
     Column(
         modifier              = modifier,
         verticalArrangement   = Arrangement.spacedBy(6.dp),
         horizontalAlignment   = Alignment.Start,
     ) {
-        PhotoFilter.entries.forEach { filter ->
-            val selected = filter == activeFilter
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(QuickInkRadius.pill))
-                    .background(
-                        if (selected) colors.accent
-                        else Color.Black.copy(alpha = 0.55f),
-                    )
-                    .clickable { onSelect(filter) }
-                    .widthIn(min = 56.dp)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text  = filter.displayName,
-                    style = type.caption.copy(fontSize = 11.sp),
-                    color = if (selected) Color.White else Color.White.copy(alpha = 0.75f),
+        if (isExpanded) {
+            // Five non-active chips above. Order follows enum
+            // declaration order; the active is dropped from the
+            // list and re-rendered at the bottom below.
+            PhotoFilter.entries.filter { it != activeFilter }.forEach { filter ->
+                FilterChip(
+                    filter    = filter,
+                    isActive  = false,
+                    thumbnail = thumbnailBitmap,
+                    onClick   = { onSelect(filter) },
                 )
             }
         }
+        FilterChip(
+            filter    = activeFilter,
+            isActive  = true,
+            thumbnail = thumbnailBitmap,
+            onClick   = onToggleExpand,
+        )
+    }
+}
+
+/**
+ * One chip in the filter strip. Visually: a 32dp live mini-
+ * preview (the camera's current frame with this chip's
+ * `captureMatrix` applied via Compose [ColorFilter.colorMatrix])
+ * + a short label. Falls back to a black square when
+ * [thumbnail] is null — happens during the brief window
+ * between expand-tap and the first poll landing, plus the
+ * permanent collapsed state where thumbnails aren't polled at
+ * all but the active chip still renders.
+ */
+@Composable
+private fun FilterChip(
+    filter: PhotoFilter,
+    isActive: Boolean,
+    thumbnail: Bitmap?,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(QuickInkRadius.pill))
+            .background(
+                if (isActive) colors.accent.copy(alpha = 0.85f)
+                else Color.Black.copy(alpha = 0.55f),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color.Black)
+                .border(
+                    width = if (isActive) 2.dp else 1.dp,
+                    color = if (isActive) Color.White else Color.White.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(6.dp),
+                ),
+        ) {
+            if (thumbnail != null) {
+                val colorFilter = filter.captureMatrix?.let {
+                    ColorFilter.colorMatrix(ComposeColorMatrix(it))
+                }
+                Image(
+                    bitmap             = thumbnail.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale       = ContentScale.Crop,
+                    colorFilter        = colorFilter,
+                    modifier           = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Text(
+            text  = filter.displayName,
+            style = type.caption.copy(fontSize = 11.sp),
+            color = Color.White,
+        )
     }
 }
 
