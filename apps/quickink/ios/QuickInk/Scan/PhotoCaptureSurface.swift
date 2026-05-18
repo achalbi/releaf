@@ -39,6 +39,17 @@
  * tearing down the video input mid-take would corrupt the
  * in-flight `.mov` and race the photo/movie delegate callbacks.
  *
+ * A vertical chip strip on the bottom-left lets the user pick
+ * one of six color filters (None / B&W / Sepia / Vivid / Cool /
+ * Warm). The selection drives both the live preview (via cheap
+ * SwiftUI `.saturation` / `.contrast` / `.colorMultiply`
+ * modifiers — no per-frame CIFilter pass) and the saved still
+ * (via `CIFilter` applied to the captured `UIImage`). Video
+ * recording always writes raw frames; the strip + preview
+ * filter are both suppressed while recording so the user can
+ * see what's actually being saved. See `PhotoFilter` for the
+ * per-case modifier / CIFilter mapping.
+ *
  * After capture (still OR video), the surface lands on the same
  * captured-preview UI: a frozen first frame (or the still) +
  * Retake / Use Photo. Use Photo writes the JPEG via
@@ -66,6 +77,136 @@ import AVFoundation
 import UIKit
 import ReleafCoreData
 import ReleafCoreScan
+
+/// One of six color filters the user can apply from the vertical
+/// chip strip on the bottom-left of the live preview. Selection
+/// lives in `PhotoCaptureSession.activeFilter` and is mirrored to:
+///
+///   - **Live preview** — via SwiftUI's `.saturation` / `.contrast`
+///     / `.colorMultiply` modifiers on `PhotoSessionView`. These
+///     are cheap GPU operations applied at the render layer, so
+///     there's no per-frame CPU cost (we don't run `CIFilter` on
+///     every preview frame).
+///   - **Captured still** — via `CIFilter` applied to the saved
+///     `UIImage` before `ImportArtifacts.build` writes the JPEG.
+///     Precise color science here; the live-preview modifiers
+///     are approximations of the same outcome.
+///
+/// Video recording captures **raw** (no filter applied to the
+/// `.mov` output). The strip is hidden while recording and the
+/// live preview drops back to identity, so the user's mental
+/// model is "what I see is what gets saved." A filtered-video
+/// pipeline (CIFilter via `AVMutableVideoComposition` +
+/// `AVAssetExportSession`) is a separate, heavier follow-up.
+public enum PhotoFilter: String, CaseIterable {
+    case none = "None"
+    case bw = "B&W"
+    case sepia = "Sepia"
+    case vivid = "Vivid"
+    case cool = "Cool"
+    case warm = "Warm"
+
+    public var displayName: String { rawValue }
+
+    // MARK: Live-preview modifier values
+
+    /// `.saturation(_:)` multiplier. 1.0 leaves the image
+    /// untouched, 0 makes it grayscale. Tuned visually to match
+    /// the eventual `CIFilter` output reasonably closely so the
+    /// captured still doesn't look surprising next to the preview.
+    public var liveSaturation: Double {
+        switch self {
+        case .none, .cool, .warm: return 1.0
+        case .bw:                 return 0.0
+        case .sepia:              return 0.3
+        case .vivid:              return 1.5
+        }
+    }
+
+    /// `.contrast(_:)` multiplier. Only Vivid bumps contrast a
+    /// touch; the rest leave it alone since `.colorMultiply` is
+    /// doing the heavy lifting for tint-based filters.
+    public var liveContrast: Double {
+        switch self {
+        case .vivid: return 1.1
+        default:     return 1.0
+        }
+    }
+
+    /// `.colorMultiply(_:)` tint. `.white` is the identity (no
+    /// tint). Cool / Warm / Sepia ship their characteristic
+    /// color cast here; B&W / Vivid go through saturation and
+    /// don't need a tint.
+    public var liveTint: Color {
+        switch self {
+        case .none, .bw, .vivid: return .white
+        case .sepia:             return Color(red: 1.00, green: 0.85, blue: 0.60)
+        case .cool:              return Color(red: 0.85, green: 0.95, blue: 1.10)
+        case .warm:              return Color(red: 1.10, green: 0.95, blue: 0.85)
+        }
+    }
+
+    // MARK: Capture-time filter
+
+    /// Apply the filter to a `UIImage` at commit time. Returns the
+    /// input verbatim when filter is `.none`. Falls back to the
+    /// input on any CIFilter / CGImage failure so a transient
+    /// pipeline hiccup never strands the user with a black still.
+    public func apply(to image: UIImage) -> UIImage {
+        guard self != .none else { return image }
+        guard let ciImage = CIImage(image: image) else { return image }
+        let context = CIContext()
+        let output: CIImage? = {
+            switch self {
+            case .none:
+                return ciImage
+            case .bw:
+                // `CIPhotoEffectMono` — Apple's curated B&W.
+                // Slightly warmer than a flat desaturation,
+                // matches what the iOS Camera app would produce.
+                let f = CIFilter(name: "CIPhotoEffectMono")!
+                f.setValue(ciImage, forKey: kCIInputImageKey)
+                return f.outputImage
+            case .sepia:
+                let f = CIFilter(name: "CISepiaTone")!
+                f.setValue(ciImage, forKey: kCIInputImageKey)
+                f.setValue(0.80, forKey: kCIInputIntensityKey)
+                return f.outputImage
+            case .vivid:
+                // `CIColorControls` boost — saturate, lift
+                // brightness a touch, add contrast. Matches the
+                // SwiftUI `.saturation(1.5).contrast(1.1)` preview.
+                let f = CIFilter(name: "CIColorControls")!
+                f.setValue(ciImage, forKey: kCIInputImageKey)
+                f.setValue(1.50, forKey: kCIInputSaturationKey)
+                f.setValue(0.05, forKey: kCIInputBrightnessKey)
+                f.setValue(1.10, forKey: kCIInputContrastKey)
+                return f.outputImage
+            case .cool:
+                // Shift target neutral to a lower Kelvin → image
+                // takes on a blue cast (the white point now sits
+                // where ~4000K would, so cooler tones survive).
+                let f = CIFilter(name: "CITemperatureAndTint")!
+                f.setValue(ciImage, forKey: kCIInputImageKey)
+                f.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
+                f.setValue(CIVector(x: 4500, y: 0), forKey: "inputTargetNeutral")
+                return f.outputImage
+            case .warm:
+                let f = CIFilter(name: "CITemperatureAndTint")!
+                f.setValue(ciImage, forKey: kCIInputImageKey)
+                f.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
+                f.setValue(CIVector(x: 8500, y: 0), forKey: "inputTargetNeutral")
+                return f.outputImage
+            }
+        }()
+        guard let outputImage = output,
+              let cgImage = context.createCGImage(outputImage, from: outputImage.extent)
+        else {
+            return image
+        }
+        return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
+    }
+}
 
 /// Discoverability state for the Photo-capture long-press shortcut
 /// on the bottom-nav ⚡ FAB. Owns the single persisted `dismissed`
@@ -242,8 +383,22 @@ private struct ActivePhotoSurface: View {
                 case .preview, .recording, .capturing, .processing:
                     PhotoSessionView(session: session)
                         .ignoresSafeArea(edges: .horizontal)
+                        // Live-preview color filter. Identity values
+                        // (1.0 / 1.0 / .white) are no-ops, so when
+                        // `effectiveLiveFilter == .none` SwiftUI
+                        // optimises the modifier chain into a pass-
+                        // through. During `.recording` we force
+                        // identity (see `effectiveLiveFilter`) so
+                        // the user sees the raw frames that the
+                        // unfiltered .mov is actually capturing.
+                        .saturation(effectiveLiveFilter.liveSaturation)
+                        .contrast(effectiveLiveFilter.liveContrast)
+                        .colorMultiply(effectiveLiveFilter.liveTint)
                     if case .recording(let elapsed) = session.state {
                         recordingOverlay(elapsedSeconds: elapsed)
+                    }
+                    if session.state == .preview {
+                        filterStrip
                     }
                     if session.state == .capturing || session.state == .processing {
                         Color.black.opacity(0.25).ignoresSafeArea(edges: .horizontal)
@@ -308,6 +463,59 @@ private struct ActivePhotoSurface: View {
         let mm = seconds / 60
         let ss = seconds % 60
         return String(format: "%01d:%02d", mm, ss)
+    }
+
+    // MARK: - Live filter
+
+    /// The filter SwiftUI should apply to the live preview right
+    /// now. While recording we force `.none` because the
+    /// `.mov` being written is unfiltered — showing a filtered
+    /// preview during a take would mislead the user about what
+    /// landed in the saved video.
+    private var effectiveLiveFilter: PhotoFilter {
+        if case .recording = session.state { return .none }
+        return session.activeFilter
+    }
+
+    /// Vertical chip strip on the bottom-left of the preview.
+    /// Each chip toggles `session.activeFilter`; the selected
+    /// chip flips to the coral accent so the active filter is
+    /// always identifiable at a glance. Hidden outside
+    /// `.preview` because (a) during recording the filter is
+    /// disabled anyway, and (b) once the user has captured a
+    /// still the filter is already baked in and the strip would
+    /// just be dead weight.
+    @ViewBuilder
+    private var filterStrip: some View {
+        VStack(spacing: 6) {
+            ForEach(PhotoFilter.allCases, id: \.self) { filter in
+                Button(action: { session.activeFilter = filter }) {
+                    Text(filter.displayName)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(
+                            session.activeFilter == filter
+                                ? Color.white
+                                : Color.white.opacity(0.75),
+                        )
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .frame(minWidth: 56)
+                        .background(
+                            Capsule().fill(
+                                session.activeFilter == filter
+                                    ? QuickInkColors.accent
+                                    : Color.black.opacity(0.55),
+                            ),
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(filter.displayName) filter")
+                .accessibilityAddTraits(session.activeFilter == filter ? [.isSelected] : [])
+            }
+        }
+        .padding(.leading, QuickInkSpacing.s4)
+        .padding(.bottom, QuickInkSpacing.s4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
     }
 
     // MARK: - Camera flip button
@@ -924,6 +1132,14 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
     /// `.preview`, but exposing the position keeps room for that.
     @Published private(set) var cameraPosition: AVCaptureDevice.Position = .back
 
+    /// Active color filter for the live preview + still capture.
+    /// Defaults to `.none` on every fresh mount — we don't
+    /// persist the choice across sessions, since a filter that
+    /// silently survived to the next launch could surprise the
+    /// user. Video recording ignores this value and always
+    /// records raw (see `PhotoFilter` docblock).
+    @Published var activeFilter: PhotoFilter = .none
+
     /// File URL the in-flight video recording is writing to.
     /// Lives in the app's cache dir; deleted after we extract
     /// the first frame + audio in `handleVideo(...)`. Set to nil
@@ -1195,7 +1411,14 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
             return
         }
         Task { @MainActor in
-            self.state = .captured(image, audioURL: nil, durationMs: nil, videoURL: nil)
+            // Apply the active filter on MainActor so the read of
+            // `activeFilter` doesn't cross actor boundaries from
+            // the `nonisolated` delegate. CIFilter on a single
+            // still is fast (~10-50ms) so the brief MainActor
+            // hop is fine; we're already in a Task so the UI
+            // doesn't jank.
+            let filtered = self.activeFilter.apply(to: image)
+            self.state = .captured(filtered, audioURL: nil, durationMs: nil, videoURL: nil)
         }
     }
 

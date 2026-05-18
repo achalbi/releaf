@@ -40,6 +40,18 @@
  * tearing down the [VideoCapture] use case mid-take would
  * corrupt the in-flight `.mp4` and stop the recording.
  *
+ * A vertical chip strip on the bottom-left lets the user pick
+ * one of six color filters (None / B&W / Sepia / Vivid / Cool /
+ * Warm). The selection drives both the live preview (via a
+ * Compose [Canvas] overlay with an HSL [BlendMode] against the
+ * COMPATIBLE-mode [PreviewView]'s TextureView pixels — no per-
+ * frame Bitmap copy) and the captured still (via
+ * [android.graphics.ColorMatrix] applied to the saved Bitmap
+ * before the JPEG re-encode). Video recording always writes raw
+ * frames; the strip + preview filter are both suppressed while
+ * recording so the user can see what's actually being saved.
+ * See [PhotoFilter] for the per-case overlay / matrix mapping.
+ *
  * After capture (still OR video), the surface lands on the same
  * captured-preview UI: a frozen still (or the video's first
  * frame) + Retake / Use Photo. Use Photo writes the JPEG via
@@ -68,6 +80,10 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas as AndroidCanvas
+import android.graphics.ColorMatrix as AndroidColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
@@ -91,6 +107,7 @@ import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -107,6 +124,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -133,8 +151,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -169,6 +190,160 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+
+/**
+ * One of six color filters the user can apply from the vertical
+ * chip strip on the bottom-left of the live preview. Selection
+ * lives in `ActivePhotoSurface`'s `activeFilter` state and is
+ * mirrored to:
+ *
+ *   - **Live preview** — via a Compose [Canvas] overlay that
+ *     paints a single colored rect over the preview using one
+ *     of the HSL blend modes ([BlendMode.Saturation] /
+ *     [BlendMode.Color]). The [PreviewView] is forced into
+ *     COMPATIBLE mode (TextureView under the hood) so the
+ *     overlay can composite against it in the same render tree;
+ *     PERFORMANCE mode's SurfaceView lives on its own surface
+ *     and Compose blend modes wouldn't reach it.
+ *
+ *   - **Captured still** — via [android.graphics.ColorMatrix]
+ *     applied to the saved [Bitmap] before disk write. The
+ *     matrix gives a precise, deterministic outcome; the live
+ *     preview is a cheap approximation tuned to land in roughly
+ *     the same color space.
+ *
+ * Video recording captures **raw** (no filter applied to the
+ * `.mp4` output). The chip strip + live preview filter are both
+ * suppressed while recording so the user can see what's actually
+ * being saved. A filtered-video pipeline would need
+ * `androidx.media3.transformer` + a `RgbFilter` effect chain;
+ * that's a separate, heavier follow-up.
+ *
+ * Vivid is the awkward one for live preview — there's no clean
+ * HSL blend mode to "boost saturation" (Saturation REPLACES the
+ * dest's saturation with the source's, which is close enough to
+ * the captured outcome that we use it). The captured matrix
+ * boosts saturation precisely via `setSaturation(1.5f)`.
+ */
+internal enum class PhotoFilter(
+    val displayName: String,
+    /** Color painted by the live-preview Canvas. `null` = no overlay. */
+    val overlayColor: Color?,
+    /** Blend mode the overlay uses against the preview underneath. */
+    val overlayBlendMode: BlendMode,
+    /**
+     * 4x5 color matrix applied to the captured bitmap. `null`
+     * leaves the bitmap untouched (the None case + the read site
+     * skips the paint pass entirely).
+     */
+    val captureMatrix: FloatArray?,
+) {
+    None(
+        displayName      = "None",
+        overlayColor     = null,
+        overlayBlendMode = BlendMode.SrcOver,
+        captureMatrix    = null,
+    ),
+    BW(
+        displayName      = "B&W",
+        overlayColor     = Color.Gray,
+        overlayBlendMode = BlendMode.Saturation,
+        // Standard luminosity weights (Rec. 601). Produces a
+        // gentle, naturally-toned grayscale rather than a flat
+        // average-of-channels desaturation.
+        captureMatrix    = floatArrayOf(
+            0.299f, 0.587f, 0.114f, 0f, 0f,
+            0.299f, 0.587f, 0.114f, 0f, 0f,
+            0.299f, 0.587f, 0.114f, 0f, 0f,
+            0f,     0f,     0f,     1f, 0f,
+        ),
+    ),
+    Sepia(
+        displayName      = "Sepia",
+        overlayColor     = Color(0xFFD2A56F),
+        overlayBlendMode = BlendMode.Color,
+        // Classic Microsoft sepia matrix.
+        captureMatrix    = floatArrayOf(
+            0.393f, 0.769f, 0.189f, 0f, 0f,
+            0.349f, 0.686f, 0.168f, 0f, 0f,
+            0.272f, 0.534f, 0.131f, 0f, 0f,
+            0f,     0f,     0f,     1f, 0f,
+        ),
+    ),
+    Vivid(
+        displayName      = "Vivid",
+        // BlendMode.Saturation with a fully-saturated source
+        // replaces the dest's saturation with 100% — a rough
+        // visual stand-in for the matrix's true 1.5x boost.
+        overlayColor     = Color.Red,
+        overlayBlendMode = BlendMode.Saturation,
+        // setSaturation(1.5f)-equivalent matrix. Derived from
+        // Android's ColorMatrix.setSaturation source so we
+        // don't depend on runtime AndroidColorMatrix to build it.
+        captureMatrix    = saturationMatrix(1.5f),
+    ),
+    Cool(
+        displayName      = "Cool",
+        overlayColor     = Color(0xFF80A0FF),
+        overlayBlendMode = BlendMode.Color,
+        // Dim red, lift blue — matches the iOS
+        // `CITemperatureAndTint` cool target.
+        captureMatrix    = floatArrayOf(
+            0.85f, 0f,    0f,    0f, 0f,
+            0f,    0.95f, 0f,    0f, 0f,
+            0f,    0f,    1.10f, 0f, 0f,
+            0f,    0f,    0f,    1f, 0f,
+        ),
+    ),
+    Warm(
+        displayName      = "Warm",
+        overlayColor     = Color(0xFFFFB070),
+        overlayBlendMode = BlendMode.Color,
+        // Lift red, dim blue — sepia's gentler cousin.
+        captureMatrix    = floatArrayOf(
+            1.10f, 0f,    0f,    0f, 0f,
+            0f,    0.95f, 0f,    0f, 0f,
+            0f,    0f,    0.85f, 0f, 0f,
+            0f,    0f,    0f,    1f, 0f,
+        ),
+    ),
+}
+
+/**
+ * Build a 4x5 saturation matrix equivalent to
+ * `android.graphics.ColorMatrix().apply { setSaturation(s) }`.
+ * Inlined here so the enum's `captureMatrix` initializers are
+ * compile-time literals — no per-app-start ColorMatrix instances.
+ */
+private fun saturationMatrix(s: Float): FloatArray {
+    val invSat = 1f - s
+    val r = 0.213f * invSat
+    val g = 0.715f * invSat
+    val b = 0.072f * invSat
+    return floatArrayOf(
+        r + s, g,     b,     0f, 0f,
+        r,     g + s, b,     0f, 0f,
+        r,     g,     b + s, 0f, 0f,
+        0f,    0f,    0f,    1f, 0f,
+    )
+}
+
+/**
+ * Apply [filter]'s `captureMatrix` to [source] and return a new
+ * [Bitmap]. Returns [source] verbatim when filter is None
+ * (caller doesn't need to special-case). Always returns an
+ * ARGB_8888 bitmap regardless of the source config so the
+ * downstream JPEG encoder has a known format.
+ */
+private fun applyFilterToBitmap(source: Bitmap, filter: PhotoFilter): Bitmap {
+    val matrix = filter.captureMatrix ?: return source
+    val out = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+    val paint = Paint().apply {
+        colorFilter = ColorMatrixColorFilter(AndroidColorMatrix(matrix))
+    }
+    AndroidCanvas(out).drawBitmap(source, 0f, 0f, paint)
+    return out
+}
 
 /**
  * Discoverability state for the Photo-capture long-press shortcut
@@ -342,6 +517,12 @@ private fun ActivePhotoSurface(
     // remount (e.g. uiState going Preview → Captured → Preview)
     // gets a fresh bind against the new PreviewView instance.
     var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
+    // Selected color filter. Resets to None on every fresh mount
+    // — we don't persist across sessions since a filter that
+    // silently survived to the next launch could surprise the
+    // user. See `PhotoFilter` docblock for the live-preview vs
+    // capture-time pipeline.
+    var activeFilter by remember { mutableStateOf(PhotoFilter.None) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -413,22 +594,74 @@ private fun ActivePhotoSurface(
                     }
                 }
                 else -> {
-                    AndroidView(
-                        modifier = Modifier.fillMaxSize(),
-                        factory = { ctx ->
-                            val pv = PreviewView(ctx).apply {
-                                scaleType          = PreviewView.ScaleType.FILL_CENTER
-                                implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+                    // Wrap PreviewView + filter overlay in a Box
+                    // with Offscreen compositing so the Compose
+                    // Canvas's BlendMode operates against the
+                    // PreviewView's pixels (it needs an offscreen
+                    // buffer as the blend destination — otherwise
+                    // HSL blend modes have nothing to blend with).
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen },
+                    ) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { ctx ->
+                                val pv = PreviewView(ctx).apply {
+                                    scaleType = PreviewView.ScaleType.FILL_CENTER
+                                    // COMPATIBLE (TextureView)
+                                    // instead of PERFORMANCE
+                                    // (SurfaceView) so the live-
+                                    // preview filter overlay can
+                                    // actually composite against
+                                    // the preview pixels. A
+                                    // SurfaceView's surface lives
+                                    // on its own window layer and
+                                    // Compose blend modes wouldn't
+                                    // reach it.
+                                    implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                                }
+                                // Bind happens via the LaunchedEffect
+                                // up in ActivePhotoSurface — it runs
+                                // as soon as we publish the ref here
+                                // and re-runs on cameraSelector flips.
+                                previewViewRef = pv
+                                pv
+                            },
+                            onRelease = { previewViewRef = null },
+                        )
+                        // Live-preview filter overlay. Suppressed
+                        // during recording so the user sees the raw
+                        // frames that the unfiltered .mp4 is
+                        // actually capturing — "what I see is what
+                        // gets saved."
+                        val showFilter = state is PhotoUiState.Preview &&
+                            activeFilter != PhotoFilter.None
+                        if (showFilter) {
+                            val color = activeFilter.overlayColor
+                            val blend = activeFilter.overlayBlendMode
+                            if (color != null) {
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    drawRect(color = color, blendMode = blend)
+                                }
                             }
-                            // Bind happens via the LaunchedEffect
-                            // up in ActivePhotoSurface — it runs
-                            // as soon as we publish the ref here
-                            // and re-runs on cameraSelector flips.
-                            previewViewRef = pv
-                            pv
-                        },
-                        onRelease = { previewViewRef = null },
-                    )
+                        }
+                        // Vertical filter strip on the bottom-left
+                        // of the preview area. Only shown in idle
+                        // Preview — hidden once a capture is in
+                        // flight or recording is running so the
+                        // surface isn't cluttered.
+                        if (state is PhotoUiState.Preview) {
+                            FilterStrip(
+                                activeFilter = activeFilter,
+                                onSelect     = { activeFilter = it },
+                                modifier     = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(start = QuickInkSpacing.s4, bottom = QuickInkSpacing.s4),
+                            )
+                        }
+                    }
                     if (state is PhotoUiState.Recording) {
                         RecordingTimeChip(
                             elapsedMs = state.elapsedMs,
@@ -460,13 +693,49 @@ private fun ActivePhotoSurface(
                     uiState = PhotoUiState.Capturing
                     view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                     CaptureAnalytics.manualFired(CaptureMode.Photo)
+                    val filterAtCapture = activeFilter
                     triggerPhotoCapture(
                         context         = context,
                         imageCapture    = bindings.imageCapture,
                         captureExecutor = captureExecutor,
                         processingScope = processingScope,
                         onResult = { file, bitmap ->
-                            uiState = PhotoUiState.Captured(CapturedBuffer.Still(bitmap, file))
+                            if (filterAtCapture == PhotoFilter.None) {
+                                uiState = PhotoUiState.Captured(CapturedBuffer.Still(bitmap, file))
+                            } else {
+                                // Filter the captured bitmap on a
+                                // background dispatcher (ColorMatrix
+                                // + JPEG re-encode is ~50-200ms),
+                                // flip to Processing in the
+                                // meantime so the spinner overlay
+                                // shows and the shutter is locked.
+                                uiState = PhotoUiState.Processing
+                                processingScope.launch {
+                                    val filtered = withContext(Dispatchers.Default) {
+                                        applyFilterToBitmap(bitmap, filterAtCapture)
+                                    }
+                                    withContext(Dispatchers.IO) {
+                                        // Rewrite the JPEG so the
+                                        // file ImportArtifacts
+                                        // eventually consumes
+                                        // matches the bitmap the
+                                        // user sees on the captured
+                                        // preview.
+                                        file.outputStream().use { out ->
+                                            filtered.compress(
+                                                Bitmap.CompressFormat.JPEG,
+                                                92,
+                                                out,
+                                            )
+                                        }
+                                    }
+                                    withContext(Dispatchers.Main) {
+                                        uiState = PhotoUiState.Captured(
+                                            CapturedBuffer.Still(filtered, file),
+                                        )
+                                    }
+                                }
+                            }
                         },
                         onError = {
                             android.util.Log.w("PhotoCapture", "takePicture failed", it)
@@ -922,6 +1191,51 @@ private fun CameraFlipButton(
             tint               = Color.White,
             modifier           = Modifier.size(20.dp),
         )
+    }
+}
+
+/**
+ * Vertical chip strip on the bottom-left of the live preview.
+ * Each chip selects one of the six [PhotoFilter] presets. The
+ * active chip flips to the coral accent so the current filter
+ * is identifiable at a glance. Hidden outside [PhotoUiState.Preview]
+ * by the caller — during recording the filter is disabled, and
+ * once the user has captured the filter is already baked in.
+ */
+@Composable
+private fun FilterStrip(
+    activeFilter: PhotoFilter,
+    onSelect: (PhotoFilter) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Column(
+        modifier              = modifier,
+        verticalArrangement   = Arrangement.spacedBy(6.dp),
+        horizontalAlignment   = Alignment.Start,
+    ) {
+        PhotoFilter.entries.forEach { filter ->
+            val selected = filter == activeFilter
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(QuickInkRadius.pill))
+                    .background(
+                        if (selected) colors.accent
+                        else Color.Black.copy(alpha = 0.55f),
+                    )
+                    .clickable { onSelect(filter) }
+                    .widthIn(min = 56.dp)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text  = filter.displayName,
+                    style = type.caption.copy(fontSize = 11.sp),
+                    color = if (selected) Color.White else Color.White.copy(alpha = 0.75f),
+                )
+            }
+        }
     }
 }
 
