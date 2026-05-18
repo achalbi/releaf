@@ -41,14 +41,13 @@
  * corrupt the in-flight `.mp4` and stop the recording.
  *
  * A collapse-by-default chip strip sits to the left of the
- * shutter and lets the user pick one of six color filters
- * (None / B&W / Sepia / Vivid / Cool / Warm). Collapsed → only
- * the active chip is visible. Tap → the column expands upward
- * into the preview area with all 6 chips; each chip carries a
- * live mini-preview rendered from [TextureView.getBitmap]
- * polled at 5fps and re-tinted per chip via Compose
- * [ColorFilter.colorMatrix]. Tap a chip → it's selected and
- * the strip collapses again.
+ * shutter and lets the user pick one of four color filters
+ * (None / B&W / Sepia / Cool). Collapsed → only the active chip
+ * is visible. Tap → the column expands upward into the preview
+ * area with all chips; each chip carries a live mini-preview
+ * rendered from [TextureView.getBitmap] polled at 5fps and
+ * re-tinted per chip via Compose [ColorFilter.colorMatrix].
+ * Tap a chip → it's selected and the strip collapses again.
  *
  * The selection drives both the main live preview (via a
  * Compose [Canvas] overlay with an HSL [BlendMode] against the
@@ -232,12 +231,6 @@ import java.util.concurrent.Executors
  * being saved. A filtered-video pipeline would need
  * `androidx.media3.transformer` + a `RgbFilter` effect chain;
  * that's a separate, heavier follow-up.
- *
- * Vivid is the awkward one for live preview — there's no clean
- * HSL blend mode to "boost saturation" (Saturation REPLACES the
- * dest's saturation with the source's, which is close enough to
- * the captured outcome that we use it). The captured matrix
- * boosts saturation precisely via `setSaturation(1.5f)`.
  */
 internal enum class PhotoFilter(
     val displayName: String,
@@ -284,18 +277,6 @@ internal enum class PhotoFilter(
             0f,     0f,     0f,     1f, 0f,
         ),
     ),
-    Vivid(
-        displayName      = "Vivid",
-        // BlendMode.Saturation with a fully-saturated source
-        // replaces the dest's saturation with 100% — a rough
-        // visual stand-in for the matrix's true 1.5x boost.
-        overlayColor     = Color.Red,
-        overlayBlendMode = BlendMode.Saturation,
-        // setSaturation(1.5f)-equivalent matrix. Derived from
-        // Android's ColorMatrix.setSaturation source so we
-        // don't depend on runtime AndroidColorMatrix to build it.
-        captureMatrix    = saturationMatrix(1.5f),
-    ),
     Cool(
         displayName      = "Cool",
         overlayColor     = Color(0xFF80A0FF),
@@ -306,18 +287,6 @@ internal enum class PhotoFilter(
             0.85f, 0f,    0f,    0f, 0f,
             0f,    0.95f, 0f,    0f, 0f,
             0f,    0f,    1.10f, 0f, 0f,
-            0f,    0f,    0f,    1f, 0f,
-        ),
-    ),
-    Warm(
-        displayName      = "Warm",
-        overlayColor     = Color(0xFFFFB070),
-        overlayBlendMode = BlendMode.Color,
-        // Lift red, dim blue — sepia's gentler cousin.
-        captureMatrix    = floatArrayOf(
-            1.10f, 0f,    0f,    0f, 0f,
-            0f,    0.95f, 0f,    0f, 0f,
-            0f,    0f,    0.85f, 0f, 0f,
             0f,    0f,    0f,    1f, 0f,
         ),
     ),
@@ -341,25 +310,6 @@ private fun findTextureView(root: View): TextureView? {
         }
     }
     return null
-}
-
-/**
- * Build a 4x5 saturation matrix equivalent to
- * `android.graphics.ColorMatrix().apply { setSaturation(s) }`.
- * Inlined here so the enum's `captureMatrix` initializers are
- * compile-time literals — no per-app-start ColorMatrix instances.
- */
-private fun saturationMatrix(s: Float): FloatArray {
-    val invSat = 1f - s
-    val r = 0.213f * invSat
-    val g = 0.715f * invSat
-    val b = 0.072f * invSat
-    return floatArrayOf(
-        r + s, g,     b,     0f, 0f,
-        r,     g + s, b,     0f, 0f,
-        r,     g,     b + s, 0f, 0f,
-        0f,    0f,    0f,    1f, 0f,
-    )
 }
 
 /**
@@ -718,11 +668,15 @@ private fun ActivePhotoSurface(
                             onRelease = { previewViewRef = null },
                         )
                         // Live-preview filter overlay. Suppressed
-                        // during recording so the user sees the raw
-                        // frames that the unfiltered .mp4 is
-                        // actually capturing — "what I see is what
-                        // gets saved."
-                        val showFilter = state is PhotoUiState.Preview &&
+                        // only during recording — video captures
+                        // raw and we want the preview to match. We
+                        // intentionally KEEP the overlay on through
+                        // Capturing / Processing too so the user
+                        // doesn't see the filter blink off the
+                        // instant they tap the shutter (the frame
+                        // they release on should look like the
+                        // frame they were composing).
+                        val showFilter = state !is PhotoUiState.Recording &&
                             activeFilter != PhotoFilter.None
                         if (showFilter) {
                             val color = activeFilter.overlayColor

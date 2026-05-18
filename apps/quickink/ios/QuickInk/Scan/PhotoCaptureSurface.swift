@@ -40,12 +40,12 @@
  * in-flight `.mov` and race the photo/movie delegate callbacks.
  *
  * A collapse-by-default chip strip sits to the left of the
- * shutter and lets the user pick one of six color filters
- * (None / B&W / Sepia / Vivid / Cool / Warm). Collapsed → only
- * the active chip is visible. Tap → the column expands upward
- * into the preview area with all 6 chips; each chip carries a
- * live mini-preview of the camera with that filter pre-applied
- * (multiple `AVCaptureVideoPreviewLayer`s share the single
+ * shutter and lets the user pick one of four color filters
+ * (None / B&W / Sepia / Cool). Collapsed → only the active chip
+ * is visible. Tap → the column expands upward into the preview
+ * area with all chips; each chip carries a live mini-preview of
+ * the camera with that filter pre-applied (multiple
+ * `AVCaptureVideoPreviewLayer`s share the single
  * `captureSession` — GPU-rendered, cost is negligible). Tap a
  * chip → it's selected and the strip collapses again.
  *
@@ -110,9 +110,7 @@ public enum PhotoFilter: String, CaseIterable {
     case none = "None"
     case bw = "B&W"
     case sepia = "Sepia"
-    case vivid = "Vivid"
     case cool = "Cool"
-    case warm = "Warm"
 
     public var displayName: String { rawValue }
 
@@ -124,33 +122,26 @@ public enum PhotoFilter: String, CaseIterable {
     /// captured still doesn't look surprising next to the preview.
     public var liveSaturation: Double {
         switch self {
-        case .none, .cool, .warm: return 1.0
-        case .bw:                 return 0.0
-        case .sepia:              return 0.3
-        case .vivid:              return 1.5
+        case .none, .cool: return 1.0
+        case .bw:          return 0.0
+        case .sepia:       return 0.3
         }
     }
 
-    /// `.contrast(_:)` multiplier. Only Vivid bumps contrast a
-    /// touch; the rest leave it alone since `.colorMultiply` is
-    /// doing the heavy lifting for tint-based filters.
-    public var liveContrast: Double {
-        switch self {
-        case .vivid: return 1.1
-        default:     return 1.0
-        }
-    }
+    /// `.contrast(_:)` multiplier. Currently every filter sticks
+    /// at identity contrast (`.colorMultiply` carries the look).
+    /// Kept as a property so future filters can dial it in
+    /// without restructuring callers.
+    public var liveContrast: Double { 1.0 }
 
     /// `.colorMultiply(_:)` tint. `.white` is the identity (no
-    /// tint). Cool / Warm / Sepia ship their characteristic
-    /// color cast here; B&W / Vivid go through saturation and
-    /// don't need a tint.
+    /// tint). Cool / Sepia ship their characteristic color cast
+    /// here; B&W goes through saturation and doesn't need a tint.
     public var liveTint: Color {
         switch self {
-        case .none, .bw, .vivid: return .white
-        case .sepia:             return Color(red: 1.00, green: 0.85, blue: 0.60)
-        case .cool:              return Color(red: 0.85, green: 0.95, blue: 1.10)
-        case .warm:              return Color(red: 1.10, green: 0.95, blue: 0.85)
+        case .none, .bw: return .white
+        case .sepia:     return Color(red: 1.00, green: 0.85, blue: 0.60)
+        case .cool:      return Color(red: 0.85, green: 0.95, blue: 1.10)
         }
     }
 
@@ -180,30 +171,14 @@ public enum PhotoFilter: String, CaseIterable {
                 f.setValue(ciImage, forKey: kCIInputImageKey)
                 f.setValue(0.80, forKey: kCIInputIntensityKey)
                 return f.outputImage
-            case .vivid:
-                // `CIColorControls` boost — saturate, lift
-                // brightness a touch, add contrast. Matches the
-                // SwiftUI `.saturation(1.5).contrast(1.1)` preview.
-                let f = CIFilter(name: "CIColorControls")!
-                f.setValue(ciImage, forKey: kCIInputImageKey)
-                f.setValue(1.50, forKey: kCIInputSaturationKey)
-                f.setValue(0.05, forKey: kCIInputBrightnessKey)
-                f.setValue(1.10, forKey: kCIInputContrastKey)
-                return f.outputImage
             case .cool:
                 // Shift target neutral to a lower Kelvin → image
                 // takes on a blue cast (the white point now sits
-                // where ~4000K would, so cooler tones survive).
+                // where ~4500K would, so cooler tones survive).
                 let f = CIFilter(name: "CITemperatureAndTint")!
                 f.setValue(ciImage, forKey: kCIInputImageKey)
                 f.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
                 f.setValue(CIVector(x: 4500, y: 0), forKey: "inputTargetNeutral")
-                return f.outputImage
-            case .warm:
-                let f = CIFilter(name: "CITemperatureAndTint")!
-                f.setValue(ciImage, forKey: kCIInputImageKey)
-                f.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
-                f.setValue(CIVector(x: 8500, y: 0), forKey: "inputTargetNeutral")
                 return f.outputImage
             }
         }()
