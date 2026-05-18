@@ -786,89 +786,136 @@ object SpeechTranscriber {
         model: WhisperModel,
         onProgress: (absoluteBytes: Long, totalBytes: Long) -> Unit,
     ) {
-        val resumeFrom = if (partial.exists()) partial.length() else 0L
-        Log.i(
-            TAG,
-            "downloadToPartial: model=${model.id} resumeFrom=$resumeFrom partialExists=${partial.exists()}",
-        )
+        // Up to two passes. The first may discover a stale `.partial`
+        // (left full-sized by a worker killed mid-extract) and 416
+        // back; the second pass starts from byte 0 with a clean
+        // partial and succeeds.
+        for (attempt in 1..2) {
+            val resumeFrom = if (partial.exists()) partial.length() else 0L
+            Log.i(
+                TAG,
+                "downloadToPartial attempt=$attempt model=${model.id} resumeFrom=$resumeFrom partialExists=${partial.exists()}",
+            )
 
-        val conn = (URL(model.downloadUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 30_000
-            readTimeout = 300_000
-            instanceFollowRedirects = true
-            if (resumeFrom > 0) {
-                setRequestProperty("Range", "bytes=$resumeFrom-")
+            val conn = (URL(model.downloadUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 30_000
+                readTimeout = 300_000
+                instanceFollowRedirects = true
+                if (resumeFrom > 0) {
+                    setRequestProperty("Range", "bytes=$resumeFrom-")
+                }
+            }
+            // Emit an initial "we're at resumeFrom bytes / total
+            // unknown" beat so the modal renders progress immediately
+            // even before the response headers arrive.
+            onProgress(resumeFrom, 0L)
+            try {
+                Log.i(TAG, "HTTP connecting to ${model.downloadUrl}…")
+                val connectStartMs = System.currentTimeMillis()
+                conn.connect()
+                val code = conn.responseCode
+                Log.i(
+                    TAG,
+                    "HTTP connected: code=$code in ${System.currentTimeMillis() - connectStartMs}ms",
+                )
+
+                // 416 Range Not Satisfiable — partial is at or past
+                // the resource's actual size. Two cases:
+                //   1. partial.length() == total: the download
+                //      already finished last attempt; the worker was
+                //      killed before extract ran. Bail out happy —
+                //      caller will extract from the existing file.
+                //   2. partial.length() != total (over-sized or
+                //      mismatched): the file on disk is bogus. Wipe
+                //      and retry the loop from byte 0.
+                if (code == 416) {
+                    val total = parseContentRangeTotal(conn)
+                    runCatching { conn.disconnect() }
+                    if (total > 0 && partial.length() == total) {
+                        Log.i(
+                            TAG,
+                            "HTTP 416 + partial is complete (${partial.length()} bytes) — skipping fetch, ready to extract",
+                        )
+                        onProgress(partial.length(), total)
+                        return
+                    }
+                    Log.i(
+                        TAG,
+                        "HTTP 416 with mismatched partial (have=${partial.length()} total=$total); wiping and restarting from byte 0",
+                    )
+                    partial.delete()
+                    continue
+                }
+
+                val resumed = code == 206
+                if (!resumed && code !in 200..299) {
+                    throw IOException("sherpa model HTTP $code")
+                }
+                if (!resumed && resumeFrom > 0) {
+                    // Server ignored Range (returned 200 with the
+                    // whole file). Drop the partial bytes — they
+                    // may belong to a different revision of the asset.
+                    Log.i(TAG, "Server didn't honor Range; restarting from byte 0")
+                    partial.delete()
+                }
+                val effectiveStart = if (resumed) resumeFrom else 0L
+                val totalBytes = totalBytesFor(conn, resumed)
+                Log.i(
+                    TAG,
+                    "HTTP body: effectiveStart=$effectiveStart totalBytes=$totalBytes resumed=$resumed",
+                )
+                onProgress(effectiveStart, totalBytes)
+
+                partial.parentFile?.mkdirs()
+                val firstReadStartMs = System.currentTimeMillis()
+                var loggedFirstChunk = false
+                java.io.FileOutputStream(partial, /* append = */ resumed).use { out ->
+                    val counting = ProgressTrackingInputStream(
+                        delegate                 = conn.inputStream,
+                        totalBytes               = totalBytes,
+                        bytesAlreadyDownloaded   = effectiveStart,
+                        onProgress               = { absolute, total ->
+                            if (!loggedFirstChunk && absolute > effectiveStart) {
+                                loggedFirstChunk = true
+                                Log.i(
+                                    TAG,
+                                    "first bytes received in ${System.currentTimeMillis() - firstReadStartMs}ms (absolute=$absolute)",
+                                )
+                            }
+                            onProgress(absolute, total)
+                        },
+                    )
+                    counting.copyTo(out)
+                }
+
+                // Truncation check. With a known total we should
+                // have landed exactly there; with an unknown total
+                // we trust EOF and accept whatever we got.
+                if (totalBytes > 0 && partial.length() < totalBytes) {
+                    throw IOException(
+                        "Download truncated: ${partial.length()}/$totalBytes bytes — will resume on next try"
+                    )
+                }
+                Log.i(
+                    TAG,
+                    "downloadToPartial done: model=${model.id} partial=${partial.length()} expected=$totalBytes",
+                )
+                return
+            } finally {
+                runCatching { conn.disconnect() }
             }
         }
-        // Emit an initial "we're at resumeFrom bytes / total unknown"
-        // beat so the modal renders progress immediately even before
-        // the response headers arrive.
-        onProgress(resumeFrom, 0L)
-        try {
-            Log.i(TAG, "HTTP connecting to ${model.downloadUrl}…")
-            val connectStartMs = System.currentTimeMillis()
-            conn.connect()
-            val code = conn.responseCode
-            Log.i(
-                TAG,
-                "HTTP connected: code=$code in ${System.currentTimeMillis() - connectStartMs}ms",
-            )
-            val resumed = code == 206
-            if (!resumed && code !in 200..299) {
-                throw IOException("sherpa model HTTP $code")
-            }
-            if (!resumed && resumeFrom > 0) {
-                // Server ignored Range (returned 200 with the whole
-                // file). Drop the partial bytes — they may belong
-                // to a different revision of the asset.
-                Log.i(TAG, "Server didn't honor Range; restarting from byte 0")
-                partial.delete()
-            }
-            val effectiveStart = if (resumed) resumeFrom else 0L
-            val totalBytes = totalBytesFor(conn, resumed)
-            Log.i(
-                TAG,
-                "HTTP body: effectiveStart=$effectiveStart totalBytes=$totalBytes resumed=$resumed",
-            )
-            onProgress(effectiveStart, totalBytes)
+        throw IOException("downloadToPartial retry exhausted (HTTP 416 ping-pong)")
+    }
 
-            partial.parentFile?.mkdirs()
-            val firstReadStartMs = System.currentTimeMillis()
-            var loggedFirstChunk = false
-            java.io.FileOutputStream(partial, /* append = */ resumed).use { out ->
-                val counting = ProgressTrackingInputStream(
-                    delegate                 = conn.inputStream,
-                    totalBytes               = totalBytes,
-                    bytesAlreadyDownloaded   = effectiveStart,
-                    onProgress               = { absolute, total ->
-                        if (!loggedFirstChunk && absolute > effectiveStart) {
-                            loggedFirstChunk = true
-                            Log.i(
-                                TAG,
-                                "first bytes received in ${System.currentTimeMillis() - firstReadStartMs}ms (absolute=$absolute)",
-                            )
-                        }
-                        onProgress(absolute, total)
-                    },
-                )
-                counting.copyTo(out)
-            }
-
-            // Truncation check. With a known total we should have
-            // landed exactly there; with an unknown total we trust
-            // EOF and accept whatever we got.
-            if (totalBytes > 0 && partial.length() < totalBytes) {
-                throw IOException(
-                    "Download truncated: ${partial.length()}/$totalBytes bytes — will resume on next try"
-                )
-            }
-            Log.i(
-                TAG,
-                "downloadToPartial done: model=${model.id} partial=${partial.length()} expected=$totalBytes",
-            )
-        } finally {
-            runCatching { conn.disconnect() }
-        }
+    // Pull the total-resource-size out of a `Content-Range` header.
+    // Format: `bytes <start>-<end>/<total>` on a 206, or
+    // `bytes <asterisk>/<total>` (literal *) on a 416. Returns 0 if
+    // the header is missing or unparseable so the caller can fall
+    // back to "wipe and retry".
+    private fun parseContentRangeTotal(conn: HttpURLConnection): Long {
+        val cr = conn.getHeaderField("Content-Range") ?: return 0L
+        return cr.substringAfterLast('/').toLongOrNull()?.coerceAtLeast(0L) ?: 0L
     }
 
     /**
