@@ -720,6 +720,13 @@ private fun TranscriptStrip(
     // variants on disk — a single-model case offers no real choice
     // and the dropdown would feel like dead chrome.
     val canPickModel = availableModels.size >= 2
+    // When a transcribe pass is in flight after a re-tap, keep the
+    // existing transcript visible (so the user can compare) and
+    // show the spinner inside the Try-again pill instead of blanking
+    // the whole strip down to "Transcribing…". Only fall through to
+    // the "Transcribing…" row when there's no prior transcript to
+    // hold up.
+    val keepTranscriptVisible = hasTranscript && isPending
 
     // Flips the Copy-to-notes pill to "Copied" briefly after a tap
     // so the action acknowledges without leaving a permanent badge.
@@ -742,6 +749,38 @@ private fun TranscriptStrip(
         Text(text = eyebrow, style = type.eyebrow, color = colors.muted)
 
         when {
+            keepTranscriptVisible -> {
+                Text(
+                    text = transcript!!,
+                    style = type.caption,
+                    color = colors.ink,
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(QuickInkRadius.pill))
+                            .background(colors.accentSoft)
+                            .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier   = Modifier.size(12.dp),
+                                color      = colors.accent,
+                                strokeWidth = 1.5.dp,
+                            )
+                            Spacer(Modifier.size(QuickInkSpacing.s1))
+                            Text(
+                                text  = "Transcribing…",
+                                style = type.caption,
+                                color = colors.accent,
+                            )
+                        }
+                    }
+                }
+            }
             hasTranscript -> {
                 Text(
                     text = transcript!!,
