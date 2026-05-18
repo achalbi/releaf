@@ -67,6 +67,7 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.PictureAsPdf
+import androidx.compose.material.icons.outlined.VideoLibrary
 import app.quickink.mobile.features.scan.businesscard.AddContactReviewSheet
 import app.quickink.mobile.features.scan.businesscard.launchAddContactIntent
 import app.quickink.mobile.features.scan.businesscard.runBusinessCardExtraction
@@ -577,10 +578,21 @@ fun ScanDetailScreen(
                     },
                     onMoreClick         = { moreMenuExpanded = true },
                     moreMenuContent     = {
+                        // Video subtype = a hold-to-record photo capture
+                        // that produced a `.mp4`. Same rule as HomeScreen
+                        // / fileTypeLabel — source == "photo" + a video
+                        // URI (local or Drive). The dropdown swaps the
+                        // image/PDF share pair for a single "Share video"
+                        // when this trips.
+                        val isVideo = current.source == "photo" && (
+                            !current.videoUri.isNullOrBlank() ||
+                                !current.videoDriveFileId.isNullOrBlank()
+                        )
                         ScanActionsDropdown(
                             expanded              = moreMenuExpanded,
                             onDismiss             = { moreMenuExpanded = false },
                             isBusinessCard        = isBusinessCard,
+                            isVideo               = isVideo,
                             isPreparingImageShare = isPreparingImageShare,
                             onAddToContact        = {
                                 moreMenuExpanded = false
@@ -589,6 +601,10 @@ fun ScanDetailScreen(
                                         runBusinessCardExtraction(captureId, ocrDao)
                                     }.getOrDefault(ExtractedContact.empty)
                                 }
+                            },
+                            onShareVideo          = {
+                                moreMenuExpanded = false
+                                shareVideo(context, current.videoUri)
                             },
                             onShareAsImage        = {
                                 moreMenuExpanded = false
@@ -1493,6 +1509,53 @@ private fun buildImageShareIntent(uris: List<Uri>): Intent {
  *
  * Mirror of iOS `ShareLink(item: pdfURL)` on the Export-as-PDF row.
  */
+/**
+ * Share-sheet for the recorded `.mp4` of a hold-to-record Photo-
+ * mode capture. Same FileProvider plumbing as [exportAsPdf] —
+ * the receiver gets a `content://` URI it can read without
+ * needing storage permission. Mime type is `video/mp4` so the
+ * share sheet only surfaces apps that handle video.
+ *
+ * Toast on every failure path so the tap doesn't read as silent
+ * (matches the PDF-share UX).
+ */
+private fun shareVideo(
+    context: android.content.Context,
+    videoUri: String?,
+) {
+    if (videoUri.isNullOrBlank() || !localFileExists(videoUri)) {
+        android.widget.Toast.makeText(
+            context, "Video isn't available for this capture",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+        return
+    }
+    val shareUri = shareableUri(context, videoUri)
+    if (shareUri == null) {
+        android.widget.Toast.makeText(
+            context, "Couldn't prepare video for sharing",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+        return
+    }
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "video/mp4"
+        putExtra(Intent.EXTRA_STREAM, shareUri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // Mirror EXTRA_STREAM into clipData so the read-grant
+        // survives the chooser-target trampoline on API 24+.
+        clipData = android.content.ClipData.newRawUri(null, shareUri)
+    }
+    try {
+        context.startActivity(Intent.createChooser(intent, "Share video"))
+    } catch (_: Exception) {
+        android.widget.Toast.makeText(
+            context, "Couldn't open the share sheet for this video",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+    }
+}
+
 private fun exportAsPdf(
     context: android.content.Context,
     pdfUri: String?,
@@ -2411,7 +2474,7 @@ private fun LocationsRow(
         modifier          = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = "Locations", style = rowStyle, color = colors.inkSoft)
+        Text(text = "Places", style = rowStyle, color = colors.inkSoft)
         Spacer(modifier = Modifier.weight(1f))
         Row(
             verticalAlignment     = Alignment.CenterVertically,
@@ -2813,9 +2876,17 @@ private fun ScanActionsDropdown(
     expanded: Boolean,
     onDismiss: () -> Unit,
     isBusinessCard: Boolean,
+    /**
+     * Video captures (hold-to-record from Photo mode) get a
+     * single "Share video" action in place of "Share as Image"
+     * + "Export as PDF" — the PDF/image pair makes no sense for
+     * a clip whose only useful artifact is the `.mp4` itself.
+     */
+    isVideo: Boolean,
     isPreparingImageShare: Boolean,
     onAddToContact: () -> Unit,
     onShareAsImage: () -> Unit,
+    onShareVideo: () -> Unit,
     onExportPdf: () -> Unit,
     onMoveToFolder: () -> Unit,
     onManageTags: () -> Unit,
@@ -2837,19 +2908,28 @@ private fun ScanActionsDropdown(
             )
             ScanActionDivider()
         }
-        ScanActionRow(
-            label   = if (isPreparingImageShare) "Preparing…" else "Share as Image",
-            icon    = androidx.compose.material.icons.Icons.Outlined.Image,
-            enabled = !isPreparingImageShare,
-            onClick = onShareAsImage,
-        )
-        ScanActionDivider()
-        ScanActionRow(
-            label   = "Export as PDF",
-            icon    = androidx.compose.material.icons.Icons.Outlined.PictureAsPdf,
-            onClick = onExportPdf,
-        )
-        ScanActionDivider()
+        if (isVideo) {
+            ScanActionRow(
+                label   = "Share video",
+                icon    = androidx.compose.material.icons.Icons.Outlined.VideoLibrary,
+                onClick = onShareVideo,
+            )
+            ScanActionDivider()
+        } else {
+            ScanActionRow(
+                label   = if (isPreparingImageShare) "Preparing…" else "Share as Image",
+                icon    = androidx.compose.material.icons.Icons.Outlined.Image,
+                enabled = !isPreparingImageShare,
+                onClick = onShareAsImage,
+            )
+            ScanActionDivider()
+            ScanActionRow(
+                label   = "Export as PDF",
+                icon    = androidx.compose.material.icons.Icons.Outlined.PictureAsPdf,
+                onClick = onExportPdf,
+            )
+            ScanActionDivider()
+        }
         ScanActionRow(
             label   = "Move to folder",
             icon    = androidx.compose.material.icons.Icons.Outlined.Folder,

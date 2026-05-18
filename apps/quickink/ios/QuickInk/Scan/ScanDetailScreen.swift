@@ -96,6 +96,12 @@ struct ScanDetailScreen: View {
     /// Workspace v1 — tag picker presentation. Tapping "Manage
     /// tags" opens the bottom sheet.
     @State private var showTagPicker = false
+    /// Workspace Places — place picker presentation. Tapping
+    /// "Manage places" opens the picker sheet.
+    @State private var showPlacePicker = false
+    /// Workspace People — person picker presentation. Tapping
+    /// "Manage people" opens the picker sheet.
+    @State private var showPeoplePicker = false
     /// Tag ids attached to this capture, oldest-first. Replaces the
     /// pre-A.3c `captures.category` read for the primary-label
     /// badge + the Business Card behavior switch.
@@ -290,6 +296,24 @@ struct ScanDetailScreen: View {
                 captureId: captureId,
                 userId:    userId,
                 onDismiss: { showTagPicker = false }
+            )
+            .presentationDetents([.large])
+        }
+        // Workspace Places — picker on "Manage places".
+        .sheet(isPresented: $showPlacePicker) {
+            LocationPickerSheet(
+                userId:    userId,
+                captureId: captureId,
+                onDismiss: { showPlacePicker = false }
+            )
+            .presentationDetents([.large])
+        }
+        // Workspace People — picker on "Manage people".
+        .sheet(isPresented: $showPeoplePicker) {
+            PeoplePickerSheet(
+                userId:    userId,
+                captureId: captureId,
+                onDismiss: { showPeoplePicker = false }
             )
             .presentationDetents([.large])
         }
@@ -688,20 +712,39 @@ struct ScanDetailScreen: View {
             }
 
             Section {
-                if canShareAsImage(capture) {
-                    Button {
-                        Task { await prepareImageShare() }
-                    } label: {
-                        Label(
-                            isPreparingImageShare ? "Preparing…" : "Share as Image",
-                            systemImage: "photo"
-                        )
+                // Video subtype = a hold-to-record photo capture
+                // that produced a `.mov`. Same rule as the
+                // fileTypeLabel branch below — source == "photo"
+                // + a video URI (local or Drive). For these, the
+                // only useful artifact is the recorded clip
+                // itself; the image/PDF pair makes no sense.
+                // Swap them for a single "Share video" ShareLink.
+                let isVideo = capture.source == "photo" && (
+                    (capture.videoUri?.isEmpty == false) ||
+                    (capture.videoDriveFileId?.isEmpty == false)
+                )
+                if isVideo {
+                    if let videoURL = Self.resolvedLocalURL(for: capture.videoUri) {
+                        ShareLink(item: videoURL) {
+                            Label("Share video", systemImage: "video")
+                        }
                     }
-                    .disabled(isPreparingImageShare)
-                }
-                if let pdfURL = shareablePdfURL(from: capture) {
-                    ShareLink(item: pdfURL) {
-                        Label("Export as PDF", systemImage: "arrow.down.doc")
+                } else {
+                    if canShareAsImage(capture) {
+                        Button {
+                            Task { await prepareImageShare() }
+                        } label: {
+                            Label(
+                                isPreparingImageShare ? "Preparing…" : "Share as Image",
+                                systemImage: "photo"
+                            )
+                        }
+                        .disabled(isPreparingImageShare)
+                    }
+                    if let pdfURL = shareablePdfURL(from: capture) {
+                        ShareLink(item: pdfURL) {
+                            Label("Export as PDF", systemImage: "arrow.down.doc")
+                        }
                     }
                 }
             }
@@ -1306,25 +1349,42 @@ struct ScanDetailScreen: View {
                     actionDivider
                 }
 
-                if canShareAsImage(capture) {
-                    Button {
-                        Task { await prepareImageShare() }
-                    } label: {
-                        actionRowContent(
-                            icon: "photo",
-                            label: isPreparingImageShare ? "Preparing…" : "Share as Image"
-                        )
+                // Video subtype gets a single "Share video" row in
+                // place of the Share-as-Image / Export-as-PDF pair —
+                // the PDF/image artifacts make no sense for a clip
+                // whose only meaningful output is the recorded .mov.
+                let isVideo = capture.source == "photo" && (
+                    (capture.videoUri?.isEmpty == false) ||
+                    (capture.videoDriveFileId?.isEmpty == false)
+                )
+                if isVideo {
+                    if let videoURL = Self.resolvedLocalURL(for: capture.videoUri) {
+                        ShareLink(item: videoURL) {
+                            actionRowContent(icon: "video", label: "Share video")
+                        }
+                        actionDivider
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isPreparingImageShare)
-                    actionDivider
-                }
+                } else {
+                    if canShareAsImage(capture) {
+                        Button {
+                            Task { await prepareImageShare() }
+                        } label: {
+                            actionRowContent(
+                                icon: "photo",
+                                label: isPreparingImageShare ? "Preparing…" : "Share as Image"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isPreparingImageShare)
+                        actionDivider
+                    }
 
-                if let pdfURL = shareablePdfURL(from: capture) {
-                    ShareLink(item: pdfURL) {
-                        actionRowContent(icon: "arrow.down.doc", label: "Export as PDF")
+                    if let pdfURL = shareablePdfURL(from: capture) {
+                        ShareLink(item: pdfURL) {
+                            actionRowContent(icon: "arrow.down.doc", label: "Export as PDF")
+                        }
+                        actionDivider
                     }
-                    actionDivider
                 }
 
                 Button { showFolderPicker = true } label: {
@@ -1336,6 +1396,20 @@ struct ScanDetailScreen: View {
 
                 Button { showTagPicker = true } label: {
                     actionRowContent(icon: "tag", label: "Manage tags")
+                }
+                .buttonStyle(.plain)
+
+                actionDivider
+
+                Button { showPlacePicker = true } label: {
+                    actionRowContent(icon: "mappin.and.ellipse", label: "Manage places")
+                }
+                .buttonStyle(.plain)
+
+                actionDivider
+
+                Button { showPeoplePicker = true } label: {
+                    actionRowContent(icon: "person.2", label: "Manage people")
                 }
                 .buttonStyle(.plain)
 
