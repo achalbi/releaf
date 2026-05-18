@@ -466,7 +466,7 @@ private struct ActivePhotoSurface: View {
                             Image(systemName: "checkmark")
                                 .font(.system(size: 14, weight: .semibold))
                         }
-                        Text("Use Photo")
+                        Text("OK")
                             .font(QuickInkText.label)
                     }
                     .foregroundStyle(.white)

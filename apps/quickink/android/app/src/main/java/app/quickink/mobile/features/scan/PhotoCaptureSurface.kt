@@ -682,7 +682,7 @@ private fun CommitRow(
                     )
                 }
                 Spacer(Modifier.size(6.dp))
-                Text(text = "Use Photo", style = type.label, color = Color.White)
+                Text(text = "OK", style = type.label, color = Color.White)
             }
         }
     }
