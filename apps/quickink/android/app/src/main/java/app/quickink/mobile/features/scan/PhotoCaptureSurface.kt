@@ -87,7 +87,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -759,23 +761,31 @@ private fun PhotoShutterButton(
             .size(78.dp)
             .pointerInput(enabled, isRecording) {
                 if (!enabled) return@pointerInput
-                detectTapGestures(
-                    onTap = { onTap() },
-                    onLongPress = { onHoldStart() },
-                    onPress = { offset ->
-                        // Wait for release of the press; once it
-                        // arrives, fire the hold-end handler so the
-                        // recording stops cleanly. The `onLongPress`
-                        // callback above fires at the system long-
-                        // press threshold (~500ms by default, close
-                        // enough to our 300ms target — see comment
-                        // on VIDEO_HOLD_THRESHOLD_MS in the iOS
-                        // mirror); we rely on Compose's gesture
-                        // machinery to disambiguate tap vs hold.
-                        tryAwaitRelease()
+                // Custom tap-vs-hold detector with the same 300ms
+                // threshold the iOS surface uses. `detectTapGestures`
+                // would work but fires its `onLongPress` callback at
+                // the platform default (~500ms) which felt sluggish
+                // — the hold gesture took half a second of "is this
+                // doing anything?" before the recording UI lit up.
+                // This loop:
+                //   1. Waits for touch-down.
+                //   2. Races a 300ms timer against a release.
+                //   3. Released early → onTap (still photo).
+                //   4. Timer elapsed → onHoldStart, then wait for
+                //      release → onHoldEnd (video stop).
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    val released = withTimeoutOrNull(VIDEO_HOLD_THRESHOLD_MS) {
+                        waitForUpOrCancellation()
+                    }
+                    if (released != null) {
+                        onTap()
+                    } else {
+                        onHoldStart()
+                        waitForUpOrCancellation()
                         onHoldEnd()
-                    },
-                )
+                    }
+                }
             },
         contentAlignment = Alignment.Center,
     ) {
