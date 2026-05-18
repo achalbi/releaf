@@ -395,20 +395,9 @@ object SpeechTranscriber {
         file: File,
         allowlistCodes: List<String>,
     ): TranscribeResult {
-        // One language picked → hand it to Whisper directly (fastest,
-        // skips LID). Multiple → auto-detect; Whisper reports the
-        // picked language back via `result.lang`.
-        val languageHint = when {
-            allowlistCodes.size == 1 -> allowlistCodes.first()
-            else                     -> ""
-        }
-        val recognizer = runCatching { ensureSherpaRecognizer(context, languageHint) }
-            .onFailure { Log.e(TAG, "sherpa-onnx model load failed", it) }
-            .getOrNull()
-            ?: return TranscribeResult.Failure(
-                "Could not download speech model — check network"
-            )
-
+        // Decode the audio once — both transcription passes (the
+        // initial auto-detect and the potential allowlist-rescue
+        // re-run) reuse the same PCM samples.
         val decoded = runCatching { decodeToPcm(file) }
             .onFailure { Log.e(TAG, "decode failed", it) }
             .getOrNull()
@@ -419,39 +408,86 @@ object SpeechTranscriber {
         }
 
         val samples = pcmBytesToMonoFloats(decoded.pcm, decoded.channelCount)
-        val sherpaResult = runCatching {
-            runSherpaRecognizer(recognizer, samples, decoded.sampleRate)
-        }
-            .onFailure { Log.e(TAG, "sherpa-onnx recognizer failed", it) }
-            .getOrNull()
-            ?: return TranscribeResult.Failure("Transcription failed")
 
-        // Allowlist mismatch is logged for now — re-transcribing in
-        // the user's primary when Whisper detects a non-allowlisted
-        // language is a deferred enhancement. Returning the
-        // mis-detected transcript is still useful in most cases
-        // (it's often empty or "thank you" placeholder text on bad
-        // detects, which the caller can show or silently drop).
-        if (languageHint.isEmpty() && sherpaResult.detectedLang.isNotEmpty() &&
-            allowlistCodes.isNotEmpty() && sherpaResult.detectedLang !in allowlistCodes
-        ) {
+        // One language picked → hand it to Whisper directly (fastest,
+        // skips LID). Multiple → auto-detect; Whisper reports the
+        // picked language back via `result.lang`.
+        val initialHint = when {
+            allowlistCodes.size == 1 -> allowlistCodes.first()
+            else                     -> ""
+        }
+        val firstResult = runSherpaPass(context, samples, decoded.sampleRate, initialHint)
+            ?: return TranscribeResult.Failure(
+                "Could not download speech model — check network"
+            )
+
+        // Allowlist-rescue path. When the user has ≥ 2 languages
+        // picked we let Whisper auto-detect; on a short or noisy
+        // clip the small `base` model frequently confuses similar
+        // Dravidian languages (Kannada → Tamil, Telugu → Tamil, …).
+        // If the detection lands outside the allowlist, re-run with
+        // the user's primary as the language hint so the transcript
+        // is at least in a language they actually speak — even if
+        // that means transcribing Tamil audio as Kannada, the result
+        // is closer to right than a confidently-wrong Tamil
+        // transcript.
+        val needsRescue = initialHint.isEmpty() &&
+            firstResult.detectedLang.isNotEmpty() &&
+            allowlistCodes.isNotEmpty() &&
+            firstResult.detectedLang !in allowlistCodes
+        if (needsRescue) {
+            val primary = allowlistCodes.first()
             Log.w(
                 TAG,
-                "sherpa-onnx detected '${sherpaResult.detectedLang}' outside " +
-                    "allowlist=${allowlistCodes.joinToString(",")} — returning " +
-                    "transcript anyway",
+                "sherpa-onnx detected '${firstResult.detectedLang}' outside " +
+                    "allowlist=${allowlistCodes.joinToString(",")} — " +
+                    "re-transcribing as '$primary'",
             )
+            val rescued = runSherpaPass(context, samples, decoded.sampleRate, primary)
+            if (rescued != null && rescued.text.isNotBlank()) {
+                Log.d(
+                    TAG,
+                    "sherpa rescue: text='${rescued.text.take(80)}' " +
+                        "(replaced detected='${firstResult.detectedLang}')",
+                )
+                return TranscribeResult.Success(rescued.text, BACKEND_SHERPA)
+            }
+            // Rescue failed (no text or model error) — fall through
+            // and return the original detection. Empty rescue text
+            // is usually worse than the (wrong-language) first pass.
+            Log.w(TAG, "sherpa rescue produced empty text — keeping initial transcript")
         }
 
         Log.d(
             TAG,
             "sherpa transcribe: samples=${samples.size} " +
                 "rate=${decoded.sampleRate}Hz channels=${decoded.channelCount} " +
-                "languageHint='$languageHint' detected='${sherpaResult.detectedLang}' " +
-                "text='${sherpaResult.text.take(80)}'",
+                "languageHint='$initialHint' detected='${firstResult.detectedLang}' " +
+                "text='${firstResult.text.take(80)}'",
         )
-        return if (sherpaResult.text.isBlank()) TranscribeResult.Failure("No speech detected")
-        else TranscribeResult.Success(sherpaResult.text, BACKEND_SHERPA)
+        return if (firstResult.text.isBlank()) TranscribeResult.Failure("No speech detected")
+        else TranscribeResult.Success(firstResult.text, BACKEND_SHERPA)
+    }
+
+    /**
+     * Load or rebuild the cached recognizer for [languageHint] and
+     * run a single decode pass on [samples]. Returns null on model-
+     * load failure (e.g. download failed); on recognizer error
+     * returns a result with empty text so the caller can decide
+     * whether to surface the failure.
+     */
+    private suspend fun runSherpaPass(
+        context: Context,
+        samples: FloatArray,
+        sampleRate: Int,
+        languageHint: String,
+    ): SherpaRecognitionResult? {
+        val recognizer = runCatching { ensureSherpaRecognizer(context, languageHint) }
+            .onFailure { Log.e(TAG, "sherpa-onnx model load failed (hint='$languageHint')", it) }
+            .getOrNull() ?: return null
+        return runCatching { runSherpaRecognizer(recognizer, samples, sampleRate) }
+            .onFailure { Log.e(TAG, "sherpa-onnx recognizer failed (hint='$languageHint')", it) }
+            .getOrNull()
     }
 
     private suspend fun ensureSherpaRecognizer(
@@ -487,9 +523,22 @@ object SpeechTranscriber {
                         ),
                         modelConfig = OfflineModelConfig(
                             whisper = OfflineWhisperModelConfig(
-                                encoder  = File(modelDir, SHERPA_ENCODER).absolutePath,
-                                decoder  = File(modelDir, SHERPA_DECODER).absolutePath,
-                                language = languageHint,
+                                encoder      = File(modelDir, SHERPA_ENCODER).absolutePath,
+                                decoder      = File(modelDir, SHERPA_DECODER).absolutePath,
+                                language     = languageHint,
+                                // 1000-sample (~62.5 ms at 16 kHz)
+                                // zero-pad before the encoder runs.
+                                // Whisper's decoder can refuse to
+                                // emit text on short or abruptly-
+                                // ended clips — the trailing silence
+                                // window gives it room to commit a
+                                // final segment. Particularly
+                                // pronounced on low-resource
+                                // languages (Kannada, Malayalam,
+                                // Punjabi) where the model already
+                                // tends toward empty output on
+                                // borderline audio.
+                                tailPaddings = 1000,
                             ),
                             tokens = File(modelDir, SHERPA_TOKENS).absolutePath,
                             modelType = "whisper",
