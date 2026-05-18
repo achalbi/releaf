@@ -60,14 +60,14 @@ fun SpeechModelDownloadModal() {
     val state by stateFlow.collectAsState(initial = ModelDownloadState.Idle)
     when (val s = state) {
         is ModelDownloadState.Downloading -> DownloadingDialog(s)
-        is ModelDownloadState.Extracting  -> ExtractingDialog()
+        is ModelDownloadState.Extracting  -> ExtractingDialog(s)
         is ModelDownloadState.Failed      -> FailedDialog(s)
         is ModelDownloadState.Idle        -> Unit  // nothing to render
     }
 }
 
 @Composable
-private fun ExtractingDialog() {
+private fun ExtractingDialog(state: ModelDownloadState.Extracting) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
 
@@ -93,16 +93,34 @@ private fun ExtractingDialog() {
             Spacer(Modifier.size(QuickInkSpacing.s2))
             Text(
                 text  = "Decompressing the archive into your device. This can take a " +
-                        "minute on a 500 MB+ model — the CPU does most of the work " +
-                        "here, no more network traffic.",
+                        "few minutes on a 500 MB+ model — the CPU does most of the " +
+                        "work here, no more network traffic.",
                 style = type.body,
                 color = colors.inkSoft,
             )
             Spacer(Modifier.size(QuickInkSpacing.s4))
-            LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth(),
-                color    = colors.accent,
-            )
+
+            if (state.totalBytes > 0) {
+                val fraction = (state.bytesProcessed.toDouble() / state.totalBytes.toDouble())
+                    .toFloat()
+                    .coerceIn(0f, 1f)
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier.fillMaxWidth(),
+                    color    = colors.accent,
+                )
+                Spacer(Modifier.size(QuickInkSpacing.s2))
+                Text(
+                    text  = "${state.bytesProcessed.toMb()} MB / ${state.totalBytes.toMb()} MB processed",
+                    style = type.meta,
+                    color = colors.inkSoft,
+                )
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color    = colors.accent,
+                )
+            }
         }
     }
 }

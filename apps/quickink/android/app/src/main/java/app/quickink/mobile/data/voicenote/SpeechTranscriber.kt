@@ -704,12 +704,17 @@ object SpeechTranscriber {
     /**
      * Worker-facing entry point. Runs the disk-write + extract
      * pipeline as two named phases so the worker can surface
-     * progress (Download phase) and the long bzip2 decompression
-     * (Extract phase) separately. [onDownloadProgress] fires every
-     * ~256 KB during phase 1; [onExtractStart] fires once before
-     * phase 2 starts and is the worker's cue to flip its
-     * notification + WorkInfo `progress` data to the Extracting
-     * state.
+     * progress separately for each:
+     *   - [onDownloadProgress] fires every ~256 KB during phase 1
+     *     (HTTP byte pull into `<modelDir>.partial`).
+     *   - [onExtractStart] fires once when phase 2 begins, with the
+     *     total compressed size so the worker can set up a
+     *     determinate progress bar.
+     *   - [onExtractProgress] fires every ~1 MB of compressed input
+     *     consumed by the bzip2 + tar reader. Maps roughly to "how
+     *     far along the decompression is" — not perfectly linear,
+     *     but a much better signal than the previous "indeterminate
+     *     bar that doesn't move."
      *
      * Throws on failure; `<modelDir>.partial` is preserved on a
      * download-phase failure so a retry resumes via HTTP `Range:`.
@@ -718,7 +723,8 @@ object SpeechTranscriber {
         context: Context,
         model: WhisperModel,
         onDownloadProgress: (bytesDownloaded: Long, totalBytes: Long) -> Unit,
-        onExtractStart: () -> Unit,
+        onExtractStart: (totalCompressedBytes: Long) -> Unit,
+        onExtractProgress: (bytesProcessed: Long, totalBytes: Long) -> Unit,
     ) {
         val parentDir = context.filesDir
         val modelDir = File(parentDir, model.sherpaDirName)
@@ -729,6 +735,7 @@ object SpeechTranscriber {
             model              = model,
             onDownloadProgress = onDownloadProgress,
             onExtractStart     = onExtractStart,
+            onExtractProgress  = onExtractProgress,
         )
     }
 
@@ -760,7 +767,8 @@ object SpeechTranscriber {
         modelDir: File,
         model: WhisperModel,
         onDownloadProgress: (absoluteBytes: Long, totalBytes: Long) -> Unit,
-        onExtractStart: () -> Unit,
+        onExtractStart: (totalCompressedBytes: Long) -> Unit,
+        onExtractProgress: (bytesProcessed: Long, totalBytes: Long) -> Unit,
     ) {
         Log.i(TAG, "downloadAndExtract start: model=${model.id} url=${model.downloadUrl}")
         val partial = File(parentDir, "${model.sherpaDirName}.partial")
@@ -794,13 +802,24 @@ object SpeechTranscriber {
         // tried to read past the end of the truncated file.
         val staging = File(parentDir, "${model.sherpaDirName}.staging")
         try {
-            Log.i(TAG, "extract start: model=${model.id} partial=${partial.absolutePath}")
-            onExtractStart()
+            val compressedTotal = partial.length()
+            Log.i(
+                TAG,
+                "extract start: model=${model.id} partial=${partial.absolutePath} compressed=${compressedTotal}",
+            )
+            onExtractStart(compressedTotal)
             if (staging.exists()) staging.deleteRecursively()
             staging.mkdirs()
             val extractStartMs = System.currentTimeMillis()
-            partial.inputStream().buffered().use { input ->
-                extractModelTarBz2(input, staging, model)
+            partial.inputStream().use { rawIn ->
+                val tracked = ExtractProgressInputStream(
+                    delegate     = rawIn,
+                    totalBytes   = compressedTotal,
+                    onProgress   = onExtractProgress,
+                )
+                tracked.buffered().use { input ->
+                    extractModelTarBz2(input, staging, model)
+                }
             }
             // Sanity-check before promoting: every wanted file must
             // exist with non-zero size. Catches a tar archive that
@@ -1069,6 +1088,8 @@ object SpeechTranscriber {
             while (entry != null) {
                 if (!entry.isDirectory) {
                     val base = entry.name.substringAfterLast('/')
+                    val wantedFlag = if (base in wanted) "[KEEP]" else "[skip]"
+                    Log.i(TAG, "tar entry $wantedFlag ${entry.name} (${entry.size} bytes)")
                     if (base in wanted) {
                         val entryStartMs = System.currentTimeMillis()
                         File(modelDir, base).outputStream().use { out ->
@@ -1084,6 +1105,58 @@ object SpeechTranscriber {
                 entry = tis.nextEntry
             }
             Log.i(TAG, "extract scanned $entriesSeen tar entries")
+        }
+    }
+
+    /**
+     * Counting wrapper around the partial-archive `InputStream` so
+     * we can report extract progress to the worker. The bytes here
+     * are *compressed* bytes pulled from disk; tar + bzip2 advance
+     * the read pointer non-linearly relative to decompressed output,
+     * so this is an approximation — but it's strictly monotonic and
+     * reaches the file size at end of stream, which is all the
+     * modal needs.
+     */
+    private class ExtractProgressInputStream(
+        private val delegate: java.io.InputStream,
+        private val totalBytes: Long,
+        private val onProgress: (bytesProcessed: Long, totalBytes: Long) -> Unit,
+    ) : java.io.InputStream() {
+        private var bytesRead: Long = 0L
+        private var lastReportedBytes: Long = 0L
+        // 1 MB — coarser than the download phase (256 KB) because
+        // the extract phase is CPU-bound and we don't want progress
+        // emissions to interfere with the decompression throughput.
+        private val reportIntervalBytes: Long = 1L * 1024L * 1024L
+
+        override fun read(): Int {
+            val b = delegate.read()
+            if (b >= 0) {
+                bytesRead++
+                maybeReport()
+            }
+            return b
+        }
+
+        override fun read(buf: ByteArray, off: Int, len: Int): Int {
+            val n = delegate.read(buf, off, len)
+            if (n > 0) {
+                bytesRead += n
+                maybeReport()
+            }
+            return n
+        }
+
+        override fun available(): Int = delegate.available()
+        override fun close() = delegate.close()
+
+        private fun maybeReport() {
+            if (bytesRead - lastReportedBytes >= reportIntervalBytes ||
+                (totalBytes > 0 && bytesRead >= totalBytes)
+            ) {
+                lastReportedBytes = bytesRead
+                onProgress(bytesRead, totalBytes)
+            }
         }
     }
 

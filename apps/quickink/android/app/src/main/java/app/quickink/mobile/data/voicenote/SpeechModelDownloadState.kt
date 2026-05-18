@@ -39,12 +39,20 @@ sealed interface ModelDownloadState {
     /**
      * Bytes are fully on disk; the worker is now bzip2-decompressing
      * the tar archive into per-file outputs. Decompression on a
-     * 500+ MB archive can take 30 s – 3 min of single-threaded CPU
+     * 500+ MB archive can take 2–5 minutes of single-threaded CPU
      * on phone hardware, and the user gets no feedback during it
      * if we don't surface this state — the modal would otherwise
      * sit at 100% and feel hung.
+     *
+     * [bytesProcessed] and [totalBytes] are taken from how far the
+     * extractor has read into the compressed archive — gives a
+     * determinate progress bar approximation that the UI can render
+     * (0 means "totals unknown yet"; UI falls back to indeterminate).
      */
-    object Extracting : ModelDownloadState
+    data class Extracting(
+        val bytesProcessed: Long,
+        val totalBytes: Long,
+    ) : ModelDownloadState
 
     /** Last attempt ended in `WorkInfo.State.FAILED`. UI surfaces
      *  a dismissable failure modal; partial bytes stay on disk so a
@@ -93,7 +101,10 @@ object SpeechModelDownloadProgress {
         }
         if (active != null) {
             if (WhisperModelDownloadWorker.isExtracting(active)) {
-                return ModelDownloadState.Extracting
+                return ModelDownloadState.Extracting(
+                    bytesProcessed = WhisperModelDownloadWorker.progressFor(active),
+                    totalBytes     = WhisperModelDownloadWorker.totalFor(active),
+                )
             }
             return ModelDownloadState.Downloading(
                 bytesDownloaded = WhisperModelDownloadWorker.progressFor(active),

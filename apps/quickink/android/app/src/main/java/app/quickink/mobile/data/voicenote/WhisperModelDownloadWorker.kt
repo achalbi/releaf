@@ -129,9 +129,13 @@ class WhisperModelDownloadWorker(
                     onDownloadProgress = { absolute, total ->
                         snapshots.value = WorkSnapshot(PHASE_DOWNLOAD, absolute, total)
                     },
-                    onExtractStart     = {
-                        Log.i(TAG, "extract phase start: flipping notification to indeterminate")
-                        snapshots.value = WorkSnapshot(PHASE_EXTRACT, 0L, 0L)
+                    onExtractStart     = { totalCompressedBytes ->
+                        Log.i(TAG, "extract phase start: total=$totalCompressedBytes")
+                        snapshots.value =
+                            WorkSnapshot(PHASE_EXTRACT, 0L, totalCompressedBytes)
+                    },
+                    onExtractProgress  = { processed, total ->
+                        snapshots.value = WorkSnapshot(PHASE_EXTRACT, processed, total)
                     },
                 )
             }
@@ -204,9 +208,18 @@ class WhisperModelDownloadWorker(
             .setContentIntent(pendingTap)
 
         if (phase == PHASE_EXTRACT) {
-            builder
-                .setContentText("Decompressing the archive — this can take a minute.")
-                .setProgress(0, 0, /* indeterminate = */ true)
+            if (totalBytes > 0) {
+                val percent = ((bytesDownloaded * 100L) / totalBytes)
+                    .coerceIn(0L, 100L)
+                    .toInt()
+                builder
+                    .setContentText("Decompressing… ${bytesDownloaded.toMb()} MB / ${totalBytes.toMb()} MB")
+                    .setProgress(100, percent, /* indeterminate = */ false)
+            } else {
+                builder
+                    .setContentText("Decompressing the archive — this can take a few minutes.")
+                    .setProgress(0, 0, /* indeterminate = */ true)
+            }
         } else if (totalBytes > 0) {
             val percent = ((bytesDownloaded * 100L) / totalBytes)
                 .coerceIn(0L, 100L)
