@@ -259,6 +259,23 @@ private fun ZoomablePage(
     )
 }
 
+/**
+ * Long-edge ceiling for the rasterised page bitmap. Compose's
+ * [androidx.compose.ui.graphics.painter.BitmapPainter] hands the
+ * Bitmap to a [RecordingCanvas] which rejects anything over
+ * `Canvas.MAX_BITMAP_SIZE` (~100MB) with `RuntimeException:
+ * Canvas: trying to draw too large(... bytes) bitmap`. A
+ * captured-photo PDF whose page is the photo's native sensor
+ * resolution (legacy QuickInk captures from before the photo-
+ * size cap landed) blows through that limit easily at the 2×
+ * backing density — a 50MP page renders to ~200MB.
+ *
+ * 2048px on the long edge is plenty for phone-screen viewing
+ * (the fullscreen viewer's zoom uses Compose's `graphicsLayer`
+ * scale, not a re-render) and keeps the bitmap to ~12MB.
+ */
+private const val RENDERED_PDF_PAGE_MAX_PX: Int = 2048
+
 internal fun renderPdfPages(context: Context, uri: Uri): List<Bitmap> {
     val pfd: ParcelFileDescriptor = context.contentResolver
         .openFileDescriptor(uri, "r")
@@ -267,10 +284,21 @@ internal fun renderPdfPages(context: Context, uri: Uri): List<Bitmap> {
     return PdfRenderer(pfd).use { renderer ->
         (0 until renderer.pageCount).map { i ->
             renderer.openPage(i).use { page ->
-                // 2× backing density so the rendering reads sharp on
-                // typical phone displays without pushing memory too far.
-                val w = page.width  * 2
-                val h = page.height * 2
+                // 2× backing density for sharp text on typical
+                // phone displays, then clamped to RENDERED_PDF_PAGE_MAX_PX
+                // on the long edge so legacy photo captures
+                // (whose PDF page IS the full sensor frame)
+                // don't allocate a draw-blocking 200MB bitmap.
+                val rawW = page.width  * 2
+                val rawH = page.height * 2
+                val longEdge = maxOf(rawW, rawH)
+                val (w, h) = if (longEdge > RENDERED_PDF_PAGE_MAX_PX) {
+                    val scale = RENDERED_PDF_PAGE_MAX_PX.toFloat() / longEdge
+                    (rawW * scale).toInt().coerceAtLeast(1) to
+                        (rawH * scale).toInt().coerceAtLeast(1)
+                } else {
+                    rawW to rawH
+                }
                 val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                 bitmap.eraseColor(android.graphics.Color.WHITE)
                 page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
