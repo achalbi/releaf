@@ -663,7 +663,12 @@ object SpeechTranscriber {
 
     private fun isSherpaModelPresent(modelDir: File, model: WhisperModel): Boolean {
         if (!modelDir.isDirectory) return false
+        // All three files are required by the recognizer config. A
+        // process kill mid-extract can leave just one or two on disk;
+        // skipping any of them here would let the next launch try to
+        // construct a recognizer over a corrupt model.
         return File(modelDir, model.encoderFile).exists() &&
+            File(modelDir, model.decoderFile).exists() &&
             File(modelDir, model.tokensFile).exists()
     }
 
@@ -675,13 +680,14 @@ object SpeechTranscriber {
      * instead of starting a fresh fetch.
      */
     private suspend fun ensureModelDownloaded(context: Context, model: WhisperModel) {
-        val modelDir = File(context.filesDir, model.sherpaDirName)
+        val parentDir = context.filesDir
+        val modelDir = File(parentDir, model.sherpaDirName)
         if (isSherpaModelPresent(modelDir, model)) return
 
         val deferred: Deferred<Unit> = synchronized(inFlightDownloadsLock) {
             inFlightDownloads[model.id] ?: run {
                 val job = modelDownloadScope.async {
-                    downloadAndExtractSherpaModel(modelDir, model)
+                    downloadAndExtractSherpaModel(parentDir, modelDir, model)
                 }
                 inFlightDownloads[model.id] = job
                 job.invokeOnCompletion {
@@ -711,67 +717,179 @@ object SpeechTranscriber {
         val detectedLang: String,
     )
 
-    private fun downloadAndExtractSherpaModel(modelDir: File, model: WhisperModel) {
+    /**
+     * Two-phase fetch:
+     *   1. Pull the tar.bz2 archive into `<modelDir>.partial` with
+     *      HTTP `Range:` resume — interrupted bytes from a previous
+     *      attempt are preserved across network drops, process
+     *      kills, and app backgrounding.
+     *   2. Once the file is complete, extract into [modelDir] and
+     *      delete the partial.
+     *
+     * The split eliminates the "process died mid-extract" failure
+     * mode the original streaming implementation had: extraction
+     * only ever runs against a fully-downloaded archive, so the
+     * extracted dir is either pristine or absent.
+     *
+     * @param parentDir the `filesDir` (or equivalent) the model dir
+     *                  and the sibling `.partial` file both live in.
+     */
+    private fun downloadAndExtractSherpaModel(
+        parentDir: File,
+        modelDir: File,
+        model: WhisperModel,
+    ) {
         Log.d(TAG, "sherpa model '${model.id}': downloading…")
-        if (modelDir.exists()) modelDir.deleteRecursively()
-        modelDir.mkdirs()
+        val partial = File(parentDir, "${model.sherpaDirName}.partial")
+
+        try {
+            downloadToPartial(partial, model)
+        } catch (e: Exception) {
+            // Bytes already on disk in `partial` survive — the next
+            // attempt resumes from there via the Range: header.
+            SpeechModelDownloadProgress.update(
+                ModelDownloadState.Failed(e.message ?: "Model download failed")
+            )
+            throw e
+        }
+
+        try {
+            if (modelDir.exists()) modelDir.deleteRecursively()
+            modelDir.mkdirs()
+            partial.inputStream().buffered().use { input ->
+                extractModelTarBz2(input, modelDir, model)
+            }
+        } catch (e: Exception) {
+            // Extraction failure on a fully-downloaded archive means
+            // the bytes are corrupt — wipe both partial and the
+            // half-extracted dir so the next attempt re-downloads
+            // from scratch. (Resume is for *download* interruptions;
+            // a bad payload can't be salvaged by appending more.)
+            modelDir.deleteRecursively()
+            partial.delete()
+            SpeechModelDownloadProgress.update(
+                ModelDownloadState.Failed(e.message ?: "Model extraction failed")
+            )
+            throw e
+        }
+
+        partial.delete()
+        SpeechModelDownloadProgress.update(ModelDownloadState.Idle)
+        Log.d(TAG, "sherpa model '${model.id}': extracted to ${modelDir.absolutePath}")
+    }
+
+    /**
+     * Download (or resume) the tar.bz2 archive to [partial]. On
+     * success [partial] contains the complete archive. On any
+     * exception [partial] holds whatever bytes were pulled so far
+     * — caller is responsible for whether to keep it or wipe it.
+     *
+     * Resume mechanics: if [partial] already exists with non-zero
+     * size, the request sends `Range: bytes=N-`. GitHub Releases
+     * (where sherpa-onnx hosts) honor Range and answer with 206
+     * Partial Content + a `Content-Range: bytes start-end/total`
+     * header. If the server falls back to 200 (no Range support
+     * or a different file behind the URL), the partial is wiped
+     * and the download restarts from byte 0.
+     */
+    private fun downloadToPartial(partial: File, model: WhisperModel) {
+        val resumeFrom = if (partial.exists()) partial.length() else 0L
 
         val conn = (URL(model.downloadUrl).openConnection() as HttpURLConnection).apply {
             connectTimeout = 30_000
             readTimeout = 300_000
             instanceFollowRedirects = true
+            if (resumeFrom > 0) {
+                setRequestProperty("Range", "bytes=$resumeFrom-")
+            }
         }
+        // Emit an initial "we're at resumeFrom bytes / total unknown"
+        // beat so the modal renders progress immediately even before
+        // the response headers arrive.
         SpeechModelDownloadProgress.update(
-            ModelDownloadState.Downloading(bytesDownloaded = 0, totalBytes = 0)
+            ModelDownloadState.Downloading(bytesDownloaded = resumeFrom, totalBytes = 0)
         )
         try {
             conn.connect()
-            if (conn.responseCode !in 200..299) {
-                throw IOException("sherpa model HTTP ${conn.responseCode}")
+            val code = conn.responseCode
+            val resumed = code == 206
+            if (!resumed && code !in 200..299) {
+                throw IOException("sherpa model HTTP $code")
             }
-            // `contentLengthLong` may be -1 if the server omits the
-            // header (rare for GitHub releases). Coerce to 0 — the
-            // UI treats 0 as "indeterminate" and falls back to a
-            // spinning bar. `lastModified` etc. aren't needed; we
-            // never partial-resume, so a fresh download starts from
-            // scratch every time.
-            val totalBytes = conn.contentLengthLong.coerceAtLeast(0L)
+            if (!resumed && resumeFrom > 0) {
+                // Server ignored Range (returned 200 with the whole
+                // file). Drop the partial bytes — they may belong
+                // to a different revision of the asset.
+                Log.d(TAG, "Server didn't honor Range; restarting from byte 0")
+                partial.delete()
+            }
+            val effectiveStart = if (resumed) resumeFrom else 0L
+            val totalBytes = totalBytesFor(conn, resumed)
             SpeechModelDownloadProgress.update(
-                ModelDownloadState.Downloading(bytesDownloaded = 0, totalBytes = totalBytes)
+                ModelDownloadState.Downloading(
+                    bytesDownloaded = effectiveStart,
+                    totalBytes      = totalBytes,
+                )
             )
-            val counting = ProgressTrackingInputStream(
-                delegate    = conn.inputStream,
-                totalBytes  = totalBytes,
-                onProgress  = { read, total ->
-                    SpeechModelDownloadProgress.update(
-                        ModelDownloadState.Downloading(bytesDownloaded = read, totalBytes = total)
-                    )
-                },
-            )
-            extractModelTarBz2(counting.buffered(), modelDir, model)
-            SpeechModelDownloadProgress.update(ModelDownloadState.Idle)
-        } catch (e: Exception) {
-            modelDir.deleteRecursively()
-            SpeechModelDownloadProgress.update(
-                ModelDownloadState.Failed(e.message ?: "Model download failed")
-            )
-            throw e
+
+            partial.parentFile?.mkdirs()
+            java.io.FileOutputStream(partial, /* append = */ resumed).use { out ->
+                val counting = ProgressTrackingInputStream(
+                    delegate                 = conn.inputStream,
+                    totalBytes               = totalBytes,
+                    bytesAlreadyDownloaded   = effectiveStart,
+                    onProgress               = { absolute, total ->
+                        SpeechModelDownloadProgress.update(
+                            ModelDownloadState.Downloading(
+                                bytesDownloaded = absolute,
+                                totalBytes      = total,
+                            )
+                        )
+                    },
+                )
+                counting.copyTo(out)
+            }
+
+            // Truncation check. With a known total we should have
+            // landed exactly there; with an unknown total we trust
+            // EOF and accept whatever we got.
+            if (totalBytes > 0 && partial.length() < totalBytes) {
+                throw IOException(
+                    "Download truncated: ${partial.length()}/$totalBytes bytes — will resume on next try"
+                )
+            }
         } finally {
             runCatching { conn.disconnect() }
         }
-        Log.d(TAG, "sherpa model: extracted to ${modelDir.absolutePath}")
+    }
+
+    /**
+     * Compute the canonical total-bytes value to surface to the UI
+     * — Content-Range (`bytes a-b/total`) on a 206 resume, plain
+     * Content-Length on a 200. Returns 0 if neither is available
+     * so the modal renders an indeterminate bar.
+     */
+    private fun totalBytesFor(conn: HttpURLConnection, resumed: Boolean): Long {
+        if (!resumed) return conn.contentLengthLong.coerceAtLeast(0L)
+        val range = conn.getHeaderField("Content-Range") ?: return 0L
+        return range.substringAfterLast('/').toLongOrNull()?.coerceAtLeast(0L) ?: 0L
     }
 
     /**
      * Pass-through `InputStream` that counts read bytes and posts
      * progress to [SpeechModelDownloadProgress] at a coarse interval
      * (~256 KB). The interval keeps the StateFlow from churning on
-     * every byte buffered by the underlying tar-bz2 decoder.
+     * every byte the underlying connection buffers. Reports
+     * *absolute* progress (resumed start offset + bytes read from
+     * this stream) so the bar reflects the user's true position in
+     * the archive, not just the slice the current HTTP call is
+     * fetching.
      */
     private class ProgressTrackingInputStream(
         private val delegate: java.io.InputStream,
         private val totalBytes: Long,
-        private val onProgress: (read: Long, total: Long) -> Unit,
+        private val bytesAlreadyDownloaded: Long,
+        private val onProgress: (absoluteBytes: Long, total: Long) -> Unit,
     ) : java.io.InputStream() {
         private var bytesRead: Long = 0
         private var lastReportedBytes: Long = 0
@@ -803,11 +921,12 @@ object SpeechTranscriber {
         override fun close() = delegate.close()
 
         private fun maybeReport() {
+            val absolute = bytesAlreadyDownloaded + bytesRead
             if (bytesRead - lastReportedBytes >= reportIntervalBytes ||
-                (totalBytes > 0 && bytesRead >= totalBytes)
+                (totalBytes > 0 && absolute >= totalBytes)
             ) {
                 lastReportedBytes = bytesRead
-                onProgress(bytesRead, totalBytes)
+                onProgress(absolute, totalBytes)
             }
         }
     }

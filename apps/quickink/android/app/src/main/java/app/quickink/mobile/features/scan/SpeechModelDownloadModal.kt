@@ -21,7 +21,9 @@
 package app.quickink.mobile.features.scan
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -29,9 +31,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
@@ -47,13 +51,20 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
 @Composable
 fun SpeechModelDownloadModal() {
     val state by SpeechModelDownloadProgress.state.collectAsState()
-    val downloading = state as? ModelDownloadState.Downloading ?: return
+    when (val s = state) {
+        is ModelDownloadState.Downloading -> DownloadingDialog(s)
+        is ModelDownloadState.Failed      -> FailedDialog(s)
+        is ModelDownloadState.Idle        -> Unit  // nothing to render
+    }
+}
 
+@Composable
+private fun DownloadingDialog(state: ModelDownloadState.Downloading) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
 
     Dialog(
-        onDismissRequest = { /* non-cancellable — see header */ },
+        onDismissRequest = { /* non-cancellable — download keeps running */ },
         properties = DialogProperties(
             dismissOnBackPress    = false,
             dismissOnClickOutside = false,
@@ -73,7 +84,8 @@ fun SpeechModelDownloadModal() {
             )
             Spacer(Modifier.size(QuickInkSpacing.s2))
             Text(
-                text  = "One-time download (~500 MB). Voice notes recorded right now will transcribe " +
+                text  = "Resumes automatically if your connection drops or the app is " +
+                        "backgrounded. Voice notes recorded right now will transcribe " +
                         "as soon as the download finishes.",
                 style = type.body,
                 color = colors.inkSoft,
@@ -82,8 +94,8 @@ fun SpeechModelDownloadModal() {
 
             // Determinate when we know the total, indeterminate while
             // we're still waiting on Content-Length / 0-byte phase.
-            if (downloading.totalBytes > 0) {
-                val fraction = (downloading.bytesDownloaded.toDouble() / downloading.totalBytes.toDouble())
+            if (state.totalBytes > 0) {
+                val fraction = (state.bytesDownloaded.toDouble() / state.totalBytes.toDouble())
                     .toFloat()
                     .coerceIn(0f, 1f)
                 LinearProgressIndicator(
@@ -93,7 +105,7 @@ fun SpeechModelDownloadModal() {
                 )
                 Spacer(Modifier.size(QuickInkSpacing.s2))
                 Text(
-                    text  = "${downloading.bytesDownloaded.toMb()} MB / ${downloading.totalBytes.toMb()} MB",
+                    text  = "${state.bytesDownloaded.toMb()} MB / ${state.totalBytes.toMb()} MB",
                     style = type.meta,
                     color = colors.inkSoft,
                 )
@@ -108,6 +120,64 @@ fun SpeechModelDownloadModal() {
                     style = type.meta,
                     color = colors.inkSoft,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FailedDialog(state: ModelDownloadState.Failed) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    // Dismissing flips the state holder back to Idle so the dialog
+    // closes. Bytes already pulled stay on disk under
+    // `<modelDir>.partial`, so the next tap of Transcribe / Try
+    // again from the voice-note card picks up where this attempt
+    // stopped — no fresh full re-download.
+    Dialog(
+        onDismissRequest = { SpeechModelDownloadProgress.update(ModelDownloadState.Idle) },
+        properties = DialogProperties(
+            dismissOnBackPress    = true,
+            dismissOnClickOutside = true,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(QuickInkRadius.lg))
+                .background(colors.surface)
+                .padding(QuickInkSpacing.s5),
+        ) {
+            Text(
+                text  = "Download paused",
+                style = type.heading,
+                color = colors.ink,
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s2))
+            Text(
+                text  = state.message,
+                style = type.body,
+                color = colors.inkSoft,
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s2))
+            Text(
+                text  = "Your progress is saved. Tap Transcribe (or Try again) on the " +
+                        "voice note to resume from where this attempt stopped.",
+                style = type.meta,
+                color = colors.inkSoft,
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s4))
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment     = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = {
+                    SpeechModelDownloadProgress.update(ModelDownloadState.Idle)
+                }) {
+                    Text(text = "Got it", color = colors.accent)
+                }
             }
         }
     }
