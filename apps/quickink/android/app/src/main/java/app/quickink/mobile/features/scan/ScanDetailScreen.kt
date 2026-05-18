@@ -2648,16 +2648,31 @@ private fun LoadingSkeleton(modifier: Modifier = Modifier) {
 }
 
 /**
- * File-type label for the [DetailsCard] row. PDF on disk reads as
- * "PDF document"; preview-only captures read as "Image"; the missing-
- * file fallback reads as "Document".
+ * File-type label for the [DetailsCard] row. Every capture
+ * produces a PDF via `buildImportArtifacts` regardless of how
+ * the bytes got in, so just gating on `pdfUri` would always
+ * read "PDF document" — even for in-app photos / videos /
+ * gallery imports. Mirror HomeScreen's `sourceChipInfo` logic
+ * by branching on `source` (+ the presence of a video URI) so
+ * the label reads "Photo", "Video", "Image" or "PDF document"
+ * to match how the row is presented elsewhere in the app.
  */
-private fun fileTypeLabel(capture: CaptureEntity): String =
-    when {
-        capture.pdfUri.isNotBlank() && localFileExists(capture.pdfUri)            -> "PDF document"
+private fun fileTypeLabel(capture: CaptureEntity): String {
+    val isPhotoSource  = capture.source == "photo"
+    val isImportSource = capture.source == "import"
+    val isVideo        = isPhotoSource && (
+        !capture.videoUri.isNullOrBlank() ||
+            !capture.videoDriveFileId.isNullOrBlank()
+    )
+    return when {
+        isVideo                                                                    -> "Video"
+        isPhotoSource                                                              -> "Photo"
+        isImportSource                                                             -> "Image"
+        capture.pdfUri.isNotBlank() && localFileExists(capture.pdfUri)             -> "PDF document"
         !capture.previewUri.isNullOrBlank() && localFileExists(capture.previewUri) -> "Image"
         else                                                                       -> "Document"
     }
+}
 
 /**
  * Resolve the PDF's on-disk size for the [DetailsCard] Size row.

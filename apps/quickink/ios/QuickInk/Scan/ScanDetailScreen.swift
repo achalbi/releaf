@@ -1426,12 +1426,26 @@ struct ScanDetailScreen: View {
 
     // MARK: - File metadata helpers
 
-    /// Resolve the file-type label for the Details row. Captures with
-    /// a real PDF on disk show "PDF document"; image-only captures
-    /// (preview JPEG, no PDF) fall back to "Image".
+    /// Resolve the file-type label for the Details row. Every
+    /// capture produces a PDF via `ImportArtifacts.build`
+    /// regardless of how the bytes got in, so just gating on the
+    /// PDF URL would always read "PDF document" — even for in-app
+    /// photos / videos / gallery imports. Branch on `source` (+
+    /// the presence of a video URI) so the label matches how the
+    /// row is presented elsewhere in the app (HomeScreen recents,
+    /// search results, etc.).
     private func fileTypeLabel(for capture: CaptureSummary) -> String {
-        if pdfURL(from: capture) != nil { return "PDF document" }
-        if loadedPreviewImage(for: capture) != nil { return "Image" }
+        let isPhotoSource  = capture.source == "photo"
+        let isImportSource = capture.source == "import"
+        let isVideo        = isPhotoSource && (
+            (capture.videoUri?.isEmpty == false) ||
+            (capture.videoDriveFileId?.isEmpty == false)
+        )
+        if isVideo                                   { return "Video" }
+        if isPhotoSource                             { return "Photo" }
+        if isImportSource                            { return "Image" }
+        if pdfURL(from: capture) != nil              { return "PDF document" }
+        if loadedPreviewImage(for: capture) != nil   { return "Image" }
         return "Document"
     }
 
