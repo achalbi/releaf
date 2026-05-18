@@ -20,6 +20,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -45,7 +47,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -63,6 +68,9 @@ import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.sync.QuickInkRestoreWorker
 import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.data.sync.QuickInkSyncWorker
+import app.quickink.mobile.data.profile.ProfileSettingsEntity
+import app.quickink.mobile.data.voicenote.TranscriptionLanguage
+import app.quickink.mobile.data.voicenote.TranscriptionLanguages
 import app.quickink.mobile.features.auth.rememberQuickInkSignInAction
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
@@ -202,9 +210,25 @@ fun SettingsScreen(
     }
 
     val authState by authStore.state.collectAsState()
+    val signedInUserId: String? = (authState as? AuthState.SignedIn)?.session?.userId
 
     val app = context.applicationContext as QuickInkApp
     val syncStateDao = remember(app) { app.database.syncStateDao() }
+    val profileSettingsDao = remember(app) { app.database.profileSettingsDao() }
+    // Live row for the signed-in user — null Flow when signed out
+    // so the picker can still render (just disabled / preview state).
+    val transcriptionFlow = remember(signedInUserId, profileSettingsDao) {
+        if (signedInUserId == null) {
+            kotlinx.coroutines.flow.flowOf<app.quickink.mobile.data.profile.ProfileSettingsEntity?>(null)
+        } else {
+            profileSettingsDao.observe(signedInUserId)
+        }
+    }
+    val transcriptionEntity by transcriptionFlow.collectAsState(initial = null)
+    val selectedTranscriptionLanguages: List<TranscriptionLanguage> = remember(transcriptionEntity) {
+        val parsed = TranscriptionLanguages.parse(transcriptionEntity?.transcriptionLanguages)
+        if (parsed.isNotEmpty()) parsed else TranscriptionLanguages.defaultAllowlist()
+    }
     val lastSyncRow by syncStateDao
         .observe(SyncStateKeys.LAST_FULL_SYNC_AT)
         .collectAsState(initial = null)
@@ -484,6 +508,68 @@ fun SettingsScreen(
                 )
             }
 
+            Section(title = "Transcription") {
+                TranscriptionLanguagesPicker(
+                    selected      = selectedTranscriptionLanguages,
+                    enabled       = signedInUserId != null,
+                    onToggle      = { language ->
+                        // Toggle the picked language in/out, never
+                        // letting the user end up with zero entries
+                        // (the LID step needs at least one allowlist
+                        // candidate; we'd silently fall back to
+                        // English otherwise).
+                        val userId = signedInUserId ?: return@TranscriptionLanguagesPicker
+                        val current = selectedTranscriptionLanguages.toMutableList()
+                        if (current.any { it.code == language.code }) {
+                            if (current.size > 1) {
+                                current.removeAll { it.code == language.code }
+                            } else {
+                                return@TranscriptionLanguagesPicker
+                            }
+                        } else {
+                            current.add(language)
+                        }
+                        val encoded = TranscriptionLanguages.encode(current)
+                        coroutineScope.launch {
+                            runCatching {
+                                val now = IsoClock.nowIso()
+                                val existing = profileSettingsDao.findByUser(userId)
+                                if (existing == null) {
+                                    // Seed the row inline — first-time use
+                                    // of this setting may predate the user
+                                    // opening Profile (the other screen
+                                    // that bootstraps the row).
+                                    profileSettingsDao.upsertLocal(
+                                        ProfileSettingsEntity(
+                                            id                     = userId,
+                                            userId                 = userId,
+                                            displayName            = null,
+                                            phoneNumber            = null,
+                                            personalityPunchline   = null,
+                                            transcriptionLanguages = encoded,
+                                            photoLocalUri          = null,
+                                            photoDriveFileId       = null,
+                                            photoUpdatedAt         = null,
+                                            driveFileId            = null,
+                                            createdAt              = now,
+                                            updatedAt              = now,
+                                            dirty                  = true,
+                                            deletedAt              = null,
+                                        )
+                                    )
+                                } else {
+                                    profileSettingsDao.setTranscriptionLanguages(
+                                        id        = userId,
+                                        codes     = encoded,
+                                        timestamp = now,
+                                    )
+                                }
+                            }
+                        }
+                    },
+                )
+            }
+
             if (onManageCategories != null) {
                 Section(title = "Tags") {
                     ManageCategoriesRow(onClick = onManageCategories)
@@ -640,6 +726,113 @@ private fun Section(title: String, content: @Composable () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
         ) {
             content()
+        }
+    }
+}
+
+/**
+ * Multi-select chip grid for the user's transcription-language
+ * allowlist. Selected chips paint accent-filled; unselected chips
+ * paint outlined. Tap toggles in/out; the last remaining chip
+ * resists deselection (a hard "0 selected" state breaks the LID
+ * pipeline downstream, so the UI never lets us reach it).
+ *
+ * Disabled state — when `enabled` is false (signed-out) — renders
+ * the chips muted and ignores taps; the user sees what the catalog
+ * looks like but the setting only takes effect after sign-in.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TranscriptionLanguagesPicker(
+    selected: List<TranscriptionLanguage>,
+    enabled: Boolean,
+    onToggle: (TranscriptionLanguage) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val selectedCodes = selected.map { it.code }.toSet()
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+        Text(
+            text  = "Pick the languages you'll speak in voice notes. Recordings are transcribed " +
+                    "in the matching language; pick more than one for code-switching.",
+            style = type.meta,
+            color = colors.inkSoft,
+        )
+        FlowRow(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+            verticalArrangement   = Arrangement.spacedBy(QuickInkSpacing.s2),
+        ) {
+            TranscriptionLanguages.supported.forEach { language ->
+                TranscriptionLanguageChip(
+                    language = language,
+                    selected = language.code in selectedCodes,
+                    enabled  = enabled,
+                    onClick  = { onToggle(language) },
+                )
+            }
+        }
+        if (!enabled) {
+            Text(
+                text  = "Sign in to save your language preferences across devices.",
+                style = type.meta,
+                color = colors.muted,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TranscriptionLanguageChip(
+    language: TranscriptionLanguage,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val shape = RoundedCornerShape(percent = 50)
+    val bg = when {
+        !enabled -> Color.White.copy(alpha = 0.45f)
+        selected -> colors.accent
+        else     -> Color.White.copy(alpha = 0.85f)
+    }
+    val borderColor = when {
+        !enabled -> colors.accent.copy(alpha = 0.15f)
+        selected -> colors.accent
+        else     -> colors.accent.copy(alpha = 0.25f)
+    }
+    val textColor = when {
+        !enabled -> colors.muted
+        selected -> colors.textOnAccent
+        else     -> colors.ink
+    }
+    val nativeColor = when {
+        !enabled -> colors.muted
+        selected -> colors.textOnAccent.copy(alpha = 0.85f)
+        else     -> colors.inkSoft
+    }
+    Column(
+        modifier = Modifier
+            .clip(shape)
+            .background(bg, shape)
+            .border(1.dp, borderColor, shape)
+            .let { if (enabled) it.clickable(onClick = onClick) else it }
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text       = language.englishName,
+            style      = type.body.copy(fontWeight = FontWeight.Medium, fontSize = 13.sp),
+            color      = textColor,
+        )
+        if (language.nativeName != language.englishName) {
+            Text(
+                text     = language.nativeName,
+                fontSize = 11.sp,
+                color    = nativeColor,
+            )
         }
     }
 }

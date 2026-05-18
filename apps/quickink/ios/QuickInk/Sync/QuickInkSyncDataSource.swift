@@ -378,6 +378,39 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 ) { out.append(entry) }
             }
 
+            // ---- profile_settings (typed via GRDB). One row per user;
+            // carries display-name override, phone, punchline,
+            // transcription-language allowlist, and the photo's
+            // Drive-file linkage. Mirror of Android's profile_settings
+            // dirty-batch step. `photo_local_uri` is excluded from
+            // the payload — device-local. ----
+            let profileSettingsRows = try ProfileSettingsEntity
+                .filter(Column("user_id") == userId)
+                .filter(Column("dirty") == true)
+                .filter(Column("deleted_at") == nil)
+                .fetchAll(db)
+            for row in profileSettingsRows {
+                let payload = ProfileSettingsPayloadV1(
+                    id:                     row.id,
+                    userId:                 row.userId,
+                    displayName:            row.displayName,
+                    phoneNumber:            row.phoneNumber,
+                    personalityPunchline:   row.personalityPunchline,
+                    transcriptionLanguages: row.transcriptionLanguages,
+                    photoDriveFileId:       row.photoDriveFileId,
+                    photoUpdatedAt:         row.photoUpdatedAt,
+                    createdAt:              row.createdAt,
+                    updatedAt:              row.updatedAt
+                )
+                if let entry = try Self.makeEntry(
+                    id: row.id,
+                    kind: DrivePath.kindProfileSettings,
+                    drivePath: DrivePath.profileSettings(id: row.id),
+                    updatedAt: row.updatedAt,
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
             // ---- ocr_results (raw SQL; not user-scoped — FK to captures) ----
             let ocrRows = try Row.fetchAll(db, sql: """
                 SELECT * FROM ocr_results
@@ -513,6 +546,22 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 ))
             }
 
+            // profile_settings — user-scoped. In practice almost
+            // never set (a user always has a profile while signed
+            // in), but covered for sync framework parity with
+            // Android.
+            let profileSettingsTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM profile_settings
+                WHERE user_id = ? AND deleted_at IS NOT NULL AND dirty = 1
+                """, arguments: [userId])
+            for row in profileSettingsTombstones {
+                out.append(PendingTombstone(
+                    kind: DrivePath.kindProfileSettings,
+                    id: row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+
             // ocr_results — not user-scoped at the row level.
             let ocrRows = try Row.fetchAll(db, sql: """
                 SELECT id, deleted_at, updated_at FROM ocr_results
@@ -625,6 +674,10 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 let p = try decoder.decode(StoryVoiceClipPayloadV1.self, from: change.payload)
                 try Self.upsertStoryVoiceClipRow(db, payload: p, driveFileId: driveFileId)
 
+            case DrivePath.kindProfileSettings:
+                let p = try decoder.decode(ProfileSettingsPayloadV1.self, from: change.payload)
+                try Self.upsertProfileSettingsRow(db, payload: p, driveFileId: driveFileId)
+
             default:
                 // Forward-compat: unknown kind, skip.
                 break
@@ -717,7 +770,11 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 SELECT COUNT(*) FROM tags
                 WHERE user_id = ? AND dirty = 1
                 """, arguments: [userId])) ?? 0
-            return notepad + captures + ocr + categories
+            let profileSettings: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM profile_settings
+                WHERE user_id = ? AND dirty = 1
+                """, arguments: [userId])) ?? 0
+            return notepad + captures + ocr + categories + profileSettings
         }
     }
 
@@ -736,6 +793,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
         case DrivePath.kindStory:           return "story"
         case DrivePath.kindStoryItem:       return "story_item"
         case DrivePath.kindStoryVoiceClip:  return "story_voice_clip"
+        case DrivePath.kindProfileSettings: return "profile_settings"
         default: return ""
         }
     }
@@ -826,6 +884,54 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             WHERE capture_tags.updated_at < excluded.updated_at
             """, arguments: [
                 payload.id, payload.captureId, payload.tagId, payload.source,
+                driveFileId, payload.createdAt, payload.updatedAt,
+            ])
+    }
+
+    /// Upsert a `profile_settings` row from a remote payload. Last-
+    /// write-wins on `updated_at`. The wire payload deliberately
+    /// omits `photo_local_uri` (device-local) — we keep the existing
+    /// local URI when the file still resolves and blank it otherwise.
+    /// The binary-restore step will repopulate it via the photo's
+    /// `photo_drive_file_id`. Mirror of Android's
+    /// `ProfileSettingsDao.upsertFromRemote` + `toEntity`.
+    private static func upsertProfileSettingsRow(_ db: Database, payload: ProfileSettingsPayloadV1, driveFileId: String?) throws {
+        let existingLocalUri: String? = try Row.fetchOne(
+            db,
+            sql: "SELECT photo_local_uri FROM profile_settings WHERE id = ? LIMIT 1",
+            arguments: [payload.id]
+        )?["photo_local_uri"]
+
+        let preservedLocalUri: String? = {
+            guard let uri = existingLocalUri, Self.fileExistsAt(uri) else { return nil }
+            return uri
+        }()
+
+        try db.execute(sql: """
+            INSERT INTO profile_settings (
+                id, user_id,
+                display_name, phone_number, personality_punchline,
+                transcription_languages,
+                photo_local_uri, photo_drive_file_id, photo_updated_at,
+                drive_file_id, created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                user_id                 = excluded.user_id,
+                display_name            = excluded.display_name,
+                phone_number            = excluded.phone_number,
+                personality_punchline   = excluded.personality_punchline,
+                transcription_languages = excluded.transcription_languages,
+                photo_drive_file_id     = excluded.photo_drive_file_id,
+                photo_updated_at        = excluded.photo_updated_at,
+                drive_file_id           = excluded.drive_file_id,
+                updated_at              = excluded.updated_at,
+                dirty                   = 0
+            WHERE profile_settings.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.userId,
+                payload.displayName, payload.phoneNumber, payload.personalityPunchline,
+                payload.transcriptionLanguages,
+                preservedLocalUri, payload.photoDriveFileId, payload.photoUpdatedAt,
                 driveFileId, payload.createdAt, payload.updatedAt,
             ])
     }

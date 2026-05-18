@@ -808,3 +808,88 @@ public struct StoryVoiceClipPayloadV1: Codable, Equatable, Sendable {
         case updatedAt           = "updated_at"
     }
 }
+
+// =====================================================================
+// profile_settings — QuickInk-only. One row per user; carries the
+// custom display-name override, phone, personality punchline,
+// transcription-language allowlist, and the photo's Drive-file
+// linkage. The actual photo binary travels via QuickInkBinarySync
+// (same path captures take); this payload only carries the metadata
+// reference (`photo_drive_file_id`). `photo_local_uri` is
+// deliberately NOT in the wire shape — it's a device-local file://
+// URI that wouldn't make sense on a different device.
+//
+// Mirror of Android's `ProfileSettingsPayloadV1`. Field order +
+// JSON keys match 1:1 so the Drive JSON round-trips across platforms.
+// =====================================================================
+
+public struct ProfileSettingsPayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let userId: String
+    public let displayName: String?
+    public let phoneNumber: String?
+    public let personalityPunchline: String?
+    /// Comma-separated BCP-47 codes (e.g. "en,hi,kn") for the user's
+    /// transcription-language allowlist. `nil` on payloads written
+    /// before the field landed; the receiver treats that as "fall
+    /// back to device locale + English" rather than carrying meaning.
+    /// Wire shape is a single string rather than a JSON array to
+    /// keep the round-trip identical to the column type and avoid a
+    /// payload-version bump for an additive change.
+    public let transcriptionLanguages: String?
+    public let photoDriveFileId: String?
+    public let photoUpdatedAt: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    public init(
+        id: String,
+        userId: String,
+        displayName: String? = nil,
+        phoneNumber: String? = nil,
+        personalityPunchline: String? = nil,
+        transcriptionLanguages: String? = nil,
+        photoDriveFileId: String? = nil,
+        photoUpdatedAt: String? = nil,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id                     = id
+        self.userId                 = userId
+        self.displayName            = displayName
+        self.phoneNumber            = phoneNumber
+        self.personalityPunchline   = personalityPunchline
+        self.transcriptionLanguages = transcriptionLanguages
+        self.photoDriveFileId       = photoDriveFileId
+        self.photoUpdatedAt         = photoUpdatedAt
+        self.createdAt              = createdAt
+        self.updatedAt              = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id                     = try c.decode(String.self, forKey: .id)
+        self.userId                 = try c.decode(String.self, forKey: .userId)
+        self.displayName            = try c.decodeIfPresent(String.self, forKey: .displayName)
+        self.phoneNumber            = try c.decodeIfPresent(String.self, forKey: .phoneNumber)
+        self.personalityPunchline   = try c.decodeIfPresent(String.self, forKey: .personalityPunchline)
+        self.transcriptionLanguages = try c.decodeIfPresent(String.self, forKey: .transcriptionLanguages)
+        self.photoDriveFileId       = try c.decodeIfPresent(String.self, forKey: .photoDriveFileId)
+        self.photoUpdatedAt         = try c.decodeIfPresent(String.self, forKey: .photoUpdatedAt)
+        self.createdAt              = try c.decode(String.self, forKey: .createdAt)
+        self.updatedAt              = try c.decode(String.self, forKey: .updatedAt)
+    }
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case userId                 = "user_id"
+        case displayName            = "display_name"
+        case phoneNumber            = "phone_number"
+        case personalityPunchline   = "personality_punchline"
+        case transcriptionLanguages = "transcription_languages"
+        case photoDriveFileId       = "photo_drive_file_id"
+        case photoUpdatedAt         = "photo_updated_at"
+        case createdAt              = "created_at"
+        case updatedAt              = "updated_at"
+    }
+}

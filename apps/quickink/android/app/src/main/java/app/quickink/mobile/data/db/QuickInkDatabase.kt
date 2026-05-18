@@ -116,6 +116,18 @@ import app.releaf.mobile.data.sync.SyncStateEntity
         // story_item_id. iOS GRDB v15_story_voice_clips.
         StoryVoiceClipEntity::class,
     ],
+    // v24 — Adds `profile_settings.transcription_languages` so the
+    // user's picked transcription-language allowlist (comma-separated
+    // BCP-47 codes like "en,hi,kn") syncs alongside display name +
+    // phone + punchline. Drives the LID → constrained transcribe
+    // pipeline in `SpeechTranscriber` and its iOS counterpart.
+    // Nullable; null means "user hasn't picked yet — fall back to
+    // device locale + English." Mirror of iOS GRDB
+    // v18_profile_settings (iOS lands the entire table at v18 since
+    // it didn't carry profile_settings before this change). Room
+    // rebuilds destructively under `fallbackToDestructiveMigration`
+    // until real users have data.
+    //
     // v23 — Adds `captures.video_drive_file_id` so the binary-sync
     // worker can mirror the raw .mp4 to Drive alongside the PDF +
     // preview JPEG, and the restore pass can re-download it on
@@ -247,7 +259,7 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // Free-form TEXT, nullable, no index — read pattern is "load the
     // whole field for the detail screen" so a full-text index isn't
     // useful yet.
-    version       = 23,
+    version       = 24,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {

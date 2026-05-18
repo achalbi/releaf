@@ -107,6 +107,21 @@ interface ProfileSettingsDao {
     suspend fun setPersonalityPunchline(id: String, line: String?, timestamp: String)
 
     /**
+     * Update the transcription-languages allowlist. `codes` is a
+     * comma-separated string of BCP-47 codes (e.g. "en,hi,kn"); null
+     * means "no preference set" and the transcriber falls back to
+     * device locale + English.
+     */
+    @Query("""
+        UPDATE profile_settings
+        SET transcription_languages = :codes,
+            updated_at              = :timestamp,
+            dirty                   = 1
+        WHERE id = :id
+    """)
+    suspend fun setTranscriptionLanguages(id: String, codes: String?, timestamp: String)
+
+    /**
      * Photo binary changed (picked or cleared). Stamps a separate
      * `photo_updated_at` so the restore worker can decide whether
      * its local file is stale without re-downloading on every

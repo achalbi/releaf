@@ -874,6 +874,63 @@ public final class QuickInkDatabase: @unchecked Sendable {
             try db.execute(sql: "ALTER TABLE captures ADD COLUMN video_drive_file_id TEXT")
         }
 
+        // ─── v18_profile_settings ───────────────────────────────
+        //
+        // Adds the `profile_settings` table — one row per user,
+        // keyed by user id. Mirror of Android's `profile_settings`
+        // (Room v4 + every column added since); iOS lands the full
+        // table at once because it didn't carry profile sync before.
+        //
+        // Columns (matched 1:1 with `ProfileSettingsEntity.kt`):
+        //   - identity: `id`, `user_id` (PK = user_id, single row).
+        //   - profile fields: `display_name`, `phone_number`,
+        //     `personality_punchline`, `transcription_languages`
+        //     (all nullable; null means "no override").
+        //   - photo: `photo_local_uri` is device-local (never sent
+        //     to Drive); `photo_drive_file_id` + `photo_updated_at`
+        //     are the synced fields.
+        //   - sync bookkeeping: `drive_file_id`, `created_at`,
+        //     `updated_at`, `dirty` (default 1 so a fresh row
+        //     pushes), `deleted_at` (tombstone slot — almost never
+        //     set in practice but kept for sync framework parity).
+        //
+        // Until this migration lands, profile fields lived in
+        // `UserDefaults` (`SettingsState`). `ProfileSettingsStore`'s
+        // bootstrap path migrates those values into the new table
+        // on first launch for users already past onboarding.
+        migrator.registerMigration("v18_profile_settings") { db in
+            try db.execute(sql: """
+                CREATE TABLE profile_settings (
+                    id                      TEXT PRIMARY KEY NOT NULL,
+                    user_id                 TEXT NOT NULL,
+                    display_name            TEXT,
+                    phone_number            TEXT,
+                    personality_punchline   TEXT,
+                    transcription_languages TEXT,
+                    photo_local_uri         TEXT,
+                    photo_drive_file_id     TEXT,
+                    photo_updated_at        TEXT,
+                    drive_file_id           TEXT,
+                    created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty                   INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at              TEXT
+                )
+                """)
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX idx_profile_settings_user
+                    ON profile_settings (user_id)
+                """)
+            try db.execute(sql: """
+                CREATE INDEX idx_profile_settings_dirty
+                    ON profile_settings (dirty) WHERE dirty = 1
+                """)
+            try db.execute(sql: """
+                CREATE INDEX idx_profile_settings_tombstone
+                    ON profile_settings (deleted_at) WHERE deleted_at IS NOT NULL
+                """)
+        }
+
         return migrator
     }
 }

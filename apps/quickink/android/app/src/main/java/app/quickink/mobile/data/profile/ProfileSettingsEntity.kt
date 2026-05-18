@@ -72,6 +72,18 @@ data class ProfileSettingsEntity(
     val personalityPunchline: String?,
 
     /**
+     * Comma-separated BCP-47 codes the user wants transcription to
+     * cover (e.g. "en,hi,kn"). Drives the LID → constrained
+     * transcribe pipeline in `SpeechTranscriber` and its iOS twin.
+     * Null when the user hasn't picked yet — callers fall back to
+     * `[device locale, "en"]` deduped. Synced like the rest of the
+     * row so the same Apple ID / Google account on two devices keeps
+     * the same allowlist.
+     */
+    @ColumnInfo(name = "transcription_languages")
+    val transcriptionLanguages: String?,
+
+    /**
      * Local file URI of the photo on THIS device. Not synced.
      * `photo_drive_file_id` + `photo_updated_at` are the synced
      * fields that let other devices know to download the binary.

@@ -8,6 +8,7 @@
  * Mirror of Android `SettingsScreen.kt`.
  */
 
+import Combine
 import SwiftUI
 import ReleafCoreAuth
 import ReleafCoreDesignSystem
@@ -55,6 +56,35 @@ struct SettingsScreen: View {
     /// short enough that a slow sync still resolves to the real
     /// state via the published `syncState` re-render.
     @State private var isSyncingFlash = false
+
+    /// Repository handle for the transcription-language allowlist.
+    /// Wrapped in @State so SwiftUI keeps a single instance across
+    /// re-renders; the type itself is reference-semantics (final
+    /// class) so equality-by-identity is what we want.
+    @State private var profileSettingsRepository = ProfileSettingsRepository()
+
+    /// Local mirror of the user's picked transcription languages.
+    /// Driven by the `task(id:)` subscription to
+    /// `ProfileSettingsRepository.observe(userId)` so a remote
+    /// update on another device propagates here on next launch.
+    /// Empty (= "no preference set") falls back to
+    /// `TranscriptionLanguages.defaultAllowlist()` for display.
+    @State private var transcriptionCodes: Set<String> = []
+
+    /// True once we've received the first emission from the
+    /// observer — distinguishes "loaded an empty allowlist" from
+    /// "still loading", so the picker doesn't flicker to defaults
+    /// then back to the user's pick on first render.
+    @State private var transcriptionDidLoad: Bool = false
+
+    /// User id when signed in; nil otherwise. Drives the transcription-
+    /// language picker's subscription target and write target — the
+    /// row keys to `userId` so the same Apple ID across devices reads
+    /// the same allowlist.
+    private var signedInUserId: String? {
+        if case .signedIn(let s) = authStore.state { return s.userId }
+        return nil
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -141,6 +171,10 @@ struct SettingsScreen: View {
                         )
                     }
 
+                    section(title: "Transcription") {
+                        transcriptionLanguagesPicker
+                    }
+
                     if let onManageCategories {
                         section(title: "Categories") {
                             categoriesRow(onTap: onManageCategories)
@@ -171,6 +205,27 @@ struct SettingsScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(QuickInkColors.bg.ignoresSafeArea())
+        .task(id: signedInUserId ?? "") {
+            // Subscribe to the picked-language allowlist while the
+            // Settings screen is visible. Combine publisher → async
+            // sequence keeps the subscription tied to SwiftUI's task
+            // lifecycle so it auto-cancels on dismiss / userId change.
+            guard let userId = signedInUserId else {
+                transcriptionCodes = []
+                transcriptionDidLoad = true
+                return
+            }
+            transcriptionDidLoad = false
+            for await row in profileSettingsRepository
+                .observe(userId: userId)
+                .replaceError(with: nil)
+                .values
+            {
+                let parsed = TranscriptionLanguages.parse(row?.transcriptionLanguages)
+                transcriptionCodes = Set(parsed.map(\.code))
+                transcriptionDidLoad = true
+            }
+        }
     }
 
     /// Inline TextField for the user's preferred display name. Edits
@@ -285,6 +340,138 @@ struct SettingsScreen: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(QuickInkColors.surface)
             .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+        }
+    }
+
+    /// Multi-select chip grid for the user's transcription-language
+    /// allowlist. Mirror of Android's `TranscriptionLanguagesPicker`.
+    /// Selected chips paint accent-filled; unselected paint outlined.
+    /// Tap toggles in/out; the last remaining chip resists deselection
+    /// (the LID pipeline needs ≥ 1 candidate).
+    ///
+    /// When signed-out, renders the chips muted and ignores taps —
+    /// the user sees what the catalog looks like but writes don't
+    /// land until they sign in (no userId to key the row by).
+    @ViewBuilder
+    private var transcriptionLanguagesPicker: some View {
+        let isSignedIn = (signedInUserId != nil)
+        // Resolved selection for display: parsed codes if the user
+        // has saved a set, else the device-locale + English default
+        // so first-time users see something sensible pre-checked.
+        let displayCodes: Set<String> = {
+            if !transcriptionDidLoad || transcriptionCodes.isEmpty {
+                return Set(TranscriptionLanguages.defaultAllowlist().map(\.code))
+            }
+            return transcriptionCodes
+        }()
+
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+            Text(
+                "Pick the languages you'll speak in voice notes. " +
+                "Recordings are transcribed in the matching language; " +
+                "pick more than one for code-switching."
+            )
+            .font(QuickInkText.meta)
+            .foregroundStyle(QuickInkColors.inkSoft)
+            .fixedSize(horizontal: false, vertical: true)
+
+            TranscriptionFlowLayout(spacing: QuickInkSpacing.s2) {
+                ForEach(TranscriptionLanguages.supported) { language in
+                    transcriptionLanguageChip(
+                        language: language,
+                        selected: displayCodes.contains(language.code),
+                        enabled:  isSignedIn,
+                        onTap:    { toggleTranscriptionLanguage(language) }
+                    )
+                }
+            }
+
+            if !isSignedIn {
+                Text("Sign in to save your language preferences across devices.")
+                    .font(QuickInkText.meta)
+                    .foregroundStyle(QuickInkColors.muted)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func transcriptionLanguageChip(
+        language: TranscriptionLanguage,
+        selected: Bool,
+        enabled: Bool,
+        onTap: @escaping () -> Void
+    ) -> some View {
+        let bg: Color = {
+            if !enabled { return Color.white.opacity(0.45) }
+            return selected ? QuickInkColors.accent : Color.white.opacity(0.85)
+        }()
+        let borderColor: Color = {
+            if !enabled { return QuickInkColors.accent.opacity(0.15) }
+            return selected ? QuickInkColors.accent : QuickInkColors.accent.opacity(0.25)
+        }()
+        let textColor: Color = {
+            if !enabled { return QuickInkColors.muted }
+            return selected ? QuickInkColors.textOnAccent : QuickInkColors.ink
+        }()
+        let nativeColor: Color = {
+            if !enabled { return QuickInkColors.muted }
+            return selected ? QuickInkColors.textOnAccent.opacity(0.85) : QuickInkColors.inkSoft
+        }()
+        let shape = Capsule(style: .continuous)
+        Button(action: onTap) {
+            VStack(alignment: .center, spacing: 2) {
+                Text(language.englishName)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(textColor)
+                if language.nativeName != language.englishName {
+                    Text(language.nativeName)
+                        .font(.system(size: 11))
+                        .foregroundStyle(nativeColor)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(bg)
+            .clipShape(shape)
+            .overlay(shape.stroke(borderColor, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+
+    /// Toggle the picked language in the local mirror and persist
+    /// the new allowlist via `ProfileSettingsRepository`. The last
+    /// remaining chip refuses to deselect — a zero-pick state would
+    /// break the LID step downstream (caller would silently fall
+    /// back to English, which is more surprising than the chip just
+    /// refusing the tap).
+    private func toggleTranscriptionLanguage(_ language: TranscriptionLanguage) {
+        guard let userId = signedInUserId else { return }
+        // Seed local mirror from defaults if the user hasn't picked
+        // anything yet — first toggle becomes "default minus / plus
+        // the tapped chip" rather than "only the tapped chip."
+        var next: Set<String> = transcriptionCodes.isEmpty
+            ? Set(TranscriptionLanguages.defaultAllowlist().map(\.code))
+            : transcriptionCodes
+
+        if next.contains(language.code) {
+            if next.count <= 1 { return }
+            next.remove(language.code)
+        } else {
+            next.insert(language.code)
+        }
+        transcriptionCodes = next
+        // Preserve catalog order in the stored string so a reader
+        // gets stable display order — `parse` will re-sort by
+        // catalog anyway, but a consistent wire form is easier to
+        // diff across devices.
+        let ordered = TranscriptionLanguages.supported.filter { next.contains($0.code) }
+        let encoded = TranscriptionLanguages.encode(ordered)
+        Task {
+            try? await profileSettingsRepository.setTranscriptionLanguages(
+                userId: userId,
+                codes:  encoded
+            )
         }
     }
 
@@ -575,6 +762,74 @@ struct SettingsScreen: View {
                     .accessibilityAddTraits(active ? [.isSelected] : [])
                 }
             }
+        }
+    }
+}
+
+/// Minimal wrapping HStack — places each subview at its natural size
+/// and wraps to a new row when the next item won't fit. Used by the
+/// transcription-language picker and any future variable-width chip
+/// grid that needs to live inside Settings (where the existing
+/// `ChipFlowLayout` in `ScanReviewScreen.swift` is intentionally
+/// scoped private to that file).
+private struct TranscriptionFlowLayout: Layout {
+    let spacing: CGFloat
+
+    init(spacing: CGFloat = 8) {
+        self.spacing = spacing
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var rowWidth: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var rowCount: Int = 0
+        for sub in subviews {
+            let size = sub.sizeThatFits(.unspecified)
+            if rowWidth + size.width > maxWidth, rowWidth > 0 {
+                totalHeight += rowHeight + spacing
+                rowWidth = size.width
+                rowHeight = size.height
+                rowCount += 1
+            } else {
+                rowWidth += size.width + (rowWidth > 0 ? spacing : 0)
+                rowHeight = max(rowHeight, size.height)
+            }
+        }
+        if rowWidth > 0 || rowHeight > 0 {
+            totalHeight += rowHeight
+            rowCount += 1
+        }
+        return CGSize(width: proposal.width ?? maxWidth, height: totalHeight)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        for sub in subviews {
+            let size = sub.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX, x > bounds.minX {
+                y += rowHeight + spacing
+                x = bounds.minX
+                rowHeight = 0
+            }
+            sub.place(
+                at: CGPoint(x: x, y: y),
+                proposal: ProposedViewSize(width: size.width, height: size.height)
+            )
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
         }
     }
 }

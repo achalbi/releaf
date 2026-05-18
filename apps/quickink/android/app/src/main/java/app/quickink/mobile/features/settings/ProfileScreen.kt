@@ -173,19 +173,20 @@ fun ProfileScreen(
             val photoUri      = preferences.profilePhotoUri.takeIf { it.isNotBlank() }
             profileSettingsDao.upsertLocal(
                 ProfileSettingsEntity(
-                    id                   = userId,
-                    userId               = userId,
-                    displayName          = customDisplay,
-                    phoneNumber          = phone,
-                    personalityPunchline = punch,
-                    photoLocalUri        = photoUri,
-                    photoDriveFileId     = null,
-                    photoUpdatedAt       = if (photoUri != null) now else null,
-                    driveFileId          = null,
-                    createdAt            = now,
-                    updatedAt            = now,
-                    dirty                = true,
-                    deletedAt            = null,
+                    id                     = userId,
+                    userId                 = userId,
+                    displayName            = customDisplay,
+                    phoneNumber            = phone,
+                    personalityPunchline   = punch,
+                    transcriptionLanguages = null,
+                    photoLocalUri          = photoUri,
+                    photoDriveFileId       = null,
+                    photoUpdatedAt         = if (photoUri != null) now else null,
+                    driveFileId            = null,
+                    createdAt              = now,
+                    updatedAt              = now,
+                    dirty                  = true,
+                    deletedAt              = null,
                 )
             )
         } else {

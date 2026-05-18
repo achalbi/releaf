@@ -342,27 +342,38 @@ fun TagPayloadV1.toEntity(driveFileId: String?): TagEntity = TagEntity(
 
 @Serializable
 data class ProfileSettingsPayloadV1(
-    @SerialName("id")                    val id: String,
-    @SerialName("user_id")               val userId: String,
-    @SerialName("display_name")          val displayName: String? = null,
-    @SerialName("phone_number")          val phoneNumber: String? = null,
-    @SerialName("personality_punchline") val personalityPunchline: String? = null,
-    @SerialName("photo_drive_file_id")   val photoDriveFileId: String? = null,
-    @SerialName("photo_updated_at")      val photoUpdatedAt: String? = null,
-    @SerialName("created_at")            val createdAt: String,
-    @SerialName("updated_at")            val updatedAt: String,
+    @SerialName("id")                      val id: String,
+    @SerialName("user_id")                 val userId: String,
+    @SerialName("display_name")            val displayName: String? = null,
+    @SerialName("phone_number")            val phoneNumber: String? = null,
+    @SerialName("personality_punchline")   val personalityPunchline: String? = null,
+    /**
+     * Comma-separated BCP-47 codes the user picked in the
+     * Transcription-languages setting (e.g. "en,hi,kn"). Null on
+     * payloads written before the field landed; the receiver treats
+     * that as "fall back to device locale + English." Wire shape is
+     * a single string rather than a JSON array to keep the round-
+     * trip identical to the column type and avoid a payload-version
+     * bump for an additive change.
+     */
+    @SerialName("transcription_languages") val transcriptionLanguages: String? = null,
+    @SerialName("photo_drive_file_id")     val photoDriveFileId: String? = null,
+    @SerialName("photo_updated_at")        val photoUpdatedAt: String? = null,
+    @SerialName("created_at")              val createdAt: String,
+    @SerialName("updated_at")              val updatedAt: String,
 )
 
 fun ProfileSettingsEntity.toV1Payload(): ProfileSettingsPayloadV1 = ProfileSettingsPayloadV1(
-    id                   = id,
-    userId               = userId,
-    displayName          = displayName,
-    phoneNumber          = phoneNumber,
-    personalityPunchline = personalityPunchline,
-    photoDriveFileId     = photoDriveFileId,
-    photoUpdatedAt       = photoUpdatedAt,
-    createdAt            = createdAt,
-    updatedAt            = updatedAt,
+    id                     = id,
+    userId                 = userId,
+    displayName            = displayName,
+    phoneNumber            = phoneNumber,
+    personalityPunchline   = personalityPunchline,
+    transcriptionLanguages = transcriptionLanguages,
+    photoDriveFileId       = photoDriveFileId,
+    photoUpdatedAt         = photoUpdatedAt,
+    createdAt              = createdAt,
+    updatedAt              = updatedAt,
 )
 
 /**
@@ -373,19 +384,20 @@ fun ProfileSettingsEntity.toV1Payload(): ProfileSettingsPayloadV1 = ProfileSetti
  * default avatar.
  */
 fun ProfileSettingsPayloadV1.toEntity(driveFileId: String?): ProfileSettingsEntity = ProfileSettingsEntity(
-    id                   = id,
-    userId               = userId,
-    displayName          = displayName,
-    phoneNumber          = phoneNumber,
-    personalityPunchline = personalityPunchline,
-    photoLocalUri        = null,
-    photoDriveFileId     = photoDriveFileId,
-    photoUpdatedAt       = photoUpdatedAt,
-    driveFileId          = driveFileId,
-    createdAt            = createdAt,
-    updatedAt            = updatedAt,
-    dirty                = false,
-    deletedAt            = null,
+    id                     = id,
+    userId                 = userId,
+    displayName            = displayName,
+    phoneNumber            = phoneNumber,
+    personalityPunchline   = personalityPunchline,
+    transcriptionLanguages = transcriptionLanguages,
+    photoLocalUri          = null,
+    photoDriveFileId       = photoDriveFileId,
+    photoUpdatedAt         = photoUpdatedAt,
+    driveFileId            = driveFileId,
+    createdAt              = createdAt,
+    updatedAt              = updatedAt,
+    dirty                  = false,
+    deletedAt              = null,
 )
 
 // =====================================================================

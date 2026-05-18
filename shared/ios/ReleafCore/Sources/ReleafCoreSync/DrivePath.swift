@@ -50,6 +50,13 @@ public enum DrivePath {
     /// audio_drive_file_id).
     public static let kindVoiceNote        = "voice_note"
 
+    /// QuickInk-only — per-user profile settings row (display name
+    /// override, phone, personality punchline, transcription-language
+    /// allowlist, photo Drive linkage). One row per user, keyed by
+    /// user id. Mirror of the Android `KIND_PROFILE_SETTINGS` shared
+    /// kind so the Drive payloads round-trip cleanly across platforms.
+    public static let kindProfileSettings  = "profile_settings"
+
     // ─── Stories (Phase 1 + Phase 2) ──────────────────────────────
     /// QuickInk-only — a curated narrative row (see STORIES_HANDOFF.md).
     public static let kindStory            = "story"
@@ -87,6 +94,11 @@ public enum DrivePath {
     /// QuickInk voice notes — `{yyyy}/{mm}/{dd}/{captureId}/voice-{id}.json`,
     /// co-located with the parent capture's day folder like ocr_results.
     public static let folderVoiceNotes       = "voice_notes"
+    /// QuickInk profile settings — `profile_settings/{userId}.json`.
+    /// One row per user; flat layout since there's exactly one file
+    /// per user (no date bucket needed). Mirror of the Android
+    /// `FOLDER_PROFILE_SETTINGS` shared folder name.
+    public static let folderProfileSettings  = "profile_settings"
     /// QuickInk stories (Phase 1) — `stories/{id}.json`. One row per
     /// curated narrative; flat layout since story counts stay small.
     public static let folderStories          = "stories"
@@ -176,6 +188,12 @@ public enum DrivePath {
 
     /// QuickInk smart-collection payload — `smart_collections/{id}.json`.
     public static func smartCollection(id: String) -> String { "\(folderSmartCollections)/\(id).json" }
+
+    /// QuickInk per-user profile-settings payload —
+    /// `profile_settings/{userId}.json`. One file per user. Mirror
+    /// of Android's `DrivePath.profileSettings(id)` so the same
+    /// account on iOS + Android writes/reads the same path.
+    public static func profileSettings(id: String) -> String { "\(folderProfileSettings)/\(id).json" }
 
     /// Date-bucketed QuickInk voice-note path —
     /// `{yyyy}/{mm}/{dd}/{captureId}/voice-{id}.json`. Co-locates voice

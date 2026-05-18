@@ -125,6 +125,7 @@ public struct QuickInkRoot: View {
         .onChange(of: authStore.state) { newState in
             handleAuthStateForAnalytics(newState)
             handleAuthStateForSettings(newState)
+            handleAuthStateForProfileBootstrap(newState)
         }
         // Hide the iOS status bar app-wide. SwiftUI's
         // `.statusBarHidden` only reaches descendents that don't
@@ -146,6 +147,40 @@ public struct QuickInkRoot: View {
     private func handleAuthStateForSettings(_ state: AuthStore.State) {
         if case .signedOut = state {
             SettingsState.clearAllUserOverrides()
+        }
+    }
+
+    /// On every sign-in transition, seed the `profile_settings` row
+    /// (GRDB v18) with whatever profile values currently live in
+    /// `SettingsState`'s UserDefaults bag. Before v18 those fields
+    /// (display name, phone, punchline, photo URI) were device-
+    /// local; the bootstrap call lifts them into the synced GRDB
+    /// row so the next sync push uploads them to Drive and they
+    /// follow the user across devices. Idempotent — if the row
+    /// already exists, the call no-ops.
+    ///
+    /// Reads UserDefaults directly (rather than via a captured
+    /// SettingsState instance) so this stays a free function on
+    /// the struct — `SettingsState` is owned by `MainShell` further
+    /// down the tree and isn't a stored property on `QuickInkRoot`.
+    /// Runs detached so a slow first-launch GRDB open doesn't gate
+    /// the rest of the auth-state handler.
+    private func handleAuthStateForProfileBootstrap(_ state: AuthStore.State) {
+        guard case .signedIn(let session) = state else { return }
+        let userId = session.userId
+        let defaults = UserDefaults.standard
+        let customDisplayName    = defaults.string(forKey: "quickink.settings.custom_display_name")
+        let phoneNumber          = defaults.string(forKey: "quickink.settings.phone_number")
+        let personalityPunchline = defaults.string(forKey: "quickink.settings.personality_punchline")
+        let profilePhotoUri      = defaults.string(forKey: "quickink.settings.profile_photo_uri")
+        Task.detached(priority: .background) {
+            try? await ProfileSettingsRepository().bootstrapFromLegacyUserDefaults(
+                userId:               userId,
+                customDisplayName:    customDisplayName,
+                phoneNumber:          phoneNumber,
+                personalityPunchline: personalityPunchline,
+                profilePhotoUri:      profilePhotoUri
+            )
         }
     }
 
