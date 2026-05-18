@@ -59,8 +59,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -89,14 +88,19 @@ class WhisperModelDownloadWorker(
         // synchronous read loop, so it can't call `setProgress` or
         // `setForeground` directly (both are `suspend`). Bridge via
         // a StateFlow that the read loop writes into and a sibling
-        // coroutine collects from. `debounce(200ms)` throttles
-        // notification + WorkInfo updates to ~5 Hz so we don't
-        // hammer WorkManager's IPC for every 256 KB chunk.
+        // coroutine `sample`s from at ~5 Hz.
+        //
+        // `sample` (NOT `debounce`): a 256 KB chunk lands every
+        // ~50 ms on a fast connection, so `debounce(200)` would
+        // sit in its quiet-window check forever and never emit —
+        // the visible bug being "Starting download…" sticks
+        // because setProgress is never called. `sample(200)` emits
+        // the most recent value at fixed intervals regardless of
+        // upstream cadence.
         val progressBeats = MutableStateFlow(0L to 0L)
         val mirrorJob = launch {
             progressBeats
-                .drop(1)  // skip the initial (0, 0) which would clobber the first real beat
-                .debounce(200L)
+                .sample(200L)
                 .collectLatest { (bytes, total) ->
                     setProgress(
                         workDataOf(
