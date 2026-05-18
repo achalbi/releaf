@@ -31,6 +31,13 @@
  *                        so the user can hold forever without
  *                        blowing up a transcription pass downstream.
  *
+ * A small flip-camera button (top-right of the preview) toggles
+ * between the back and front cameras. It is only shown in the
+ * idle `.preview` state — hidden while a still capture, video
+ * recording, or post-record processing pass is in flight, since
+ * tearing down the video input mid-take would corrupt the
+ * in-flight `.mov` and race the photo/movie delegate callbacks.
+ *
  * After capture (still OR video), the surface lands on the same
  * captured-preview UI: a frozen first frame (or the still) +
  * Retake / Use Photo. Use Photo writes the JPEG via
@@ -237,6 +244,9 @@ private struct ActivePhotoSurface: View {
                     if case .recording(let elapsed) = session.state {
                         recordingOverlay(elapsedSeconds: elapsed)
                     }
+                    if session.state == .preview {
+                        cameraFlipButton
+                    }
                     if session.state == .capturing || session.state == .processing {
                         Color.black.opacity(0.25).ignoresSafeArea(edges: .horizontal)
                         ProgressView()
@@ -300,6 +310,31 @@ private struct ActivePhotoSurface: View {
         let mm = seconds / 60
         let ss = seconds % 60
         return String(format: "%01d:%02d", mm, ss)
+    }
+
+    // MARK: - Camera flip button
+
+    /// Top-right overlay that toggles between the back and front
+    /// cameras. Only rendered while `session.state == .preview`;
+    /// hiding it the rest of the time means a mid-recording flip
+    /// can't reach `PhotoCaptureSession.flipCamera()` (which would
+    /// no-op defensively anyway). The 40pt black disc matches the
+    /// other on-camera affordances (recording chip, audio badge)
+    /// for visual rhythm.
+    @ViewBuilder
+    private var cameraFlipButton: some View {
+        Button(action: { session.flipCamera() }) {
+            Image(systemName: "arrow.triangle.2.circlepath.camera")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(Color.black.opacity(0.55)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Switch camera")
+        .padding(.top, QuickInkSpacing.s5)
+        .padding(.trailing, QuickInkSpacing.s4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
 
     // MARK: - Captured-state preview
@@ -870,6 +905,20 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
     private let movieOutput = AVCaptureMovieFileOutput()
     private var audioInput: AVCaptureDeviceInput?
 
+    /// Currently-bound camera input (front or back). Tracked
+    /// separately from `audioInput` so the camera-flip handler can
+    /// detach and replace just the video input without disturbing
+    /// the mic side of the session.
+    private var currentCameraInput: AVCaptureDeviceInput?
+
+    /// Active camera position. Defaults to `.back` since document /
+    /// object capture is the dominant use case; the on-screen flip
+    /// button toggles to `.front` and back. `@Published` so SwiftUI
+    /// consumers can react (e.g. swap the flip-icon style) — for
+    /// the current spec the view just hides the flip button outside
+    /// `.preview`, but exposing the position keeps room for that.
+    @Published private(set) var cameraPosition: AVCaptureDevice.Position = .back
+
     /// File URL the in-flight video recording is writing to.
     /// Lives in the app's cache dir; deleted after we extract
     /// the first frame + audio in `handleVideo(...)`. Set to nil
@@ -897,6 +946,67 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
             if let s = self?.captureSession, s.isRunning {
                 s.stopRunning()
             }
+        }
+    }
+
+    // MARK: Camera flip
+
+    /// Toggle between front and back cameras. No-op outside
+    /// `.preview` — flipping mid-recording would tear down the
+    /// `AVCaptureMovieFileOutput` connection and corrupt the in-
+    /// flight `.mov`; flipping during capturing/processing would
+    /// race the photo/movie delegate callbacks. The view hides
+    /// the flip button outside `.preview` too, but we guard here
+    /// defensively in case a stray gesture sneaks through.
+    func flipCamera() {
+        guard state == .preview else { return }
+        let newPosition: AVCaptureDevice.Position = (cameraPosition == .back) ? .front : .back
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            guard let device = AVCaptureDevice.default(
+                    .builtInWideAngleCamera,
+                    for: .video,
+                    position: newPosition,
+                  ),
+                  let input = try? AVCaptureDeviceInput(device: device)
+            else {
+                NSLog("[PhotoCapture] flipCamera: no %@ camera on device",
+                      newPosition == .front ? "front" : "back")
+                return
+            }
+            self.captureSession.beginConfiguration()
+            if let current = self.currentCameraInput {
+                self.captureSession.removeInput(current)
+            }
+            if self.captureSession.canAddInput(input) {
+                self.captureSession.addInput(input)
+                self.currentCameraInput = input
+            } else {
+                // Couldn't add the new input — try to reinstate the
+                // old one so we don't strand the user on a black
+                // preview.
+                NSLog("[PhotoCapture] flipCamera: canAddInput=false for %@; reverting",
+                      newPosition == .front ? "front" : "back")
+                if let old = self.currentCameraInput,
+                   self.captureSession.canAddInput(old) {
+                    self.captureSession.addInput(old)
+                }
+                self.captureSession.commitConfiguration()
+                return
+            }
+            // The input swap recreates both output connections from
+            // scratch, so portrait orientation has to be re-applied
+            // (defaults to landscape-right on a fresh connection).
+            if let conn = self.photoOutput.connection(with: .video),
+               conn.isVideoOrientationSupported {
+                conn.videoOrientation = .portrait
+            }
+            if let conn = self.movieOutput.connection(with: .video),
+               conn.isVideoOrientationSupported {
+                conn.videoOrientation = .portrait
+            }
+            self.captureSession.commitConfiguration()
+            Task { @MainActor in self.cameraPosition = newPosition }
         }
     }
 
@@ -1023,11 +1133,14 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
         // still on the photo path.
         captureSession.sessionPreset = .high
 
-        if let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+        if let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: cameraPosition),
            let input  = try? AVCaptureDeviceInput(device: camera),
            captureSession.canAddInput(input)
         {
             captureSession.addInput(input)
+            // Pin the video input so `flipCamera()` can detach it
+            // later without having to re-enumerate session inputs.
+            self.currentCameraInput = input
         }
         if let mic = AVCaptureDevice.default(for: .audio),
            let input = try? AVCaptureDeviceInput(device: mic),

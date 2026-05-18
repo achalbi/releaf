@@ -32,6 +32,13 @@
  *                        so the user can hold forever without
  *                        blowing up a transcription pass downstream.
  *
+ * A small flip-camera button (top-right of the preview) toggles
+ * between the back and front cameras. It is only shown in the
+ * idle `Preview` state — hidden while a still capture, video
+ * recording, or post-record processing pass is in flight, since
+ * tearing down the [VideoCapture] use case mid-take would
+ * corrupt the in-flight `.mp4` and stop the recording.
+ *
  * After capture (still OR video), the surface lands on the same
  * captured-preview UI: a frozen still (or the video's first
  * frame) + Retake / Use Photo. Use Photo writes the JPEG via
@@ -103,6 +110,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
@@ -321,6 +329,19 @@ private fun ActivePhotoSurface(
     var pendingVideoFile by remember { mutableStateOf<File?>(null) }
     var recordingStartedAtElapsed by remember { mutableLongStateOf(0L) }
 
+    // Active camera. Hoisted out of `bindCameraX` so the
+    // LaunchedEffect below can re-bind the CameraX use cases
+    // against a different selector when the user taps the flip
+    // button. Default is back camera — photo capture is primarily
+    // for documents / objects in front of the user, not selfies.
+    var cameraSelector by remember { mutableStateOf(CameraSelector.DEFAULT_BACK_CAMERA) }
+    // PreviewView is created by AndroidView's factory; we hold a
+    // ref so the LaunchedEffect can pass it into `bindCameraX`
+    // outside the factory closure. Nulled in `onRelease` so a
+    // remount (e.g. uiState going Preview → Captured → Preview)
+    // gets a fresh bind against the new PreviewView instance.
+    var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
+
     DisposableEffect(Unit) {
         onDispose {
             // Stop any in-flight recording before tearing down so
@@ -354,6 +375,22 @@ private fun ActivePhotoSurface(
         }
     }
 
+    // (Re)bind CameraX whenever the PreviewView mounts (factory →
+    // previewViewRef set) or the user flips cameras. Each call
+    // unbindAll()s and rebinds against the current selector, so
+    // the same effect drives both the initial bind and the flip
+    // path — no separate "swap input" code path to keep in sync.
+    LaunchedEffect(previewViewRef, cameraSelector) {
+        val pv = previewViewRef ?: return@LaunchedEffect
+        bindCameraX(
+            context        = context,
+            previewView    = pv,
+            lifecycleOwner = lifecycleOwner,
+            bindings       = bindings,
+            cameraSelector = cameraSelector,
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
@@ -378,19 +415,33 @@ private fun ActivePhotoSurface(
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx ->
-                            val previewView = PreviewView(ctx).apply {
+                            val pv = PreviewView(ctx).apply {
                                 scaleType          = PreviewView.ScaleType.FILL_CENTER
                                 implementationMode = PreviewView.ImplementationMode.PERFORMANCE
                             }
-                            bindCameraX(
-                                context        = ctx,
-                                previewView    = previewView,
-                                lifecycleOwner = lifecycleOwner,
-                                bindings       = bindings,
-                            )
-                            previewView
+                            // Bind happens via the LaunchedEffect
+                            // up in ActivePhotoSurface — it runs
+                            // as soon as we publish the ref here
+                            // and re-runs on cameraSelector flips.
+                            previewViewRef = pv
+                            pv
                         },
+                        onRelease = { previewViewRef = null },
                     )
+                    if (state is PhotoUiState.Preview) {
+                        CameraFlipButton(
+                            onClick = {
+                                cameraSelector =
+                                    if (cameraSelector == CameraSelector.DEFAULT_BACK_CAMERA)
+                                        CameraSelector.DEFAULT_FRONT_CAMERA
+                                    else
+                                        CameraSelector.DEFAULT_BACK_CAMERA
+                            },
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = QuickInkSpacing.s5, end = QuickInkSpacing.s4),
+                        )
+                    }
                     if (state is PhotoUiState.Recording) {
                         RecordingTimeChip(
                             elapsedMs = state.elapsedMs,
@@ -837,6 +888,37 @@ private fun PhotoShutterButton(
     }
 }
 
+/**
+ * Top-right overlay that toggles between the back and front
+ * cameras. Only rendered while the surface is idle on
+ * [PhotoUiState.Preview] — hidden mid-recording since flipping
+ * tears down the in-flight [VideoCapture] use case and would
+ * stop the `.mp4` mid-write. The 40dp black disc matches the
+ * other on-camera affordances (recording chip, audio badge)
+ * for visual rhythm.
+ */
+@Composable
+private fun CameraFlipButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.55f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector        = Icons.Filled.Cameraswitch,
+            contentDescription = "Switch camera",
+            tint               = Color.White,
+            modifier           = Modifier.size(20.dp),
+        )
+    }
+}
+
 @Composable
 private fun PhotoPermissionRationale(onRequest: () -> Unit) {
     val type = LocalQuickInkTypography.current
@@ -881,12 +963,19 @@ private fun PhotoPermissionRationale(onRequest: () -> Unit) {
  * hold-start handler can call `prepareRecording` against the
  * same instance. Lifecycle release happens automatically via
  * [lifecycleOwner].
+ *
+ * Re-callable: pass a different [cameraSelector] (e.g. FRONT
+ * instead of BACK) and the function `unbindAll`s and rebinds
+ * against the new camera. That's how the flip button works —
+ * the [LaunchedEffect] up in `ActivePhotoSurface` keys on the
+ * selector and calls this again whenever the user flips.
  */
 private fun bindCameraX(
     context: Context,
     previewView: PreviewView,
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     bindings: CameraXBindings,
+    cameraSelector: CameraSelector,
 ) {
     val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
     cameraProviderFuture.addListener({
@@ -930,24 +1019,36 @@ private fun bindCameraX(
         runCatching {
             cameraProvider.bindToLifecycle(
                 lifecycleOwner,
-                CameraSelector.DEFAULT_BACK_CAMERA,
+                cameraSelector,
                 preview,
                 imageCapture,
                 videoCapture,
             )
-        }.onFailure {
+        }.recoverCatching {
             // Fall back to image + preview only on devices that
             // can't satisfy the three-use-case bind. Video
             // capture won't work in that case, but the still
             // path still does — the hold gesture will start a
             // recording that never produces a Finalize event,
-            // and the surface stays in `.recording` until the
+            // and the surface stays in `Recording` until the
             // user releases. Acceptable degraded behaviour.
+            // `recoverCatching` (not `onFailure`) so a throw in
+            // this lambda itself gets caught by the outer chain
+            // rather than crashing the executor — relevant when
+            // the user flips to a camera the device doesn't have
+            // (front-camera-less tablets, etc.) and BOTH binds
+            // fail.
             cameraProvider.bindToLifecycle(
                 lifecycleOwner,
-                CameraSelector.DEFAULT_BACK_CAMERA,
+                cameraSelector,
                 preview,
                 imageCapture,
+            )
+        }.onFailure {
+            android.util.Log.w(
+                "PhotoCapture",
+                "bindToLifecycle failed for selector=$cameraSelector",
+                it,
             )
         }
     }, ContextCompat.getMainExecutor(context))
