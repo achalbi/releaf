@@ -1,23 +1,25 @@
 /*
  * SpeechModelDownloadState.kt
  *
- * Process-wide download progress for the sherpa-onnx Whisper model.
- * `SpeechTranscriber.downloadAndExtractSherpaModel` updates this
- * state holder while bytes flow in; UI surfaces (Settings, the
- * post-record sheet, the root shell) observe via [state] to render
- * progress.
+ * Process-wide observable state for sherpa-onnx Whisper-model
+ * downloads. Derived from WorkManager's [WorkInfo] stream for the
+ * [WhisperModelDownloadWorker] tag so the source of truth survives
+ * the activity being recreated (and the app process being recycled)
+ * — the moment a fresh UI binds, it sees the in-flight progress
+ * exactly where the worker left it.
  *
- * Singleton because the download is fire-and-forget from a coroutine
- * launched off the record sheet — the user can navigate away mid-
- * download and we still want a global modal/banner to surface
- * progress wherever they land.
+ * UI surfaces (the in-app download modal at MainShell root, the
+ * future Settings → Transcription banner) all consume [observe].
  */
 
 package app.quickink.mobile.data.voicenote
 
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import android.content.Context
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 sealed interface ModelDownloadState {
     /** No download in flight. UI surfaces hide. */
@@ -34,17 +36,63 @@ sealed interface ModelDownloadState {
         val totalBytes: Long,
     ) : ModelDownloadState
 
-    /** Last attempt failed; UI may surface this until the user retries (or dismisses). */
+    /** Last attempt ended in `WorkInfo.State.FAILED`. UI surfaces
+     *  a dismissable failure modal; partial bytes stay on disk so a
+     *  retry from the voice-note card resumes from where the fetch
+     *  stopped (HTTP `Range:` is the recovery mechanism, not a
+     *  fresh enqueue). */
     data class Failed(val message: String) : ModelDownloadState
 }
 
 object SpeechModelDownloadProgress {
 
-    private val _state = MutableStateFlow<ModelDownloadState>(ModelDownloadState.Idle)
-    val state: StateFlow<ModelDownloadState> = _state.asStateFlow()
+    /**
+     * Live state derived from WorkManager's WorkInfo stream tagged
+     * [WhisperModelDownloadWorker.WORK_TAG]. Active (RUNNING /
+     * ENQUEUED / BLOCKED) work wins over terminal-Failed work; if
+     * nothing's active and nothing failed, returns [Idle].
+     *
+     * `distinctUntilChanged` is applied so a worker emitting
+     * progress at the 256 KB cadence doesn't trigger a recomposition
+     * burst at the consumer.
+     */
+    fun observe(context: Context): Flow<ModelDownloadState> {
+        return WorkManager.getInstance(context)
+            .getWorkInfosByTagFlow(WhisperModelDownloadWorker.WORK_TAG)
+            .map { infos -> derive(infos) }
+            .distinctUntilChanged()
+    }
 
-    /** Set the current state. Called from [SpeechTranscriber] only. */
-    internal fun update(value: ModelDownloadState) {
-        _state.value = value
+    /**
+     * Acknowledge a failure in the modal — prunes any terminal-state
+     * (FAILED / SUCCEEDED / CANCELLED) entries from WorkManager's
+     * database so the derivation flips to [Idle] and the dialog
+     * hides. Active work is untouched, so a fresh download kicked
+     * off in parallel keeps running. The partial file stays on disk;
+     * the user re-enters the flow from the voice-note card.
+     */
+    fun dismissFailures(context: Context) {
+        WorkManager.getInstance(context).pruneWork()
+    }
+
+    private fun derive(infos: List<WorkInfo>): ModelDownloadState {
+        val active = infos.firstOrNull {
+            it.state == WorkInfo.State.RUNNING ||
+                it.state == WorkInfo.State.ENQUEUED ||
+                it.state == WorkInfo.State.BLOCKED
+        }
+        if (active != null) {
+            return ModelDownloadState.Downloading(
+                bytesDownloaded = WhisperModelDownloadWorker.progressFor(active),
+                totalBytes      = WhisperModelDownloadWorker.totalFor(active),
+            )
+        }
+        val failed = infos.firstOrNull { it.state == WorkInfo.State.FAILED }
+        if (failed != null) {
+            return ModelDownloadState.Failed(
+                WhisperModelDownloadWorker.errorFor(failed) ?: "Download failed"
+            )
+        }
+        return ModelDownloadState.Idle
     }
 }

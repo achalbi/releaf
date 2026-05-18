@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import app.quickink.mobile.data.voicenote.WhisperModelDownloadWorker
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkTimeBar
@@ -506,6 +507,25 @@ private fun MainShell(
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.ACCESS_FINE_LOCATION,
         ))
+    }
+
+    // POST_NOTIFICATIONS (Android 13+) — required for the
+    // foreground-service Whisper model download notification to
+    // actually appear in the system tray. Deny is OK; the worker
+    // still runs as a regular bg job, just without the OS guarantee
+    // against process kill. Asked once per install; the system
+    // dialog never re-prompts after a "Don't allow" anyway, and a
+    // user who flipped it off in OS Settings doesn't want us
+    // pestering them.
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { /* result ignored — worker degrades gracefully on deny */ }
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+            return@LaunchedEffect
+        }
+        if (WhisperModelDownloadWorker.hasNotificationPermission(context)) return@LaunchedEffect
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     val scanState by controller.state.collectAsState()

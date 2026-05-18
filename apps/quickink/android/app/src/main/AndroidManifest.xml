@@ -45,6 +45,21 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
 
     <!--
+      Whisper-model first-run downloads run as a foreground-service
+      WorkManager task so they survive the user dismissing the app
+      mid-fetch (the archive can be ~500 MB / 1.5 GB and would lose
+      bytes otherwise). The notification surfaces the same progress
+      bar the in-app modal shows; on Android 14+ the service is
+      categorized as DATA_SYNC. POST_NOTIFICATIONS is requested at
+      runtime the first time we kick a download; deny → the worker
+      degrades to a regular (non-foreground) job and risks being
+      killed under memory pressure.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
       Camera is required for the in-app Business Card surface AND
       for the system document scanner (the latter runs in GMS,
       but `uses-feature` covers both). `required="false"` keeps
@@ -108,6 +123,19 @@
                 <data android:mimeType="application/pdf" />
             </intent-filter>
         </activity>
+
+        <!--
+          Merge a `foregroundServiceType="dataSync"` attribute onto
+          WorkManager's bundled `SystemForegroundService`. Required
+          on Android 14+ for any worker that calls `setForeground(...)`;
+          our Whisper model download is the first such worker in
+          this app. `tools:node="merge"` overlays the attribute
+          without redeclaring the service body.
+        -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <!--
           FileProvider used by the profile-photo "Take Photo" flow.

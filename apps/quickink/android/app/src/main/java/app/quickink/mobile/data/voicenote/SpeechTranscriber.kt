@@ -72,11 +72,8 @@ import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
@@ -430,26 +427,11 @@ object SpeechTranscriber {
     @Volatile private var cachedSherpaModelId: String? = null
     private val sherpaRecognizerLock = Any()
 
-    /**
-     * Process-scope coroutine that owns in-flight model downloads.
-     * Decoupled from any caller's lifetime so the user navigating
-     * away from the voice-note sheet (or backgrounding the app)
-     * doesn't cancel the HTTP fetch. The `SupervisorJob` keeps one
-     * model's failure from poisoning others if we ever parallel-
-     * download multiple variants.
-     */
-    private val modelDownloadScope =
-        CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    /**
-     * `Deferred` per model id while a download is in flight. Lets a
-     * second caller (e.g. a retry after the user re-enters the
-     * screen) await the existing fetch instead of kicking a second
-     * concurrent download. Cleared on completion via
-     * `invokeOnCompletion`.
-     */
-    private val inFlightDownloadsLock = Any()
-    private val inFlightDownloads = mutableMapOf<String, Deferred<Unit>>()
+    // Model fetches run as foreground-service WorkManager jobs (see
+    // [WhisperModelDownloadWorker]) — survives navigation away, the
+    // app being dismissed, and process pressure. The transcribe
+    // call awaits the work's WorkInfo terminal state instead of
+    // owning a coroutine of its own.
 
     private suspend fun transcribeWithSherpa(
         context: Context,
@@ -673,42 +655,53 @@ object SpeechTranscriber {
     }
 
     /**
-     * Ensure [model] is extracted on disk, kicking a process-scope
-     * download if it isn't. Caller can cancel — the `Deferred` lives
-     * on [modelDownloadScope] so a navigation away leaves the bytes
-     * still pulling; the next attempt awaits the same in-flight job
-     * instead of starting a fresh fetch.
+     * Ensure [model] is extracted on disk, kicking a foreground-
+     * service WorkManager fetch if it isn't. The work survives the
+     * caller's coroutine being cancelled, the user navigating away,
+     * the activity being destroyed, AND the app being dismissed —
+     * the bytes keep pulling against a system-managed foreground
+     * service. Caller suspends until the work transitions to
+     * SUCCEEDED (model is on disk) or FAILED/CANCELLED.
      */
     private suspend fun ensureModelDownloaded(context: Context, model: WhisperModel) {
         val parentDir = context.filesDir
         val modelDir = File(parentDir, model.sherpaDirName)
         if (isSherpaModelPresent(modelDir, model)) return
 
-        val deferred: Deferred<Unit> = synchronized(inFlightDownloadsLock) {
-            inFlightDownloads[model.id] ?: run {
-                val job = modelDownloadScope.async {
-                    downloadAndExtractSherpaModel(parentDir, modelDir, model)
-                }
-                inFlightDownloads[model.id] = job
-                job.invokeOnCompletion {
-                    synchronized(inFlightDownloadsLock) {
-                        // Only clear when *this* deferred is still the
-                        // tracked one — a fast-fail + retry could have
-                        // installed a fresh job between the failure
-                        // and the completion callback.
-                        if (inFlightDownloads[model.id] === job) {
-                            inFlightDownloads.remove(model.id)
-                        }
-                    }
-                }
-                job
-            }
+        val workFlow = WhisperModelDownloadWorker.enqueue(context, model)
+        val terminal = workFlow.first { infos ->
+            val state = infos.firstOrNull()?.state
+            state == androidx.work.WorkInfo.State.SUCCEEDED ||
+                state == androidx.work.WorkInfo.State.FAILED ||
+                state == androidx.work.WorkInfo.State.CANCELLED
         }
-        // Await joins the shared deferred. A caller-side cancellation
-        // propagates a CancellationException to our coroutine but
-        // leaves the deferred running on modelDownloadScope — the
-        // next caller picks it back up from where it left off.
-        deferred.await()
+        val info = terminal.firstOrNull()
+        if (info?.state != androidx.work.WorkInfo.State.SUCCEEDED) {
+            val msg = WhisperModelDownloadWorker.errorFor(info ?: return)
+                ?: "Model download did not succeed (${info.state})"
+            throw IOException(msg)
+        }
+    }
+
+    /**
+     * Worker-facing entry point — runs the actual disk-write +
+     * extract pipeline synchronously, calling [onProgress] every
+     * ~256 KB so the worker can mirror bytes to `setProgress` and
+     * the foreground-service notification. Throws on any failure;
+     * `<modelDir>.partial` is preserved on failure so a retry
+     * resumes via HTTP `Range:`. Internal to the module, but
+     * `internal` so the worker class (different package) can call
+     * it without exposing it to library consumers.
+     */
+    internal fun runModelDownload(
+        context: Context,
+        model: WhisperModel,
+        onProgress: (bytesDownloaded: Long, totalBytes: Long) -> Unit,
+    ) {
+        val parentDir = context.filesDir
+        val modelDir = File(parentDir, model.sherpaDirName)
+        if (isSherpaModelPresent(modelDir, model)) return
+        downloadAndExtractSherpaModel(parentDir, modelDir, model, onProgress)
     }
 
     /** Container for the bits of [OfflineRecognizerResult] we care about. */
@@ -738,21 +731,20 @@ object SpeechTranscriber {
         parentDir: File,
         modelDir: File,
         model: WhisperModel,
+        onProgress: (absoluteBytes: Long, totalBytes: Long) -> Unit,
     ) {
         Log.d(TAG, "sherpa model '${model.id}': downloading…")
         val partial = File(parentDir, "${model.sherpaDirName}.partial")
 
-        try {
-            downloadToPartial(partial, model)
-        } catch (e: Exception) {
-            // Bytes already on disk in `partial` survive — the next
-            // attempt resumes from there via the Range: header.
-            SpeechModelDownloadProgress.update(
-                ModelDownloadState.Failed(e.message ?: "Model download failed")
-            )
-            throw e
-        }
+        // Phase 1 — pull bytes into the `.partial` staging file.
+        // Failure leaves whatever bytes landed on disk so the next
+        // enqueue resumes via HTTP `Range:`.
+        downloadToPartial(partial, model, onProgress)
 
+        // Phase 2 — extract the fully-downloaded archive. Failure
+        // here means the payload itself is corrupt; wipe both
+        // partial and the half-extracted dir so a retry re-fetches
+        // from scratch instead of appending bytes to a broken file.
         try {
             if (modelDir.exists()) modelDir.deleteRecursively()
             modelDir.mkdirs()
@@ -760,21 +752,12 @@ object SpeechTranscriber {
                 extractModelTarBz2(input, modelDir, model)
             }
         } catch (e: Exception) {
-            // Extraction failure on a fully-downloaded archive means
-            // the bytes are corrupt — wipe both partial and the
-            // half-extracted dir so the next attempt re-downloads
-            // from scratch. (Resume is for *download* interruptions;
-            // a bad payload can't be salvaged by appending more.)
             modelDir.deleteRecursively()
             partial.delete()
-            SpeechModelDownloadProgress.update(
-                ModelDownloadState.Failed(e.message ?: "Model extraction failed")
-            )
             throw e
         }
 
         partial.delete()
-        SpeechModelDownloadProgress.update(ModelDownloadState.Idle)
         Log.d(TAG, "sherpa model '${model.id}': extracted to ${modelDir.absolutePath}")
     }
 
@@ -792,7 +775,11 @@ object SpeechTranscriber {
      * or a different file behind the URL), the partial is wiped
      * and the download restarts from byte 0.
      */
-    private fun downloadToPartial(partial: File, model: WhisperModel) {
+    private fun downloadToPartial(
+        partial: File,
+        model: WhisperModel,
+        onProgress: (absoluteBytes: Long, totalBytes: Long) -> Unit,
+    ) {
         val resumeFrom = if (partial.exists()) partial.length() else 0L
 
         val conn = (URL(model.downloadUrl).openConnection() as HttpURLConnection).apply {
@@ -806,9 +793,7 @@ object SpeechTranscriber {
         // Emit an initial "we're at resumeFrom bytes / total unknown"
         // beat so the modal renders progress immediately even before
         // the response headers arrive.
-        SpeechModelDownloadProgress.update(
-            ModelDownloadState.Downloading(bytesDownloaded = resumeFrom, totalBytes = 0)
-        )
+        onProgress(resumeFrom, 0L)
         try {
             conn.connect()
             val code = conn.responseCode
@@ -825,12 +810,7 @@ object SpeechTranscriber {
             }
             val effectiveStart = if (resumed) resumeFrom else 0L
             val totalBytes = totalBytesFor(conn, resumed)
-            SpeechModelDownloadProgress.update(
-                ModelDownloadState.Downloading(
-                    bytesDownloaded = effectiveStart,
-                    totalBytes      = totalBytes,
-                )
-            )
+            onProgress(effectiveStart, totalBytes)
 
             partial.parentFile?.mkdirs()
             java.io.FileOutputStream(partial, /* append = */ resumed).use { out ->
@@ -838,14 +818,7 @@ object SpeechTranscriber {
                     delegate                 = conn.inputStream,
                     totalBytes               = totalBytes,
                     bytesAlreadyDownloaded   = effectiveStart,
-                    onProgress               = { absolute, total ->
-                        SpeechModelDownloadProgress.update(
-                            ModelDownloadState.Downloading(
-                                bytesDownloaded = absolute,
-                                totalBytes      = total,
-                            )
-                        )
-                    },
+                    onProgress               = onProgress,
                 )
                 counting.copyTo(out)
             }

@@ -1,18 +1,21 @@
 /*
  * SpeechModelDownloadModal.kt
  *
- * Modal dialog that surfaces the ~500 MB Whisper-small first-fetch
- * progress to the user. Observes [SpeechModelDownloadProgress.state]
- * and shows itself whenever a download is in flight; auto-dismisses
- * when state flips back to Idle (extraction finished) or Failed
- * (the recorder card surfaces the error separately).
+ * Modal dialog that surfaces sherpa-onnx Whisper first-fetch
+ * progress and failure to the user. Observes
+ * [SpeechModelDownloadProgress.observe] which derives its state
+ * from WorkManager's WorkInfo stream — meaning the modal
+ * reappears at the right progress beat after the app is
+ * dismissed and reopened mid-download.
  *
- * Non-cancellable — the download is fire-and-forget from
- * `SpeechTranscriber.transcribe`, and back-pressing the modal
- * wouldn't actually stop the HTTP fetch. We omit the dismiss
- * affordance and let the user navigate away from the host screen
- * if they need to; the modal re-appears the moment they land on a
- * shell that hosts it.
+ * Two visual states:
+ *   - Downloading: non-cancellable; bytes / total readout plus a
+ *     determinate progress bar once Content-Length is known.
+ *   - Failed:     dismissable; "Got it" cancels the failed work
+ *                 (so the modal hides) and reminds the user that
+ *                 their partial bytes are saved and the next tap
+ *                 of Transcribe / Try again on the voice-note
+ *                 card will resume from there.
  *
  * Hosted in `MainShell`'s root `Box` so it's visible across every
  * tab the user might be on while bytes pull down.
@@ -35,9 +38,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -50,7 +55,9 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
 
 @Composable
 fun SpeechModelDownloadModal() {
-    val state by SpeechModelDownloadProgress.state.collectAsState()
+    val context = LocalContext.current
+    val stateFlow = remember(context) { SpeechModelDownloadProgress.observe(context) }
+    val state by stateFlow.collectAsState(initial = ModelDownloadState.Idle)
     when (val s = state) {
         is ModelDownloadState.Downloading -> DownloadingDialog(s)
         is ModelDownloadState.Failed      -> FailedDialog(s)
@@ -84,9 +91,9 @@ private fun DownloadingDialog(state: ModelDownloadState.Downloading) {
             )
             Spacer(Modifier.size(QuickInkSpacing.s2))
             Text(
-                text  = "Resumes automatically if your connection drops or the app is " +
-                        "backgrounded. Voice notes recorded right now will transcribe " +
-                        "as soon as the download finishes.",
+                text  = "The download runs in the background — you can switch apps " +
+                        "or close QuickInk and it'll keep going. Resumes automatically " +
+                        "if your connection drops.",
                 style = type.body,
                 color = colors.inkSoft,
             )
@@ -127,16 +134,12 @@ private fun DownloadingDialog(state: ModelDownloadState.Downloading) {
 
 @Composable
 private fun FailedDialog(state: ModelDownloadState.Failed) {
+    val context = LocalContext.current
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
 
-    // Dismissing flips the state holder back to Idle so the dialog
-    // closes. Bytes already pulled stay on disk under
-    // `<modelDir>.partial`, so the next tap of Transcribe / Try
-    // again from the voice-note card picks up where this attempt
-    // stopped — no fresh full re-download.
     Dialog(
-        onDismissRequest = { SpeechModelDownloadProgress.update(ModelDownloadState.Idle) },
+        onDismissRequest = { SpeechModelDownloadProgress.dismissFailures(context) },
         properties = DialogProperties(
             dismissOnBackPress    = true,
             dismissOnClickOutside = true,
@@ -174,7 +177,7 @@ private fun FailedDialog(state: ModelDownloadState.Failed) {
                 verticalAlignment     = Alignment.CenterVertically,
             ) {
                 TextButton(onClick = {
-                    SpeechModelDownloadProgress.update(ModelDownloadState.Idle)
+                    SpeechModelDownloadProgress.dismissFailures(context)
                 }) {
                     Text(text = "Got it", color = colors.accent)
                 }
