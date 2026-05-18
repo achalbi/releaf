@@ -328,6 +328,49 @@ private fun findTextureView(root: View): TextureView? {
 }
 
 /**
+ * Decode the JPEG at [file] with the long edge clamped to at
+ * most [maxDimension] pixels. Uses the standard two-pass
+ * BitmapFactory idiom — first pass reads only the header to
+ * compute a power-of-2 `inSampleSize`, second pass decodes at
+ * the sampled resolution (cheaper than a full decode followed
+ * by a downscale, and avoids the OOM risk of decoding a 48MP
+ * frame into a 192MB ARGB_8888 buffer just to throw most of it
+ * away). A final exact-scale step rounds the result down to
+ * [maxDimension] when the sample size leaves us slightly over.
+ *
+ * Returns null on a malformed / unreadable JPEG.
+ */
+private fun decodeAndDownscale(file: File, maxDimension: Int): Bitmap? {
+    val sizeOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.absolutePath, sizeOptions)
+    val srcW = sizeOptions.outWidth
+    val srcH = sizeOptions.outHeight
+    if (srcW <= 0 || srcH <= 0) return null
+
+    // `inSampleSize` is a power of two; pick the smallest power
+    // that gets us within 2x of the target. The final
+    // `createScaledBitmap` below cleans up the remainder.
+    var sampleSize = 1
+    while ((srcW / sampleSize) > maxDimension * 2 || (srcH / sampleSize) > maxDimension * 2) {
+        sampleSize *= 2
+    }
+    val decodeOptions = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    val raw = BitmapFactory.decodeFile(file.absolutePath, decodeOptions) ?: return null
+
+    val longEdge = maxOf(raw.width, raw.height)
+    if (longEdge <= maxDimension) return raw
+    val scale = maxDimension.toFloat() / longEdge
+    val targetW = (raw.width  * scale).toInt().coerceAtLeast(1)
+    val targetH = (raw.height * scale).toInt().coerceAtLeast(1)
+    val scaled = Bitmap.createScaledBitmap(raw, targetW, targetH, true)
+    if (scaled !== raw) raw.recycle()
+    return scaled
+}
+
+/**
  * Apply [filter]'s `captureMatrix` to [source] and return a new
  * [Bitmap]. Returns [source] verbatim when filter is None
  * (caller doesn't need to special-case). Always returns an
@@ -476,6 +519,22 @@ private const val MAX_VIDEO_RECORDING_MS: Long = 120_000L
 
 /** Threshold before a press is promoted from "tap" to "video hold". */
 private const val VIDEO_HOLD_THRESHOLD_MS: Long = 300L
+
+/**
+ * Max long-edge dimension we keep for a captured still before
+ * persisting it. CameraX [ImageCapture] writes a full-resolution
+ * JPEG (e.g. ~24MB on a 48MP sensor at default quality 100);
+ * 2048px on the long edge keeps OCR + on-screen detail intact
+ * while landing the file ~400KB-1.5MB.
+ */
+private const val CAPTURED_PHOTO_MAX_DIMENSION: Int = 2048
+
+/**
+ * Compression quality for the re-encoded JPEG. 88 is in the
+ * "visually indistinguishable from the source" band for natural
+ * photo content and keeps the per-file size budget tight.
+ */
+private const val CAPTURED_PHOTO_JPEG_QUALITY: Int = 88
 
 @Composable
 internal fun PhotoCaptureSurface(
@@ -883,11 +942,15 @@ private fun ActivePhotoSurface(
                                         // eventually consumes
                                         // matches the bitmap the
                                         // user sees on the captured
-                                        // preview.
+                                        // preview. Reuses the same
+                                        // quality the unfiltered
+                                        // path lands on so the
+                                        // file-size budget is
+                                        // consistent.
                                         file.outputStream().use { out ->
                                             filtered.compress(
                                                 Bitmap.CompressFormat.JPEG,
-                                                92,
+                                                CAPTURED_PHOTO_JPEG_QUALITY,
                                                 out,
                                             )
                                         }
@@ -1694,9 +1757,13 @@ private fun bindCameraX(
 /**
  * Take a single still using [ImageCapture.OutputFileOptions] →
  * the file lives in the app's cache directory under
- * `photo_capture/buffer-<ts>.jpg`. Decoded back to a [Bitmap]
- * for the captured-preview, then handed to [onResult] on the
- * main thread.
+ * `photo_capture/buffer-<ts>.jpg`. The ImageCapture-written
+ * JPEG is full-sensor-resolution at quality 100 (∼15-25MB on
+ * 48MP-class sensors), so we immediately decode-and-downscale
+ * to [CAPTURED_PHOTO_MAX_DIMENSION] and re-encode at
+ * [CAPTURED_PHOTO_JPEG_QUALITY], overwriting the same file.
+ * The downscaled [Bitmap] is also handed to [onResult] for the
+ * captured-preview render.
  */
 private fun triggerPhotoCapture(
     context: Context,
@@ -1720,7 +1787,7 @@ private fun triggerPhotoCapture(
             override fun onImageSaved(results: ImageCapture.OutputFileResults) {
                 processingScope.launch {
                     val bitmap = withContext(Dispatchers.IO) {
-                        BitmapFactory.decodeFile(outFile.absolutePath)
+                        decodeAndDownscale(outFile, CAPTURED_PHOTO_MAX_DIMENSION)
                     }
                     if (bitmap == null) {
                         outFile.delete()
@@ -1728,6 +1795,20 @@ private fun triggerPhotoCapture(
                             onError(IllegalStateException("decode failed"))
                         }
                         return@launch
+                    }
+                    // Overwrite the ImageCapture-written JPEG
+                    // with the downscaled bitmap at our chosen
+                    // quality. This is the file that gets handed
+                    // to `buildImportArtifacts` → it's what ends
+                    // up under the user's attachments.
+                    withContext(Dispatchers.IO) {
+                        outFile.outputStream().use { out ->
+                            bitmap.compress(
+                                Bitmap.CompressFormat.JPEG,
+                                CAPTURED_PHOTO_JPEG_QUALITY,
+                                out,
+                            )
+                        }
                     }
                     withContext(Dispatchers.Main) { onResult(outFile, bitmap) }
                 }

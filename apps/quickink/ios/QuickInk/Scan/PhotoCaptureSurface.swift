@@ -266,6 +266,18 @@ private let maxVideoRecordingSeconds: Int = 120
 /// user a clear "tap vs hold" affordance.
 private let videoHoldThresholdMs: Int = 300
 
+/// Max long-edge dimension we keep for a captured still before
+/// passing it on to `ImportArtifacts.build`. iPhone Pro sensors
+/// land 48MP frames (8064x6048) which at the importer's
+/// `jpegData(compressionQuality: 0.92)` encodes ~15-25MB JPEGs
+/// — bigger than most users want sitting in their note
+/// attachments. 2048px on the long edge keeps OCR + on-screen
+/// detail intact while bringing the encoded file down to
+/// ~400KB-1.5MB. The capture session itself still runs the
+/// hardware at native resolution; we scale only the artifact
+/// we persist.
+private let capturedPhotoMaxDimension: CGFloat = 2048
+
 struct PhotoCaptureSurface: View {
 
     let controller: ScanFlowController
@@ -1485,14 +1497,47 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
             return
         }
         Task { @MainActor in
+            // Scale first, filter second. The captured frame
+            // comes in at full sensor resolution (up to 48MP on
+            // Pro models — a UIImage that big is fine in memory
+            // but bloats the saved JPEG enormously). Scaling
+            // before the CIFilter pass also speeds the filter
+            // up — the same shader runs over a quarter as many
+            // pixels.
+            let scaled = Self.scaleDown(image, maxDimension: capturedPhotoMaxDimension)
             // Apply the active filter on MainActor so the read of
             // `activeFilter` doesn't cross actor boundaries from
             // the `nonisolated` delegate. CIFilter on a single
             // still is fast (~10-50ms) so the brief MainActor
             // hop is fine; we're already in a Task so the UI
             // doesn't jank.
-            let filtered = self.activeFilter.apply(to: image)
+            let filtered = self.activeFilter.apply(to: scaled)
             self.state = .captured(filtered, audioURL: nil, durationMs: nil, videoURL: nil)
+        }
+    }
+
+    /// Downscale `image` so its long edge is at most
+    /// `maxDimension` points, preserving aspect ratio. No-op if
+    /// the image is already smaller. Returns a non-Retina (scale
+    /// 1.0), opaque-format raster so the resulting bitmap
+    /// matches the pixel dimensions reported by `.size` —
+    /// keeping a UIImage at the device's @3x scale would mean
+    /// `ImportArtifacts.build` encodes the underlying CGImage
+    /// at 3x the resolution we just asked for.
+    private static func scaleDown(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
+        let maxSide = max(image.size.width, image.size.height)
+        guard maxSide > maxDimension else { return image }
+        let scale = maxDimension / maxSide
+        let newSize = CGSize(
+            width:  (image.size.width  * scale).rounded(),
+            height: (image.size.height * scale).rounded(),
+        )
+        let format = UIGraphicsImageRendererFormat()
+        format.scale  = 1.0
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
         }
     }
 
