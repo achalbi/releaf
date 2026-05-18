@@ -89,11 +89,37 @@ object SpeechTranscriber {
     const val BACKEND_MLKIT = "mlkit"
     const val BACKEND_SHERPA = "sherpa"
 
+    /**
+     * Inspect the app's files directory and return the subset of
+     * Whisper variants that are already extracted on disk. Drives
+     * the per-item model picker on voice-note cards: the UI only
+     * offers variants the user can pick without triggering a fresh
+     * download. Cheap — three `File.exists()` checks per variant.
+     */
+    fun availableModels(context: Context): List<WhisperModel> {
+        val filesDir = context.filesDir
+        return WhisperModel.values().filter { model ->
+            val dir = File(filesDir, model.sherpaDirName)
+            dir.isDirectory &&
+                File(dir, model.encoderFile).exists() &&
+                File(dir, model.tokensFile).exists()
+        }
+    }
+
     suspend fun transcribe(
         context: Context,
         fileUri: String,
         userId: String? = null,
         preferredBackend: String? = null,
+        /**
+         * Optional per-call override for the Whisper variant. When
+         * non-null, this variant is used instead of the global
+         * `SettingsPreferences.transcriptionModel` pick. Wired into
+         * the voice-note card's "Re-transcribe with…" picker so a
+         * user can try a different model on a specific clip without
+         * changing their default. Null = honor the global pref.
+         */
+        modelOverride: WhisperModel? = null,
     ): TranscribeResult = withContext(Dispatchers.IO) {
         Log.d(TAG, "transcribe: preferredBackend=${preferredBackend ?: "default"} uri=${Uri.parse(fileUri).lastPathSegment}")
         val file = runCatching { File(Uri.parse(fileUri).path ?: "") }.getOrNull()
@@ -124,11 +150,11 @@ object SpeechTranscriber {
                 )
             }
             BACKEND_SHERPA -> {
-                return@withContext transcribeWithSherpa(context, file, allowlist)
+                return@withContext transcribeWithSherpa(context, file, allowlist, modelOverride)
             }
         }
 
-        val sherpa = runCatching { transcribeWithSherpa(context, file, allowlist) }
+        val sherpa = runCatching { transcribeWithSherpa(context, file, allowlist, modelOverride) }
             .onFailure { Log.w(TAG, "sherpa-onnx path threw, falling back to ML Kit", it) }
             .getOrNull()
         if (sherpa is TranscribeResult.Success) return@withContext sherpa
@@ -404,8 +430,9 @@ object SpeechTranscriber {
         context: Context,
         file: File,
         allowlistCodes: List<String>,
+        modelOverride: WhisperModel?,
     ): TranscribeResult {
-        val model = resolvePickedModel(context)
+        val model = modelOverride ?: resolvePickedModel(context)
 
         // Decode the audio once — both transcription passes (the
         // initial auto-detect and the potential allowlist-rescue

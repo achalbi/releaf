@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Mic
@@ -44,6 +45,8 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Subtitles
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -76,6 +79,7 @@ import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.voicenote.SpeechTranscriber
 import app.quickink.mobile.data.voicenote.TranscribeResult
+import app.quickink.mobile.data.voicenote.WhisperModel
 import app.quickink.mobile.data.voicenote.VoiceNoteEntity
 import app.quickink.mobile.data.voicenote.VoiceNoteRepository
 import app.quickink.mobile.data.voicenote.WaveformSamples
@@ -186,19 +190,27 @@ fun VoiceNoteSection(
             modifier            = Modifier.padding(QuickInkSpacing.s3),
             verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
         ) {
+        // Snapshot of which Whisper variants are on disk right now —
+        // drives the per-card "Re-transcribe with…" picker. Refreshes
+        // on every recomposition (cheap: 3 file-exists per variant).
+        val availableModels = remember(notes.size) {
+            SpeechTranscriber.availableModels(context)
+        }
         notes.forEach { note ->
             VoiceNoteCard(
                 note = note,
                 isTranscribing = transcribingIds[note.id] == true,
                 unavailableReason = unavailable[note.id],
-                onTranscribe = {
+                availableModels = availableModels,
+                onTranscribe = { modelOverride ->
                     scope.launch {
                         runTranscribe(
-                            context     = context,
-                            repository  = repository,
-                            note        = note,
-                            transcribing = transcribingIds,
-                            unavailable = unavailable,
+                            context       = context,
+                            repository    = repository,
+                            note          = note,
+                            transcribing  = transcribingIds,
+                            unavailable   = unavailable,
+                            modelOverride = modelOverride,
                         )
                     }
                 },
@@ -492,14 +504,16 @@ private suspend fun runTranscribe(
     note: VoiceNoteEntity,
     transcribing: MutableMap<String, Boolean>,
     unavailable: MutableMap<String, String>,
+    modelOverride: WhisperModel? = null,
 ) {
     if (transcribing[note.id] == true) return
     transcribing[note.id] = true
     try {
         val result = SpeechTranscriber.transcribe(
-            context = context,
-            fileUri = note.audioUri,
-            userId  = note.userId,
+            context       = context,
+            fileUri       = note.audioUri,
+            userId        = note.userId,
+            modelOverride = modelOverride,
         )
         when (result) {
             is TranscribeResult.Success -> {
@@ -526,7 +540,11 @@ private fun VoiceNoteCard(
     note: VoiceNoteEntity,
     isTranscribing: Boolean,
     unavailableReason: String?,
-    onTranscribe: () -> Unit,
+    /** Whisper variants that are already on disk — drives the per-card
+     *  "Re-transcribe with…" picker. Empty / single-entry lists fall
+     *  back to a plain pill that uses the global Settings pick. */
+    availableModels: List<WhisperModel>,
+    onTranscribe: (WhisperModel?) -> Unit,
     /** Append the current transcript to the parent capture's notes.
      *  Only rendered when [note.transcription] is non-empty. */
     onCopyToNotes: () -> Unit,
@@ -676,6 +694,7 @@ private fun VoiceNoteCard(
             transcript        = note.transcription,
             isPending         = isTranscribing,
             unavailableReason = unavailableReason,
+            availableModels   = availableModels,
             onTranscribe      = onTranscribe,
             onCopyToNotes     = onCopyToNotes,
             onEditTranscript  = onEditTranscript,
@@ -688,7 +707,8 @@ private fun TranscriptStrip(
     transcript: String?,
     isPending: Boolean,
     unavailableReason: String?,
-    onTranscribe: () -> Unit,
+    availableModels: List<WhisperModel>,
+    onTranscribe: (WhisperModel?) -> Unit,
     onCopyToNotes: () -> Unit,
     onEditTranscript: () -> Unit,
 ) {
@@ -696,6 +716,10 @@ private fun TranscriptStrip(
     val type = LocalQuickInkTypography.current
     val hasTranscript = !transcript.isNullOrBlank()
     val hasReason = unavailableReason != null
+    // Only surface the model picker when there are at least two
+    // variants on disk — a single-model case offers no real choice
+    // and the dropdown would feel like dead chrome.
+    val canPickModel = availableModels.size >= 2
 
     // Flips the Copy-to-notes pill to "Copied" briefly after a tap
     // so the action acknowledges without leaving a permanent badge.
@@ -775,19 +799,12 @@ private fun TranscriptStrip(
                             )
                         }
                     }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(QuickInkRadius.pill))
-                            .background(colors.accentSoft)
-                            .clickable(onClick = onTranscribe)
-                            .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
-                    ) {
-                        Text(
-                            text = "Try again",
-                            style = type.caption,
-                            color = colors.accent,
-                        )
-                    }
+                    TranscribePill(
+                        label            = "Try again",
+                        availableModels  = availableModels,
+                        canPickModel     = canPickModel,
+                        onTranscribe     = onTranscribe,
+                    )
                 }
             }
             isPending -> Row(verticalAlignment = Alignment.CenterVertically) {
@@ -801,39 +818,135 @@ private fun TranscriptStrip(
             }
             hasReason -> {
                 Text(text = unavailableReason!!, style = type.caption, color = colors.inkSoft)
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(QuickInkRadius.pill))
-                        .background(colors.accentSoft)
-                        .clickable(onClick = onTranscribe)
-                        .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
-                ) {
-                    Text(text = "Retry", style = type.caption, color = colors.accent)
-                }
+                TranscribePill(
+                    label            = "Retry",
+                    availableModels  = availableModels,
+                    canPickModel     = canPickModel,
+                    onTranscribe     = onTranscribe,
+                )
             }
             else -> {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(QuickInkRadius.pill))
-                        .background(colors.accentSoft)
-                        .clickable(onClick = onTranscribe)
-                        .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Outlined.Subtitles,
-                            contentDescription = null,
-                            tint = colors.accent,
-                            modifier = Modifier.size(12.dp),
+                TranscribePill(
+                    label            = "Transcribe",
+                    leadingIcon      = Icons.Outlined.Subtitles,
+                    availableModels  = availableModels,
+                    canPickModel     = canPickModel,
+                    onTranscribe     = onTranscribe,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Coral pill that triggers transcription. On tap, either:
+ *   - directly invokes [onTranscribe] with `null` (use the global
+ *     Settings pick) when only one Whisper variant is on disk —
+ *     the dropdown would have a single item and feel pointless, or
+ *   - opens a dropdown menu listing every downloaded variant so the
+ *     user can pick a different one for this specific clip.
+ *
+ * "Default (<name>)" is always the first menu entry so the user
+ * keeps a one-tap path to the global pick even with the picker
+ * surfaced.
+ */
+@Composable
+private fun TranscribePill(
+    label: String,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    availableModels: List<WhisperModel>,
+    canPickModel: Boolean,
+    onTranscribe: (WhisperModel?) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    var menuOpen by remember { mutableStateOf(false) }
+
+    Box {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(QuickInkRadius.pill))
+                .background(colors.accentSoft)
+                .clickable {
+                    if (canPickModel) menuOpen = true
+                    else onTranscribe(null)
+                }
+                .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (leadingIcon != null) {
+                Icon(
+                    imageVector = leadingIcon,
+                    contentDescription = null,
+                    tint = colors.accent,
+                    modifier = Modifier.size(12.dp),
+                )
+                Spacer(Modifier.size(QuickInkSpacing.s1))
+            }
+            Text(
+                text  = label,
+                style = type.caption,
+                color = colors.accent,
+            )
+            if (canPickModel) {
+                Spacer(Modifier.size(QuickInkSpacing.s1))
+                Icon(
+                    imageVector = Icons.Filled.ArrowDropDown,
+                    contentDescription = null,
+                    tint = colors.accent,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
+
+        if (canPickModel) {
+            DropdownMenu(
+                expanded         = menuOpen,
+                onDismissRequest = { menuOpen = false },
+            ) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text  = "Use default",
+                            style = type.body,
+                            color = colors.ink,
                         )
-                        Spacer(Modifier.size(QuickInkSpacing.s1))
-                        Text(text = "Transcribe", style = type.caption, color = colors.accent)
-                    }
+                    },
+                    onClick = {
+                        menuOpen = false
+                        onTranscribe(null)
+                    },
+                )
+                for (model in availableModels) {
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(
+                                    text  = "${model.displayName}  ·  ~${formatWhisperSize(model.approxSizeMb)}",
+                                    style = type.body,
+                                    color = colors.ink,
+                                )
+                                Text(
+                                    text  = model.blurb,
+                                    style = type.meta,
+                                    color = colors.inkSoft,
+                                )
+                            }
+                        },
+                        onClick = {
+                            menuOpen = false
+                            onTranscribe(model)
+                        },
+                    )
                 }
             }
         }
     }
 }
+
+private fun formatWhisperSize(approxMb: Int): String =
+    if (approxMb < 1_000) "$approxMb MB"
+    else "%.1f GB".format(approxMb / 1_000.0)
 
 @Composable
 private fun VoiceWaveform(
