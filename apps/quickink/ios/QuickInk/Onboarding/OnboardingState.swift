@@ -22,7 +22,7 @@ import SwiftUI
 public final class OnboardingState: ObservableObject {
 
     public enum Step: Sendable {
-        case welcome, permissions, location, signIn
+        case welcome, permissions, location, languages, signIn
     }
 
     @Published public private(set) var step: Step = .welcome
@@ -33,13 +33,22 @@ public final class OnboardingState: ObservableObject {
     /// OnboardingPreferences.
     @Published public var driveBackupEnabled: Bool = true
 
+    /// ISO 639-1 codes the user has picked on the Languages step.
+    /// Default = device locale + English deduped, so a user in
+    /// India sees Hindi + English already checked. Committed into
+    /// `profile_settings.transcription_languages` once SignIn
+    /// succeeds and `userId` is known.
+    @Published public var selectedLanguageCodes: Set<String> =
+        Set(TranscriptionLanguages.defaultAllowlist().map(\.code))
+
     public init() {}
 
     public func advance() {
         step = switch step {
         case .welcome:     .permissions
         case .permissions: .location
-        case .location:    .signIn
+        case .location:    .languages
+        case .languages:   .signIn
         case .signIn:      .signIn  // terminal — caller invokes onComplete instead
         }
     }

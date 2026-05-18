@@ -83,6 +83,7 @@ fun LocationPermissionScreen(onContinue: () -> Unit) {
         subtitle   = "QuickInk attaches the area and city to each scan so you can find them by place later. You can change this anytime in Settings.",
         ctaLabel   = if (isRequesting) "Requesting…" else "Allow location",
         stepIndex  = 2,
+        totalSteps = 4,
         onContinue = {
             isRequesting = true
             launcher.launch(arrayOf(

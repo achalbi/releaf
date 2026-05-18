@@ -35,6 +35,7 @@ struct LocationPermissionScreen: View {
             subtitle:   "QuickInk attaches the area and city to each scan so you can find them by place later. You can change this anytime in Settings.",
             ctaLabel:   isRequesting ? "Requesting…" : "Allow location",
             stepIndex:  2,
+            totalSteps: 4,
             onContinue: { Task { await requestAndAdvance() } }
         ) {
             LocationIllustration()

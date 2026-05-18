@@ -19,10 +19,11 @@ package app.quickink.mobile.features.onboarding
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import app.quickink.mobile.data.voicenote.TranscriptionLanguages
 
 class OnboardingState {
 
-    enum class Step { Welcome, Permissions, Location, SignIn }
+    enum class Step { Welcome, Permissions, Location, Languages, SignIn }
 
     var step by mutableStateOf(Step.Welcome)
         private set
@@ -35,11 +36,23 @@ class OnboardingState {
      */
     var driveBackupEnabled by mutableStateOf(true)
 
+    /**
+     * ISO 639-1 codes the user has picked on the Languages step
+     * (English + Indian languages). Default = device locale + English
+     * deduped, so a user in India sees Hindi + English already
+     * checked. Committed into `profile_settings.transcription_languages`
+     * once SignIn succeeds and `userId` is known.
+     */
+    var selectedLanguageCodes by mutableStateOf(
+        TranscriptionLanguages.defaultAllowlist().map { it.code }.toSet()
+    )
+
     fun advance() {
         step = when (step) {
             Step.Welcome     -> Step.Permissions
             Step.Permissions -> Step.Location
-            Step.Location    -> Step.SignIn
+            Step.Location    -> Step.Languages
+            Step.Languages   -> Step.SignIn
             Step.SignIn      -> Step.SignIn  // terminal — caller invokes onComplete instead
         }
     }

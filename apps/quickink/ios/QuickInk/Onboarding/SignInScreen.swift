@@ -83,8 +83,12 @@ struct SignInScreen: View {
 
             Spacer()
 
-            // Page indicator dots — third one active.
+            // Page indicator dots — fourth one active (step 4/4 now
+            // that Languages lands between Location and SignIn).
             HStack(spacing: QuickInkSpacing.s2) {
+                Circle()
+                    .fill(QuickInkColors.border)
+                    .frame(width: 8, height: 8)
                 Circle()
                     .fill(QuickInkColors.border)
                     .frame(width: 8, height: 8)

@@ -22,6 +22,7 @@ fun PermissionsScreen(onContinue: () -> Unit) {
         subtitle   = "We'll ask for camera access the first time you scan. Change it anytime in Settings.",
         ctaLabel   = "Continue",
         stepIndex  = 1,
+        totalSteps = 4,
         onContinue = onContinue,
     ) {
         CameraIllustration()

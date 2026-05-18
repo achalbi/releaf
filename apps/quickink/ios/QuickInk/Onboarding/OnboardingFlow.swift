@@ -39,11 +39,36 @@ public struct OnboardingFlow: View {
             PermissionsScreen(onContinue: { state.advance() })
         case .location:
             LocationPermissionScreen(onContinue: { state.advance() })
+        case .languages:
+            LanguagesScreen(
+                state:      state,
+                onContinue: { state.advance() }
+            )
         case .signIn:
             SignInScreen(
                 state:      state,
                 authStore:  authStore,
-                onSignedIn: onComplete
+                onSignedIn: {
+                    // Commit the picked transcription-language
+                    // allowlist into the now-keyable
+                    // `profile_settings` row. Fire-and-forget — the
+                    // sign-in callback advances synchronously to the
+                    // home shell; the DB write isn't user-blocking.
+                    if case .signedIn(let session) = authStore.state {
+                        let ordered = TranscriptionLanguages.supported
+                            .filter { state.selectedLanguageCodes.contains($0.code) }
+                        let encoded = TranscriptionLanguages.encode(ordered)
+                        let userId = session.userId
+                        Task.detached(priority: .background) {
+                            try? await ProfileSettingsRepository()
+                                .setTranscriptionLanguages(
+                                    userId: userId,
+                                    codes:  encoded
+                                )
+                        }
+                    }
+                    onComplete()
+                }
             )
         }
     }

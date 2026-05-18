@@ -26,6 +26,7 @@ struct WelcomeScreen: View {
             subtitle:    "Snap any page from your Quickink notebook — we'll crop, clean, and save it for you.",
             ctaLabel:    "Continue",
             stepIndex:   0,
+            totalSteps:  4,
             onContinue:  onContinue
         ) {
             NotebookScanIllustration()

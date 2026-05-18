@@ -19,9 +19,16 @@ package app.quickink.mobile.features.onboarding
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import app.quickink.mobile.QuickInkApp
+import app.quickink.mobile.data.profile.ProfileSettingsEntity
+import app.quickink.mobile.data.voicenote.TranscriptionLanguages
 import app.quickink.mobile.features.settings.SettingsPreferences
+import app.releaf.mobile.auth.AuthState
 import app.releaf.mobile.auth.AuthStore
+import app.releaf.mobile.data.common.IsoClock
+import kotlinx.coroutines.launch
 
 @Composable
 fun OnboardingFlow(
@@ -32,6 +39,7 @@ fun OnboardingFlow(
     val state = remember { OnboardingState() }
     val context = LocalContext.current
     val settings = remember { SettingsPreferences(context) }
+    val coroutineScope = rememberCoroutineScope()
 
     when (state.step) {
         OnboardingState.Step.Welcome ->
@@ -42,6 +50,12 @@ fun OnboardingFlow(
 
         OnboardingState.Step.Location ->
             LocationPermissionScreen(onContinue = state::advance)
+
+        OnboardingState.Step.Languages ->
+            LanguagesScreen(
+                state      = state,
+                onContinue = state::advance,
+            )
 
         OnboardingState.Step.SignIn ->
             SignInScreen(
@@ -55,6 +69,52 @@ fun OnboardingFlow(
                     // itself is in-memory and discarded after
                     // sign-in completes.
                     settings.driveBackupEnabled = state.driveBackupEnabled
+                    // Commit the picked transcription-language
+                    // allowlist into the now-keyable profile_settings
+                    // row. Run on a launched coroutine — the sign-in
+                    // callback returns synchronously to advance the
+                    // flow; the DB write isn't user-blocking.
+                    val signedIn = authStore.state.value as? AuthState.SignedIn
+                    val userId = signedIn?.session?.userId
+                    if (userId != null) {
+                        val ordered = TranscriptionLanguages.supported
+                            .filter { it.code in state.selectedLanguageCodes }
+                        val encoded = TranscriptionLanguages.encode(ordered)
+                        val app = context.applicationContext as QuickInkApp
+                        val dao = app.database.profileSettingsDao()
+                        coroutineScope.launch {
+                            runCatching {
+                                val now = IsoClock.nowIso()
+                                val existing = dao.findByUser(userId)
+                                if (existing == null) {
+                                    dao.upsertLocal(
+                                        ProfileSettingsEntity(
+                                            id                     = userId,
+                                            userId                 = userId,
+                                            displayName            = null,
+                                            phoneNumber            = null,
+                                            personalityPunchline   = null,
+                                            transcriptionLanguages = encoded,
+                                            photoLocalUri          = null,
+                                            photoDriveFileId       = null,
+                                            photoUpdatedAt         = null,
+                                            driveFileId            = null,
+                                            createdAt              = now,
+                                            updatedAt              = now,
+                                            dirty                  = true,
+                                            deletedAt              = null,
+                                        )
+                                    )
+                                } else {
+                                    dao.setTranscriptionLanguages(
+                                        id        = userId,
+                                        codes     = encoded,
+                                        timestamp = now,
+                                    )
+                                }
+                            }
+                        }
+                    }
                     onComplete()
                 },
             )
