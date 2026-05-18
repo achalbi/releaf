@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -71,6 +72,7 @@ import app.quickink.mobile.data.sync.QuickInkSyncWorker
 import app.quickink.mobile.data.profile.ProfileSettingsEntity
 import app.quickink.mobile.data.voicenote.TranscriptionLanguage
 import app.quickink.mobile.data.voicenote.TranscriptionLanguages
+import app.quickink.mobile.data.voicenote.WhisperModel
 import app.quickink.mobile.features.auth.rememberQuickInkSignInAction
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
@@ -117,6 +119,7 @@ fun SettingsScreen(
     var driveBackupEnabled by remember { mutableStateOf(preferences.driveBackupEnabled) }
     var searchablePdfExportEnabled by remember { mutableStateOf(preferences.searchablePdfExportEnabled) }
     var experimentalPublicLinksEnabled by remember { mutableStateOf(preferences.experimentalPublicLinksEnabled) }
+    var transcriptionModel by remember { mutableStateOf(preferences.transcriptionModel) }
     var locationForScansEnabled by remember { mutableStateOf(preferences.locationForScansEnabled) }
     var customDisplayName by remember { mutableStateOf(preferences.customDisplayName) }
 
@@ -568,6 +571,16 @@ fun SettingsScreen(
                         }
                     },
                 )
+
+                Spacer(Modifier.height(QuickInkSpacing.s2))
+
+                TranscriptionModelPicker(
+                    selected      = transcriptionModel,
+                    onSelect      = { model ->
+                        transcriptionModel = model
+                        preferences.transcriptionModel = model
+                    },
+                )
             }
 
             if (onManageCategories != null) {
@@ -836,6 +849,122 @@ private fun TranscriptionLanguageChip(
         }
     }
 }
+
+/**
+ * Single-select row picker for the sherpa-onnx Whisper variant.
+ * Mirrors the layout pattern of a settings group: top label +
+ * subtitle, then one tappable row per option with a coral radio
+ * dot on the active pick. Persists straight through `onSelect` —
+ * the next transcribe attempt picks the new variant up via
+ * `SettingsPreferences.transcriptionModel`, triggering a one-time
+ * download (with the modal) if the model isn't cached yet.
+ */
+@Composable
+private fun TranscriptionModelPicker(
+    selected: WhisperModel,
+    onSelect: (WhisperModel) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+        Text(
+            text  = "MODEL",
+            style = type.eyebrow,
+            color = colors.muted,
+        )
+        Text(
+            text  = "Bigger models transcribe Indian languages more accurately but take longer to download and run. Switching takes effect on your next voice note.",
+            style = type.meta,
+            color = colors.inkSoft,
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1)) {
+            for (model in WhisperModel.values()) {
+                TranscriptionModelRow(
+                    model    = model,
+                    selected = model.id == selected.id,
+                    onClick  = { onSelect(model) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TranscriptionModelRow(
+    model: WhisperModel,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val shape = RoundedCornerShape(QuickInkRadius.md)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                if (selected) colors.accent.copy(alpha = 0.10f) else colors.surface,
+                shape,
+            )
+            .border(
+                width = if (selected) 1.5.dp else 1.dp,
+                color = if (selected) colors.accent else colors.border,
+                shape = shape,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Custom radio dot — coral when selected, hollow circle when not.
+        Box(
+            modifier          = Modifier
+                .size(18.dp)
+                .clip(RoundedCornerShape(percent = 50))
+                .background(if (selected) colors.accent else Color.Transparent)
+                .border(
+                    width = if (selected) 0.dp else 1.5.dp,
+                    color = if (selected) Color.Transparent else colors.muted,
+                    shape = RoundedCornerShape(percent = 50),
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(RoundedCornerShape(percent = 50))
+                        .background(colors.textOnAccent),
+                )
+            }
+        }
+        Spacer(Modifier.width(QuickInkSpacing.s3))
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text     = model.displayName,
+                    style    = type.body.copy(fontWeight = FontWeight.Medium),
+                    color    = colors.ink,
+                )
+                Spacer(Modifier.width(QuickInkSpacing.s2))
+                Text(
+                    text  = "~${formatModelSize(model.approxSizeMb)}",
+                    style = type.meta,
+                    color = colors.inkSoft,
+                )
+            }
+            Text(
+                text  = model.blurb,
+                style = type.meta,
+                color = colors.inkSoft,
+            )
+        }
+    }
+}
+
+/** Display "120 MB" up to 999 MB and "1.5 GB" beyond. */
+private fun formatModelSize(approxMb: Int): String =
+    if (approxMb < 1_000) "$approxMb MB"
+    else "%.1f GB".format(approxMb / 1_000.0)
 
 @Composable
 private fun ToggleRow(

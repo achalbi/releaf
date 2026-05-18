@@ -171,12 +171,19 @@ object SpeechTranscriber {
     }
 
     private fun deleteLegacyModelDirsIfPresent(context: Context) {
-        for (name in arrayOf("sherpa-onnx-whisper-tiny.en", "sherpa-onnx-whisper-base")) {
-            val legacy = File(context.filesDir, name)
-            if (legacy.exists()) {
-                Log.d(TAG, "Removing legacy model dir '$name' to reclaim disk")
-                legacy.deleteRecursively()
-            }
+        // The English-only `whisper-tiny.en` dir from pre-multilingual
+        // builds is the only truly-legacy artifact we eagerly wipe.
+        // All other Whisper dirs (`whisper-tiny`, `-base`, `-small`,
+        // `-medium`) are legitimate user picks via Settings →
+        // Transcription → Model, so we leave them on disk — even
+        // when the user has switched away from them, so a flip back
+        // doesn't re-download. A "Clear cached models" action in
+        // Settings can land later if disk pressure becomes a real
+        // issue (medium + small + base + tiny ≈ 2.3 GB combined).
+        val legacy = File(context.filesDir, "sherpa-onnx-whisper-tiny.en")
+        if (legacy.exists()) {
+            Log.d(TAG, "Removing legacy English-only model dir 'sherpa-onnx-whisper-tiny.en' to reclaim disk")
+            legacy.deleteRecursively()
         }
     }
 
@@ -373,27 +380,16 @@ object SpeechTranscriber {
 
     // ========================= sherpa-onnx =======================
 
-    // Multilingual Whisper-small int8. ~500 MB extracted, supports
-    // all 99 Whisper target languages. Filenames inside the tar.bz2
-    // use the `small-*` prefix — see sherpa-onnx releases asr-models
-    // page. `small` is a deliberate step up from `base` (~165 MB) —
-    // base produced empty transcripts on Kannada audio because
-    // Whisper's lower-resource Indian-language support degrades
-    // quickly at smaller model sizes.
-    private const val SHERPA_MODEL_NAME = "sherpa-onnx-whisper-small"
-    private const val SHERPA_MODEL_URL =
-        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/" +
-            "sherpa-onnx-whisper-small.tar.bz2"
-    private const val SHERPA_ENCODER = "small-encoder.int8.onnx"
-    private const val SHERPA_DECODER = "small-decoder.int8.onnx"
-    private const val SHERPA_TOKENS  = "small-tokens.txt"
-
+    // The active Whisper variant (tiny / base / small / medium) is
+    // chosen at runtime by the user via Settings → Transcription →
+    // Model. See [WhisperModel] for the URLs + filenames; default
+    // is [WhisperModel.DEFAULT] (Small) for fresh installs.
     private const val SAMPLE_RATE_HZ = 16_000
 
     /// The OfflineRecognizer's `language` field is read at construction
     /// time — there's no per-stream override — so we cache one
-    /// recognizer per language hint and rebuild when the user changes
-    /// their picked primary. Hint values:
+    /// recognizer per (model variant, language hint) pair and rebuild
+    /// when either changes. Language-hint values:
     ///   - `""` (empty) — Whisper auto-detects. Returned in
     ///     `OfflineRecognizerResult.lang`.
     ///   - ISO 639-1 code (e.g. "hi", "kn") — Whisper transcribes
@@ -401,6 +397,7 @@ object SpeechTranscriber {
     ///     only speaks one language.
     @Volatile private var cachedSherpaRecognizer: OfflineRecognizer? = null
     @Volatile private var cachedSherpaLanguageHint: String? = null
+    @Volatile private var cachedSherpaModelId: String? = null
     private val sherpaRecognizerLock = Any()
 
     private suspend fun transcribeWithSherpa(
@@ -408,6 +405,8 @@ object SpeechTranscriber {
         file: File,
         allowlistCodes: List<String>,
     ): TranscribeResult {
+        val model = resolvePickedModel(context)
+
         // Decode the audio once — both transcription passes (the
         // initial auto-detect and the potential allowlist-rescue
         // re-run) reuse the same PCM samples.
@@ -429,7 +428,7 @@ object SpeechTranscriber {
             allowlistCodes.size == 1 -> allowlistCodes.first()
             else                     -> ""
         }
-        val firstResult = runSherpaPass(context, samples, decoded.sampleRate, initialHint)
+        val firstResult = runSherpaPass(context, model, samples, decoded.sampleRate, initialHint)
             ?: return TranscribeResult.Failure(
                 "Could not download speech model — check network"
             )
@@ -456,7 +455,7 @@ object SpeechTranscriber {
                     "allowlist=${allowlistCodes.joinToString(",")} — " +
                     "re-transcribing as '$primary'",
             )
-            val rescued = runSherpaPass(context, samples, decoded.sampleRate, primary)
+            val rescued = runSherpaPass(context, model, samples, decoded.sampleRate, primary)
             if (rescued != null && rescued.text.isNotBlank()) {
                 Log.d(
                     TAG,
@@ -483,49 +482,86 @@ object SpeechTranscriber {
     }
 
     /**
-     * Load or rebuild the cached recognizer for [languageHint] and
-     * run a single decode pass on [samples]. Returns null on model-
-     * load failure (e.g. download failed); on recognizer error
-     * returns a result with empty text so the caller can decide
-     * whether to surface the failure.
+     * Load or rebuild the cached recognizer for ([model],
+     * [languageHint]) and run a single decode pass on [samples].
+     * Returns null on model-load failure (e.g. download failed); on
+     * recognizer error returns a result with empty text so the
+     * caller can decide whether to surface the failure.
      */
     private suspend fun runSherpaPass(
         context: Context,
+        model: WhisperModel,
         samples: FloatArray,
         sampleRate: Int,
         languageHint: String,
     ): SherpaRecognitionResult? {
-        val recognizer = runCatching { ensureSherpaRecognizer(context, languageHint) }
-            .onFailure { Log.e(TAG, "sherpa-onnx model load failed (hint='$languageHint')", it) }
+        val recognizer = runCatching { ensureSherpaRecognizer(context, model, languageHint) }
+            .onFailure {
+                Log.e(
+                    TAG,
+                    "sherpa-onnx model load failed (model='${model.id}' hint='$languageHint')",
+                    it,
+                )
+            }
             .getOrNull() ?: return null
         return runCatching { runSherpaRecognizer(recognizer, samples, sampleRate) }
-            .onFailure { Log.e(TAG, "sherpa-onnx recognizer failed (hint='$languageHint')", it) }
+            .onFailure {
+                Log.e(
+                    TAG,
+                    "sherpa-onnx recognizer failed (model='${model.id}' hint='$languageHint')",
+                    it,
+                )
+            }
             .getOrNull()
+    }
+
+    /**
+     * Read the user's picked Whisper variant from
+     * `SettingsPreferences` on an IO dispatcher (SharedPreferences
+     * touches disk on first access). Falls back to
+     * [WhisperModel.DEFAULT] on any read error.
+     */
+    private suspend fun resolvePickedModel(context: Context): WhisperModel {
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                app.quickink.mobile.features.settings.SettingsPreferences(context).transcriptionModel
+            }.getOrDefault(WhisperModel.DEFAULT)
+        }
     }
 
     private suspend fun ensureSherpaRecognizer(
         context: Context,
+        model: WhisperModel,
         languageHint: String,
     ): OfflineRecognizer {
         cachedSherpaRecognizer
-            ?.takeIf { cachedSherpaLanguageHint == languageHint }
+            ?.takeIf {
+                cachedSherpaLanguageHint == languageHint &&
+                    cachedSherpaModelId == model.id
+            }
             ?.let { return it }
         return withContext(Dispatchers.IO) {
             synchronized(sherpaRecognizerLock) {
                 cachedSherpaRecognizer
-                    ?.takeIf { cachedSherpaLanguageHint == languageHint }
+                    ?.takeIf {
+                        cachedSherpaLanguageHint == languageHint &&
+                            cachedSherpaModelId == model.id
+                    }
                     ?.let { return@withContext it }
-                // Drop the previously cached recognizer when the
-                // language hint changes — Whisper reads `language`
-                // at config time so we can't reuse the existing
-                // instance for a different language.
+                // Drop the previously cached recognizer when either
+                // the language hint or the picked model variant
+                // changes — Whisper reads `language` at config time
+                // and a different variant has different encoder /
+                // decoder file paths, so we can't reuse the
+                // existing instance.
                 cachedSherpaRecognizer?.runCatching { release() }
                 cachedSherpaRecognizer = null
                 cachedSherpaLanguageHint = null
+                cachedSherpaModelId = null
 
-                val modelDir = File(context.filesDir, SHERPA_MODEL_NAME)
-                if (!isSherpaModelPresent(modelDir)) {
-                    downloadAndExtractSherpaModel(modelDir)
+                val modelDir = File(context.filesDir, model.sherpaDirName)
+                if (!isSherpaModelPresent(modelDir, model)) {
+                    downloadAndExtractSherpaModel(modelDir, model)
                 }
                 val recognizer = OfflineRecognizer(
                     assetManager = null,
@@ -536,8 +572,8 @@ object SpeechTranscriber {
                         ),
                         modelConfig = OfflineModelConfig(
                             whisper = OfflineWhisperModelConfig(
-                                encoder      = File(modelDir, SHERPA_ENCODER).absolutePath,
-                                decoder      = File(modelDir, SHERPA_DECODER).absolutePath,
+                                encoder      = File(modelDir, model.encoderFile).absolutePath,
+                                decoder      = File(modelDir, model.decoderFile).absolutePath,
                                 language     = languageHint,
                                 // 1000-sample (~62.5 ms at 16 kHz)
                                 // zero-pad before the encoder runs.
@@ -553,7 +589,7 @@ object SpeechTranscriber {
                                 // borderline audio.
                                 tailPaddings = 1000,
                             ),
-                            tokens = File(modelDir, SHERPA_TOKENS).absolutePath,
+                            tokens = File(modelDir, model.tokensFile).absolutePath,
                             modelType = "whisper",
                             numThreads = 2,
                         ),
@@ -561,15 +597,16 @@ object SpeechTranscriber {
                 )
                 cachedSherpaRecognizer = recognizer
                 cachedSherpaLanguageHint = languageHint
+                cachedSherpaModelId = model.id
                 recognizer
             }
         }
     }
 
-    private fun isSherpaModelPresent(modelDir: File): Boolean {
+    private fun isSherpaModelPresent(modelDir: File, model: WhisperModel): Boolean {
         if (!modelDir.isDirectory) return false
-        return File(modelDir, SHERPA_ENCODER).exists() &&
-            File(modelDir, SHERPA_TOKENS).exists()
+        return File(modelDir, model.encoderFile).exists() &&
+            File(modelDir, model.tokensFile).exists()
     }
 
     /** Container for the bits of [OfflineRecognizerResult] we care about. */
@@ -578,12 +615,12 @@ object SpeechTranscriber {
         val detectedLang: String,
     )
 
-    private fun downloadAndExtractSherpaModel(modelDir: File) {
-        Log.d(TAG, "sherpa model: downloading…")
+    private fun downloadAndExtractSherpaModel(modelDir: File, model: WhisperModel) {
+        Log.d(TAG, "sherpa model '${model.id}': downloading…")
         if (modelDir.exists()) modelDir.deleteRecursively()
         modelDir.mkdirs()
 
-        val conn = (URL(SHERPA_MODEL_URL).openConnection() as HttpURLConnection).apply {
+        val conn = (URL(model.downloadUrl).openConnection() as HttpURLConnection).apply {
             connectTimeout = 30_000
             readTimeout = 300_000
             instanceFollowRedirects = true
@@ -615,7 +652,7 @@ object SpeechTranscriber {
                     )
                 },
             )
-            extractModelTarBz2(counting.buffered(), modelDir)
+            extractModelTarBz2(counting.buffered(), modelDir, model)
             SpeechModelDownloadProgress.update(ModelDownloadState.Idle)
         } catch (e: Exception) {
             modelDir.deleteRecursively()
@@ -679,8 +716,8 @@ object SpeechTranscriber {
         }
     }
 
-    private fun extractModelTarBz2(input: java.io.InputStream, modelDir: File) {
-        val wanted = setOf(SHERPA_ENCODER, SHERPA_DECODER, SHERPA_TOKENS)
+    private fun extractModelTarBz2(input: java.io.InputStream, modelDir: File, model: WhisperModel) {
+        val wanted = setOf(model.encoderFile, model.decoderFile, model.tokensFile)
         TarArchiveInputStream(BZip2CompressorInputStream(input)).use { tis ->
             var entry = tis.nextEntry
             while (entry != null) {

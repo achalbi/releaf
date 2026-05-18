@@ -27,6 +27,7 @@ package app.quickink.mobile.features.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import app.quickink.mobile.data.voicenote.WhisperModel
 import app.quickink.mobile.features.scan.CaptureMode
 import app.quickink.mobile.ui.theme.PrimaryColor
 import app.quickink.mobile.ui.theme.ThemeMode
@@ -230,6 +231,20 @@ class SettingsPreferences(context: Context) {
             prefs.edit().putString(KEY_LAST_CAPTURE_MODE, value.analyticsKey).apply()
         }
 
+    /**
+     * Picked sherpa-onnx Whisper model variant — drives both which
+     * archive [SpeechTranscriber] downloads and the per-clip
+     * inference cost / accuracy trade-off. Device-local (not synced)
+     * because a tablet and a low-end phone on the same Apple/Google
+     * account may genuinely want different sizes. Defaults to
+     * `Small` — the recommended balance per Settings copy.
+     */
+    var transcriptionModel: WhisperModel
+        get() = WhisperModel.fromId(prefs.getString(KEY_TRANSCRIPTION_MODEL, null))
+        set(value) {
+            prefs.edit().putString(KEY_TRANSCRIPTION_MODEL, value.id).apply()
+        }
+
     companion object {
         private const val PREFS_NAME              = "quickink.settings"
         private const val KEY_DRIVE_BACKUP        = "drive_backup_enabled"
@@ -251,6 +266,7 @@ class SettingsPreferences(context: Context) {
         // literal here so the on-disk shape stays grep-able and
         // matches the iOS UserDefaults key 1:1.
         private const val KEY_LAST_CAPTURE_MODE   = "quickink.capture.last_mode"
+        private const val KEY_TRANSCRIPTION_MODEL = "transcription_model"
 
         /**
          * Last-known lifetime Tree-points balance. Written by
