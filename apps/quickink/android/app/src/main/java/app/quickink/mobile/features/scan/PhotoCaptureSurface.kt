@@ -1905,9 +1905,14 @@ private suspend fun commitCapture(
                 )
             }.getOrNull()
             if (row != null) {
+                val pendingUserId = userId
                 backgroundScope.launch(Dispatchers.IO) {
                     val transcribe = runCatching {
-                        SpeechTranscriber.transcribe(context, audioUri.toString())
+                        SpeechTranscriber.transcribe(
+                            context = context,
+                            fileUri = audioUri.toString(),
+                            userId  = pendingUserId,
+                        )
                     }.getOrNull()
                     if (transcribe is TranscribeResult.Success) {
                         runCatching {

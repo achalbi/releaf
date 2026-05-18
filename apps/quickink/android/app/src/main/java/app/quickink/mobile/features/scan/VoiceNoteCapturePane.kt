@@ -226,9 +226,14 @@ fun VoiceNoteCapturePane(
                         // lifecycle scope so it isn't cancelled when
                         // this composable unmounts as the parent
                         // advances to the transcript-edit pane.
+                        val pendingUserId = userId
                         backgroundScope.launch(Dispatchers.IO) {
                             val result = runCatching {
-                                SpeechTranscriber.transcribe(context, clip.uri)
+                                SpeechTranscriber.transcribe(
+                                    context = context,
+                                    fileUri = clip.uri,
+                                    userId  = pendingUserId,
+                                )
                             }.getOrNull()
                             if (result is TranscribeResult.Success) {
                                 runCatching {

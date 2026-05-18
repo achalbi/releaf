@@ -293,7 +293,11 @@ fun VoiceNoteSection(
                                     return@launch
                                 }
                                 stage = RecorderStage.Transcribing
-                                val result = SpeechTranscriber.transcribe(context, clip.uri)
+                                val result = SpeechTranscriber.transcribe(
+                                    context = context,
+                                    fileUri = clip.uri,
+                                    userId  = userId,
+                                )
                                 when (result) {
                                     is TranscribeResult.Success -> {
                                         // Pre-save what the recognizer
@@ -492,7 +496,11 @@ private suspend fun runTranscribe(
     if (transcribing[note.id] == true) return
     transcribing[note.id] = true
     try {
-        val result = SpeechTranscriber.transcribe(context, note.audioUri)
+        val result = SpeechTranscriber.transcribe(
+            context = context,
+            fileUri = note.audioUri,
+            userId  = note.userId,
+        )
         when (result) {
             is TranscribeResult.Success -> {
                 runCatching {
