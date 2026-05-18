@@ -212,6 +212,14 @@ object SpeechTranscriber {
             Log.d(TAG, "Removing legacy English-only model dir 'sherpa-onnx-whisper-tiny.en' to reclaim disk")
             legacy.deleteRecursively()
         }
+        // Sweep `.staging` dirs from any previous extract that was
+        // killed before its atomic rename. These can't be reused
+        // (mid-extract state) and would otherwise pile up disk.
+        context.filesDir.listFiles { _, name -> name.endsWith(".staging") }
+            ?.forEach { dir ->
+                Log.i(TAG, "Sweeping leftover extract staging dir: ${dir.name}")
+                dir.deleteRecursively()
+            }
     }
 
     // ========================= ML Kit GenAI ======================
@@ -643,12 +651,22 @@ object SpeechTranscriber {
         }
     }
 
+    /** Marker file written at the end of a successful extract.
+     *  Its absence means the dir holds files from a killed extract
+     *  (or a pre-marker build) and the recognizer would abort
+     *  natively when it tried to read them. */
+    private val MODEL_READY_MARKER = ".quickink-extract-complete"
+
     private fun isSherpaModelPresent(modelDir: File, model: WhisperModel): Boolean {
         if (!modelDir.isDirectory) return false
-        // All three files are required by the recognizer config. A
-        // process kill mid-extract can leave just one or two on disk;
-        // skipping any of them here would let the next launch try to
-        // construct a recognizer over a corrupt model.
+        // The marker is the integrity gate — it's the last write
+        // every successful extract makes, so its presence proves
+        // every file beforehand was fully flushed to disk.
+        if (!File(modelDir, MODEL_READY_MARKER).exists()) return false
+        // Belt + suspenders: the recognizer config references these
+        // three paths, so verify they exist (a marker-but-no-file
+        // state would only happen if something external scrubbed
+        // the dir between writes).
         return File(modelDir, model.encoderFile).exists() &&
             File(modelDir, model.decoderFile).exists() &&
             File(modelDir, model.tokensFile).exists()
@@ -764,23 +782,59 @@ object SpeechTranscriber {
         // notification / WorkInfo phase to "Extracting" so the UI
         // can show indeterminate progress instead of sitting at
         // 100% looking hung.
+        //
+        // Atomic placement: extract into `<modelDir>.staging/`, then
+        // atomically rename to `modelDir`. A worker killed mid-extract
+        // (OOM, process death, native crash elsewhere) leaves only
+        // the staging dir behind — `modelDir` either has every file
+        // intact or doesn't exist at all. Without this, partially-
+        // written `.onnx` weights survived to the next launch,
+        // `isSherpaModelPresent` saw the file paths existed and
+        // returned true, and sherpa-onnx aborted natively when it
+        // tried to read past the end of the truncated file.
+        val staging = File(parentDir, "${model.sherpaDirName}.staging")
         try {
             Log.i(TAG, "extract start: model=${model.id} partial=${partial.absolutePath}")
             onExtractStart()
-            if (modelDir.exists()) modelDir.deleteRecursively()
-            modelDir.mkdirs()
+            if (staging.exists()) staging.deleteRecursively()
+            staging.mkdirs()
             val extractStartMs = System.currentTimeMillis()
             partial.inputStream().buffered().use { input ->
-                extractModelTarBz2(input, modelDir, model)
+                extractModelTarBz2(input, staging, model)
             }
+            // Sanity-check before promoting: every wanted file must
+            // exist with non-zero size. Catches a tar archive that
+            // looked complete but somehow skipped one of our files.
+            for (name in arrayOf(model.encoderFile, model.decoderFile, model.tokensFile)) {
+                val f = File(staging, name)
+                if (!f.exists() || f.length() == 0L) {
+                    throw IOException("extract missing file: $name (exists=${f.exists()}, len=${f.length()})")
+                }
+            }
+            if (modelDir.exists()) modelDir.deleteRecursively()
+            if (!staging.renameTo(modelDir)) {
+                // Same-filesystem rename failed (rare on Android
+                // /data/data) — fall back to copy + delete.
+                Log.w(TAG, "renameTo failed; falling back to copy")
+                staging.copyRecursively(modelDir, overwrite = true)
+                staging.deleteRecursively()
+            }
+            // Stamp the integrity marker. This is the LAST write —
+            // its presence on the next launch proves every file
+            // above was flushed before we lost the process. See
+            // [isSherpaModelPresent].
+            File(modelDir, MODEL_READY_MARKER).writeText("ok\n")
             Log.i(
                 TAG,
                 "extract complete: model=${model.id} dir=${modelDir.absolutePath} elapsed=${System.currentTimeMillis() - extractStartMs}ms",
             )
         } catch (e: Exception) {
             Log.e(TAG, "extract failed: model=${model.id} message=${e.message}", e)
-            modelDir.deleteRecursively()
-            partial.delete()
+            staging.deleteRecursively()
+            // Leave the partial archive in place so the next attempt
+            // can re-extract without re-downloading — the bytes
+            // themselves were proven good by the truncation check at
+            // the end of `downloadToPartial`.
             throw e
         }
 
