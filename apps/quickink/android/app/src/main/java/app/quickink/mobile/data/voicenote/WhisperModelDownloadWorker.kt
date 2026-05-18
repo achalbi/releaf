@@ -73,16 +73,21 @@ class WhisperModelDownloadWorker(
             workDataOf(KEY_ERROR_MESSAGE to "Missing model id")
         )
         val model = WhisperModel.fromId(modelId)
-        Log.d(TAG, "doWork start: model=${model.id} attempt=$runAttemptCount")
+        Log.i(TAG, "doWork start: model=${model.id} attempt=$runAttemptCount runAttempt=$runAttemptCount")
 
         // Promote to a foreground service before the first byte
         // arrives. `setForeground` may throw on devices that refuse
         // notifications (e.g. POST_NOTIFICATIONS denied on Android 13+);
         // we ignore the failure and continue as a regular background
         // worker — bytes still flow, just without the OS guarantee.
-        runCatching {
+        val foregroundOutcome = runCatching {
             setForeground(makeForegroundInfo(model, bytesDownloaded = 0, totalBytes = 0))
-        }.onFailure { Log.w(TAG, "setForeground rejected; running as bg worker", it) }
+        }
+        if (foregroundOutcome.isSuccess) {
+            Log.i(TAG, "setForeground OK — running with OS foreground-service guarantee")
+        } else {
+            Log.w(TAG, "setForeground rejected; running as bg worker", foregroundOutcome.exceptionOrNull())
+        }
 
         // The download's `onProgress` callback fires from inside a
         // synchronous read loop, so it can't call `setProgress` or
@@ -122,10 +127,11 @@ class WhisperModelDownloadWorker(
                 }
             }
             mirrorJob.cancel()
+            Log.i(TAG, "doWork success: model=${model.id}")
             Result.success()
         } catch (e: IOException) {
             mirrorJob.cancel()
-            Log.w(TAG, "doWork transient failure: ${e.message}")
+            Log.w(TAG, "doWork transient IOException: ${e.message} attempt=$runAttemptCount/$MAX_ATTEMPTS")
             // Cap retries so we don't drain the user's data on a
             // genuinely-broken URL; partial bytes stay on disk so
             // a manual retry from the card still resumes.
@@ -133,7 +139,7 @@ class WhisperModelDownloadWorker(
             else Result.failure(workDataOf(KEY_ERROR_MESSAGE to (e.message ?: "Download failed")))
         } catch (e: Exception) {
             mirrorJob.cancel()
-            Log.e(TAG, "doWork hard failure", e)
+            Log.e(TAG, "doWork hard failure (model=${model.id})", e)
             Result.failure(workDataOf(KEY_ERROR_MESSAGE to (e.message ?: "Download failed")))
         }
     }

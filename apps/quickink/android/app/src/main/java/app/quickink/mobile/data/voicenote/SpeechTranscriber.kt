@@ -733,32 +733,38 @@ object SpeechTranscriber {
         model: WhisperModel,
         onProgress: (absoluteBytes: Long, totalBytes: Long) -> Unit,
     ) {
-        Log.d(TAG, "sherpa model '${model.id}': downloading…")
+        Log.i(TAG, "downloadAndExtract start: model=${model.id} url=${model.downloadUrl}")
         val partial = File(parentDir, "${model.sherpaDirName}.partial")
 
         // Phase 1 — pull bytes into the `.partial` staging file.
         // Failure leaves whatever bytes landed on disk so the next
         // enqueue resumes via HTTP `Range:`.
         downloadToPartial(partial, model, onProgress)
+        Log.i(
+            TAG,
+            "download phase complete: model=${model.id} partialBytes=${partial.length()}",
+        )
 
         // Phase 2 — extract the fully-downloaded archive. Failure
         // here means the payload itself is corrupt; wipe both
         // partial and the half-extracted dir so a retry re-fetches
         // from scratch instead of appending bytes to a broken file.
         try {
+            Log.i(TAG, "extract start: model=${model.id} partial=${partial.absolutePath}")
             if (modelDir.exists()) modelDir.deleteRecursively()
             modelDir.mkdirs()
             partial.inputStream().buffered().use { input ->
                 extractModelTarBz2(input, modelDir, model)
             }
         } catch (e: Exception) {
+            Log.e(TAG, "extract failed: model=${model.id} message=${e.message}", e)
             modelDir.deleteRecursively()
             partial.delete()
             throw e
         }
 
         partial.delete()
-        Log.d(TAG, "sherpa model '${model.id}': extracted to ${modelDir.absolutePath}")
+        Log.i(TAG, "extract complete: model=${model.id} dir=${modelDir.absolutePath}")
     }
 
     /**
@@ -781,6 +787,10 @@ object SpeechTranscriber {
         onProgress: (absoluteBytes: Long, totalBytes: Long) -> Unit,
     ) {
         val resumeFrom = if (partial.exists()) partial.length() else 0L
+        Log.i(
+            TAG,
+            "downloadToPartial: model=${model.id} resumeFrom=$resumeFrom partialExists=${partial.exists()}",
+        )
 
         val conn = (URL(model.downloadUrl).openConnection() as HttpURLConnection).apply {
             connectTimeout = 30_000
@@ -795,8 +805,14 @@ object SpeechTranscriber {
         // the response headers arrive.
         onProgress(resumeFrom, 0L)
         try {
+            Log.i(TAG, "HTTP connecting to ${model.downloadUrl}…")
+            val connectStartMs = System.currentTimeMillis()
             conn.connect()
             val code = conn.responseCode
+            Log.i(
+                TAG,
+                "HTTP connected: code=$code in ${System.currentTimeMillis() - connectStartMs}ms",
+            )
             val resumed = code == 206
             if (!resumed && code !in 200..299) {
                 throw IOException("sherpa model HTTP $code")
@@ -805,20 +821,35 @@ object SpeechTranscriber {
                 // Server ignored Range (returned 200 with the whole
                 // file). Drop the partial bytes — they may belong
                 // to a different revision of the asset.
-                Log.d(TAG, "Server didn't honor Range; restarting from byte 0")
+                Log.i(TAG, "Server didn't honor Range; restarting from byte 0")
                 partial.delete()
             }
             val effectiveStart = if (resumed) resumeFrom else 0L
             val totalBytes = totalBytesFor(conn, resumed)
+            Log.i(
+                TAG,
+                "HTTP body: effectiveStart=$effectiveStart totalBytes=$totalBytes resumed=$resumed",
+            )
             onProgress(effectiveStart, totalBytes)
 
             partial.parentFile?.mkdirs()
+            val firstReadStartMs = System.currentTimeMillis()
+            var loggedFirstChunk = false
             java.io.FileOutputStream(partial, /* append = */ resumed).use { out ->
                 val counting = ProgressTrackingInputStream(
                     delegate                 = conn.inputStream,
                     totalBytes               = totalBytes,
                     bytesAlreadyDownloaded   = effectiveStart,
-                    onProgress               = onProgress,
+                    onProgress               = { absolute, total ->
+                        if (!loggedFirstChunk && absolute > effectiveStart) {
+                            loggedFirstChunk = true
+                            Log.i(
+                                TAG,
+                                "first bytes received in ${System.currentTimeMillis() - firstReadStartMs}ms (absolute=$absolute)",
+                            )
+                        }
+                        onProgress(absolute, total)
+                    },
                 )
                 counting.copyTo(out)
             }
@@ -831,6 +862,10 @@ object SpeechTranscriber {
                     "Download truncated: ${partial.length()}/$totalBytes bytes — will resume on next try"
                 )
             }
+            Log.i(
+                TAG,
+                "downloadToPartial done: model=${model.id} partial=${partial.length()} expected=$totalBytes",
+            )
         } finally {
             runCatching { conn.disconnect() }
         }
