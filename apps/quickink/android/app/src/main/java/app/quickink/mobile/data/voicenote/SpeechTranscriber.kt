@@ -72,7 +72,11 @@ import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
@@ -426,6 +430,27 @@ object SpeechTranscriber {
     @Volatile private var cachedSherpaModelId: String? = null
     private val sherpaRecognizerLock = Any()
 
+    /**
+     * Process-scope coroutine that owns in-flight model downloads.
+     * Decoupled from any caller's lifetime so the user navigating
+     * away from the voice-note sheet (or backgrounding the app)
+     * doesn't cancel the HTTP fetch. The `SupervisorJob` keeps one
+     * model's failure from poisoning others if we ever parallel-
+     * download multiple variants.
+     */
+    private val modelDownloadScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * `Deferred` per model id while a download is in flight. Lets a
+     * second caller (e.g. a retry after the user re-enters the
+     * screen) await the existing fetch instead of kicking a second
+     * concurrent download. Cleared on completion via
+     * `invokeOnCompletion`.
+     */
+    private val inFlightDownloadsLock = Any()
+    private val inFlightDownloads = mutableMapOf<String, Deferred<Unit>>()
+
     private suspend fun transcribeWithSherpa(
         context: Context,
         file: File,
@@ -567,6 +592,15 @@ object SpeechTranscriber {
                     cachedSherpaModelId == model.id
             }
             ?.let { return it }
+
+        // Run / await the model download OUTSIDE the recognizer
+        // cache's lock — the fetch lives on a process-scope coroutine
+        // (see [modelDownloadScope]) so a caller-side cancel doesn't
+        // kill the bytes mid-flight. When the user navigates back
+        // and re-tries, this call rejoins the same Deferred and
+        // resumes wherever the download is at.
+        ensureModelDownloaded(context, model)
+
         return withContext(Dispatchers.IO) {
             synchronized(sherpaRecognizerLock) {
                 cachedSherpaRecognizer
@@ -587,9 +621,6 @@ object SpeechTranscriber {
                 cachedSherpaModelId = null
 
                 val modelDir = File(context.filesDir, model.sherpaDirName)
-                if (!isSherpaModelPresent(modelDir, model)) {
-                    downloadAndExtractSherpaModel(modelDir, model)
-                }
                 val recognizer = OfflineRecognizer(
                     assetManager = null,
                     config = OfflineRecognizerConfig(
@@ -634,6 +665,44 @@ object SpeechTranscriber {
         if (!modelDir.isDirectory) return false
         return File(modelDir, model.encoderFile).exists() &&
             File(modelDir, model.tokensFile).exists()
+    }
+
+    /**
+     * Ensure [model] is extracted on disk, kicking a process-scope
+     * download if it isn't. Caller can cancel — the `Deferred` lives
+     * on [modelDownloadScope] so a navigation away leaves the bytes
+     * still pulling; the next attempt awaits the same in-flight job
+     * instead of starting a fresh fetch.
+     */
+    private suspend fun ensureModelDownloaded(context: Context, model: WhisperModel) {
+        val modelDir = File(context.filesDir, model.sherpaDirName)
+        if (isSherpaModelPresent(modelDir, model)) return
+
+        val deferred: Deferred<Unit> = synchronized(inFlightDownloadsLock) {
+            inFlightDownloads[model.id] ?: run {
+                val job = modelDownloadScope.async {
+                    downloadAndExtractSherpaModel(modelDir, model)
+                }
+                inFlightDownloads[model.id] = job
+                job.invokeOnCompletion {
+                    synchronized(inFlightDownloadsLock) {
+                        // Only clear when *this* deferred is still the
+                        // tracked one — a fast-fail + retry could have
+                        // installed a fresh job between the failure
+                        // and the completion callback.
+                        if (inFlightDownloads[model.id] === job) {
+                            inFlightDownloads.remove(model.id)
+                        }
+                    }
+                }
+                job
+            }
+        }
+        // Await joins the shared deferred. A caller-side cancellation
+        // propagates a CancellationException to our coroutine but
+        // leaves the deferred running on modelDownloadScope — the
+        // next caller picks it back up from where it left off.
+        deferred.await()
     }
 
     /** Container for the bits of [OfflineRecognizerResult] we care about. */
