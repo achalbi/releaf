@@ -391,7 +391,7 @@ final class VoiceNoteSectionViewModel: ObservableObject {
             return
         }
 
-        if let result = await VoiceTranscriber.transcribe(fileURL: fileURL),
+        if let result = await VoiceTranscriber.transcribe(fileURL: fileURL, userId: userId),
            !result.text.isEmpty {
             stage = .editing(initialText: result.text, noteId: inserted.id)
             // Pre-save the recognized transcript on the row so even if
@@ -490,7 +490,7 @@ final class VoiceNoteSectionViewModel: ObservableObject {
         transcribingIds.insert(note.id)
         defer { transcribingIds.remove(note.id) }
 
-        if let result = await VoiceTranscriber.transcribe(fileURL: url) {
+        if let result = await VoiceTranscriber.transcribe(fileURL: url, userId: userId) {
             do {
                 try await repo.setTranscription(
                     id:            note.id,

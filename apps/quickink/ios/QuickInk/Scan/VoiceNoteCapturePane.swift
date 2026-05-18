@@ -270,11 +270,15 @@ final class VoiceNoteCapturePaneModel: ObservableObject {
                 audioUri:   uri,
                 durationMs: durationMs
             )
+            let pendingUserId = userId
             Task.detached(priority: .userInitiated) {
                 let granted = await VoiceTranscriber.requestPermission()
                 guard granted else { return }
                 guard let url = Self.fileURL(for: uri) else { return }
-                guard let result = await VoiceTranscriber.transcribe(fileURL: url) else { return }
+                guard let result = await VoiceTranscriber.transcribe(
+                    fileURL: url,
+                    userId:  pendingUserId
+                ) else { return }
                 try? await VoiceNoteRepository().setTranscription(
                     id:            row.id,
                     transcription: result.text,
