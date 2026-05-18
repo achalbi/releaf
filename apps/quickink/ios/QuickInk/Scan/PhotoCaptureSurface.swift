@@ -31,9 +31,10 @@
  *                        so the user can hold forever without
  *                        blowing up a transcription pass downstream.
  *
- * A small flip-camera button (top-right of the preview) toggles
- * between the back and front cameras. It is only shown in the
- * idle `.preview` state — hidden while a still capture, video
+ * A small flip-camera button sits at the trailing edge of the
+ * shutter row, next to the shutter itself (matches the iOS
+ * Camera / Instagram convention). It is only shown in the idle
+ * `.preview` state — hidden while a still capture, video
  * recording, or post-record processing pass is in flight, since
  * tearing down the video input mid-take would corrupt the
  * in-flight `.mov` and race the photo/movie delegate callbacks.
@@ -244,9 +245,6 @@ private struct ActivePhotoSurface: View {
                     if case .recording(let elapsed) = session.state {
                         recordingOverlay(elapsedSeconds: elapsed)
                     }
-                    if session.state == .preview {
-                        cameraFlipButton
-                    }
                     if session.state == .capturing || session.state == .processing {
                         Color.black.opacity(0.25).ignoresSafeArea(edges: .horizontal)
                         ProgressView()
@@ -314,13 +312,13 @@ private struct ActivePhotoSurface: View {
 
     // MARK: - Camera flip button
 
-    /// Top-right overlay that toggles between the back and front
-    /// cameras. Only rendered while `session.state == .preview`;
-    /// hiding it the rest of the time means a mid-recording flip
-    /// can't reach `PhotoCaptureSession.flipCamera()` (which would
-    /// no-op defensively anyway). The 40pt black disc matches the
-    /// other on-camera affordances (recording chip, audio badge)
-    /// for visual rhythm.
+    /// Bare 40pt black disc that toggles between the back and
+    /// front cameras. Positioned by `shutterRow` at the trailing
+    /// edge of the shutter row so it reads as a peer affordance
+    /// to the shutter button (matches Instagram / iOS Camera).
+    /// Only rendered while `session.state == .preview` —
+    /// `flipCamera()` no-ops outside `.preview` defensively too,
+    /// but hiding the button keeps the UI honest.
     @ViewBuilder
     private var cameraFlipButton: some View {
         Button(action: { session.flipCamera() }) {
@@ -332,9 +330,6 @@ private struct ActivePhotoSurface: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Switch camera")
-        .padding(.top, QuickInkSpacing.s5)
-        .padding(.trailing, QuickInkSpacing.s4)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
 
     // MARK: - Captured-state preview
@@ -371,8 +366,14 @@ private struct ActivePhotoSurface: View {
     @ViewBuilder
     private var shutterRow: some View {
         VStack(spacing: QuickInkSpacing.s2) {
-            HStack {
-                Spacer()
+            // ZStack (not the old centered HStack) so the flip
+            // button can pin to the trailing edge without pushing
+            // the shutter off-center. The shutter stays at the
+            // ZStack's natural center; the flip button takes a
+            // `maxWidth: .infinity` frame aligned trailing, which
+            // expands the ZStack to the row's full width without
+            // moving the shutter.
+            ZStack {
                 PhotoShutterButton(
                     isRecording: {
                         if case .recording = session.state { return true }
@@ -382,8 +383,12 @@ private struct ActivePhotoSurface: View {
                 .gesture(shutterGesture)
                 .disabled(session.state == .capturing || session.state == .processing)
                 .opacity((session.state == .capturing || session.state == .processing) ? 0.5 : 1.0)
-                Spacer()
+                if session.state == .preview {
+                    cameraFlipButton
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
             }
+            .frame(maxWidth: .infinity)
             shutterHint
         }
         .padding(.horizontal, QuickInkSpacing.s5)

@@ -32,9 +32,10 @@
  *                        so the user can hold forever without
  *                        blowing up a transcription pass downstream.
  *
- * A small flip-camera button (top-right of the preview) toggles
- * between the back and front cameras. It is only shown in the
- * idle `Preview` state — hidden while a still capture, video
+ * A small flip-camera button sits at the trailing edge of the
+ * shutter row, next to the shutter itself (matches the iOS
+ * Camera / Instagram convention). It is only shown in the idle
+ * `Preview` state — hidden while a still capture, video
  * recording, or post-record processing pass is in flight, since
  * tearing down the [VideoCapture] use case mid-take would
  * corrupt the in-flight `.mp4` and stop the recording.
@@ -428,20 +429,6 @@ private fun ActivePhotoSurface(
                         },
                         onRelease = { previewViewRef = null },
                     )
-                    if (state is PhotoUiState.Preview) {
-                        CameraFlipButton(
-                            onClick = {
-                                cameraSelector =
-                                    if (cameraSelector == CameraSelector.DEFAULT_BACK_CAMERA)
-                                        CameraSelector.DEFAULT_FRONT_CAMERA
-                                    else
-                                        CameraSelector.DEFAULT_BACK_CAMERA
-                            },
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(top = QuickInkSpacing.s5, end = QuickInkSpacing.s4),
-                        )
-                    }
                     if (state is PhotoUiState.Recording) {
                         RecordingTimeChip(
                             elapsedMs = state.elapsedMs,
@@ -583,6 +570,13 @@ private fun ActivePhotoSurface(
                     recording.stop()
                     activeRecording = null
                 },
+                onFlipCamera = {
+                    cameraSelector =
+                        if (cameraSelector == CameraSelector.DEFAULT_BACK_CAMERA)
+                            CameraSelector.DEFAULT_FRONT_CAMERA
+                        else
+                            CameraSelector.DEFAULT_BACK_CAMERA
+                },
             )
         } else {
             CommitRow(
@@ -630,6 +624,7 @@ private fun ShutterRow(
     onTap: () -> Unit,
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
+    onFlipCamera: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -637,10 +632,14 @@ private fun ShutterRow(
             .padding(horizontal = QuickInkSpacing.s5, vertical = QuickInkSpacing.s4),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(
-            modifier              = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment     = Alignment.CenterVertically,
+        // Box (not a centered Row) so the flip button can pin to
+        // the trailing edge via `Alignment.CenterEnd` without
+        // displacing the shutter — the shutter sits at the Box's
+        // own center alignment and the flip floats over the same
+        // row, vertically aligned with the shutter.
+        Box(
+            modifier         = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
         ) {
             PhotoShutterButton(
                 isRecording      = uiState is PhotoUiState.Recording,
@@ -649,6 +648,12 @@ private fun ShutterRow(
                 onStartRecording = onStartRecording,
                 onStopRecording  = onStopRecording,
             )
+            if (uiState is PhotoUiState.Preview) {
+                CameraFlipButton(
+                    onClick  = onFlipCamera,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                )
+            }
         }
         Spacer(Modifier.size(QuickInkSpacing.s2))
         // Hint copy: two variants — "tap or hold" for the
@@ -889,13 +894,14 @@ private fun PhotoShutterButton(
 }
 
 /**
- * Top-right overlay that toggles between the back and front
- * cameras. Only rendered while the surface is idle on
- * [PhotoUiState.Preview] — hidden mid-recording since flipping
- * tears down the in-flight [VideoCapture] use case and would
- * stop the `.mp4` mid-write. The 40dp black disc matches the
- * other on-camera affordances (recording chip, audio badge)
- * for visual rhythm.
+ * Bare 40dp black disc that toggles between the back and front
+ * cameras. Positioned by [ShutterRow] at the trailing edge of
+ * the shutter row so it reads as a peer affordance to the
+ * shutter button (matches iOS Camera / Instagram). Only
+ * rendered while the surface is idle on [PhotoUiState.Preview]
+ * — hidden mid-recording since flipping tears down the in-
+ * flight [VideoCapture] use case and would stop the `.mp4`
+ * mid-write.
  */
 @Composable
 private fun CameraFlipButton(
