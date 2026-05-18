@@ -49,14 +49,19 @@
  * `captureSession` — GPU-rendered, cost is negligible). Tap a
  * chip → it's selected and the strip collapses again.
  *
- * The selection drives both the main live preview (via cheap
+ * The selection drives the main live preview (via cheap
  * SwiftUI `.saturation` / `.contrast` / `.colorMultiply`
- * modifiers — no per-frame CIFilter pass) and the saved still
- * (via `CIFilter` applied to the captured `UIImage`). Video
- * recording always writes raw frames; the strip + preview
- * filter are both suppressed while recording so the user can
- * see what's actually being saved. See `PhotoFilter` for the
- * per-case modifier / CIFilter mapping.
+ * modifiers — no per-frame CIFilter pass) AND every saved
+ * artifact: the captured still (via `CIFilter` applied to the
+ * `UIImage`) and the recorded video (via
+ * `AVMutableVideoComposition.applyingCIFiltersWithHandler` +
+ * `AVAssetExportSession`, run as a post-record pass that
+ * replaces the raw `.mov` in `AttachmentStorage` with a
+ * filtered re-encode). The chip strip is hidden while
+ * recording so the user can't change the filter mid-take —
+ * the post-process snapshot is taken once when the recording
+ * ends. See `PhotoFilter` for the per-case modifier / CIFilter
+ * mapping.
  *
  * After capture (still OR video), the surface lands on the same
  * captured-preview UI: a frozen first frame (or the still) +
@@ -147,6 +152,41 @@ public enum PhotoFilter: String, CaseIterable {
 
     // MARK: Capture-time filter
 
+    /// CIImage → CIImage transform shared by still and video
+    /// pipelines. The still path wraps this in a `CIContext.
+    /// createCGImage`; the video path hands it to
+    /// `AVMutableVideoComposition`'s
+    /// `applyingCIFiltersWithHandler` so each decoded frame gets
+    /// the same look. Returns `input` on `.none` so callers don't
+    /// need to special-case.
+    public func applyToCIImage(_ input: CIImage) -> CIImage {
+        switch self {
+        case .none:
+            return input
+        case .bw:
+            // `CIPhotoEffectMono` — Apple's curated B&W.
+            // Slightly warmer than a flat desaturation, matches
+            // what the iOS Camera app would produce.
+            let f = CIFilter(name: "CIPhotoEffectMono")!
+            f.setValue(input, forKey: kCIInputImageKey)
+            return f.outputImage ?? input
+        case .sepia:
+            let f = CIFilter(name: "CISepiaTone")!
+            f.setValue(input, forKey: kCIInputImageKey)
+            f.setValue(0.80, forKey: kCIInputIntensityKey)
+            return f.outputImage ?? input
+        case .cool:
+            // Shift target neutral to a lower Kelvin → image
+            // takes on a blue cast (the white point now sits
+            // where ~4500K would, so cooler tones survive).
+            let f = CIFilter(name: "CITemperatureAndTint")!
+            f.setValue(input, forKey: kCIInputImageKey)
+            f.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
+            f.setValue(CIVector(x: 4500, y: 0), forKey: "inputTargetNeutral")
+            return f.outputImage ?? input
+        }
+    }
+
     /// Apply the filter to a `UIImage` at commit time. Returns the
     /// input verbatim when filter is `.none`. Falls back to the
     /// input on any CIFilter / CGImage failure so a transient
@@ -154,37 +194,9 @@ public enum PhotoFilter: String, CaseIterable {
     public func apply(to image: UIImage) -> UIImage {
         guard self != .none else { return image }
         guard let ciImage = CIImage(image: image) else { return image }
+        let output = applyToCIImage(ciImage)
         let context = CIContext()
-        let output: CIImage? = {
-            switch self {
-            case .none:
-                return ciImage
-            case .bw:
-                // `CIPhotoEffectMono` — Apple's curated B&W.
-                // Slightly warmer than a flat desaturation,
-                // matches what the iOS Camera app would produce.
-                let f = CIFilter(name: "CIPhotoEffectMono")!
-                f.setValue(ciImage, forKey: kCIInputImageKey)
-                return f.outputImage
-            case .sepia:
-                let f = CIFilter(name: "CISepiaTone")!
-                f.setValue(ciImage, forKey: kCIInputImageKey)
-                f.setValue(0.80, forKey: kCIInputIntensityKey)
-                return f.outputImage
-            case .cool:
-                // Shift target neutral to a lower Kelvin → image
-                // takes on a blue cast (the white point now sits
-                // where ~4500K would, so cooler tones survive).
-                let f = CIFilter(name: "CITemperatureAndTint")!
-                f.setValue(ciImage, forKey: kCIInputImageKey)
-                f.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
-                f.setValue(CIVector(x: 4500, y: 0), forKey: "inputTargetNeutral")
-                return f.outputImage
-            }
-        }()
-        guard let outputImage = output,
-              let cgImage = context.createCGImage(outputImage, from: outputImage.extent)
-        else {
+        guard let cgImage = context.createCGImage(output, from: output.extent) else {
             return image
         }
         return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
@@ -379,10 +391,10 @@ private struct ActivePhotoSurface: View {
                         // (1.0 / 1.0 / .white) are no-ops, so when
                         // `effectiveLiveFilter == .none` SwiftUI
                         // optimises the modifier chain into a pass-
-                        // through. During `.recording` we force
-                        // identity (see `effectiveLiveFilter`) so
-                        // the user sees the raw frames that the
-                        // unfiltered .mov is actually capturing.
+                        // through. Stays on through `.recording`
+                        // too — `applyFilterToVideo` bakes the
+                        // same filter into the saved `.mov`, so
+                        // preview ≈ saved output.
                         .saturation(effectiveLiveFilter.liveSaturation)
                         .contrast(effectiveLiveFilter.liveContrast)
                         .colorMultiply(effectiveLiveFilter.liveTint)
@@ -457,13 +469,16 @@ private struct ActivePhotoSurface: View {
     // MARK: - Live filter
 
     /// The filter SwiftUI should apply to the live preview right
-    /// now. While recording we force `.none` because the
-    /// `.mov` being written is unfiltered — showing a filtered
-    /// preview during a take would mislead the user about what
-    /// landed in the saved video.
+    /// now. Always the active filter — the recorded `.mov` is
+    /// re-exported through `PhotoCaptureSession.applyFilterToVideo`
+    /// after the take ends, so the preview can keep showing the
+    /// filter throughout recording without misleading the user
+    /// about what's saved. The filter strip is still hidden mid-
+    /// recording (changing filter mid-take would mismatch the
+    /// post-process snapshot) — only the live filter on the raw
+    /// camera feed stays on.
     private var effectiveLiveFilter: PhotoFilter {
-        if case .recording = session.state { return .none }
-        return session.activeFilter
+        session.activeFilter
     }
 
     /// Collapse-aware filter strip. Default `isFilterStripExpanded
@@ -938,11 +953,15 @@ private struct ActivePhotoSurface: View {
                 durationMs: durationMs,
             )
             NSLog("[PhotoCapture] attachVoiceNote insert ok rowId=%@", row.id)
+            let pendingUserId = userId
             Task.detached(priority: .userInitiated) {
                 let granted = await VoiceTranscriber.requestPermission()
                 NSLog("[PhotoCapture] speech permission granted=%@", granted ? "true" : "false")
                 guard granted else { return }
-                guard let transcript = await VoiceTranscriber.transcribe(fileURL: audioFileURL) else {
+                guard let transcript = await VoiceTranscriber.transcribe(
+                    fileURL: audioFileURL,
+                    userId:  pendingUserId
+                ) else {
                     NSLog("[PhotoCapture] VoiceTranscriber returned nil for %@", audioFileURL.path)
                     return
                 }
@@ -1512,23 +1531,43 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
         let cacheSize = (try? FileManager.default.attributesOfItem(atPath: outputFileURL.path)[.size] as? Int) ?? 0
         NSLog("[PhotoCapture] handleVideo cache=%@ size=%dB", outputFileURL.path, cacheSize)
         let asset = AVURLAsset(url: outputFileURL)
-        let firstFrame = await Self.extractFirstFrame(from: asset)
+        let rawFirstFrame = await Self.extractFirstFrame(from: asset)
         let durationMs = Int((CMTimeGetSeconds(asset.duration) * 1000.0).rounded())
+
+        // Snapshot the filter so the rest of the pipeline runs
+        // against a fixed value — the user could flip filters
+        // mid-process and we want the recorded artifact to match
+        // what they saw when they released the shutter.
+        let filter = self.activeFilter
 
         // Extract audio to a stable AttachmentStorage URL —
         // VoiceNoteRepository expects a file:// path it can
         // serve up to the transcriber and sync workers later.
+        // (Filter doesn't touch the audio track; we extract from
+        // the raw .mov before any video transcode.)
         let audioURL = await Self.extractAudio(from: asset)
-        // Persist the raw .mov into AttachmentStorage too. The
-        // detail screen plays this back via AVPlayer — without
-        // it the page (first frame) and voice note (audio) survive
-        // but the user can't re-watch the full clip.
-        let videoURL = Self.persistVideo(from: outputFileURL)
-        NSLog("[PhotoCapture] handleVideo persisted firstFrame=%@ audio=%@ video=%@ duration=%dms",
+        // Persist the raw .mov into AttachmentStorage. If a
+        // filter is active we'll re-export this through
+        // `applyFilterToVideo` and replace it in-storage; doing
+        // it in two steps (persist-then-filter) keeps the
+        // fallback simple — if the filter pass fails for any
+        // reason the user still has the raw recording.
+        let rawVideoURL = Self.persistVideo(from: outputFileURL)
+        let videoURL: URL? = await {
+            guard filter != .none, let raw = rawVideoURL else { return rawVideoURL }
+            let filtered = await Self.applyFilterToVideo(rawAttachmentURL: raw, filter: filter)
+            return filtered
+        }()
+        // Apply the filter to the first frame too so the
+        // captured-preview the user sees on the Retake / OK
+        // screen matches what the recorded video plays back.
+        let firstFrame = rawFirstFrame.map { filter.apply(to: $0) }
+        NSLog("[PhotoCapture] handleVideo persisted firstFrame=%@ audio=%@ video=%@ duration=%dms filter=%@",
               firstFrame == nil ? "nil" : "ok",
               audioURL?.absoluteString ?? "nil",
               videoURL?.absoluteString ?? "nil",
-              durationMs)
+              durationMs,
+              filter.displayName)
 
         guard let image = firstFrame else {
             // No frames at all (very short or malformed recording)
@@ -1539,6 +1578,69 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
             return
         }
         state = .captured(image, audioURL: audioURL, durationMs: durationMs, videoURL: videoURL)
+    }
+
+    /// Re-encode the recorded video with `filter` baked in via
+    /// `AVMutableVideoComposition` + `AVAssetExportSession`. The
+    /// audio track is copied verbatim. Writes the filtered output
+    /// to a temp dir, then moves it into `AttachmentStorage` so
+    /// the saved artifact lives where every other capture binary
+    /// does (Drive sync, thumbnails, etc.). The raw video at
+    /// `rawAttachmentURL` is deleted on success; on any failure
+    /// we fall back to returning the raw URL so the user still
+    /// has their clip.
+    private static func applyFilterToVideo(rawAttachmentURL: URL, filter: PhotoFilter) async -> URL? {
+        guard filter != .none else { return rawAttachmentURL }
+        let asset = AVURLAsset(url: rawAttachmentURL)
+        let composition = AVMutableVideoComposition(
+            asset: asset,
+            applyingCIFiltersWithHandler: { request in
+                // `clampedToExtent()` keeps the filter happy on
+                // shaders that sample outside the source bounds
+                // (e.g. CIColorControls) — we crop back to the
+                // original extent after so the export keeps the
+                // same dimensions as the input.
+                let source = request.sourceImage.clampedToExtent()
+                let output = filter.applyToCIImage(source).cropped(to: request.sourceImage.extent)
+                request.finish(with: output, context: nil)
+            },
+        )
+        guard let exporter = AVAssetExportSession(
+                asset: asset,
+                presetName: AVAssetExportPresetHighestQuality,
+              )
+        else {
+            NSLog("[PhotoCapture] applyFilterToVideo: no exporter, falling back to raw")
+            return rawAttachmentURL
+        }
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("photo_capture_filtered", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let tempURL = dir.appendingPathComponent("filtered-\(Int(Date().timeIntervalSince1970 * 1000)).mov")
+        try? FileManager.default.removeItem(at: tempURL)
+        exporter.outputURL = tempURL
+        exporter.outputFileType = .mov
+        exporter.videoComposition = composition
+        await exporter.export()
+        guard exporter.status == .completed else {
+            NSLog("[PhotoCapture] applyFilterToVideo export failed: %@ — falling back to raw",
+                  "\(exporter.error?.localizedDescription ?? "unknown")")
+            try? FileManager.default.removeItem(at: tempURL)
+            return rawAttachmentURL
+        }
+        // Move into AttachmentStorage and clean up.
+        guard let data = try? Data(contentsOf: tempURL),
+              let stored = AttachmentStorage.write(data, ext: "mov")
+        else {
+            NSLog("[PhotoCapture] applyFilterToVideo: AttachmentStorage write failed — falling back to raw")
+            try? FileManager.default.removeItem(at: tempURL)
+            return rawAttachmentURL
+        }
+        try? FileManager.default.removeItem(at: tempURL)
+        try? FileManager.default.removeItem(at: rawAttachmentURL)
+        NSLog("[PhotoCapture] applyFilterToVideo ok: %@ → %@ (filter=%@)",
+              rawAttachmentURL.absoluteString, stored.absoluteString, filter.displayName)
+        return stored
     }
 
     /// Copy the raw cache .mov into AttachmentStorage so it

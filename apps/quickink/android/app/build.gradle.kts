@@ -334,6 +334,13 @@ dependencies {
     implementation(libs.camerax.view)
     implementation(libs.camerax.video)
 
+    // Media3 Transformer + Effect — drives the post-record video
+    // filter pass for QuickInk's Photo-mode hold-to-record clips.
+    // See `PhotoCaptureSurface.applyFilterToVideo` for usage.
+    implementation(libs.media3.transformer)
+    implementation(libs.media3.effect)
+    implementation(libs.media3.common)
+
     // commons-suncalc — pure-JVM sunrise/sunset/twilight calculator.
     // Drives the Calendar feature's Rahu Kala + sunrise/sunset rows
     // on the per-day panchanga card. Same dep Releaf carries; the

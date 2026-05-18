@@ -100,6 +100,13 @@ haze                 = "1.5.3"
 # modules. 1.4.x is the current stable, paired with `view` 1.4.x for
 # the Compose-interop PreviewView.
 camerax              = "1.4.0"
+# AndroidX Media3 — Transformer + Effect for the post-record video
+# filter pass (QuickInk Photo-mode hold-to-record clips). Transformer
+# wraps MediaCodec/MediaMuxer with a clean Effects pipeline; the
+# Effect artifact ships RgbMatrix (the 4x4 column-major GL color
+# matrix we use to bake the chip strip's filter into the .mp4). Only
+# pulled in by `:apps:quickink` since no other module records video.
+media3               = "1.4.1"
 
 [plugins]
 android-application  = { id = "com.android.application",                     version.ref = "agp" }
@@ -231,3 +238,12 @@ camerax-view      = { module = "androidx.camera:camera-view",      version.ref =
 # so we can write .mp4 to AttachmentStorage and then strip the audio
 # track for voice-note transcription downstream.
 camerax-video     = { module = "androidx.camera:camera-video",     version.ref = "camerax" }
+
+# Media3 Transformer + Effect — used by `applyFilterToVideo` in
+# PhotoCaptureSurface to bake the active color filter (Sepia / B&W /
+# Cool) into the recorded .mp4 via a `RgbMatrix` effect. Common is
+# the shared types layer the other two depend on transitively, but
+# we declare it explicitly to keep the imports honest.
+media3-transformer = { module = "androidx.media3:media3-transformer", version.ref = "media3" }
+media3-effect      = { module = "androidx.media3:media3-effect",      version.ref = "media3" }
+media3-common      = { module = "androidx.media3:media3-common",      version.ref = "media3" }

@@ -49,14 +49,17 @@
  * re-tinted per chip via Compose [ColorFilter.colorMatrix].
  * Tap a chip → it's selected and the strip collapses again.
  *
- * The selection drives both the main live preview (via a
- * Compose [Canvas] overlay with an HSL [BlendMode] against the
+ * The selection drives the main live preview (via a Compose
+ * [Canvas] overlay with an HSL [BlendMode] against the
  * COMPATIBLE-mode [PreviewView]'s TextureView pixels — no per-
- * frame Bitmap copy) and the captured still (via
- * [android.graphics.ColorMatrix] applied to the saved Bitmap
- * before the JPEG re-encode). Video recording always writes raw
- * frames; the strip + preview filter are both suppressed while
- * recording so the user can see what's actually being saved.
+ * frame Bitmap copy) AND every saved artifact: the captured
+ * still (via [android.graphics.ColorMatrix] applied to the
+ * Bitmap before the JPEG re-encode) and the recorded video
+ * (via a Media3 [Transformer] post-process with an [RgbMatrix]
+ * effect that bakes the same matrix into every frame of the
+ * `.mp4`, audio passed through untouched). The chip strip is
+ * hidden while recording so the user can't change filter mid-
+ * take — the post-process snapshot is taken once at Finalize.
  * See [PhotoFilter] for the per-case overlay / matrix mapping.
  *
  * After capture (still OR video), the surface lands on the same
@@ -117,6 +120,16 @@ import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
+import androidx.core.net.toUri
+import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.RgbMatrix
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.Effects
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.Transformer
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -197,8 +210,10 @@ import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 import java.io.File
 import java.nio.ByteBuffer
 import java.util.concurrent.ExecutorService
@@ -327,6 +342,112 @@ private fun applyFilterToBitmap(source: Bitmap, filter: PhotoFilter): Bitmap {
     }
     AndroidCanvas(out).drawBitmap(source, 0f, 0f, paint)
     return out
+}
+
+/**
+ * Convert our 4x5 row-major Android ColorMatrix into the 4x4
+ * column-major float[16] format GL shaders (and therefore
+ * Media3's [RgbMatrix]) expect. We drop the 5th column entirely
+ * because all of [PhotoFilter]'s `captureMatrix` values use
+ * zero offsets — purely linear transforms, no constant
+ * addition. The transpose folds row-major rows into column-
+ * major columns: row 0 (R coefficients) becomes the first
+ * element of each column, row 1 (G) the second, etc.
+ *
+ * The shader then computes `result = M * vec4(r, g, b, a)`
+ * where M is read column-major, so each output channel is
+ * dot(M.column, vec4(r,g,b,a)) — equivalent to the row-major
+ * dot we get from ColorMatrixColorFilter on the still path.
+ */
+private fun FloatArray.toRgbMatrix4x4ColumnMajor(): FloatArray = floatArrayOf(
+    // column 0: r0 g0 b0 a0
+    this[0], this[5], this[10], this[15],
+    // column 1: r1 g1 b1 a1
+    this[1], this[6], this[11], this[16],
+    // column 2: r2 g2 b2 a2
+    this[2], this[7], this[12], this[17],
+    // column 3: r3 g3 b3 a3
+    this[3], this[8], this[13], this[18],
+)
+
+/**
+ * Re-encode [sourceFile] with [filter] baked into every video
+ * frame via a Media3 [Transformer] + [RgbMatrix] effect, writing
+ * to [outputFile]. Returns true on success; false on any error
+ * (the caller is expected to fall back to the raw source on
+ * failure so the user still has their clip).
+ *
+ * Audio is copied through unchanged — Effects.audioProcessors is
+ * empty, so the audio track just goes through Transformer's
+ * default passthrough path. That keeps the voice-note transcript
+ * pipeline downstream identical regardless of filter.
+ *
+ * Transformer requires its `start()` call (and the listener
+ * dispatch) to happen on a thread with a Looper, so the whole
+ * suspending region runs on [Dispatchers.Main]. Encoding itself
+ * happens on Transformer's internal worker threads — Main is
+ * only used for orchestration / callbacks.
+ */
+@OptIn(UnstableApi::class)
+private suspend fun applyFilterToVideo(
+    context: Context,
+    sourceFile: File,
+    filter: PhotoFilter,
+    outputFile: File,
+): Boolean {
+    val matrix4x4 = filter.captureMatrix?.toRgbMatrix4x4ColumnMajor() ?: return false
+    return withContext(Dispatchers.Main) {
+        suspendCancellableCoroutine { cont ->
+            val rgbMatrix = object : RgbMatrix {
+                // Media3 1.4 renamed the interface method from
+                // `getRgbMatrix` (older betas) to `getMatrix` —
+                // override the current name.
+                override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray =
+                    matrix4x4
+            }
+            val editedItem = EditedMediaItem.Builder(MediaItem.fromUri(sourceFile.toUri()))
+                .setEffects(Effects(/* audioProcessors = */ emptyList(), listOf(rgbMatrix)))
+                .build()
+            val transformer = Transformer.Builder(context)
+                .addListener(object : Transformer.Listener {
+                    override fun onCompleted(
+                        composition: Composition,
+                        exportResult: ExportResult,
+                    ) {
+                        if (cont.isActive) cont.resume(true)
+                    }
+
+                    override fun onError(
+                        composition: Composition,
+                        exportResult: ExportResult,
+                        exportException: ExportException,
+                    ) {
+                        android.util.Log.w(
+                            "PhotoCapture",
+                            "applyFilterToVideo Transformer error",
+                            exportException,
+                        )
+                        if (cont.isActive) cont.resume(false)
+                    }
+                })
+                .build()
+            // `cancel()` is the supported way to abort an in-
+            // flight Transformer (release would race the worker
+            // threads). Safe to call even if the listener already
+            // resumed `cont` — we only check `isActive` before
+            // resuming, and `cancel` after is a no-op for the
+            // coroutine.
+            cont.invokeOnCancellation {
+                runCatching { transformer.cancel() }
+            }
+            runCatching {
+                transformer.start(editedItem, outputFile.absolutePath)
+            }.onFailure {
+                android.util.Log.w("PhotoCapture", "applyFilterToVideo start() threw", it)
+                if (cont.isActive) cont.resume(false)
+            }
+        }
+    }
 }
 
 /**
@@ -667,17 +788,16 @@ private fun ActivePhotoSurface(
                             },
                             onRelease = { previewViewRef = null },
                         )
-                        // Live-preview filter overlay. Suppressed
-                        // only during recording — video captures
-                        // raw and we want the preview to match. We
-                        // intentionally KEEP the overlay on through
-                        // Capturing / Processing too so the user
-                        // doesn't see the filter blink off the
-                        // instant they tap the shutter (the frame
-                        // they release on should look like the
-                        // frame they were composing).
-                        val showFilter = state !is PhotoUiState.Recording &&
-                            activeFilter != PhotoFilter.None
+                        // Live-preview filter overlay. Stays on
+                        // through Recording / Capturing / Processing
+                        // — the recorded `.mp4` is post-processed
+                        // by `applyFilterToVideo` to bake in the
+                        // same matrix, so the preview ≈ the saved
+                        // video. The chip strip is still hidden
+                        // mid-recording (we snapshot `activeFilter`
+                        // at Finalize and changing it during a take
+                        // would mismatch), only the overlay stays.
+                        val showFilter = activeFilter != PhotoFilter.None
                         if (showFilter) {
                             val color = activeFilter.overlayColor
                             val blend = activeFilter.overlayBlendMode
@@ -828,6 +948,7 @@ private fun ActivePhotoSurface(
                                         "video recording finalized — ${file.length()}B at ${file.absolutePath}",
                                     )
                                     uiState = PhotoUiState.Processing
+                                    val filterAtFinalize = activeFilter
                                     processingScope.launch {
                                         // Note: pass the file through verbatim
                                         // so `processVideoBuffer` can extract
@@ -845,13 +966,66 @@ private fun ActivePhotoSurface(
                                         // (processed == null) clean up here.
                                         if (processed == null) {
                                             file.delete()
+                                            withContext(Dispatchers.Main) {
+                                                uiState = PhotoUiState.Preview
+                                            }
+                                            return@launch
+                                        }
+                                        // Bake the active filter into the
+                                        // recorded video + first frame so
+                                        // commit() persists artifacts that
+                                        // match what the user was seeing in
+                                        // the live preview. Falls back to
+                                        // the raw buffer if the Transformer
+                                        // pass errors — the user still gets
+                                        // their clip, just unfiltered.
+                                        val finalBuffer = if (filterAtFinalize != PhotoFilter.None) {
+                                            val filteredVideoFile = File(
+                                                processed.videoFile.parentFile,
+                                                "filtered-${processed.videoFile.name}",
+                                            )
+                                            filteredVideoFile.delete()
+                                            val ok = applyFilterToVideo(
+                                                context    = context,
+                                                sourceFile = processed.videoFile,
+                                                filter     = filterAtFinalize,
+                                                outputFile = filteredVideoFile,
+                                            )
+                                            val finalVideo = if (ok) {
+                                                processed.videoFile.delete()
+                                                filteredVideoFile
+                                            } else {
+                                                filteredVideoFile.delete()
+                                                processed.videoFile
+                                            }
+                                            // Re-encode the first frame
+                                            // JPEG with the same matrix so
+                                            // the captured-preview tracks
+                                            // the saved video.
+                                            val filteredImage = withContext(Dispatchers.Default) {
+                                                applyFilterToBitmap(processed.image, filterAtFinalize)
+                                            }
+                                            withContext(Dispatchers.IO) {
+                                                processed.file.outputStream().use { out ->
+                                                    filteredImage.compress(
+                                                        Bitmap.CompressFormat.JPEG,
+                                                        92,
+                                                        out,
+                                                    )
+                                                }
+                                            }
+                                            CapturedBuffer.Video(
+                                                image      = filteredImage,
+                                                file       = processed.file,
+                                                videoFile  = finalVideo,
+                                                audioFile  = processed.audioFile,
+                                                durationMs = processed.durationMs,
+                                            )
+                                        } else {
+                                            processed
                                         }
                                         withContext(Dispatchers.Main) {
-                                            uiState = if (processed != null) {
-                                                PhotoUiState.Captured(processed)
-                                            } else {
-                                                PhotoUiState.Preview
-                                            }
+                                            uiState = PhotoUiState.Captured(finalBuffer)
                                         }
                                     }
                                 }
