@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Subtitles
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -716,10 +718,11 @@ private fun TranscriptStrip(
     val type = LocalQuickInkTypography.current
     val hasTranscript = !transcript.isNullOrBlank()
     val hasReason = unavailableReason != null
-    // Only surface the model picker when there are at least two
-    // variants on disk — a single-model case offers no real choice
-    // and the dropdown would feel like dead chrome.
-    val canPickModel = availableModels.size >= 2
+    // Always surface the picker — every menu entry is a real choice
+    // now that un-downloaded variants are listed with their fetch
+    // size and an extra-tap confirm. The "Use default" entry stays
+    // a one-tap path to the global Settings pick.
+    val canPickModel = true
     // When a transcribe pass is in flight after a re-tap, keep the
     // existing transcript visible (so the user can compare) and
     // show the spinner inside the Try-again pill instead of blanking
@@ -878,16 +881,22 @@ private fun TranscriptStrip(
 }
 
 /**
- * Coral pill that triggers transcription. On tap, either:
- *   - directly invokes [onTranscribe] with `null` (use the global
- *     Settings pick) when only one Whisper variant is on disk —
- *     the dropdown would have a single item and feel pointless, or
- *   - opens a dropdown menu listing every downloaded variant so the
- *     user can pick a different one for this specific clip.
+ * Coral pill that triggers transcription. The dropdown menu lists
+ * all four Whisper variants regardless of whether they're already
+ * on disk:
+ *   - Downloaded entries tap-through directly to transcribe.
+ *   - Un-downloaded entries show "~XXX MB download" inline and
+ *     trip an `AlertDialog` confirm before the fetch kicks off, so
+ *     the user never accidentally pulls 1.5 GB from a card-level
+ *     affordance. The download itself rides the existing process-
+ *     scope path (modal + progress bar at the MainShell root).
  *
- * "Default (<name>)" is always the first menu entry so the user
- * keeps a one-tap path to the global pick even with the picker
- * surfaced.
+ * "Use default" stays at the top of the menu so the global Settings
+ * pick is always one tap away.
+ *
+ * The leading icon area also doubles as the in-flight indicator —
+ * when [isPending] is true the pill becomes non-clickable and the
+ * icon slot shows a small CircularProgressIndicator instead.
  */
 @Composable
 private fun TranscribePill(
@@ -900,6 +909,10 @@ private fun TranscribePill(
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
     var menuOpen by remember { mutableStateOf(false) }
+    var pendingDownloadConfirm by remember { mutableStateOf<WhisperModel?>(null) }
+    val downloadedIds = remember(availableModels) {
+        availableModels.map { it.id }.toSet()
+    }
 
     Box {
         Row(
@@ -956,15 +969,29 @@ private fun TranscribePill(
                         onTranscribe(null)
                     },
                 )
-                for (model in availableModels) {
+                for (model in WhisperModel.values()) {
+                    val downloaded = model.id in downloadedIds
                     DropdownMenuItem(
                         text = {
                             Column {
-                                Text(
-                                    text  = "${model.displayName}  ·  ~${formatWhisperSize(model.approxSizeMb)}",
-                                    style = type.body,
-                                    color = colors.ink,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text  = model.displayName,
+                                        style = type.body,
+                                        color = colors.ink,
+                                    )
+                                    Spacer(Modifier.width(QuickInkSpacing.s2))
+                                    val sizeTag = if (downloaded) {
+                                        "~${formatWhisperSize(model.approxSizeMb)}"
+                                    } else {
+                                        "~${formatWhisperSize(model.approxSizeMb)} download"
+                                    }
+                                    Text(
+                                        text  = sizeTag,
+                                        style = type.meta,
+                                        color = if (downloaded) colors.inkSoft else colors.accent,
+                                    )
+                                }
                                 Text(
                                     text  = model.blurb,
                                     style = type.meta,
@@ -974,13 +1001,61 @@ private fun TranscribePill(
                         },
                         onClick = {
                             menuOpen = false
-                            onTranscribe(model)
+                            if (downloaded) {
+                                onTranscribe(model)
+                            } else {
+                                pendingDownloadConfirm = model
+                            }
                         },
                     )
                 }
             }
         }
     }
+
+    val toConfirm = pendingDownloadConfirm
+    if (toConfirm != null) {
+        WhisperDownloadConfirmDialog(
+            model     = toConfirm,
+            onConfirm = {
+                pendingDownloadConfirm = null
+                onTranscribe(toConfirm)
+            },
+            onDismiss = { pendingDownloadConfirm = null },
+        )
+    }
+}
+
+@Composable
+private fun WhisperDownloadConfirmDialog(
+    model: WhisperModel,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "Download ${model.displayName} model?") },
+        text  = {
+            Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+                Text(
+                    text = "One-time download (~${formatWhisperSize(model.approxSizeMb)}). " +
+                        "We'll start it on this voice note and transcribe with " +
+                        "${model.displayName} as soon as it finishes.",
+                )
+                Text(text = model.blurb)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(text = "Download & transcribe")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = "Cancel")
+            }
+        },
+    )
 }
 
 private fun formatWhisperSize(approxMb: Int): String =
