@@ -7,13 +7,18 @@
  *
  * Two back-ends, dispatched at call time:
  *
- *   1. sherpa-onnx (preferred), whisper-base int8 multilingual. ONNX
- *      Runtime + sherpa-onnx JNI ship as ~34MB of native libs per ABI.
- *      The model itself (~165MB) downloads on first use into the app's
- *      files dir. Multilingual: supports English + every Whisper
- *      target language (Hindi, Kannada, Tamil, …) — chosen at call
- *      time from the user's `profile_settings.transcription_languages`
- *      allowlist.
+ *   1. sherpa-onnx (preferred), whisper-small int8 multilingual.
+ *      ONNX Runtime + sherpa-onnx JNI ship as ~34 MB of native libs
+ *      per ABI. The model itself (~500 MB) downloads on first use
+ *      into the app's files dir. Multilingual: supports English +
+ *      every Whisper target language (Hindi, Kannada, Tamil, …) —
+ *      chosen at call time from the user's
+ *      `profile_settings.transcription_languages` allowlist.
+ *      `small` is a deliberate step up from `base` (~165 MB) — base
+ *      produced empty transcripts on Kannada audio because Whisper's
+ *      lower-resource Indian-language support degrades quickly at
+ *      smaller model sizes. Trade-off: ~3× inference time and a
+ *      heavier first-run download.
  *
  *   2. ML Kit GenAI Speech Recognition (fallback, API 31+). Uses
  *      AICore / Gemini Nano on supported devices. No model bundle in
@@ -28,9 +33,11 @@
  * mismatch (re-transcribing in the user's primary on miss is a
  * deferred enhancement).
  *
- * On upgrade from the old `tiny.en` English-only model, the old cache
- * directory is wiped lazily on first transcribe attempt so the user
- * reclaims the ~98 MB.
+ * Migration: on upgrade we lazily wipe both the legacy `tiny.en`
+ * (English-only, ~98 MB) and `whisper-base` (multilingual but too
+ * weak for Indian languages, ~165 MB) model dirs on first
+ * transcribe — reclaims ~263 MB combined for users upgrading from
+ * either prior build.
  */
 
 package app.quickink.mobile.data.voicenote
@@ -94,10 +101,11 @@ object SpeechTranscriber {
             return@withContext TranscribeResult.Failure("Audio file missing")
         }
 
-        // Lazy one-time cleanup of the pre-multilingual tiny.en model
-        // dir. Reclaims ~98 MB for users upgrading from the English-only
-        // build. Cheap no-op on fresh installs.
-        runCatching { deleteLegacyTinyEnIfPresent(context) }
+        // Lazy one-time cleanup of legacy model dirs. Reclaims
+        // ~98 MB (tiny.en) and ~165 MB (whisper-base) for users
+        // upgrading through the model-size progression. Cheap
+        // no-op on fresh installs.
+        runCatching { deleteLegacyModelDirsIfPresent(context) }
 
         val allowlist = resolveAllowlistCodes(context, userId)
 
@@ -162,11 +170,13 @@ object SpeechTranscriber {
         }
     }
 
-    private fun deleteLegacyTinyEnIfPresent(context: Context) {
-        val legacy = File(context.filesDir, "sherpa-onnx-whisper-tiny.en")
-        if (legacy.exists()) {
-            Log.d(TAG, "Removing legacy tiny.en model dir to reclaim disk")
-            legacy.deleteRecursively()
+    private fun deleteLegacyModelDirsIfPresent(context: Context) {
+        for (name in arrayOf("sherpa-onnx-whisper-tiny.en", "sherpa-onnx-whisper-base")) {
+            val legacy = File(context.filesDir, name)
+            if (legacy.exists()) {
+                Log.d(TAG, "Removing legacy model dir '$name' to reclaim disk")
+                legacy.deleteRecursively()
+            }
         }
     }
 
@@ -363,17 +373,20 @@ object SpeechTranscriber {
 
     // ========================= sherpa-onnx =======================
 
-    // Multilingual Whisper-base int8. ~165 MB extracted, supports all
-    // 99 Whisper target languages. Filenames inside the tar.bz2 use
-    // the `base-*` prefix (vs. `tiny.en-*` for the legacy English-
-    // only variant) — see sherpa-onnx releases asr-models page.
-    private const val SHERPA_MODEL_NAME = "sherpa-onnx-whisper-base"
+    // Multilingual Whisper-small int8. ~500 MB extracted, supports
+    // all 99 Whisper target languages. Filenames inside the tar.bz2
+    // use the `small-*` prefix — see sherpa-onnx releases asr-models
+    // page. `small` is a deliberate step up from `base` (~165 MB) —
+    // base produced empty transcripts on Kannada audio because
+    // Whisper's lower-resource Indian-language support degrades
+    // quickly at smaller model sizes.
+    private const val SHERPA_MODEL_NAME = "sherpa-onnx-whisper-small"
     private const val SHERPA_MODEL_URL =
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/" +
-            "sherpa-onnx-whisper-base.tar.bz2"
-    private const val SHERPA_ENCODER = "base-encoder.int8.onnx"
-    private const val SHERPA_DECODER = "base-decoder.int8.onnx"
-    private const val SHERPA_TOKENS  = "base-tokens.txt"
+            "sherpa-onnx-whisper-small.tar.bz2"
+    private const val SHERPA_ENCODER = "small-encoder.int8.onnx"
+    private const val SHERPA_DECODER = "small-decoder.int8.onnx"
+    private const val SHERPA_TOKENS  = "small-tokens.txt"
 
     private const val SAMPLE_RATE_HZ = 16_000
 
