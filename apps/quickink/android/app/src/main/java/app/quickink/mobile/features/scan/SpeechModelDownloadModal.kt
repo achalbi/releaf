@@ -60,8 +60,50 @@ fun SpeechModelDownloadModal() {
     val state by stateFlow.collectAsState(initial = ModelDownloadState.Idle)
     when (val s = state) {
         is ModelDownloadState.Downloading -> DownloadingDialog(s)
+        is ModelDownloadState.Extracting  -> ExtractingDialog()
         is ModelDownloadState.Failed      -> FailedDialog(s)
         is ModelDownloadState.Idle        -> Unit  // nothing to render
+    }
+}
+
+@Composable
+private fun ExtractingDialog() {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    Dialog(
+        onDismissRequest = { /* non-cancellable */ },
+        properties = DialogProperties(
+            dismissOnBackPress    = false,
+            dismissOnClickOutside = false,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(QuickInkRadius.lg))
+                .background(colors.surface)
+                .padding(QuickInkSpacing.s5),
+        ) {
+            Text(
+                text  = "Preparing transcription model",
+                style = type.heading,
+                color = colors.ink,
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s2))
+            Text(
+                text  = "Decompressing the archive into your device. This can take a " +
+                        "minute on a 500 MB+ model — the CPU does most of the work " +
+                        "here, no more network traffic.",
+                style = type.body,
+                color = colors.inkSoft,
+            )
+            Spacer(Modifier.size(QuickInkSpacing.s4))
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth(),
+                color    = colors.accent,
+            )
+        }
     }
 }
 

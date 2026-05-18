@@ -89,42 +89,51 @@ class WhisperModelDownloadWorker(
             Log.w(TAG, "setForeground rejected; running as bg worker", foregroundOutcome.exceptionOrNull())
         }
 
-        // The download's `onProgress` callback fires from inside a
-        // synchronous read loop, so it can't call `setProgress` or
+        // The download + extract callbacks fire from inside
+        // synchronous I/O loops, so they can't call `setProgress` /
         // `setForeground` directly (both are `suspend`). Bridge via
-        // a StateFlow that the read loop writes into and a sibling
-        // coroutine `sample`s from at ~5 Hz.
+        // a single StateFlow that the read loop writes into and a
+        // sibling coroutine `sample`s from at ~5 Hz.
         //
         // `sample` (NOT `debounce`): a 256 KB chunk lands every
-        // ~50 ms on a fast connection, so `debounce(200)` would
-        // sit in its quiet-window check forever and never emit —
-        // the visible bug being "Starting download…" sticks
-        // because setProgress is never called. `sample(200)` emits
-        // the most recent value at fixed intervals regardless of
+        // ~50 ms on a fast connection, so `debounce(200)` sits in
+        // its quiet-window check forever and never emits — the
+        // visible bug being "Starting download…" sticks because
+        // setProgress is never called. `sample(200)` emits the
+        // most recent value at fixed intervals regardless of
         // upstream cadence.
-        val progressBeats = MutableStateFlow(0L to 0L)
+        val snapshots = MutableStateFlow(WorkSnapshot.initial())
         val mirrorJob = launch {
-            progressBeats
+            snapshots
                 .sample(200L)
-                .collectLatest { (bytes, total) ->
-                    setProgress(
-                        workDataOf(
-                            KEY_PROGRESS_BYTES to bytes,
-                            KEY_PROGRESS_TOTAL to total,
+                .collectLatest { snap ->
+                    val data = when (snap.phase) {
+                        PHASE_DOWNLOAD -> workDataOf(
+                            KEY_PHASE to PHASE_DOWNLOAD,
+                            KEY_PROGRESS_BYTES to snap.bytes,
+                            KEY_PROGRESS_TOTAL to snap.total,
                         )
-                    )
-                    runCatching { setForeground(makeForegroundInfo(model, bytes, total)) }
+                        PHASE_EXTRACT -> workDataOf(KEY_PHASE to PHASE_EXTRACT)
+                        else -> workDataOf()
+                    }
+                    setProgress(data)
+                    runCatching { setForeground(makeForegroundInfo(model, snap)) }
                 }
         }
 
         try {
             withContext(Dispatchers.IO) {
                 SpeechTranscriber.runModelDownload(
-                    context = applicationContext,
-                    model   = model,
-                ) { absolute, total ->
-                    progressBeats.value = absolute to total
-                }
+                    context            = applicationContext,
+                    model              = model,
+                    onDownloadProgress = { absolute, total ->
+                        snapshots.value = WorkSnapshot(PHASE_DOWNLOAD, absolute, total)
+                    },
+                    onExtractStart     = {
+                        Log.i(TAG, "extract phase start: flipping notification to indeterminate")
+                        snapshots.value = WorkSnapshot(PHASE_EXTRACT, 0L, 0L)
+                    },
+                )
             }
             mirrorJob.cancel()
             Log.i(TAG, "doWork success: model=${model.id}")
@@ -144,10 +153,27 @@ class WhisperModelDownloadWorker(
         }
     }
 
+    /** Snapshot of phase + byte counts the mirror coroutine pumps
+     *  into `setProgress` + the foreground notification. */
+    private data class WorkSnapshot(
+        val phase: String,
+        val bytes: Long,
+        val total: Long,
+    ) {
+        companion object {
+            fun initial(): WorkSnapshot = WorkSnapshot(PHASE_DOWNLOAD, 0L, 0L)
+        }
+    }
+
+    private fun makeForegroundInfo(model: WhisperModel, snap: WorkSnapshot): ForegroundInfo {
+        return makeForegroundInfo(model, snap.bytes, snap.total, snap.phase)
+    }
+
     private fun makeForegroundInfo(
         model: WhisperModel,
         bytesDownloaded: Long,
         totalBytes: Long,
+        phase: String = PHASE_DOWNLOAD,
     ): ForegroundInfo {
         ensureNotificationChannel(applicationContext)
 
@@ -163,9 +189,13 @@ class WhisperModelDownloadWorker(
             )
         }
 
+        val title = when (phase) {
+            PHASE_EXTRACT -> "Preparing ${model.displayName} transcription model"
+            else          -> "Downloading ${model.displayName} transcription model"
+        }
         val builder = NotificationCompat.Builder(applicationContext, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("Downloading ${model.displayName} transcription model")
+            .setContentTitle(title)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
             .setSilent(true)
@@ -173,7 +203,11 @@ class WhisperModelDownloadWorker(
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(pendingTap)
 
-        if (totalBytes > 0) {
+        if (phase == PHASE_EXTRACT) {
+            builder
+                .setContentText("Decompressing the archive — this can take a minute.")
+                .setProgress(0, 0, /* indeterminate = */ true)
+        } else if (totalBytes > 0) {
             val percent = ((bytesDownloaded * 100L) / totalBytes)
                 .coerceIn(0L, 100L)
                 .toInt()
@@ -210,7 +244,12 @@ class WhisperModelDownloadWorker(
         const val KEY_MODEL_ID = "model_id"
         const val KEY_PROGRESS_BYTES = "bytes"
         const val KEY_PROGRESS_TOTAL = "total"
+        const val KEY_PHASE = "phase"
         const val KEY_ERROR_MESSAGE = "error"
+
+        /** Phase values written to `WorkInfo.progress` under [KEY_PHASE]. */
+        const val PHASE_DOWNLOAD = "download"
+        const val PHASE_EXTRACT  = "extract"
 
         private const val NOTIFICATION_CHANNEL_ID = "quickink.whisper-download"
         private const val NOTIFICATION_CHANNEL_NAME = "Transcription model downloads"
@@ -289,5 +328,7 @@ class WhisperModelDownloadWorker(
         fun errorFor(info: WorkInfo): String? =
             info.outputData.getString(KEY_ERROR_MESSAGE)
                 ?: if (info.state == WorkInfo.State.FAILED) "Download failed" else null
+        fun isExtracting(info: WorkInfo): Boolean =
+            info.progress.getString(KEY_PHASE) == PHASE_EXTRACT
     }
 }

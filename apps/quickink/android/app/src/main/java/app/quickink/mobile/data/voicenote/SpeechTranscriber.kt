@@ -684,24 +684,34 @@ object SpeechTranscriber {
     }
 
     /**
-     * Worker-facing entry point — runs the actual disk-write +
-     * extract pipeline synchronously, calling [onProgress] every
-     * ~256 KB so the worker can mirror bytes to `setProgress` and
-     * the foreground-service notification. Throws on any failure;
-     * `<modelDir>.partial` is preserved on failure so a retry
-     * resumes via HTTP `Range:`. Internal to the module, but
-     * `internal` so the worker class (different package) can call
-     * it without exposing it to library consumers.
+     * Worker-facing entry point. Runs the disk-write + extract
+     * pipeline as two named phases so the worker can surface
+     * progress (Download phase) and the long bzip2 decompression
+     * (Extract phase) separately. [onDownloadProgress] fires every
+     * ~256 KB during phase 1; [onExtractStart] fires once before
+     * phase 2 starts and is the worker's cue to flip its
+     * notification + WorkInfo `progress` data to the Extracting
+     * state.
+     *
+     * Throws on failure; `<modelDir>.partial` is preserved on a
+     * download-phase failure so a retry resumes via HTTP `Range:`.
      */
     internal fun runModelDownload(
         context: Context,
         model: WhisperModel,
-        onProgress: (bytesDownloaded: Long, totalBytes: Long) -> Unit,
+        onDownloadProgress: (bytesDownloaded: Long, totalBytes: Long) -> Unit,
+        onExtractStart: () -> Unit,
     ) {
         val parentDir = context.filesDir
         val modelDir = File(parentDir, model.sherpaDirName)
         if (isSherpaModelPresent(modelDir, model)) return
-        downloadAndExtractSherpaModel(parentDir, modelDir, model, onProgress)
+        downloadAndExtractSherpaModel(
+            parentDir          = parentDir,
+            modelDir           = modelDir,
+            model              = model,
+            onDownloadProgress = onDownloadProgress,
+            onExtractStart     = onExtractStart,
+        )
     }
 
     /** Container for the bits of [OfflineRecognizerResult] we care about. */
@@ -731,7 +741,8 @@ object SpeechTranscriber {
         parentDir: File,
         modelDir: File,
         model: WhisperModel,
-        onProgress: (absoluteBytes: Long, totalBytes: Long) -> Unit,
+        onDownloadProgress: (absoluteBytes: Long, totalBytes: Long) -> Unit,
+        onExtractStart: () -> Unit,
     ) {
         Log.i(TAG, "downloadAndExtract start: model=${model.id} url=${model.downloadUrl}")
         val partial = File(parentDir, "${model.sherpaDirName}.partial")
@@ -739,23 +750,33 @@ object SpeechTranscriber {
         // Phase 1 — pull bytes into the `.partial` staging file.
         // Failure leaves whatever bytes landed on disk so the next
         // enqueue resumes via HTTP `Range:`.
-        downloadToPartial(partial, model, onProgress)
+        downloadToPartial(partial, model, onDownloadProgress)
         Log.i(
             TAG,
             "download phase complete: model=${model.id} partialBytes=${partial.length()}",
         )
 
-        // Phase 2 — extract the fully-downloaded archive. Failure
-        // here means the payload itself is corrupt; wipe both
-        // partial and the half-extracted dir so a retry re-fetches
-        // from scratch instead of appending bytes to a broken file.
+        // Phase 2 — extract the fully-downloaded archive. bzip2 is
+        // a stream codec, so we have to decompress the entire 500+
+        // MB tarball even though we only want three files out of it;
+        // on phone hardware that's 30 s – 3 min of single-threaded
+        // CPU. `onExtractStart` lets the worker flip its
+        // notification / WorkInfo phase to "Extracting" so the UI
+        // can show indeterminate progress instead of sitting at
+        // 100% looking hung.
         try {
             Log.i(TAG, "extract start: model=${model.id} partial=${partial.absolutePath}")
+            onExtractStart()
             if (modelDir.exists()) modelDir.deleteRecursively()
             modelDir.mkdirs()
+            val extractStartMs = System.currentTimeMillis()
             partial.inputStream().buffered().use { input ->
                 extractModelTarBz2(input, modelDir, model)
             }
+            Log.i(
+                TAG,
+                "extract complete: model=${model.id} dir=${modelDir.absolutePath} elapsed=${System.currentTimeMillis() - extractStartMs}ms",
+            )
         } catch (e: Exception) {
             Log.e(TAG, "extract failed: model=${model.id} message=${e.message}", e)
             modelDir.deleteRecursively()
@@ -764,7 +785,7 @@ object SpeechTranscriber {
         }
 
         partial.delete()
-        Log.i(TAG, "extract complete: model=${model.id} dir=${modelDir.absolutePath}")
+        Log.i(TAG, "downloadAndExtract done: model=${model.id}")
     }
 
     /**
@@ -990,17 +1011,25 @@ object SpeechTranscriber {
         val wanted = setOf(model.encoderFile, model.decoderFile, model.tokensFile)
         TarArchiveInputStream(BZip2CompressorInputStream(input)).use { tis ->
             var entry = tis.nextEntry
+            var entriesSeen = 0
             while (entry != null) {
                 if (!entry.isDirectory) {
                     val base = entry.name.substringAfterLast('/')
                     if (base in wanted) {
+                        val entryStartMs = System.currentTimeMillis()
                         File(modelDir, base).outputStream().use { out ->
                             tis.copyTo(out)
                         }
+                        Log.i(
+                            TAG,
+                            "extracted '$base' (${File(modelDir, base).length()} bytes) in ${System.currentTimeMillis() - entryStartMs}ms",
+                        )
                     }
                 }
+                entriesSeen++
                 entry = tis.nextEntry
             }
+            Log.i(TAG, "extract scanned $entriesSeen tar entries")
         }
     }
 

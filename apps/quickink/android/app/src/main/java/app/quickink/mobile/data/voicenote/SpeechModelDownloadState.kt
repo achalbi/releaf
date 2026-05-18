@@ -36,6 +36,16 @@ sealed interface ModelDownloadState {
         val totalBytes: Long,
     ) : ModelDownloadState
 
+    /**
+     * Bytes are fully on disk; the worker is now bzip2-decompressing
+     * the tar archive into per-file outputs. Decompression on a
+     * 500+ MB archive can take 30 s – 3 min of single-threaded CPU
+     * on phone hardware, and the user gets no feedback during it
+     * if we don't surface this state — the modal would otherwise
+     * sit at 100% and feel hung.
+     */
+    object Extracting : ModelDownloadState
+
     /** Last attempt ended in `WorkInfo.State.FAILED`. UI surfaces
      *  a dismissable failure modal; partial bytes stay on disk so a
      *  retry from the voice-note card resumes from where the fetch
@@ -82,6 +92,9 @@ object SpeechModelDownloadProgress {
                 it.state == WorkInfo.State.BLOCKED
         }
         if (active != null) {
+            if (WhisperModelDownloadWorker.isExtracting(active)) {
+                return ModelDownloadState.Extracting
+            }
             return ModelDownloadState.Downloading(
                 bytesDownloaded = WhisperModelDownloadWorker.progressFor(active),
                 totalBytes      = WhisperModelDownloadWorker.totalFor(active),
