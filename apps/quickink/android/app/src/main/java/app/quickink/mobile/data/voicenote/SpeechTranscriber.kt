@@ -588,19 +588,95 @@ object SpeechTranscriber {
             readTimeout = 300_000
             instanceFollowRedirects = true
         }
+        SpeechModelDownloadProgress.update(
+            ModelDownloadState.Downloading(bytesDownloaded = 0, totalBytes = 0)
+        )
         try {
             conn.connect()
             if (conn.responseCode !in 200..299) {
                 throw IOException("sherpa model HTTP ${conn.responseCode}")
             }
-            extractModelTarBz2(conn.inputStream.buffered(), modelDir)
+            // `contentLengthLong` may be -1 if the server omits the
+            // header (rare for GitHub releases). Coerce to 0 — the
+            // UI treats 0 as "indeterminate" and falls back to a
+            // spinning bar. `lastModified` etc. aren't needed; we
+            // never partial-resume, so a fresh download starts from
+            // scratch every time.
+            val totalBytes = conn.contentLengthLong.coerceAtLeast(0L)
+            SpeechModelDownloadProgress.update(
+                ModelDownloadState.Downloading(bytesDownloaded = 0, totalBytes = totalBytes)
+            )
+            val counting = ProgressTrackingInputStream(
+                delegate    = conn.inputStream,
+                totalBytes  = totalBytes,
+                onProgress  = { read, total ->
+                    SpeechModelDownloadProgress.update(
+                        ModelDownloadState.Downloading(bytesDownloaded = read, totalBytes = total)
+                    )
+                },
+            )
+            extractModelTarBz2(counting.buffered(), modelDir)
+            SpeechModelDownloadProgress.update(ModelDownloadState.Idle)
         } catch (e: Exception) {
             modelDir.deleteRecursively()
+            SpeechModelDownloadProgress.update(
+                ModelDownloadState.Failed(e.message ?: "Model download failed")
+            )
             throw e
         } finally {
             runCatching { conn.disconnect() }
         }
         Log.d(TAG, "sherpa model: extracted to ${modelDir.absolutePath}")
+    }
+
+    /**
+     * Pass-through `InputStream` that counts read bytes and posts
+     * progress to [SpeechModelDownloadProgress] at a coarse interval
+     * (~256 KB). The interval keeps the StateFlow from churning on
+     * every byte buffered by the underlying tar-bz2 decoder.
+     */
+    private class ProgressTrackingInputStream(
+        private val delegate: java.io.InputStream,
+        private val totalBytes: Long,
+        private val onProgress: (read: Long, total: Long) -> Unit,
+    ) : java.io.InputStream() {
+        private var bytesRead: Long = 0
+        private var lastReportedBytes: Long = 0
+        // 256 KB — frequent enough to feel live (a determinate bar
+        // ticks ~2× per second on a 1 MB/s connection) but rare
+        // enough that StateFlow consumers on the main thread don't
+        // pay for per-byte recompositions.
+        private val reportIntervalBytes: Long = 256L * 1024L
+
+        override fun read(): Int {
+            val b = delegate.read()
+            if (b >= 0) {
+                bytesRead++
+                maybeReport()
+            }
+            return b
+        }
+
+        override fun read(buf: ByteArray, off: Int, len: Int): Int {
+            val n = delegate.read(buf, off, len)
+            if (n > 0) {
+                bytesRead += n
+                maybeReport()
+            }
+            return n
+        }
+
+        override fun available(): Int = delegate.available()
+        override fun close() = delegate.close()
+
+        private fun maybeReport() {
+            if (bytesRead - lastReportedBytes >= reportIntervalBytes ||
+                (totalBytes > 0 && bytesRead >= totalBytes)
+            ) {
+                lastReportedBytes = bytesRead
+                onProgress(bytesRead, totalBytes)
+            }
+        }
     }
 
     private fun extractModelTarBz2(input: java.io.InputStream, modelDir: File) {

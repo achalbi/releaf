@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalContext
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkTimeBar
+import app.quickink.mobile.features.scan.SpeechModelDownloadModal
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -1069,5 +1070,13 @@ private fun MainShell(
                 showPhotoHint = !photoFabHintDismissed,
             )
         }
+
+        // Sherpa Whisper-small first-fetch progress modal. Renders
+        // when the user kicks off a transcribe pass that needs to
+        // download the ~500 MB model; auto-hides when the download
+        // is no longer in flight. Hosted at the MainShell root so a
+        // navigation away from the recording surface mid-download
+        // doesn't drop the surface.
+        SpeechModelDownloadModal()
     }   // closes outer Box
 }
