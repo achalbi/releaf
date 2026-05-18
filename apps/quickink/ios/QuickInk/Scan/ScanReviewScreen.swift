@@ -61,6 +61,38 @@ struct ScanReviewScreen: View {
     /// captureId change.
     @State private var suggestionsExpanded: Bool = false
 
+    // People + Places sections. The picker sheets handle commit on
+    // their own Done button; this screen only needs the user's full
+    // list (to look up names) and the set of currently-attached IDs
+    // (to render the chip strip + know what to highlight).
+    @State private var allPeople: [PersonEntity] = []
+    @State private var allLocations: [LocationEntity] = []
+    @State private var attachedPersonIds: Set<String> = []
+    @State private var attachedLocationIds: Set<String> = []
+    @State private var peopleCancellable: AnyCancellable? = nil
+    @State private var locationsCancellable: AnyCancellable? = nil
+    @State private var attachedPeopleCancellable: AnyCancellable? = nil
+    @State private var attachedLocationsCancellable: AnyCancellable? = nil
+    @State private var showPeoplePicker: Bool = false
+    @State private var showLocationPicker: Bool = false
+    // Capture lat/lon — read once per captureId; drives the
+    // distance-based place auto-attach below. Null when the capture
+    // landed without a location fix (offline, denied permission, etc).
+    @State private var captureLat: Double? = nil
+    @State private var captureLon: Double? = nil
+    // Locations the user has explicitly detached this session. Guards
+    // the auto-attach effect from re-attaching a place the user just
+    // removed because they didn't want it on this scan.
+    @State private var dismissedLocationIds: Set<String> = []
+    // Same guard for the "Me" auto-attach — a person the user
+    // explicitly detached this session must not be silently re-attached
+    // by the default-person effect.
+    @State private var dismissedPersonIds: Set<String> = []
+    /// Place auto-attach radius. 150m covers GPS jitter on a typical
+    /// urban fix; tighter than this misses across-the-street snaps,
+    /// looser starts grabbing neighbors.
+    private let autoAttachRadiusMeters: Double = 150
+
     /// Visible suggestion strip — proposals not currently attached.
     private var suggestedNames: [String] {
         let attached = Set(acceptedNames)
@@ -131,6 +163,10 @@ struct ScanReviewScreen: View {
                        inflightCaptureId != nil {
                         tagsSection
                     }
+                    if !isFailed, let cid = inflightCaptureId {
+                        peopleSection(captureId: cid)
+                        placesSection(captureId: cid)
+                    }
                     statusIndicator
                 }
                 .padding(.horizontal, QuickInkSpacing.s5)
@@ -178,6 +214,29 @@ struct ScanReviewScreen: View {
                         }
                     )
             }
+            if peopleCancellable == nil {
+                peopleCancellable = PersonRepository()
+                    .observe(userId: userId)
+                    .receive(on: DispatchQueue.main)
+                    .sink(
+                        receiveCompletion: { _ in },
+                        receiveValue: { rows in allPeople = rows }
+                    )
+            }
+            if locationsCancellable == nil {
+                locationsCancellable = LocationRepository()
+                    .observe(userId: userId)
+                    .receive(on: DispatchQueue.main)
+                    .sink(
+                        receiveCompletion: { _ in },
+                        receiveValue: { rows in allLocations = rows }
+                    )
+            }
+            if let cid = inflightCaptureId {
+                subscribeAttachedJoins(captureId: cid)
+                await refreshLocationAutoAttach(captureId: cid)
+                await refreshSelfAutoAttach(captureId: cid)
+            }
             await refreshSuggestions()
         }
         .onChange(of: inflightCaptureId) { newId in
@@ -186,6 +245,14 @@ struct ScanReviewScreen: View {
             suggestionsExpanded = false
             voiceTranscriptCount = 0
             voiceNotesCancellable?.cancel()
+            attachedPersonIds = []
+            attachedLocationIds = []
+            attachedPeopleCancellable?.cancel()
+            attachedLocationsCancellable?.cancel()
+            captureLat = nil
+            captureLon = nil
+            dismissedLocationIds = []
+            dismissedPersonIds = []
             if let cid = newId {
                 voiceNotesCancellable = VoiceNoteRepository()
                     .observeForCapture(cid)
@@ -198,8 +265,43 @@ struct ScanReviewScreen: View {
                                 .count
                         }
                     )
+                subscribeAttachedJoins(captureId: cid)
+                Task {
+                    await refreshLocationAutoAttach(captureId: cid)
+                    await refreshSelfAutoAttach(captureId: cid)
+                }
             }
             Task { await refreshSuggestions() }
+        }
+        .onChange(of: allLocations.count) { _ in
+            if let cid = inflightCaptureId {
+                Task { await refreshLocationAutoAttach(captureId: cid) }
+            }
+        }
+        .onChange(of: allPeople.count) { _ in
+            if let cid = inflightCaptureId {
+                Task { await refreshSelfAutoAttach(captureId: cid) }
+            }
+        }
+        .sheet(isPresented: $showPeoplePicker) {
+            if let cid = inflightCaptureId {
+                PeoplePickerSheet(
+                    userId:    userId,
+                    captureId: cid,
+                    onDismiss: { showPeoplePicker = false }
+                )
+                .presentationDetents([.large])
+            }
+        }
+        .sheet(isPresented: $showLocationPicker) {
+            if let cid = inflightCaptureId {
+                LocationPickerSheet(
+                    userId:    userId,
+                    captureId: cid,
+                    onDismiss: { showLocationPicker = false }
+                )
+                .presentationDetents([.large])
+            }
         }
         .onChange(of: recognitionProgress) { _ in Task { await refreshSuggestions() } }
         .onChange(of: voiceTranscriptCount) { _ in Task { await refreshSuggestions() } }
@@ -741,6 +843,278 @@ struct ScanReviewScreen: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Tag \(name)")
         .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
+    // MARK: - People + Places
+
+    /// All people in the user's namespace as inline toggle chips, with
+    /// attached chips rendered accent-filled. Tap toggles attach /
+    /// detach against the in-flight capture. The "+ ADD" header button
+    /// opens [PeoplePickerSheet] so the user can create a new person
+    /// from a typed name when the inline list doesn't have what they
+    /// want yet.
+    @ViewBuilder
+    private func peopleSection(captureId: String) -> some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+            HStack {
+                Text("PEOPLE")
+                    .font(QuickInkText.eyebrow)
+                    .tracking(QuickInkLetterSpacing.eyebrow)
+                    .foregroundStyle(QuickInkColors.muted)
+                Spacer()
+                Button(action: { showPeoplePicker = true }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("ADD PERSON")
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(1.2)
+                    }
+                    .foregroundStyle(QuickInkColors.accentDeep)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add person")
+            }
+            if allPeople.isEmpty {
+                Text("No people yet. Tap “Add person” to create one.")
+                    .font(.system(size: 12))
+                    .foregroundColor(QuickInkColors.muted)
+            } else {
+                ChipFlowLayout(spacing: 6) {
+                    ForEach(orderedPeople(), id: \.id) { person in
+                        entityToggleChip(
+                            name:     person.name,
+                            selected: attachedPersonIds.contains(person.id)
+                        ) {
+                            Task { await togglePerson(person, captureId: captureId) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// All places in the user's namespace as inline toggle chips,
+    /// mirroring [peopleSection]. Place auto-attach by capture lat/lon
+    /// runs alongside, so a place near the capture's GPS fix is
+    /// already filled-in by the time the user lands here.
+    @ViewBuilder
+    private func placesSection(captureId: String) -> some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+            HStack {
+                Text("PLACES")
+                    .font(QuickInkText.eyebrow)
+                    .tracking(QuickInkLetterSpacing.eyebrow)
+                    .foregroundStyle(QuickInkColors.muted)
+                Spacer()
+                Button(action: { showLocationPicker = true }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("ADD PLACE")
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(1.2)
+                    }
+                    .foregroundStyle(QuickInkColors.accentDeep)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add place")
+            }
+            if allLocations.isEmpty {
+                Text("No places yet. Tap “Add place” to create one.")
+                    .font(.system(size: 12))
+                    .foregroundColor(QuickInkColors.muted)
+            } else {
+                ChipFlowLayout(spacing: 6) {
+                    ForEach(orderedLocations(), id: \.id) { loc in
+                        entityToggleChip(
+                            name:     loc.name,
+                            selected: attachedLocationIds.contains(loc.id)
+                        ) {
+                            Task { await toggleLocation(loc, captureId: captureId) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Toggle chip mirroring [tagToggleChip] visually so the three
+    /// inline picker surfaces (tags, people, places) read as one
+    /// family. Filled-accent when selected, outlined otherwise.
+    @ViewBuilder
+    private func entityToggleChip(
+        name: String,
+        selected: Bool,
+        onTap: @escaping () -> Void
+    ) -> some View {
+        Button(action: onTap) {
+            Text(name)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundColor(
+                    selected
+                    ? QuickInkColors.textOnAccent
+                    : QuickInkColors.ink
+                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(selected ? QuickInkColors.accent : Color.white.opacity(0.85))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(
+                            selected
+                            ? QuickInkColors.accent
+                            : QuickInkColors.accent.opacity(0.25),
+                            lineWidth: 1
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(name)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
+    /// Attached-first ordering — keeps tapped chips at the head of the
+    /// strip so the user can see what's already linked at a glance.
+    /// Within each partition, walks `allPeople` so creation order
+    /// stays stable frame-to-frame.
+    private func orderedPeople() -> [PersonEntity] {
+        let selected   = allPeople.filter { attachedPersonIds.contains($0.id) }
+        let unselected = allPeople.filter { !attachedPersonIds.contains($0.id) }
+        return selected + unselected
+    }
+
+    private func orderedLocations() -> [LocationEntity] {
+        let selected   = allLocations.filter { attachedLocationIds.contains($0.id) }
+        let unselected = allLocations.filter { !attachedLocationIds.contains($0.id) }
+        return selected + unselected
+    }
+
+    private func togglePerson(_ person: PersonEntity, captureId: String) async {
+        let repo = PersonRepository()
+        if attachedPersonIds.contains(person.id) {
+            try? await repo.detachPerson(captureId: captureId, personId: person.id)
+            // Remember the explicit dismissal so the "Me" auto-attach
+            // doesn't put the same row back behind the user's back.
+            dismissedPersonIds.insert(person.id)
+        } else {
+            try? await repo.attachPerson(captureId: captureId, personId: person.id)
+            dismissedPersonIds.remove(person.id)
+        }
+    }
+
+    private func toggleLocation(_ loc: LocationEntity, captureId: String) async {
+        let repo = LocationRepository()
+        if attachedLocationIds.contains(loc.id) {
+            try? await repo.detachLocation(captureId: captureId, locationId: loc.id)
+            // Remember the explicit dismissal so the auto-attach
+            // effect doesn't reattach the same place behind the
+            // user's back on the next refresh.
+            dismissedLocationIds.insert(loc.id)
+        } else {
+            try? await repo.attachLocation(captureId: captureId, locationId: loc.id)
+            // Re-attach by deliberate user action clears the previous
+            // dismissal so the matcher treats this place as freshly
+            // desired going forward.
+            dismissedLocationIds.remove(loc.id)
+        }
+    }
+
+    /// Subscribes to the capture-scoped person/location join tables.
+    /// Called from `.task` on initial mount and from the captureId
+    /// `onChange` so the strip refreshes when a new in-flight capture
+    /// appears mid-flow.
+    private func subscribeAttachedJoins(captureId: String) {
+        attachedPeopleCancellable = PersonRepository()
+            .observePersonIds(captureId: captureId)
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { _ in },
+                receiveValue: { ids in attachedPersonIds = Set(ids) }
+            )
+        attachedLocationsCancellable = LocationRepository()
+            .observeLocationIds(captureId: captureId)
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { _ in },
+                receiveValue: { ids in attachedLocationIds = Set(ids) }
+            )
+    }
+
+    /// Auto-attach the seeded "Me" person to the in-flight capture
+    /// so the common case (a scan that's about the user themselves)
+    /// lands with one less tap. Idempotent: skips if "Me" was renamed
+    /// away, already attached, or explicitly detached this session.
+    /// Match is case-insensitive on the literal seed name.
+    private func refreshSelfAutoAttach(captureId: String) async {
+        guard let me = allPeople.first(where: { $0.name.caseInsensitiveCompare("Me") == .orderedSame }) else { return }
+        if attachedPersonIds.contains(me.id) { return }
+        if dismissedPersonIds.contains(me.id) { return }
+        try? await PersonRepository().attachPerson(
+            captureId: captureId,
+            personId:  me.id,
+        )
+    }
+
+    /// Read the capture's lat/lon once and run the place auto-attach.
+    /// Called from `.task`, from the captureId `onChange`, and when
+    /// `allLocations.count` changes (so a place created after the
+    /// review screen mounted can still auto-attach).
+    private func refreshLocationAutoAttach(captureId: String) async {
+        if captureLat == nil || captureLon == nil {
+            let coords: (Double, Double)? = await Task.detached(priority: .userInitiated) {
+                let dbQueue = QuickInkDatabase.shared.dbQueue
+                return try? await dbQueue.read { db -> (Double, Double)? in
+                    let row = try Row.fetchOne(db, sql: """
+                        SELECT latitude, longitude FROM captures
+                        WHERE id = ? LIMIT 1
+                        """, arguments: [captureId])
+                    guard let row,
+                          let lat: Double = row["latitude"],
+                          let lon: Double = row["longitude"] else { return nil }
+                    return (lat, lon)
+                }
+            }.value
+            if let coords {
+                captureLat = coords.0
+                captureLon = coords.1
+            }
+        }
+        guard let lat = captureLat, let lon = captureLon else { return }
+        let repo = LocationRepository()
+        for loc in allLocations {
+            guard let placeLat = loc.latitude,
+                  let placeLon = loc.longitude else { continue }
+            let distance = haversineMeters(
+                lat1: lat,        lon1: lon,
+                lat2: placeLat,   lon2: placeLon,
+            )
+            if distance <= autoAttachRadiusMeters,
+               !attachedLocationIds.contains(loc.id),
+               !dismissedLocationIds.contains(loc.id) {
+                try? await repo.attachLocation(captureId: captureId, locationId: loc.id)
+            }
+        }
+    }
+
+    /// Great-circle distance in meters. Equatorial radius of Earth at
+    /// 6_371_000m — the eccentricity correction doesn't matter at the
+    /// 150m radius we match within.
+    private func haversineMeters(
+        lat1: Double, lon1: Double,
+        lat2: Double, lon2: Double
+    ) -> Double {
+        let R = 6_371_000.0
+        let dLat = (lat2 - lat1) * .pi / 180
+        let dLon = (lon2 - lon1) * .pi / 180
+        let a = sin(dLat / 2) * sin(dLat / 2)
+            + cos(lat1 * .pi / 180) * cos(lat2 * .pi / 180)
+            * sin(dLon / 2) * sin(dLon / 2)
+        let c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        return R * c
     }
 
     // MARK: - Status

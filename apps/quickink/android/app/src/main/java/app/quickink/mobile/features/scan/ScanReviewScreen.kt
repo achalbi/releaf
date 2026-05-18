@@ -48,6 +48,9 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -71,7 +74,11 @@ import app.quickink.mobile.data.tag.TagEntity
 import app.quickink.mobile.data.tag.TagRepository
 import app.quickink.mobile.data.voicenote.VoiceNoteEntity
 import app.quickink.mobile.data.voicenote.VoiceNoteRepository
+import app.quickink.mobile.data.location.LocationEntity
+import app.quickink.mobile.data.person.PersonEntity
 import app.quickink.mobile.features.workspace.AutoTagSuggester
+import app.quickink.mobile.features.workspace.LocationPickerSheet
+import app.quickink.mobile.features.workspace.PeoplePickerSheet
 import app.quickink.mobile.features.workspace.normalizeTagName
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
@@ -114,6 +121,21 @@ fun ScanReviewScreen(
         folderRepo.observe(userId)
     }.collectAsState(initial = emptyList())
 
+    // People + Places — observe the user's full lists once, plus
+    // the capture-scoped join sets, so the chip strips re-render the
+    // moment the picker sheets commit. The pickers themselves write
+    // the join rows; this screen only reads.
+    val personDao         = remember(app) { app.database.personDao() }
+    val locationDao       = remember(app) { app.database.locationDao() }
+    val capturePersonDao  = remember(app) { app.database.capturePersonDao() }
+    val captureLocationDao = remember(app) { app.database.captureLocationDao() }
+    val allPeople by remember(userId, personDao) {
+        personDao.observeActive(userId)
+    }.collectAsState(initial = emptyList())
+    val allLocations by remember(userId, locationDao) {
+        locationDao.observeActive(userId)
+    }.collectAsState(initial = emptyList())
+
     val isFailed = state is ScanFlowController.State.Failed
     val isRecognizing = state is ScanFlowController.State.Recognizing
 
@@ -126,6 +148,40 @@ fun ScanReviewScreen(
         is ScanFlowController.State.Complete    -> s.captureId
         else                                    -> null
     }
+    // Capture-scoped join sets — nil-safe via flowOf(emptyList()) so
+    // the strip renders blank until a captureId lands. Re-keyed on
+    // captureId so a fresh in-flight capture starts from a clean slate.
+    val attachedPersonIds by remember(captureId, capturePersonDao) {
+        if (captureId != null) capturePersonDao.observePersonIdsForCapture(captureId)
+        else kotlinx.coroutines.flow.flowOf(emptyList())
+    }.collectAsState(initial = emptyList())
+    val attachedLocationIds by remember(captureId, captureLocationDao) {
+        if (captureId != null) captureLocationDao.observeLocationIdsForCapture(captureId)
+        else kotlinx.coroutines.flow.flowOf(emptyList())
+    }.collectAsState(initial = emptyList())
+    val attachedPeople: List<PersonEntity> = remember(attachedPersonIds, allPeople) {
+        val byId = allPeople.associateBy { it.id }
+        attachedPersonIds.mapNotNull { byId[it] }
+    }
+    val attachedLocations: List<LocationEntity> = remember(attachedLocationIds, allLocations) {
+        val byId = allLocations.associateBy { it.id }
+        attachedLocationIds.mapNotNull { byId[it] }
+    }
+    // Picker-sheet visibility. The sheets handle their own commit on
+    // Done; we only flip the flag.
+    var showPeoplePicker   by remember(captureId) { mutableStateOf(false) }
+    var showLocationPicker by remember(captureId) { mutableStateOf(false) }
+    // Locations the user has explicitly detached this session. Guards
+    // the place auto-attach effect from re-attaching a place the user
+    // just removed because they didn't want it on this scan.
+    var dismissedLocationIds by remember(captureId) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+    // Same guard for the "Me" auto-attach below.
+    var dismissedPersonIds by remember(captureId) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     // Every name the suggester has emitted for the in-flight
     // capture, in emit order. The visible "SUGGESTED FROM THIS
@@ -175,6 +231,64 @@ fun ScanReviewScreen(
     val voiceNotes by voiceNotesFlow.collectAsState(
         initial = emptyList<VoiceNoteEntity>(),
     )
+
+    // "Me" auto-attach — the seeded "Me" person is silently attached
+    // to every new capture so the common case (a scan that's about the
+    // user themselves) lands with one less tap. Guarded by
+    // dismissedPersonIds so explicit detach wins. Re-keyed on
+    // allPeople so a late-arriving people-list still triggers the
+    // match (e.g. when the seed runs on first open and the flow lands
+    // after this composable mounts).
+    androidx.compose.runtime.LaunchedEffect(
+        captureId, allPeople.size, attachedPersonIds,
+    ) {
+        val id = captureId ?: return@LaunchedEffect
+        val me = allPeople.firstOrNull { it.name.equals("Me", ignoreCase = true) }
+            ?: return@LaunchedEffect
+        if (me.id in attachedPersonIds.toSet()) return@LaunchedEffect
+        if (me.id in dismissedPersonIds) return@LaunchedEffect
+        capturePersonDao.attachPerson(
+            joinId    = Uuidv7.generate(),
+            captureId = id,
+            personId  = me.id,
+            source    = "ai-suggested",
+            timestamp = IsoClock.nowIso(),
+        )
+    }
+
+    // Place auto-attach — when the capture has a GPS fix and any
+    // existing place falls within 150m, attach it. Guarded by
+    // dismissedLocationIds so the user's explicit detach this session
+    // wins over the matcher. Re-keyed on allLocations so a place
+    // created mid-flow still gets picked up.
+    androidx.compose.runtime.LaunchedEffect(
+        captureId, allLocations.size, attachedLocationIds,
+    ) {
+        val id = captureId ?: return@LaunchedEffect
+        val capture = app.database.captureDao().findById(id) ?: return@LaunchedEffect
+        val lat = capture.latitude ?: return@LaunchedEffect
+        val lon = capture.longitude ?: return@LaunchedEffect
+        val attachedSet = attachedLocationIds.toSet()
+        val results = FloatArray(1)
+        for (loc in allLocations) {
+            val placeLat = loc.latitude ?: continue
+            val placeLon = loc.longitude ?: continue
+            if (loc.id in attachedSet) continue
+            if (loc.id in dismissedLocationIds) continue
+            android.location.Location.distanceBetween(
+                lat, lon, placeLat, placeLon, results,
+            )
+            if (results[0] <= 150f) {
+                captureLocationDao.attachLocation(
+                    joinId     = Uuidv7.generate(),
+                    captureId  = id,
+                    locationId = loc.id,
+                    source     = "ai-suggested",
+                    timestamp  = IsoClock.nowIso(),
+                )
+            }
+        }
+    }
 
     androidx.compose.runtime.LaunchedEffect(captureId, state, categories, voiceNotes) {
         val id = captureId ?: return@LaunchedEffect
@@ -357,6 +471,68 @@ fun ScanReviewScreen(
                 )
             }
 
+            if (!isFailed && cid != null) {
+                PeopleSection(
+                    all          = allPeople,
+                    selectedIds  = attachedPersonIds.toSet(),
+                    onAdd        = { showPeoplePicker = true },
+                    onToggle     = { person ->
+                        scope.launch {
+                            if (person.id in attachedPersonIds) {
+                                capturePersonDao.detachPerson(
+                                    captureId = cid,
+                                    personId  = person.id,
+                                    timestamp = IsoClock.nowIso(),
+                                )
+                                // Remember the explicit dismissal so
+                                // the "Me" auto-attach doesn't put the
+                                // same row back this session.
+                                dismissedPersonIds = dismissedPersonIds + person.id
+                            } else {
+                                capturePersonDao.attachPerson(
+                                    joinId    = Uuidv7.generate(),
+                                    captureId = cid,
+                                    personId  = person.id,
+                                    source    = "manual",
+                                    timestamp = IsoClock.nowIso(),
+                                )
+                                dismissedPersonIds = dismissedPersonIds - person.id
+                            }
+                        }
+                    },
+                )
+                PlacesSection(
+                    all          = allLocations,
+                    selectedIds  = attachedLocationIds.toSet(),
+                    onAdd        = { showLocationPicker = true },
+                    onToggle     = { loc ->
+                        scope.launch {
+                            if (loc.id in attachedLocationIds) {
+                                captureLocationDao.detachLocation(
+                                    captureId  = cid,
+                                    locationId = loc.id,
+                                    timestamp  = IsoClock.nowIso(),
+                                )
+                                // Remember the explicit dismissal so
+                                // the auto-attach effect doesn't
+                                // reattach the same place behind the
+                                // user's back on the next refresh.
+                                dismissedLocationIds = dismissedLocationIds + loc.id
+                            } else {
+                                captureLocationDao.attachLocation(
+                                    joinId     = Uuidv7.generate(),
+                                    captureId  = cid,
+                                    locationId = loc.id,
+                                    source     = "manual",
+                                    timestamp  = IsoClock.nowIso(),
+                                )
+                                dismissedLocationIds = dismissedLocationIds - loc.id
+                            }
+                        }
+                    },
+                )
+            }
+
             val attached = acceptedTagNames.value
             if (!isFailed && categories.isNotEmpty() && cid != null) {
                 TagsSection(
@@ -405,6 +581,22 @@ fun ScanReviewScreen(
             )
             Spacer(Modifier.size(AppSpacing.s5))
         }
+    }
+
+    if (showPeoplePicker && captureId != null) {
+        PeoplePickerSheet(
+            captureId = captureId,
+            userId    = userId,
+            onDismiss = { showPeoplePicker = false },
+        )
+    }
+
+    if (showLocationPicker && captureId != null) {
+        LocationPickerSheet(
+            captureId = captureId,
+            userId    = userId,
+            onDismiss = { showLocationPicker = false },
+        )
     }
 
     if (showAddTagDialog.value && captureId != null) {
@@ -750,6 +942,177 @@ private fun TagsSection(
             }
         }
     }
+}
+
+/**
+ * Section header + inline toggle chips for every person in the user's
+ * namespace. Attached chips paint accent-filled; unattached chips
+ * paint outlined. Tap toggles attach/detach. The "+ ADD" header
+ * button opens [PeoplePickerSheet] for creating a brand-new person
+ * from a typed name when the inline list doesn't have what they want
+ * yet. Mirror of [PlacesSection].
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PeopleSection(
+    all: List<PersonEntity>,
+    selectedIds: Set<String>,
+    onAdd: () -> Unit,
+    onToggle: (PersonEntity) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+        EntitySectionHeader(label = "PEOPLE", cta = "ADD PERSON", onEdit = onAdd)
+        if (all.isEmpty()) {
+            Text(
+                text       = "No people yet. Tap “Add person” to create one.",
+                style      = type.body.copy(fontSize = 12.sp),
+                color      = colors.muted,
+                fontFamily = QuickInkFonts.ui,
+            )
+        } else {
+            // Selected first so the user sees what's already linked
+            // at a glance; within each partition we walk the source
+            // list so creation order stays stable frame-to-frame.
+            val ordered = remember(all, selectedIds) {
+                all.filter { it.id in selectedIds } +
+                    all.filter { it.id !in selectedIds }
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement   = Arrangement.spacedBy(6.dp),
+            ) {
+                ordered.forEach { person ->
+                    EntityToggleChip(
+                        name     = person.name,
+                        selected = person.id in selectedIds,
+                        onClick  = { onToggle(person) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PlacesSection(
+    all: List<LocationEntity>,
+    selectedIds: Set<String>,
+    onAdd: () -> Unit,
+    onToggle: (LocationEntity) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2)) {
+        EntitySectionHeader(label = "PLACES", cta = "ADD PLACE", onEdit = onAdd)
+        if (all.isEmpty()) {
+            Text(
+                text       = "No places yet. Tap “Add place” to create one.",
+                style      = type.body.copy(fontSize = 12.sp),
+                color      = colors.muted,
+                fontFamily = QuickInkFonts.ui,
+            )
+        } else {
+            val ordered = remember(all, selectedIds) {
+                all.filter { it.id in selectedIds } +
+                    all.filter { it.id !in selectedIds }
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement   = Arrangement.spacedBy(6.dp),
+            ) {
+                ordered.forEach { loc ->
+                    EntityToggleChip(
+                        name     = loc.name,
+                        selected = loc.id in selectedIds,
+                        onClick  = { onToggle(loc) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EntitySectionHeader(
+    label: String,
+    cta: String,
+    onEdit: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Row(
+        modifier          = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text       = label,
+            style      = type.eyebrow,
+            color      = colors.muted,
+            fontFamily = QuickInkFonts.ui,
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .clickable(onClick = onEdit)
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector        = Icons.Outlined.Add,
+                contentDescription = null,
+                tint               = colors.accentDeep,
+                modifier           = Modifier.size(10.dp),
+            )
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+                text  = cta,
+                style = type.label.copy(
+                    fontSize      = 10.sp,
+                    fontWeight    = FontWeight.SemiBold,
+                    letterSpacing = 1.2.sp,
+                ),
+                color = colors.accentDeep,
+            )
+        }
+    }
+}
+
+/**
+ * Toggle chip mirroring the TAGS-row chip style so all three inline
+ * picker surfaces (tags, people, places) read as one family. Filled-
+ * accent when selected, outlined otherwise. Tap is bidirectional —
+ * attach if currently detached, detach if currently attached.
+ */
+@Composable
+private fun EntityToggleChip(
+    name: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Text(
+        text       = name,
+        style      = type.label.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Medium),
+        color      = if (selected) colors.textOnAccent else colors.ink,
+        modifier   = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                if (selected) colors.accent else Color.White.copy(alpha = 0.85f),
+                RoundedCornerShape(999.dp),
+            )
+            .border(
+                1.dp,
+                if (selected) colors.accent else colors.accent.copy(alpha = 0.25f),
+                RoundedCornerShape(999.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    )
 }
 
 @Composable
