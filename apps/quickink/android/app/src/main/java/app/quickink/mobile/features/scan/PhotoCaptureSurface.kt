@@ -542,6 +542,15 @@ private class CameraXBindings {
     @Volatile var imageCapture: ImageCapture? = null
     @Volatile var videoCapture: VideoCapture<Recorder>? = null
     @Volatile var recorder: Recorder? = null
+    /**
+     * The provider itself — stashed so the surface's dispose
+     * handler can call `unbindAll()` directly. `bindToLifecycle`
+     * only auto-releases when the supplied [LifecycleOwner]
+     * transitions to STOPPED; navigating back inside the same
+     * Activity doesn't move the Activity's lifecycle, so without
+     * an explicit unbind the camera stays hot in the background.
+     */
+    @Volatile var cameraProvider: ProcessCameraProvider? = null
 }
 
 /** Captured artifact returned to the host after the user lets go. */
@@ -645,6 +654,14 @@ private fun ActivePhotoSurface(
             // Stop any in-flight recording before tearing down so
             // the executor isn't disposed mid-write.
             activeRecording?.stop()
+            // Release the hardware camera. `bindToLifecycle`
+            // releases on STOPPED, but inside a nav graph we're
+            // tied to the Activity's lifecycle — navigating back
+            // doesn't move it, so without this call the camera
+            // stays hot in the background (status-bar indicator
+            // stuck on, battery draining). Explicit unbind frees
+            // the surface immediately.
+            bindings.cameraProvider?.unbindAll()
             captureExecutor.shutdown()
             processingScope.cancel()
             // backgroundScope intentionally NOT cancelled — the
@@ -1596,6 +1613,10 @@ private fun bindCameraX(
     val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
     cameraProviderFuture.addListener({
         val cameraProvider = cameraProviderFuture.get()
+        // Pin the provider so the host composable's dispose can
+        // explicitly unbindAll() — see CameraXBindings docblock
+        // for why bindToLifecycle alone isn't enough.
+        bindings.cameraProvider = cameraProvider
 
         val preview = Preview.Builder()
             .setTargetRotation(Surface.ROTATION_0)

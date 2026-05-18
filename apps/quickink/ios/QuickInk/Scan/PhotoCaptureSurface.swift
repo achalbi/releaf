@@ -1228,6 +1228,22 @@ private final class PhotoCaptureSession: NSObject, ObservableObject,
         }
     }
 
+    /// Defensive cleanup — `stop()` is also called from the
+    /// SwiftUI view's `onDisappear`, but in some teardown
+    /// orderings (e.g. parent removes the view before SwiftUI
+    /// gets to fire `onDisappear`, or a delegate retain cycle
+    /// keeps the session alive a bit longer than the view) the
+    /// async stop on `sessionQueue` can miss the window. Doing
+    /// a synchronous `stopRunning()` here ensures the hardware
+    /// camera is released the moment the last reference to
+    /// `PhotoCaptureSession` is dropped. `stopRunning` is
+    /// thread-safe per Apple's docs.
+    deinit {
+        if captureSession.isRunning {
+            captureSession.stopRunning()
+        }
+    }
+
     // MARK: Camera flip
 
     /// Toggle between front and back cameras. No-op outside
