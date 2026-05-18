@@ -545,7 +545,11 @@ private struct ActivePhotoSurface: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
             .background(
-                Capsule().fill(
+                // Rounded rectangle (not a Capsule) — the chips
+                // are wide enough that a full pill looked too
+                // soft; 8pt corners read as "rounded rectangle"
+                // and match the rest of the surface's chrome.
+                RoundedRectangle(cornerRadius: 8).fill(
                     isActive ? QuickInkColors.accent.opacity(0.85) : Color.black.opacity(0.55),
                 ),
             )

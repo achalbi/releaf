@@ -1489,7 +1489,11 @@ private fun FilterChip(
     val type   = LocalQuickInkTypography.current
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(QuickInkRadius.pill))
+            // Rounded rectangle (QuickInkRadius.sm = 8dp), not a
+            // pill — the chips are wide enough that a full pill
+            // looked too soft; 8dp corners read as "rounded
+            // rectangle" and match the rest of the surface chrome.
+            .clip(RoundedCornerShape(QuickInkRadius.sm))
             .background(
                 if (isActive) colors.accent.copy(alpha = 0.85f)
                 else Color.Black.copy(alpha = 0.55f),
