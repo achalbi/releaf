@@ -218,6 +218,15 @@ private struct ActivePhotoSurface: View {
     /// releases early (→ still photo) or once recording starts.
     @State private var pendingRecordingStart: DispatchWorkItem? = nil
 
+    /// True when the current touch sequence is the one that
+    /// promoted into a video recording (the user held past
+    /// `videoHoldThresholdMs`). Lets `onEnded` distinguish
+    /// "released after starting a recording — keep recording,
+    /// the next tap will stop" from "released during recording
+    /// from a separate tap — stop now." Reset on every touch-
+    /// down.
+    @State private var startedRecordingThisPress: Bool = false
+
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
@@ -350,12 +359,18 @@ private struct ActivePhotoSurface: View {
     /// Subtle copy under the shutter in the live state. Surfaces
     /// the dual gesture so a first-time user doesn't have to
     /// discover the hold-to-record behaviour through trial and
-    /// error. Hidden during recording so the gesture-elapsed
-    /// chip up top owns the chrome.
+    /// error. Two variants:
+    ///   - Preview   → "Tap for photo · hold for video"
+    ///   - Recording → "Tap to stop" (the shutter swaps to a red
+    ///                  stop icon already; the copy makes the
+    ///                  "no need to keep holding" affordance
+    ///                  unmistakable).
     @ViewBuilder
     private var shutterHint: some View {
         if case .recording = session.state {
-            EmptyView()
+            Text("Tap to stop")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.55))
         } else {
             Text("Tap for photo · hold for video")
                 .font(.system(size: 11, weight: .medium))
@@ -363,28 +378,55 @@ private struct ActivePhotoSurface: View {
         }
     }
 
-    // MARK: - Shutter gesture (tap vs hold)
+    // MARK: - Shutter gesture (tap vs long-press)
 
-    /// DragGesture with `minimumDistance: 0` is the canonical
-    /// Compose-like "press detector" in SwiftUI. We don't care
-    /// about the drag itself — just the touch-down (onChanged
-    /// first fire) and touch-up (onEnded) events — so we use the
-    /// gesture as a stand-in for a `PointerInput` press listener.
-    /// At touch-down we schedule a 0.3s timer; if it fires while
-    /// the finger is still down, recording starts. Touch-up
-    /// before the timer → still photo; touch-up after the timer
-    /// → stop recording.
+    /// Two-mode press detector:
+    ///
+    ///   - Recording   → any release stops the take (the user
+    ///                   has already moved past the start
+    ///                   gesture; their next tap is "stop").
+    ///   - Preview     → schedule a 300ms timer. Released early
+    ///                   → still photo. Timer elapsed → start
+    ///                   video recording. Crucially, release
+    ///                   AFTER the timer does NOT stop the
+    ///                   recording — the take continues
+    ///                   hands-free until the user taps the
+    ///                   shutter again (which falls through to
+    ///                   the Recording branch above and stops
+    ///                   the take). Avoids the awkward
+    ///                   "hold-the-whole-time" model that made
+    ///                   ≥10s clips painful.
+    ///
+    /// `DragGesture(minimumDistance: 0)` is the SwiftUI idiom
+    /// for "press detector" — we ignore the drag itself, just
+    /// listen for touch-down (`onChanged` first fire) and
+    /// touch-up (`onEnded`).
     private var shutterGesture: some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { _ in
                 if pressStart != nil { return }
                 pressStart = Date()
+                startedRecordingThisPress = false
+                // If we're already mid-recording, this press is
+                // the user's "stop" tap — don't schedule a fresh
+                // start timer, just let onEnded handle the stop.
+                if case .recording = session.state { return }
                 scheduleRecordingStart()
             }
             .onEnded { _ in
                 defer { pressStart = nil }
                 cancelPendingRecordingStart()
                 if case .recording = session.state {
+                    if startedRecordingThisPress {
+                        // The release that initially kicked off
+                        // the recording — keep recording. The
+                        // next tap will land in the recording
+                        // branch above without
+                        // `startedRecordingThisPress` set and
+                        // will stop the take.
+                        startedRecordingThisPress = false
+                        return
+                    }
                     session.stopVideoRecording()
                 } else if session.state == .preview {
                     // Released before the 0.3s threshold without
@@ -407,6 +449,7 @@ private struct ActivePhotoSurface: View {
             guard pressStart != nil, session.state == .preview else { return }
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             CaptureAnalytics.manualFired(mode: .photo)
+            startedRecordingThisPress = true
             session.startVideoRecording()
         }
         pendingRecordingStart = work

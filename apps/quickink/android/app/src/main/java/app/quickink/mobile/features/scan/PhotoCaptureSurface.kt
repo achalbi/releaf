@@ -436,9 +436,9 @@ private fun ActivePhotoSurface(
                         },
                     )
                 },
-                onHoldStart = onHoldStart@{
-                    if (uiState != PhotoUiState.Preview) return@onHoldStart
-                    val videoCapture = bindings.videoCapture ?: return@onHoldStart
+                onStartRecording = onStartRecording@{
+                    if (uiState != PhotoUiState.Preview) return@onStartRecording
+                    val videoCapture = bindings.videoCapture ?: return@onStartRecording
                     val outputDir = File(context.cacheDir, "photo_capture_video").apply { mkdirs() }
                     val outputFile = File(outputDir, "buffer-${System.currentTimeMillis()}.mp4")
                     outputFile.delete()
@@ -527,8 +527,8 @@ private fun ActivePhotoSurface(
                         }
                     activeRecording = recording
                 },
-                onHoldEnd = onHoldEnd@{
-                    val recording = activeRecording ?: return@onHoldEnd
+                onStopRecording = onStopRecording@{
+                    val recording = activeRecording ?: return@onStopRecording
                     recording.stop()
                     activeRecording = null
                 },
@@ -577,8 +577,8 @@ private fun ActivePhotoSurface(
 private fun ShutterRow(
     uiState: PhotoUiState,
     onTap: () -> Unit,
-    onHoldStart: () -> Unit,
-    onHoldEnd: () -> Unit,
+    onStartRecording: () -> Unit,
+    onStopRecording: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -592,21 +592,29 @@ private fun ShutterRow(
             verticalAlignment     = Alignment.CenterVertically,
         ) {
             PhotoShutterButton(
-                isRecording = uiState is PhotoUiState.Recording,
-                enabled     = uiState !is PhotoUiState.Capturing && uiState !is PhotoUiState.Processing,
-                onTap       = onTap,
-                onHoldStart = onHoldStart,
-                onHoldEnd   = onHoldEnd,
+                isRecording      = uiState is PhotoUiState.Recording,
+                enabled          = uiState !is PhotoUiState.Capturing && uiState !is PhotoUiState.Processing,
+                onTap            = onTap,
+                onStartRecording = onStartRecording,
+                onStopRecording  = onStopRecording,
             )
         }
         Spacer(Modifier.size(QuickInkSpacing.s2))
-        if (uiState !is PhotoUiState.Recording) {
-            Text(
-                text  = "Tap for photo · hold for video",
-                style = LocalQuickInkTypography.current.caption.copy(fontSize = 11.sp),
-                color = Color.White.copy(alpha = 0.55f),
-            )
+        // Hint copy: two variants — "tap or hold" for the
+        // preview state, "tap to stop" once the recording is
+        // running so the user knows they can let go of the
+        // shutter (the gesture has flipped from "hold the whole
+        // take" to "tap again to end").
+        val hint = if (uiState is PhotoUiState.Recording) {
+            "Tap to stop"
+        } else {
+            "Tap for photo · hold for video"
         }
+        Text(
+            text  = hint,
+            style = LocalQuickInkTypography.current.caption.copy(fontSize = 11.sp),
+            color = Color.White.copy(alpha = 0.55f),
+        )
     }
     Spacer(Modifier.size(QuickInkSpacing.s7))
 }
@@ -752,8 +760,8 @@ private fun PhotoShutterButton(
     isRecording: Boolean,
     enabled: Boolean,
     onTap: () -> Unit,
-    onHoldStart: () -> Unit,
-    onHoldEnd: () -> Unit,
+    onStartRecording: () -> Unit,
+    onStopRecording: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     Box(
@@ -761,29 +769,46 @@ private fun PhotoShutterButton(
             .size(78.dp)
             .pointerInput(enabled, isRecording) {
                 if (!enabled) return@pointerInput
-                // Custom tap-vs-hold detector with the same 300ms
-                // threshold the iOS surface uses. `detectTapGestures`
-                // would work but fires its `onLongPress` callback at
-                // the platform default (~500ms) which felt sluggish
-                // — the hold gesture took half a second of "is this
-                // doing anything?" before the recording UI lit up.
-                // This loop:
-                //   1. Waits for touch-down.
-                //   2. Races a 300ms timer against a release.
-                //   3. Released early → onTap (still photo).
-                //   4. Timer elapsed → onHoldStart, then wait for
-                //      release → onHoldEnd (video stop).
+                // Two-mode gesture detector:
+                //
+                //   - Recording   → any touch (regardless of
+                //                   duration) stops the take on
+                //                   release. The shutter swaps
+                //                   to a red stop icon while
+                //                   recording so the affordance
+                //                   reads as "tap to stop."
+                //   - Preview     → race a 300ms hold threshold
+                //                   against a release:
+                //                     ‣ released early → onTap
+                //                       (still photo).
+                //                     ‣ threshold elapsed →
+                //                       onStartRecording. Release
+                //                       does NOT stop — the user
+                //                       must explicitly tap the
+                //                       shutter again to end the
+                //                       take, which lets them
+                //                       record hands-free without
+                //                       holding the finger down
+                //                       for the entire clip.
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
+                    if (isRecording) {
+                        waitForUpOrCancellation()
+                        onStopRecording()
+                        return@awaitEachGesture
+                    }
                     val released = withTimeoutOrNull(VIDEO_HOLD_THRESHOLD_MS) {
                         waitForUpOrCancellation()
                     }
                     if (released != null) {
                         onTap()
                     } else {
-                        onHoldStart()
+                        onStartRecording()
+                        // Consume the eventual up event so the
+                        // gesture loop resets cleanly; we
+                        // deliberately do NOT call
+                        // onStopRecording here.
                         waitForUpOrCancellation()
-                        onHoldEnd()
                     }
                 }
             },
