@@ -43,6 +43,7 @@
 
 package app.quickink.mobile.features.home
 
+import android.content.Context
 import androidx.compose.animation.core.EaseInOut
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -52,6 +53,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -74,13 +77,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
@@ -330,6 +336,33 @@ internal fun DaylightHero(
     latitude: Double? = null,
     longitude: Double? = null,
 ) {
+    // Persisted layout choice: 0 = detailed (two-tile split with
+    // stats meter), 1 = compact (single-card row with sunrise /
+    // sunset times + fat progress bar + centred caption). Tap the
+    // card to cycle. Mirror of iOS's `@AppStorage("quickink.daylight.style")`.
+    val context = LocalContext.current
+    val prefs = remember(context) {
+        context.getSharedPreferences("quickink.home", Context.MODE_PRIVATE)
+    }
+    var styleOrdinal by rememberSaveable {
+        mutableStateOf(prefs.getInt("daylight.style", 0))
+    }
+    val onToggle: () -> Unit = {
+        val next = (styleOrdinal + 1) % 2
+        styleOrdinal = next
+        prefs.edit().putInt("daylight.style", next).apply()
+    }
+
+    if (styleOrdinal == 1) {
+        DaylightCompactHero(
+            fixedNow  = fixedNow,
+            latitude  = latitude,
+            longitude = longitude,
+            onToggle  = onToggle,
+        )
+        return
+    }
+
     val type = LocalQuickInkTypography.current
     val colors = LocalQuickInkColors.current
 
@@ -389,9 +422,14 @@ internal fun DaylightHero(
         label = "set-pulse",
     )
 
+    val detailedInteraction = remember { MutableInteractionSource() }
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(
+                interactionSource = detailedInteraction,
+                indication        = null,
+            ) { onToggle() }
             .semantics { contentDescription = a11yLabel(snapshot) },
     ) {
         // Split tiles — daytime shows Sunrise (left) + Sunset (right);
@@ -496,6 +534,218 @@ internal fun DaylightHero(
             )
         }
     }
+}
+
+// MARK: - Compact variant
+
+/**
+ * Single-card compact layout — Sunrise / Sunset labels with times
+ * on one row, a fat dark progress bar through the day, and a centred
+ * "Xh Ym of daylight left" caption underneath. Tap to flip back to
+ * the detailed split-tile + meter layout.
+ *
+ * Always shows *today's* sunrise/sunset times (regardless of pre-
+ * dawn / post-sunset phase) so the user can read "today's arc" at a
+ * glance. The progress bar tracks the day cycle only: empty before
+ * sunrise, fills through the day, full after sunset. The caption
+ * swaps to "Sunrise in Xh Ym" outside the day window so the card
+ * stays informative at night.
+ */
+@Composable
+private fun DaylightCompactHero(
+    fixedNow: ZonedDateTime?,
+    latitude: Double?,
+    longitude: Double?,
+    onToggle: () -> Unit,
+) {
+    val type   = LocalQuickInkTypography.current
+    val colors = LocalQuickInkColors.current
+
+    // 60 s tick — mirror of the detailed variant.
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    if (fixedNow == null) {
+        LaunchedEffect(Unit) {
+            while (true) {
+                delay(60_000L)
+                nowMs = System.currentTimeMillis()
+            }
+        }
+    }
+    val now: ZonedDateTime = fixedNow
+        ?: ZonedDateTime.ofInstant(Instant.ofEpochMilli(nowMs), IST)
+    val snapshot = remember(now.toEpochSecond(), latitude, longitude) {
+        computeDaylight(now, latitude = latitude, longitude = longitude)
+    }
+    // During the day we show *today's* sunrise/sunset times. At
+    // night we swap to the passed-sunset → upcoming-sunrise pair the
+    // elaborate hero uses — those live on the snapshot's
+    // [nightSunset] / [nightSunrise] fields during night phases.
+    val lat = latitude  ?: 12.2958
+    val lng = longitude ?: 76.6394
+    val today = remember(now.toLocalDate(), lat, lng) {
+        sunTimesFor(now.toLocalDate(), latitude = lat, longitude = lng)
+    }
+
+    data class Side(val label: String, val time: ZonedDateTime?)
+    val left:  Side
+    val right: Side
+    if (snapshot.isNight) {
+        left  = Side("Sunset",  snapshot.nightSunset)
+        right = Side("Sunrise", snapshot.nightSunrise)
+    } else {
+        left  = Side("Sunrise", today.first)
+        right = Side("Sunset",  today.second)
+    }
+
+    // Match the elaborate hero's time-text style exactly — editorial
+    // size in the UI sans, normal weight. Switching from `display`
+    // (Lora 26 sp) keeps the compact times consistent with the rest
+    // of the hero typography across the app.
+    val timeStyle = type.editorial.copy(
+        fontFamily = QuickInkFonts.ui,
+        fontWeight = FontWeight.Normal,
+    )
+    val interaction = remember { MutableInteractionSource() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(colors.borderSoft)
+            .clickable(
+                interactionSource = interaction,
+                indication        = null,
+            ) { onToggle() }
+            .padding(
+                horizontal = QuickInkSpacing.s4,
+                vertical   = QuickInkSpacing.s4,
+            )
+            .semantics { contentDescription = a11yLabel(snapshot) },
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = left.label, style = type.caption, color = colors.inkSoft)
+                Text(
+                    text  = formatTimeCompact(left.time),
+                    style = timeStyle,
+                    color = colors.ink,
+                )
+            }
+            Column(
+                modifier             = Modifier.weight(1f),
+                horizontalAlignment  = Alignment.End,
+            ) {
+                Text(text = right.label, style = type.caption, color = colors.inkSoft)
+                Text(
+                    text  = formatTimeCompact(right.time),
+                    style = timeStyle,
+                    color = colors.ink,
+                )
+            }
+        }
+        Spacer(Modifier.size(QuickInkSpacing.s3))
+        CompactDaylightBar(
+            progress = snapshot.dayProgress,
+            isNight  = snapshot.isNight,
+            inkColor = colors.ink,
+        )
+        Spacer(Modifier.size(QuickInkSpacing.s3))
+        Box(
+            modifier         = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text  = compactCaption(snapshot),
+                style = type.meta,
+                color = colors.inkSoft,
+            )
+        }
+    }
+}
+
+/**
+ * Fat 6 dp-tall capsule bar. Day uses ink on a soft ink track; night
+ * switches to the same indigo palette (`#4C5A8C`) the elaborate
+ * hero's night meter uses, so the compact view also reads as
+ * "different mode" after sunset. No marker — the bar's edge is the
+ * marker.
+ */
+@Composable
+private fun CompactDaylightBar(
+    progress: Float,
+    isNight: Boolean,
+    inkColor: androidx.compose.ui.graphics.Color,
+) {
+    val nightFill  = androidx.compose.ui.graphics.Color(0xFF4C5A8C)
+    val trackColor = if (isNight) nightFill.copy(alpha = 0.25f) else inkColor.copy(alpha = 0.12f)
+    val fillColor  = if (isNight) nightFill else inkColor
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(6.dp),
+    ) {
+        val barH = size.height
+        drawRoundRect(
+            color        = trackColor,
+            topLeft      = Offset(0f, 0f),
+            size         = Size(size.width, barH),
+            cornerRadius = CornerRadius(barH / 2f),
+        )
+        val fillW = progress.coerceIn(0f, 1f) * size.width
+        if (fillW > 0f) {
+            drawRoundRect(
+                color        = fillColor,
+                topLeft      = Offset(0f, 0f),
+                size         = Size(fillW, barH),
+                cornerRadius = CornerRadius(barH / 2f),
+            )
+        }
+    }
+}
+
+/**
+ * Caption underneath the compact bar. Daytime → "Xh Ym of daylight
+ * left"; pre-dawn / post-dusk → "Sunrise in Xh Ym". Polar fallback
+ * → "Sunrise unavailable" so the card stays honest at high latitudes.
+ */
+private fun compactCaption(s: DaylightSnapshot): String {
+    return when (s.phase) {
+        DaylightPhase.Daytime -> {
+            val set = s.sunset ?: return "—"
+            val remaining = Duration.between(s.now, set).let {
+                if (it.isNegative) Duration.ZERO else it
+            }
+            "${formatDuration(remaining)} of daylight left"
+        }
+        DaylightPhase.BeforeSunrise,
+        DaylightPhase.AfterSunset -> {
+            // Prefer `nightSunrise` — during AfterSunset the snapshot's
+            // `sunrise` is today's (already passed), but `nightSunrise`
+            // is tomorrow's (the next upcoming one).
+            val rise = s.nightSunrise ?: s.sunrise ?: return "After sunset"
+            val until = Duration.between(s.now, rise).let {
+                if (it.isNegative) Duration.ZERO else it
+            }
+            "Sunrise in ${formatDuration(until)}"
+        }
+        DaylightPhase.Unresolved -> "Sunrise unavailable"
+    }
+}
+
+/**
+ * Locale-aware short time formatter — reads the device's 12 / 24-h
+ * preference (so a 24-h locale shows "18:39", an en_US locale shows
+ * "6:39 PM"). Timezone stays pinned to IST because [sunTimesFor] is
+ * anchored to Mysuru — the same constraint the detailed variant
+ * lives with.
+ */
+private val CompactTimeFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT)
+        .withLocale(Locale.getDefault())
+
+private fun formatTimeCompact(t: ZonedDateTime?): String {
+    val zoned = t?.withZoneSameInstant(IST) ?: return "—"
+    return zoned.toLocalTime().format(CompactTimeFormatter)
 }
 
 /**

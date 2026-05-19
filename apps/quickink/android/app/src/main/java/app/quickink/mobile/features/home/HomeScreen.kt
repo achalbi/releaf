@@ -346,50 +346,6 @@ fun HomeScreen(
                     bottom = 140.dp,
                 ),
         ) {
-            // Live-updating system date/time strip at top-right —
-            // small temporal anchor in the space where the OS
-            // status bar would be (hidden app-wide) and where the
-            // daylight bar would be (suppressed on Home). 60 s tick
-            // is enough; only the minute digit moves below the hour
-            // scale. Reuses `nowMs` (already maintained for the
-            // sync-tap-ack window) plus a top-level minute ticker.
-            var clockNowMs by remember { mutableStateOf(System.currentTimeMillis()) }
-            LaunchedEffect(Unit) {
-                while (true) {
-                    delay(60_000L)
-                    clockNowMs = System.currentTimeMillis()
-                }
-            }
-            val clockNow = remember(clockNowMs) {
-                java.time.ZonedDateTime.ofInstant(
-                    java.time.Instant.ofEpochMilli(clockNowMs),
-                    java.time.ZoneId.systemDefault(),
-                )
-            }
-            val statusDate = remember(clockNow) { formatHomeStatusDate(clockNow) }
-            val statusTime = remember(clockNow) { formatHomeStatusTime(clockNow) }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment     = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text       = statusDate,
-                    fontFamily = QuickInkFonts.ui,
-                    fontSize   = 12.sp,
-                    color      = colors.muted,
-                )
-                // Sun glyph moved out — now sits next to the
-                // "Good morning" greeting below. The status row
-                // shows just time on the right.
-                Text(
-                    text       = statusTime,
-                    fontFamily = QuickInkFonts.ui,
-                    fontSize   = 12.sp,
-                    color      = colors.muted,
-                )
-            }
-            Spacer(Modifier.size(QuickInkSpacing.s2))
             HomeHeader(
                 displayName     = displayName,
                 profilePhotoUri = profilePhotoUri,
@@ -458,6 +414,8 @@ fun HomeScreen(
                 )
             }
             Spacer(Modifier.size(QuickInkSpacing.s5))
+            HomeSectionDivider()
+            Spacer(Modifier.size(QuickInkSpacing.s5))
             RecentRail(
                 captures            = recentCaptures.take(6),
                 primaryTagByCapture = primaryTagByCapture,
@@ -465,11 +423,15 @@ fun HomeScreen(
                 onOpenScan          = onOpenScan,
             )
             Spacer(Modifier.size(QuickInkSpacing.s4))
+            HomeSectionDivider()
+            Spacer(Modifier.size(QuickInkSpacing.s4))
             LocationsRail(
                 locations  = locations,
                 onAddTap   = { showLocationsSheet = true },
                 onChipTap  = { showLocationsSheet = true },
             )
+            Spacer(Modifier.size(QuickInkSpacing.s4))
+            HomeSectionDivider()
             Spacer(Modifier.size(QuickInkSpacing.s4))
             PeopleRail(
                 people    = people,
@@ -588,6 +550,17 @@ fun HomeScreen(
             )
         }
     }
+}
+
+// MARK: - Section divider
+
+@Composable
+private fun HomeSectionDivider() {
+    val colors = LocalQuickInkColors.current
+    HorizontalDivider(
+        thickness = 1.dp,
+        color     = colors.border,
+    )
 }
 
 // MARK: - Header
@@ -1418,27 +1391,6 @@ private fun BreakdownRow(label: String, value: String, caption: String) {
 private fun pointsLabel(locale: java.util.Locale, raw: Double): String =
     String.format(locale, "+%,d pts", raw.roundToInt().coerceAtLeast(0))
 
-// region — Home status date/time strip
-
-/// Locked to US English so the abbreviated weekday + AM/PM tokens
-/// match the design spec regardless of device locale.
-private val HomeStatusDateFormatter =
-    java.time.format.DateTimeFormatter.ofPattern("EEE, d MMM yyyy", java.util.Locale.US)
-private val HomeStatusTimeFormatter =
-    java.time.format.DateTimeFormatter.ofPattern("hh:mm a", java.util.Locale.US)
-
-/// "Sat, 16 May 2026" — left side of the home status strip.
-private fun formatHomeStatusDate(now: java.time.ZonedDateTime): String =
-    now.format(HomeStatusDateFormatter)
-
-/// "07:20 AM" — right side of the home status strip. Uppercase per
-/// the design spec; java.time's `a` token is already uppercase on
-/// US locale, so no further casing is required.
-private fun formatHomeStatusTime(now: java.time.ZonedDateTime): String =
-    now.format(HomeStatusTimeFormatter)
-
-// endregion
-
 /** "812 g" under a kilo, "1.23 kg" once we cross the threshold. */
 private fun formatGramsOrKg(grams: Double): String {
     val locale = java.util.Locale.ROOT
@@ -1717,7 +1669,11 @@ private fun RecentRail(
             Spacer(Modifier.weight(1f))
             Text(
                 text     = "View all →",
-                style    = type.label.copy(fontSize = 13.sp),
+                style    = type.label.copy(
+                    letterSpacing = 1.2.sp,
+                    fontSize      = 10.5.sp,
+                    fontWeight    = FontWeight.SemiBold,
+                ),
                 color    = colors.accent,
                 modifier = Modifier.clickable(onClick = onAllNotes),
             )
@@ -1994,7 +1950,7 @@ private fun LocationsRail(
         ) {
             Text(
                 text  = "Places",
-                style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
+                style = type.heading,
                 color = colors.ink,
             )
             Text(
@@ -2214,7 +2170,7 @@ private fun PeopleRail(
         ) {
             Text(
                 text  = "People",
-                style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
+                style = type.heading,
                 color = colors.ink,
             )
             Text(

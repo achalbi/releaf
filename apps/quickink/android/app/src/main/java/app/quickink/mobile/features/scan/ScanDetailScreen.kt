@@ -110,7 +110,6 @@ import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.sync.QuickInkBinarySync
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
-import app.quickink.mobile.features.nav.QuickInkTimeBar
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
@@ -479,21 +478,8 @@ fun ScanDetailScreen(
 
         val scrollState = rememberScrollState()
 
-        // Reuse the global `QuickInkTimeBar`, but auto-hide it as
-        // soon as the user starts scrolling so the preview chrome
-        // doesn't crowd the page; reappears when the scroll returns
-        // to the very top. The global bar in `QuickInkRoot` is
-        // suppressed on this route, so this is the only time-chip
-        // surface on the scan-detail screen.
-        androidx.compose.animation.AnimatedVisibility(
-            visible = scrollState.value == 0,
-            enter   = androidx.compose.animation.fadeIn() +
-                androidx.compose.animation.expandVertically(),
-            exit    = androidx.compose.animation.fadeOut() +
-                androidx.compose.animation.shrinkVertically(),
-        ) {
-            QuickInkTimeBar()
-        }
+        // The global `QuickInkTimeBar` in `QuickInkRoot` already
+        // sits above this screen — no inline status strip needed.
 
         if (showDeleteConfirm) {
             AlertDialog(
@@ -837,9 +823,11 @@ fun ScanDetailScreen(
                 onCancel = { pendingEditorPages = null },
                 onDone   = { edited ->
                     pendingEditorPages = null
+                    val notes = capture?.notes?.trim().orEmpty()
                     scope.launch {
                         val files = withContext(Dispatchers.IO) {
-                            writeEditedJpegs(context, edited)
+                            val withNotes = embedNotesFooter(edited, notes)
+                            writeEditedJpegs(context, withNotes)
                         }
                         if (files.isEmpty()) {
                             android.widget.Toast.makeText(
@@ -1396,6 +1384,95 @@ private fun rasterisePagesForEditor(
  * standard share-images cache subdir. Mirror of the writer used by
  * [prepareShareImageFiles] but with the bitmaps already in hand.
  */
+/**
+ * Bake the capture's notes onto the first shared page as a
+ * caption-bar footer. Blank notes are a no-op so the original
+ * bitmaps pass through unchanged. Only page 1 gets the footer —
+ * recipients of multi-page scans see the note once, attached to
+ * the visually-primary page.
+ */
+private fun embedNotesFooter(
+    bitmaps: List<Bitmap>,
+    notes: String,
+): List<Bitmap> {
+    if (notes.isEmpty() || bitmaps.isEmpty()) return bitmaps
+    val first = bitmaps.first()
+    val composited = drawNotesFooter(first, notes) ?: return bitmaps
+    return listOf(composited) + bitmaps.drop(1)
+}
+
+/**
+ * Compose [image] with a white footer bar containing [notes].
+ * Footer width matches the image; height grows with the wrapped
+ * text up to a cap of ~30% of the image height (overflow tail
+ * truncated by StaticLayout's max-lines ellipsis).
+ */
+private fun drawNotesFooter(image: Bitmap, notes: String): Bitmap? {
+    val width    = image.width
+    val height   = image.height
+    val pad      = maxOf(24, (width * 0.04f).toInt())
+    val headerSp = maxOf(16f, width * 0.022f)
+    val bodySp   = maxOf(20f, width * 0.028f)
+
+    val headerPaint = android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        textSize  = headerSp
+        color     = android.graphics.Color.argb(255, 115, 115, 115)
+        typeface  = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        letterSpacing = 0.12f
+    }
+    val bodyPaint = android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = bodySp
+        color    = android.graphics.Color.argb(255, 31, 31, 31)
+    }
+
+    val textWidth = width - pad * 2
+    if (textWidth <= 0) return null
+
+    // Cap roughly at 30% of image height; StaticLayout will ellipsize
+    // when the line budget is exhausted.
+    val maxBodyHeight = maxOf((bodySp * 4).toInt(), (height * 0.28f).toInt())
+    val approxLineHeight = bodySp * 1.25f
+    val maxLines = maxOf(2, (maxBodyHeight / approxLineHeight).toInt())
+
+    val bodyLayout = android.text.StaticLayout.Builder
+        .obtain(notes, 0, notes.length, bodyPaint, textWidth)
+        .setAlignment(android.text.Layout.Alignment.ALIGN_NORMAL)
+        .setLineSpacing(bodySp * 0.18f, 1f)
+        .setIncludePad(false)
+        .setMaxLines(maxLines)
+        .setEllipsize(android.text.TextUtils.TruncateAt.END)
+        .build()
+
+    val headerHeight = kotlin.math.ceil(headerPaint.descent() - headerPaint.ascent()).toInt()
+    val headerToBody = (bodySp * 0.5f).toInt()
+    val bodyHeight   = bodyLayout.height
+    val footerHeight = pad + headerHeight + headerToBody + bodyHeight + pad
+    val outputHeight = height + footerHeight
+
+    val out = Bitmap.createBitmap(width, outputHeight, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(out)
+    canvas.drawColor(android.graphics.Color.WHITE)
+    canvas.drawBitmap(image, 0f, 0f, null)
+
+    // Thin separator between the scan and the notes bar.
+    val rulePaint = android.graphics.Paint().apply {
+        color = android.graphics.Color.argb(255, 220, 220, 220)
+    }
+    canvas.drawRect(0f, height.toFloat(), width.toFloat(), (height + 1).toFloat(), rulePaint)
+
+    // Header label baseline sits one ascent below the footer's top pad.
+    val headerBaseline = (height + pad).toFloat() - headerPaint.ascent()
+    canvas.drawText("NOTES", pad.toFloat(), headerBaseline, headerPaint)
+
+    val bodyTop = (height + pad + headerHeight + headerToBody).toFloat()
+    canvas.save()
+    canvas.translate(pad.toFloat(), bodyTop)
+    bodyLayout.draw(canvas)
+    canvas.restore()
+
+    return out
+}
+
 private fun writeEditedJpegs(
     context: android.content.Context,
     bitmaps: List<Bitmap>,

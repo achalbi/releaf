@@ -135,12 +135,6 @@ struct ScanDetailScreen: View {
     /// PDF reader writes last_opened_* 500ms after the user lands
     /// on a page so a quick flip-through doesn't pollute Home.
     @State private var lastOpenedDebounceTask: Task<Void, Never>? = nil
-    /// True once the outer ScrollView's content offset moves past
-    /// the top. Drives the auto-hide animation on
-    /// [QuickInkTimeBar] so the preview chrome doesn't crowd the
-    /// page on scroll. Resets when the user scrolls back to the
-    /// very top.
-    @State private var isScrolledPastTop: Bool = false
 
     init(
         captureId: String,
@@ -156,105 +150,76 @@ struct ScanDetailScreen: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if !isScrolledPastTop {
-                QuickInkTimeBar()
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-            ScrollView {
-                // Invisible 0-height tracker emits the scroll-view's
-                // current content offset via PreferenceKey so the
-                // time bar can hide on any non-zero scroll without
-                // pulling in iOS 18's onScrollGeometryChange.
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key:   ScanDetailScrollOffsetKey.self,
-                        value: proxy.frame(in: .named("scanDetailScroll")).minY
+        // The global `QuickInkTimeBar` in `QuickInkRoot` already
+        // sits above this screen — no inline status strip needed.
+        ScrollView {
+            VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
+                if let capture {
+                    // Title block — large, prominent, with breadcrumb
+                    titleHeader(for: capture)
+                        .padding(.horizontal, QuickInkSpacing.s5)
+
+                    // Preview block — full-bleed within margins
+                    previewBlock(for: capture)
+                        .padding(.horizontal, QuickInkSpacing.s5)
+
+                    // Page thumbnails strip (only when multi-page)
+                    if capture.pageCount > 1 {
+                        pageThumbnailsStrip(for: capture)
+                    }
+
+                    // Video card — three states, gated on the
+                    // pair (video_uri, video_drive_file_id):
+                    //
+                    //   - Both unset                → no card
+                    //     (this capture never had a video).
+                    //   - video_uri resolves on disk → real
+                    //     "Play recorded clip" card with the
+                    //     AVPlayer launcher.
+                    //   - Drive id set but local file not yet
+                    //     here → placeholder "Downloading…"
+                    //     card so cross-device receivers know
+                    //     the clip is on its way (the binary-
+                    //     restore pass fills the URI in on
+                    //     the next sync).
+                    videoCardSection(for: capture)
+                        .padding(.horizontal, QuickInkSpacing.s5)
+
+                    // Details card — full width now that the
+                    // Actions card has moved to the more-menu
+                    // dropdown anchored next to the fullscreen
+                    // chip on the preview.
+                    detailsCard(for: capture)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(.horizontal, QuickInkSpacing.s5)
+
+                    // Document notes — free-form text the user
+                    // can type directly into the scan. Tapping
+                    // the card opens a full editor sheet; the
+                    // voice-note transcript editor also appends
+                    // here, so notes accumulate from both
+                    // surfaces.
+                    notesCard(for: capture)
+                        .padding(.horizontal, QuickInkSpacing.s5)
+
+                    // Voice notes — full-width section below the
+                    // Details row. Owns its own list +
+                    // recorder sheet; persists rows through
+                    // `voice_notes` with a foreign key to this
+                    // capture, so deletes cascade with the scan.
+                    // The `onNotesChanged` callback fires after
+                    // Copy-to-notes or the transcript editor's
+                    // append so the Notes card above refreshes
+                    // without waiting for a screen revisit.
+                    VoiceNoteSection(
+                        captureId:      captureId,
+                        userId:         userId,
+                        onNotesChanged: { Task { await loadCapture() } }
                     )
-                }
-                .frame(height: 0)
-
-                VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
-                    if let capture {
-                        // Title block — large, prominent, with breadcrumb
-                        titleHeader(for: capture)
-                            .padding(.horizontal, QuickInkSpacing.s5)
-
-                        // Preview block — full-bleed within margins
-                        previewBlock(for: capture)
-                            .padding(.horizontal, QuickInkSpacing.s5)
-
-                        // Page thumbnails strip (only when multi-page)
-                        if capture.pageCount > 1 {
-                            pageThumbnailsStrip(for: capture)
-                        }
-
-                        // Video card — three states, gated on the
-                        // pair (video_uri, video_drive_file_id):
-                        //
-                        //   - Both unset                → no card
-                        //     (this capture never had a video).
-                        //   - video_uri resolves on disk → real
-                        //     "Play recorded clip" card with the
-                        //     AVPlayer launcher.
-                        //   - Drive id set but local file not yet
-                        //     here → placeholder "Downloading…"
-                        //     card so cross-device receivers know
-                        //     the clip is on its way (the binary-
-                        //     restore pass fills the URI in on
-                        //     the next sync).
-                        videoCardSection(for: capture)
-                            .padding(.horizontal, QuickInkSpacing.s5)
-
-                        // Details card — full width now that the
-                        // Actions card has moved to the more-menu
-                        // dropdown anchored next to the fullscreen
-                        // chip on the preview.
-                        detailsCard(for: capture)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .padding(.horizontal, QuickInkSpacing.s5)
-
-                        // Document notes — free-form text the user
-                        // can type directly into the scan. Tapping
-                        // the card opens a full editor sheet; the
-                        // voice-note transcript editor also appends
-                        // here, so notes accumulate from both
-                        // surfaces.
-                        notesCard(for: capture)
-                            .padding(.horizontal, QuickInkSpacing.s5)
-
-                        // Voice notes — full-width section below the
-                        // Details row. Owns its own list +
-                        // recorder sheet; persists rows through
-                        // `voice_notes` with a foreign key to this
-                        // capture, so deletes cascade with the scan.
-                        // The `onNotesChanged` callback fires after
-                        // Copy-to-notes or the transcript editor's
-                        // append so the Notes card above refreshes
-                        // without waiting for a screen revisit.
-                        VoiceNoteSection(
-                            captureId:      captureId,
-                            userId:         userId,
-                            onNotesChanged: { Task { await loadCapture() } }
-                        )
-                            .padding(.horizontal, QuickInkSpacing.s5)
-                    } else {
-                        loadingSkeleton
-                            .padding(.horizontal, QuickInkSpacing.s5)
-                    }
-                }
-            }
-            .coordinateSpace(name: "scanDetailScroll")
-            .onPreferenceChange(ScanDetailScrollOffsetKey.self) { minY in
-                // minY is positive at the top (content starts at the
-                // ScrollView's origin); scrolling down drives it
-                // negative. Threshold of -4 absorbs jitter on the
-                // bounce and stretches.
-                let scrolled = minY < -4
-                if scrolled != isScrolledPastTop {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        isScrolledPastTop = scrolled
-                    }
+                        .padding(.horizontal, QuickInkSpacing.s5)
+                } else {
+                    loadingSkeleton
+                        .padding(.horizontal, QuickInkSpacing.s5)
                 }
             }
         }
@@ -620,8 +585,14 @@ struct ScanDetailScreen: View {
                 onDone: { edited in
                     pendingEditorBundle = nil
                     let id = captureId
+                    let notes = capture?.notes?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     Task.detached(priority: .userInitiated) {
-                        let urls = ScanDetailScreen.writeJpegsToTemp(edited, base: id)
+                        let withNotes = ScanDetailScreen.embedNotesFooter(
+                            on: edited,
+                            notes: notes
+                        )
+                        let urls = ScanDetailScreen.writeJpegsToTemp(withNotes, base: id)
                         await MainActor.run {
                             if !urls.isEmpty {
                                 imageShareItems = IdentifiedURLs(urls: urls)
@@ -1883,6 +1854,92 @@ struct ScanDetailScreen: View {
         return []
     }
 
+    /// Bake the capture's notes onto the first shared page as a
+    /// caption-bar footer. Blank notes are a no-op so the original
+    /// images pass through unchanged. Only page 1 gets the footer —
+    /// recipients of multi-page scans see the note once, attached to
+    /// the visually-primary page.
+    private static func embedNotesFooter(
+        on images: [UIImage],
+        notes: String
+    ) -> [UIImage] {
+        guard !notes.isEmpty, let first = images.first else { return images }
+        let composited = drawNotesFooter(on: first, notes: notes)
+        var out = images
+        out[0] = composited
+        return out
+    }
+
+    /// Compose `image` with a white footer bar containing `notes`.
+    /// Footer width matches the image; height grows with the wrapped
+    /// text up to a cap of ~30% of the image height (overflow tail
+    /// truncated with an ellipsis). Renders at the source image's
+    /// scale so JPEG encoding lands at the same DPI as the page.
+    private static func drawNotesFooter(on image: UIImage, notes: String) -> UIImage {
+        let width  = image.size.width
+        let height = image.size.height
+        let pad: CGFloat        = max(24, width * 0.04)
+        let headerSize: CGFloat = max(16, width * 0.022)
+        let bodySize: CGFloat   = max(20, width * 0.028)
+
+        let headerFont = UIFont.systemFont(ofSize: headerSize, weight: .semibold)
+        let bodyFont   = UIFont.systemFont(ofSize: bodySize,   weight: .regular)
+        let para = NSMutableParagraphStyle()
+        para.lineSpacing = bodySize * 0.18
+
+        let headerAttrs: [NSAttributedString.Key: Any] = [
+            .font: headerFont,
+            .foregroundColor: UIColor(white: 0.45, alpha: 1),
+            .kern: 1.4,
+        ]
+        let bodyAttrs: [NSAttributedString.Key: Any] = [
+            .font: bodyFont,
+            .foregroundColor: UIColor(white: 0.12, alpha: 1),
+            .paragraphStyle: para,
+        ]
+
+        let headerString = NSAttributedString(string: "NOTES", attributes: headerAttrs)
+        let bodyString   = NSAttributedString(string: notes, attributes: bodyAttrs)
+
+        let textWidth = width - pad * 2
+        let headerHeight = ceil(headerString.size().height)
+        let headerToBody: CGFloat = bodySize * 0.5
+        let maxBodyHeight = max(bodySize * 4, height * 0.28)
+        let bodyBounds = bodyString.boundingRect(
+            with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            context: nil
+        )
+        let bodyHeight  = min(ceil(bodyBounds.height), maxBodyHeight)
+        let footerHeight = pad + headerHeight + headerToBody + bodyHeight + pad
+        let outputSize  = CGSize(width: width, height: height + footerHeight)
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = image.scale
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: outputSize, format: format)
+        return renderer.image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: outputSize))
+            image.draw(in: CGRect(x: 0, y: 0, width: width, height: height))
+
+            // Thin separator between the scan and the notes bar.
+            UIColor(white: 0.86, alpha: 1).setFill()
+            ctx.fill(CGRect(x: 0, y: height, width: width, height: 1))
+
+            let headerOrigin = CGPoint(x: pad, y: height + pad)
+            headerString.draw(at: headerOrigin)
+
+            let bodyRect = CGRect(
+                x: pad,
+                y: height + pad + headerHeight + headerToBody,
+                width: textWidth,
+                height: bodyHeight
+            )
+            bodyString.draw(with: bodyRect, options: [.usesLineFragmentOrigin], context: nil)
+        }
+    }
+
     /// Write a batch of UIImages out as JPEGs in a fresh per-call temp
     /// subdirectory. The unique-per-call subdir keeps file names
     /// (`page-1.jpg`, `page-2.jpg`, …) human-readable in the iOS share
@@ -2218,17 +2275,5 @@ private func splitCsv(_ s: String) -> [String] {
     s.split(whereSeparator: { $0 == "," || $0 == "\n" })
         .map { $0.trimmingCharacters(in: .whitespaces) }
         .filter { !$0.isEmpty }
-}
-
-/// PreferenceKey that carries the scroll-view's content-origin
-/// offset out to the parent. The parent compares it against a
-/// small threshold to decide whether the [QuickInkTimeBar] should
-/// be visible. Living at file scope (rather than inside the view
-/// struct) keeps the key's identity stable across body rebuilds.
-struct ScanDetailScrollOffsetKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
 }
 

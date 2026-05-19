@@ -219,6 +219,13 @@ struct DaylightHero: View {
     let latitude:  Double?
     let longitude: Double?
 
+    /// Persisted layout choice: `0` = detailed (two-tile split with
+    /// stats meter), `1` = compact (single-card row with sunrise /
+    /// sunset times, fat progress bar, and centred "Xh Ym of daylight
+    /// left" caption). Tap the card to cycle. Persisted so the
+    /// choice survives across launches.
+    @AppStorage("quickink.daylight.style") private var styleRaw: Int = 0
+
     init(
         fixedNow: Date? = nil,
         latitude: Double? = nil,
@@ -237,7 +244,19 @@ struct DaylightHero: View {
         // timeline tick.
         TimelineView(.periodic(from: Date(), by: 60)) { context in
             let now = fixedNow ?? context.date
-            content(for: computeDaylight(now: now, latitude: latitude, longitude: longitude))
+            let snapshot = computeDaylight(now: now, latitude: latitude, longitude: longitude)
+            Group {
+                if styleRaw == 1 {
+                    compactContent(for: snapshot, now: now)
+                } else {
+                    content(for: snapshot)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                // Cycle: detailed → compact → detailed.
+                styleRaw = (styleRaw + 1) % 2
+            }
         }
     }
 
@@ -341,6 +360,142 @@ struct DaylightHero: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel(for: snapshot))
+    }
+
+    // MARK: - Compact variant
+
+    /// Single-card compact layout — Sunrise / Sunset labels with
+    /// times on one row, a fat dark progress bar through the day, and
+    /// a centred "Xh Ym of daylight left" caption underneath. Tap to
+    /// flip back to the detailed split-tile + meter layout.
+    ///
+    /// Always shows *today's* sunrise/sunset times (regardless of
+    /// pre-dawn / post-sunset phase) so the user can read "today's
+    /// arc" at a glance. The progress bar tracks the day cycle only:
+    /// empty before sunrise, fills through the day, full after
+    /// sunset. The caption swaps to "Sunrise in Xh Ym" outside the
+    /// day window so the card stays informative at night.
+    @ViewBuilder
+    private func compactContent(for snapshot: DaylightSnapshot, now: Date) -> some View {
+        // During the day we show *today's* sunrise/sunset times. At
+        // night we swap to the same passed-sunset → upcoming-sunrise
+        // pair the elaborate hero uses — the snapshot's `sunset` /
+        // `sunrise` fields already carry those values during night
+        // phases (yesterday's set + today's rise before sunrise;
+        // today's set + tomorrow's rise after sunset).
+        let lat = latitude  ?? 12.2958
+        let lng = longitude ?? 76.6394
+        let today = sunTimesFor(now, latitude: lat, longitude: lng)
+
+        let leftLabel:  String = snapshot.isNight ? "Sunset"  : "Sunrise"
+        let leftTime:   Date?  = snapshot.isNight ? snapshot.sunset  : today.sunrise
+        let rightLabel: String = snapshot.isNight ? "Sunrise" : "Sunset"
+        let rightTime:  Date?  = snapshot.isNight ? snapshot.sunrise : today.sunset
+
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(leftLabel)
+                        .font(QuickInkText.caption)
+                        .foregroundStyle(QuickInkColors.inkSoft)
+                    Text(Self.compactTime(leftTime))
+                        .font(QuickInkText.editorial)
+                        .foregroundStyle(QuickInkColors.ink)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(rightLabel)
+                        .font(QuickInkText.caption)
+                        .foregroundStyle(QuickInkColors.inkSoft)
+                    Text(Self.compactTime(rightTime))
+                        .font(QuickInkText.editorial)
+                        .foregroundStyle(QuickInkColors.ink)
+                }
+            }
+
+            compactBar(progress: snapshot.dayProgress, isNight: snapshot.isNight)
+
+            HStack {
+                Spacer()
+                Text(compactCaption(for: snapshot))
+                    .font(QuickInkText.meta)
+                    .foregroundStyle(QuickInkColors.inkSoft)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, QuickInkSpacing.s4)
+        .padding(.vertical, QuickInkSpacing.s4)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                .fill(QuickInkColors.borderSoft)
+        )
+    }
+
+    /// Fat 6 pt-tall progress bar. Day uses ink on a soft ink track;
+    /// night switches to the same indigo palette the elaborate hero's
+    /// night meter uses (`#4C5A8C`) so the compact view also reads as
+    /// "different mode" after sunset. No marker — the bar's edge is
+    /// the marker.
+    @ViewBuilder
+    private func compactBar(progress: Double, isNight: Bool) -> some View {
+        let nightFill = Color(hex: 0x4C5A8C)
+        let trackColor = isNight ? nightFill.opacity(0.25) : QuickInkColors.ink.opacity(0.12)
+        let fillColor  = isNight ? nightFill                 : QuickInkColors.ink
+        GeometryReader { geo in
+            let width = geo.size.width
+            let fillW = max(0, CGFloat(progress.clamped(to: 0...1)) * width)
+            ZStack(alignment: .leading) {
+                Capsule().fill(trackColor)
+                Capsule().fill(fillColor).frame(width: fillW)
+            }
+        }
+        .frame(height: 6)
+    }
+
+    /// Caption underneath the compact bar. Daytime → "Xh Ym of
+    /// daylight left"; pre-dawn / post-dusk → "Sunrise in Xh Ym".
+    /// Polar fallback → "Sunrise unavailable" so the card stays
+    /// honest at high latitudes.
+    private func compactCaption(for s: DaylightSnapshot) -> String {
+        switch s.phase {
+        case .daytime:
+            guard let set = s.sunset else { return "—" }
+            let remaining = max(0, set.timeIntervalSince(s.now))
+            return "\(formatDuration(remaining)) of daylight left"
+        case .beforeSunrise:
+            if let rise = s.sunrise {
+                return "Sunrise in \(formatDuration(rise.timeIntervalSince(s.now)))"
+            }
+            return "Before sunrise"
+        case .afterSunset:
+            if let rise = s.sunrise {
+                return "Sunrise in \(formatDuration(rise.timeIntervalSince(s.now)))"
+            }
+            return "After sunset"
+        case .unresolved:
+            return "Sunrise unavailable"
+        }
+    }
+
+    /// Locale-aware short time formatter. Reads the device's 12 / 24-
+    /// hour preference (so a 24-h-locale user sees "18:39", an en_US
+    /// user sees "6:39 PM"). Timezone is pinned to IST because
+    /// `sunTimesFor` is anchored to Mysuru — the same constraint the
+    /// detailed variant lives with.
+    private static let compactTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale.current
+        f.timeZone = TimeZone(identifier: "Asia/Kolkata")
+            ?? TimeZone(secondsFromGMT: 5 * 3600 + 30 * 60)!
+        f.timeStyle = .short
+        f.dateStyle = .none
+        return f
+    }()
+
+    private static func compactTime(_ date: Date?) -> String {
+        guard let date else { return "—" }
+        return compactTimeFormatter.string(from: date)
     }
 
     // MARK: - Subviews

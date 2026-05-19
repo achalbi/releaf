@@ -23,11 +23,6 @@ import android.Manifest
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -682,19 +677,14 @@ private fun MainShell(
         daylightStore.refreshIfNeeded()
     }
 
-    // Drive both the top time-bar visibility and the bottom-nav active
-    // tab from the current NavHost destination. Reading via
-    // `currentBackStackEntryAsState()` re-triggers recomposition on
-    // every nav transition so both pieces stay in sync without per-
-    // screen plumbing.
+    // Drive the bottom-nav active tab from the current NavHost
+    // destination. Reading via `currentBackStackEntryAsState()`
+    // re-triggers recomposition on every nav transition so the
+    // active-pill stays in sync without per-screen plumbing. The
+    // top time bar is rendered unconditionally — see the Column
+    // body below.
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
-    val onHome = currentRoute == Routes.HOME
-    // Hide the global time bar on the scan-detail viewer — that
-    // screen renders its own auto-hide-on-scroll variant so the
-    // preview surface stays dominant. Route template carries the
-    // {captureId} placeholder.
-    val onScanDetail = currentRoute?.startsWith("scan_detail") == true
 
     // App-exit confirmation. Fires whenever a back-press would leave
     // QuickInk altogether — i.e., the NavHost has nothing left to
@@ -770,19 +760,13 @@ private fun MainShell(
     // surface as a sibling layer — moved out of every per-screen
     // composable so a tab transition no longer crossfades two bars
     // (which used to produce the "masked footer" during a switch).
-    // The Column inside still owns the time bar + NavHost stack;
-    // AnimatedVisibility on the bar replaces the instant insert/
-    // remove that previously jumped vertical space at the moment
-    // screens were already mid-crossfade.
+    // The Column inside owns the time bar + NavHost stack.
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            AnimatedVisibility(
-                visible = !onHome && !onScanDetail,
-                enter   = fadeIn() + expandVertically(),
-                exit    = fadeOut() + shrinkVertically(),
-            ) {
-                QuickInkTimeBar()
-            }
+            // Global status strip — present on every screen.
+            // Doubles as the app's clock + date strip now that the
+            // system status bar is hidden app-wide.
+            QuickInkTimeBar()
             NavHost(
                 navController     = navController,
                 startDestination  = Routes.HOME,

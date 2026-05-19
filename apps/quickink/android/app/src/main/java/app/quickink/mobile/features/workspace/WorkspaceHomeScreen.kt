@@ -328,6 +328,8 @@ fun WorkspaceHomeScreen(
                 onNewCollection    = { showSmartEditor = true },
             )
             Spacer(Modifier.height(QuickInkSpacing.s4))
+            WorkspaceSectionDivider()
+            Spacer(Modifier.height(QuickInkSpacing.s4))
 
             FoldersSection(
                 folders             = folders,
@@ -339,6 +341,8 @@ fun WorkspaceHomeScreen(
             )
 
             Spacer(Modifier.height(QuickInkSpacing.s4))
+            WorkspaceSectionDivider()
+            Spacer(Modifier.height(QuickInkSpacing.s4))
 
             TagsSection(
                 tags = tags,
@@ -347,6 +351,8 @@ fun WorkspaceHomeScreen(
                 onBrowseAll = onBrowseTags,
             )
 
+            Spacer(Modifier.height(QuickInkSpacing.s4))
+            WorkspaceSectionDivider()
             Spacer(Modifier.height(QuickInkSpacing.s4))
 
             LocationsSection(
@@ -359,6 +365,8 @@ fun WorkspaceHomeScreen(
                 },
             )
 
+            Spacer(Modifier.height(QuickInkSpacing.s4))
+            WorkspaceSectionDivider()
             Spacer(Modifier.height(QuickInkSpacing.s4))
 
             PeopleSection(
@@ -664,6 +672,18 @@ private sealed interface FolderEditorTarget {
         val folder: FolderEntity,
         val mode: FolderEditorMode,
     ) : FolderEditorTarget
+}
+
+// ─── Section divider ─────────────────────────────────────────────
+
+@Composable
+private fun WorkspaceSectionDivider() {
+    val colors = LocalQuickInkColors.current
+    androidx.compose.material3.HorizontalDivider(
+        modifier  = Modifier.padding(horizontal = QuickInkSpacing.s4),
+        thickness = 1.dp,
+        color     = colors.border,
+    )
 }
 
 // ─── Header ──────────────────────────────────────────────────────

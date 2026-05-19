@@ -409,16 +409,6 @@ private struct MainShell: View {
         }
     }
 
-    /// Whether the global time bar at the top of the screen should
-    /// be visible. Hidden on Home (which already has its own status
-    /// strip) and on the ScanDetail viewer (which renders its own
-    /// auto-hide-on-scroll variant so the preview surface stays
-    /// dominant).
-    private var showsTimeBar: Bool {
-        guard let last = path.last else { return false }
-        if case .scanDetail = last { return false }
-        return true
-    }
 
     /// Settings override > Google session displayName > nil.
     /// The home screen falls back to "QuickInk" when this is nil.
@@ -495,23 +485,10 @@ private struct MainShell: View {
                 ScanCaptureSurface(controller: controller, userId: userId)
             case .idle:
                 VStack(spacing: 0) {
-                    // Time bar hides on Home (which has its own
-                    // status strip) and on ScanDetail (which renders
-                    // its own auto-hide-on-scroll variant inline).
-                    //
-                    // Wrap the conditional in a Group with its own
-                    // `.animation(_, value:)` so the bar slides in/out
-                    // independently of the NavigationStack's screen
-                    // transitions. An outer-VStack animation modifier
-                    // was getting overridden by NavigationStack's own
-                    // animation context and the bar popped abruptly.
-                    Group {
-                        if showsTimeBar {
-                            QuickInkTimeBar()
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                        }
-                    }
-                    .animation(.easeInOut(duration: 0.22), value: showsTimeBar)
+                    // Global status strip — present on every screen.
+                    // Doubles as the app's clock + date strip now
+                    // that the system status bar is hidden.
+                    QuickInkTimeBar()
                     NavigationStack(path: $path) {
                     HomeScreen(
                         controller:     controller,

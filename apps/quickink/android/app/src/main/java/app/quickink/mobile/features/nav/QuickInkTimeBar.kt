@@ -1,17 +1,18 @@
 /*
  * QuickInkTimeBar.kt
  *
- * Slim top bar that shows just the current wall-clock time aligned to
- * the right edge. Sits above the NavHost in `QuickInkRoot` on every
- * non-Home, non-ScanDetail surface, and is reused inside
- * `ScanDetailScreen` for its auto-hide-on-scroll variant.
+ * Slim top bar that shows the current time and date in a single
+ * line with a center-dot separator ("9:35 AM · Tue 19 Jan"). Sits
+ * above the NavHost in `QuickInkRoot` on every screen — functions
+ * as the app's status strip now that the system bar is hidden
+ * app-wide. Refreshes every 60s; only the minute moves below the
+ * hour scale.
  *
- * Replaces the editorial `DaylightStatusBar` that previously occupied
- * this slot — the time chip reads as quiet ambient context without
- * crowding the screen below it.
- *
- * Mirror of iOS `QuickInkTimeBar.swift`. Keep the layout (right-
- * aligned, 12sp medium, muted color) in sync between the two.
+ * Mirror of iOS `QuickInkTimeBar.swift`. Keep the layout (top-
+ * left, 12sp medium, muted color, 10dp top + s5 start padding)
+ * in sync between the two. The start inset matches the Home
+ * screen's content margin so the bar text lines up with the
+ * "Good evening" greeting below it.
  */
 
 package app.quickink.mobile.features.nav
@@ -31,35 +32,32 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.QuickInkSpacing
 import kotlinx.coroutines.delay
-import java.time.LocalTime
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 fun QuickInkTimeBar(modifier: Modifier = Modifier) {
     val colors = LocalQuickInkColors.current
-    var now by remember { mutableStateOf(LocalTime.now()) }
+    var now by remember { mutableStateOf(ZonedDateTime.now()) }
     LaunchedEffect(Unit) {
         while (true) {
-            now = LocalTime.now()
+            now = ZonedDateTime.now()
             delay(60_000L)
         }
     }
-    val formatted = remember(now) { now.format(TimeFormatter) }
+    val formatted = remember(now) { now.format(TimeBarFormatter) }
     Row(
         modifier = modifier
             .fillMaxWidth()
             .background(colors.bg)
-            .padding(
-                start  = QuickInkSpacing.s4,
-                end    = QuickInkSpacing.s4,
-                top    = QuickInkSpacing.s2,
-                bottom = QuickInkSpacing.s1,
-            ),
-        horizontalArrangement = Arrangement.End,
+            .padding(top = 10.dp, start = QuickInkSpacing.s5),
+        horizontalArrangement = Arrangement.Start,
         verticalAlignment     = Alignment.CenterVertically,
     ) {
         Text(
@@ -71,4 +69,5 @@ fun QuickInkTimeBar(modifier: Modifier = Modifier) {
     }
 }
 
-private val TimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm a")
+private val TimeBarFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("h:mm a · EEE d MMM", Locale.US)

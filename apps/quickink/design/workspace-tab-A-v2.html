@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>QuickInk · Workspace tab — A v2 (complete)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Caveat:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --canvas: #FAF7F2;
+    --surface: #FFFFFF;
+    --border: #EDE4D2;
+    --border-soft: #F0E9DD;
+    --border-softer: #F5EDE0;
+    --coral: #D97757;
+    --coral-soft: #F4DACC;
+    --ink: #2C2826;
+    --ink-soft: #5C4A38;
+    --muted: #A8A29E;
+
+    /* Tag bucket hues */
+    --status:        #4F46E5;  --status-bg:  #ECECFD;
+    --people:        #0F9F6E;  --people-bg:  #E2F5EE;
+    --orgplace:      #0891B2;  --orgplace-bg:#DDF2F7;
+    --energy:        #C2570A;  --energy-bg:  #FBEFDD;
+    --time:          #D33B4D;  --time-bg:    #FBE6E8;
+    --kind:          #7C3AED;  --kind-bg:    #F1E9FE;
+    --source:        #0E7FB8;  --source-bg:  #E1F1FA;
+
+    /* Tier stripes */
+    --tier1: #6366F1;
+    --tier2: #2C2826;
+    --tier3: #10B981;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: #F4EFE6;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { padding: 48px 28px 80px; }
+  .page-title {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-weight: 500; font-size: 36px; letter-spacing: -0.01em;
+    margin: 0 0 6px; text-align: center;
+  }
+  .page-sub {
+    text-align: center;
+    font-size: 14px; color: var(--ink-soft);
+    max-width: 580px; margin: 0 auto 36px;
+    line-height: 1.55;
+  }
+
+  .stage {
+    display: flex; justify-content: center; align-items: flex-start;
+    gap: 36px;
+    flex-wrap: wrap;
+  }
+
+  .frame {
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .frame-cap {
+    margin-top: 14px;
+    font-size: 12px; color: var(--muted);
+    letter-spacing: 0.04em; text-transform: uppercase;
+  }
+
+  /* iPhone frame — tall to show full scroll */
+  .phone {
+    width: 390px;
+    border-radius: 48px;
+    background: var(--ink);
+    padding: 12px;
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.4) inset,
+      0 30px 60px rgba(44, 40, 38, 0.18),
+      0 6px 18px rgba(44, 40, 38, 0.08);
+    position: relative;
+  }
+  .phone-screen {
+    border-radius: 36px;
+    overflow: hidden;
+    background: var(--canvas);
+    position: relative;
+    display: flex; flex-direction: column;
+  }
+  .island {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    width: 110px; height: 32px;
+    background: #050505; border-radius: 20px; z-index: 20;
+  }
+  .statusbar {
+    height: 50px;
+    padding: 18px 28px 0;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    font-size: 14px; font-weight: 600; color: var(--ink);
+    flex-shrink: 0;
+  }
+  .statusbar .right { display: flex; gap: 5px; align-items: center; }
+  .signal-dot {
+    width: 16px; height: 10px; border-radius: 2px;
+    background: var(--ink);
+    -webkit-mask: linear-gradient(90deg, #000 25%, transparent 25% 33%, #000 33% 58%, transparent 58% 66%, #000 66%);
+  }
+  .battery {
+    width: 24px; height: 12px; border-radius: 3px;
+    border: 1.2px solid var(--ink); position: relative;
+  }
+  .battery::after {
+    content: ''; position: absolute; left: 1.5px; top: 1.5px; bottom: 1.5px; right: 1.5px;
+    background: var(--ink); border-radius: 1.5px;
+  }
+  .body-area { padding: 4px 22px 110px; flex: 1; }
+
+  /* Tab bar sticks at bottom of frame */
+  .tabbar {
+    height: 86px;
+    background: rgba(250, 247, 242, 0.92);
+    backdrop-filter: blur(20px);
+    border-top: 1px solid var(--border);
+    display: flex; align-items: flex-start; justify-content: space-around;
+    padding: 12px 14px 0;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .tab {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    font-size: 10.5px; color: var(--muted); font-weight: 500;
+  }
+  .tab.active { color: var(--ink); }
+  .tab-icon { width: 26px; height: 26px; display: grid; place-items: center; }
+  .home-indicator {
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+    width: 134px; height: 5px; border-radius: 999px; background: var(--ink); opacity: 0.85;
+  }
+  .fab {
+    position: absolute;
+    right: 22px; bottom: 110px;
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: var(--coral);
+    color: white;
+    display: grid; place-items: center;
+    box-shadow: 0 12px 24px rgba(217, 119, 87, 0.4), 0 4px 10px rgba(217,119,87,0.25);
+    z-index: 15;
+  }
+
+  /* Header */
+  .h-eyebrow {
+    font-size: 10.5px;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--muted); font-weight: 500;
+  }
+  .h-title {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 30px; font-weight: 500; letter-spacing: -0.01em;
+    margin: 4px 0 0; line-height: 1.1;
+  }
+  .h-italic {
+    font-size: 13px; color: var(--ink-soft);
+    margin-top: 4px; font-style: italic;
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 15px;
+  }
+
+  /* Search */
+  .search {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--border-soft);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 11px 16px;
+    font-size: 14px; color: var(--muted);
+    margin-top: 16px;
+  }
+
+  /* Tier blocks */
+  .tier { margin-top: 26px; }
+  .tier-head {
+    display: flex; align-items: baseline; gap: 10px;
+    margin-bottom: 4px;
+  }
+  .tier-num {
+    font-family: 'Cormorant Garamond', serif; font-weight: 500;
+    color: var(--coral); font-size: 14px; letter-spacing: 0.06em;
+  }
+  .tier-label {
+    font-size: 11px; letter-spacing: 0.13em;
+    color: var(--ink); font-weight: 600; text-transform: uppercase;
+  }
+  .tier-sub {
+    font-size: 11px; color: var(--muted); font-style: italic;
+  }
+  .tier-divider {
+    height: 1px; background: var(--border); margin: 8px 0 4px;
+  }
+
+  /* Folder row */
+  .row {
+    display: flex; align-items: center;
+    padding: 13px 0;
+    border-bottom: 1px solid var(--border);
+    gap: 14px;
+  }
+  .row:last-child { border-bottom: 0; }
+  .stripe {
+    width: 3px; height: 26px; border-radius: 3px;
+    background: var(--tier1); flex-shrink: 0;
+  }
+  .tier-2 .stripe { background: var(--tier2); }
+  .tier-3 .stripe { background: var(--tier3); }
+  .row-body { flex: 1; min-width: 0; }
+  .row-name {
+    font-size: 15px; font-weight: 500; color: var(--ink); line-height: 1.2;
+  }
+  .row-desc {
+    font-size: 12px; color: var(--muted); margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .count {
+    font-size: 12px; color: var(--ink-soft);
+    background: var(--border-softer);
+    border-radius: 999px; padding: 3px 8px;
+    min-width: 26px; text-align: center; font-weight: 500;
+  }
+  .chev { color: var(--muted); flex-shrink: 0; font-size: 18px; }
+
+  /* Tag section */
+  .tag-section { margin-top: 28px; }
+  .tag-section-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .tag-block { padding: 12px 0 4px; border-bottom: 1px solid var(--border); }
+  .tag-block:last-child { border-bottom: 0; }
+  .tag-block-head {
+    display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px;
+  }
+  .tag-bucket-bar {
+    width: 3px; height: 26px; border-radius: 3px; flex-shrink: 0;
+    align-self: center;
+  }
+  .tag-block.status    .tag-bucket-bar { background: var(--status); }
+  .tag-block.people    .tag-bucket-bar { background: var(--people); }
+  .tag-block.orgplace  .tag-bucket-bar { background: var(--orgplace); }
+  .tag-block.energy    .tag-bucket-bar { background: var(--energy); }
+  .tag-block.time      .tag-bucket-bar { background: var(--time); }
+  .tag-block.kind      .tag-bucket-bar { background: var(--kind); }
+  .tag-block.source    .tag-bucket-bar { background: var(--source); }
+
+  .tag-row { display: flex; align-items: center; gap: 12px; }
+  .tag-bucket-meta { flex: 1; }
+  .tag-bucket-name {
+    font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .tag-block.status    .tag-bucket-name { color: var(--status); }
+  .tag-block.people    .tag-bucket-name { color: var(--people); }
+  .tag-block.orgplace  .tag-bucket-name { color: var(--orgplace); }
+  .tag-block.energy    .tag-bucket-name { color: var(--energy); }
+  .tag-block.time      .tag-bucket-name { color: var(--time); }
+  .tag-block.kind      .tag-bucket-name { color: var(--kind); }
+  .tag-block.source    .tag-bucket-name { color: var(--source); }
+
+  .tag-bucket-q {
+    font-size: 11px; color: var(--muted); font-style: italic; margin-top: 1px;
+  }
+  .tag-bucket-count {
+    font-size: 11px; color: var(--ink-soft);
+    background: var(--border-softer);
+    border-radius: 999px; padding: 2px 7px;
+  }
+
+  .tag-pills {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 4px 0 10px 15px;
+  }
+  .tag {
+    display: inline-flex; align-items: center;
+    height: 26px; padding: 0 11px;
+    font-size: 12px; font-weight: 500;
+    border-radius: 999px;
+    border: 1px solid;
+    background: white; white-space: nowrap;
+  }
+  .tag.status    { color: var(--status);   border-color: var(--status);   background: var(--status-bg); }
+  .tag.people    { color: var(--people);   border-color: var(--people);   background: var(--people-bg); }
+  .tag.orgplace  { color: var(--orgplace); border-color: var(--orgplace); background: var(--orgplace-bg); }
+  .tag.energy    { color: var(--energy);   border-color: var(--energy);   background: var(--energy-bg); }
+  .tag.time      { color: var(--time);     border-color: var(--time);     background: var(--time-bg); }
+  .tag.kind      { color: var(--kind);     border-color: var(--kind);     background: var(--kind-bg); }
+  .tag.source    { color: var(--source);   border-color: var(--source);   background: var(--source-bg); }
+  .tag.add {
+    color: var(--muted); border: 1px dashed var(--border);
+    background: var(--canvas);
+  }
+
+  /* footer epigram */
+  .epigram {
+    margin-top: 30px; padding: 14px 16px;
+    text-align: center;
+    border: 1px dashed var(--border);
+    border-radius: 14px;
+    background: var(--border-soft);
+    font-family: 'Caveat', cursive;
+    font-size: 17px; color: var(--ink-soft);
+  }
+
+  .footer {
+    max-width: 1100px; margin: 40px auto 0;
+    text-align: center;
+    font-size: 12px; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <h1 class="page-title">Workspace tab — A · Tiered list v2 (refined)</h1>
+  <p class="page-sub">All 12 folders plus a refined tag vocabulary — 7 buckets, 32 tags. Each bucket answers one clean question; status, time and energy are now distinct; <code style="font-family: 'SF Mono', monospace; color: var(--coral); background: var(--border-soft); padding: 1px 5px; border-radius: 4px; font-size: 12.5px;">#org/</code> and <code style="font-family: 'SF Mono', monospace; color: var(--coral); background: var(--border-soft); padding: 1px 5px; border-radius: 4px; font-size: 12.5px;">#place/</code> join <code style="font-family: 'SF Mono', monospace; color: var(--coral); background: var(--border-soft); padding: 1px 5px; border-radius: 4px; font-size: 12.5px;">#p/</code> as prefixed entity tags.</p>
+
+  <div class="stage">
+
+    <div class="frame">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right"><span class="signal-dot"></span><span class="battery"></span></span>
+          </div>
+
+          <div class="body-area">
+
+            <!-- Header -->
+            <span class="h-eyebrow">Workspace</span>
+            <h2 class="h-title">Folders &amp; tags</h2>
+            <div class="h-italic">Folders are addresses. Tags are roads.</div>
+
+            <!-- Search -->
+            <div class="search">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              Search notes, tags, people…
+            </div>
+
+            <!-- ── Tier 1 ────────────────────────────────────────── -->
+            <div class="tier tier-1">
+              <div class="tier-head">
+                <span class="tier-num">1</span>
+                <span class="tier-label">Workflow</span>
+              </div>
+              <div class="tier-divider"></div>
+              <div class="row">
+                <span class="stripe"></span>
+                <div class="row-body">
+                  <div class="row-name">Inbox</div>
+                  <div class="row-desc">Capture zone — everything lands here first</div>
+                </div>
+                <span class="count">14</span><span class="chev">›</span>
+              </div>
+              <div class="row">
+                <span class="stripe"></span>
+                <div class="row-body">
+                  <div class="row-name">Archive</div>
+                  <div class="row-desc">Completed or dormant, kept for reference</div>
+                </div>
+                <span class="count">208</span><span class="chev">›</span>
+              </div>
+            </div>
+
+            <!-- ── Tier 2 ────────────────────────────────────────── -->
+            <div class="tier tier-2">
+              <div class="tier-head">
+                <span class="tier-num">2</span>
+                <span class="tier-label">Life domains</span>
+                <span class="tier-sub">where it belongs</span>
+              </div>
+              <div class="tier-divider"></div>
+              <div class="row">
+                <span class="stripe"></span>
+                <div class="row-body">
+                  <div class="row-name">Finance</div>
+                  <div class="row-desc">bills, taxes, subscriptions</div>
+                </div>
+                <span class="count">42</span><span class="chev">›</span>
+              </div>
+              <div class="row">
+                <span class="stripe"></span>
+                <div class="row-body">
+                  <div class="row-name">Medical</div>
+                  <div class="row-desc">appointments, scripts, results</div>
+                </div>
+                <span class="count">18</span><span class="chev">›</span>
+              </div>
+              <div class="row">
+                <span class="stripe"></span>
+                <div class="row-body">
+                  <div class="row-name">Family</div>
+                  <div class="row-desc">people, relationships, home</div>
+                </div>
+                <span class="count">31</span><span class="chev">›</span>
+              </div>
+              <div class="row">
+                <span class="stripe"></span>
+                <div class="row-body">
+                  <div class="row-name">Travel</div>
+                  <div class="row-desc">trips, bookings, places</div>
+                </div>
+                <span class="count">9</span><span class="chev">›</span>
+              </div>
+              <div class="row">
+                <span class="stripe"></span>
+                <div class="row-body">
+                  <div class="row-name">Events</div>
+                  <div class="row-desc">weddings, parties, conferences</div>
+                </div>
+                <span class="count">6</span><span class="chev">›</span>
+              </div>
+              <div class="row">
+                <span class="stripe"></span>
+                <div class="row-body">
+                  <div class="row-name">Legal</div>
+                  <div class="row-desc">contracts, IDs, records</div>
+                </div>
+                <span class="count">11</span><span class="chev">›</span>
+              </div>
+              <div class="row">
+                <span class="stripe"></span>
+                <div class="row-body">
+                  <div class="row-name">Lifestyle</div>
+                  <div class="row-desc">fitness, food, hobbies, style</div>
+                </div>
+                <span class="count">24</span><span class="chev">›</span>
+              </div>
+            </div>
+
+            <!-- ── Tier 3 ────────────────────────────────────────── -->
+            <div class="tier tier-3">
+              <div class="tier-head">
+                <span class="tier-num">3</span>
+                <span class="tier-label">Creative &amp; output</span>
+                <span class="tier-sub">output, study, sparks</span>
+              </div>
+              <div class="tier-divider"></div>
+              <div class="row">
+                <span class="stripe"></span>
+                <div class="row-body">
+                  <div class="row-name">Learning</div>
+                  <div class="row-desc">notes from books, podcasts</div>
+                </div>
+                <span class="count">27</span><span class="chev">›</span>
+              </div>
+              <div class="row">
+                <span class="stripe"></span>
+                <div class="row-body">
+                  <div class="row-name">Projects</div>
+                  <div class="row-desc">committed efforts w/ an end</div>
+                </div>
+                <span class="count">5</span><span class="chev">›</span>
+              </div>
+              <div class="row">
+                <span class="stripe"></span>
+                <div class="row-body">
+                  <div class="row-name">Ideas</div>
+                  <div class="row-desc">sparks, someday/maybe</div>
+                </div>
+                <span class="count">63</span><span class="chev">›</span>
+              </div>
+            </div>
+
+            <!-- ── Tag vocabulary ────────────────────────────────── -->
+            <div class="tag-section">
+              <div class="tag-section-head">
+                <span class="tier-label">Tag vocabulary</span>
+                <span class="tier-sub" style="font-size: 11px;">32 tags · 7 buckets</span>
+              </div>
+
+              <!-- Status -->
+              <div class="tag-block status">
+                <div class="tag-block-head">
+                  <span class="tag-bucket-bar"></span>
+                  <div class="tag-bucket-meta">
+                    <div class="tag-bucket-name">Status</div>
+                    <div class="tag-bucket-q">what state is it in?</div>
+                  </div>
+                  <span class="tag-bucket-count">4</span>
+                </div>
+                <div class="tag-pills">
+                  <span class="tag status">#active</span>
+                  <span class="tag status">#todo</span>
+                  <span class="tag status">#later</span>
+                  <span class="tag status">#done</span>
+                </div>
+              </div>
+
+              <!-- People -->
+              <div class="tag-block people">
+                <div class="tag-block-head">
+                  <span class="tag-bucket-bar"></span>
+                  <div class="tag-bucket-meta">
+                    <div class="tag-bucket-name">People <span style="color:var(--muted); font-weight:500;">(#p/)</span></div>
+                    <div class="tag-bucket-q">who is this about?</div>
+                  </div>
+                  <span class="tag-bucket-count">3</span>
+                </div>
+                <div class="tag-pills">
+                  <span class="tag people">#p/mom</span>
+                  <span class="tag people">#p/manager</span>
+                  <span class="tag people">#p/sarah</span>
+                  <span class="tag add">+ add</span>
+                </div>
+              </div>
+
+              <!-- Org / Place -->
+              <div class="tag-block orgplace">
+                <div class="tag-block-head">
+                  <span class="tag-bucket-bar"></span>
+                  <div class="tag-bucket-meta">
+                    <div class="tag-bucket-name">Org &amp; Place <span style="color:var(--muted); font-weight:500;">(#org/, #place/)</span></div>
+                    <div class="tag-bucket-q">what organization or location?</div>
+                  </div>
+                  <span class="tag-bucket-count">4</span>
+                </div>
+                <div class="tag-pills">
+                  <span class="tag orgplace">#org/aws</span>
+                  <span class="tag orgplace">#org/clinic</span>
+                  <span class="tag orgplace">#place/lisbon</span>
+                  <span class="tag orgplace">#place/home</span>
+                  <span class="tag add">+ add</span>
+                </div>
+              </div>
+
+              <!-- Energy -->
+              <div class="tag-block energy">
+                <div class="tag-block-head">
+                  <span class="tag-bucket-bar"></span>
+                  <div class="tag-bucket-meta">
+                    <div class="tag-bucket-name">Energy</div>
+                    <div class="tag-bucket-q">what state of mind does it need?</div>
+                  </div>
+                  <span class="tag-bucket-count">4</span>
+                </div>
+                <div class="tag-pills">
+                  <span class="tag energy">#focus</span>
+                  <span class="tag energy">#shallow</span>
+                  <span class="tag energy">#errand</span>
+                  <span class="tag energy">#call</span>
+                </div>
+              </div>
+
+              <!-- Time-sensitivity -->
+              <div class="tag-block time">
+                <div class="tag-block-head">
+                  <span class="tag-bucket-bar"></span>
+                  <div class="tag-bucket-meta">
+                    <div class="tag-bucket-name">Time-sensitivity</div>
+                    <div class="tag-bucket-q">which horizon? (exclusive)</div>
+                  </div>
+                  <span class="tag-bucket-count">3</span>
+                </div>
+                <div class="tag-pills">
+                  <span class="tag time">#today</span>
+                  <span class="tag time">#thisweek</span>
+                  <span class="tag time">#thismonth</span>
+                </div>
+              </div>
+
+              <!-- Kind -->
+              <div class="tag-block kind">
+                <div class="tag-block-head">
+                  <span class="tag-bucket-bar"></span>
+                  <div class="tag-bucket-meta">
+                    <div class="tag-bucket-name">Kind</div>
+                    <div class="tag-bucket-q">what kind of content?</div>
+                  </div>
+                  <span class="tag-bucket-count">5</span>
+                </div>
+                <div class="tag-pills">
+                  <span class="tag kind">#idea</span>
+                  <span class="tag kind">#quote</span>
+                  <span class="tag kind">#recipe</span>
+                  <span class="tag kind">#checklist</span>
+                  <span class="tag kind">#template</span>
+                </div>
+              </div>
+
+              <!-- Source -->
+              <div class="tag-block source">
+                <div class="tag-block-head">
+                  <span class="tag-bucket-bar"></span>
+                  <div class="tag-bucket-meta">
+                    <div class="tag-bucket-name">Source <span style="color:var(--muted); font-weight:500;">· auto-applied</span></div>
+                    <div class="tag-bucket-q">where did it come from?</div>
+                  </div>
+                  <span class="tag-bucket-count">9</span>
+                </div>
+                <div class="tag-pills">
+                  <span class="tag source">#scan</span>
+                  <span class="tag source">#voice</span>
+                  <span class="tag source">#handwritten</span>
+                  <span class="tag source">#web</span>
+                  <span class="tag source">#email</span>
+                  <span class="tag source">#book</span>
+                  <span class="tag source">#podcast</span>
+                  <span class="tag source">#article</span>
+                  <span class="tag source">#conversation</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="epigram">One question per bucket. Prune monthly. Lean stays useful.</div>
+          </div>
+
+          <!-- FAB sits just above the tab bar -->
+          <div class="fab" style="position: absolute; right: 22px; bottom: 110px;">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg>
+          </div>
+
+          <!-- Tab bar -->
+          <div class="tabbar">
+            <div class="tab"><div class="tab-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/></svg></div>Home</div>
+            <div class="tab active"><div class="tab-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h7l2 2h9v11H3z"/></svg></div>Workspace</div>
+            <div class="tab"><div class="tab-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>Search</div>
+            <div class="tab"><div class="tab-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg></div>You</div>
+            <div class="home-indicator"></div>
+          </div>
+        </div>
+      </div>
+      <div class="frame-cap">Full scroll · 390 × auto</div>
+    </div>
+
+  </div>
+
+  <p class="footer">All 12 folders across three tiers · 24 tags across six buckets · QuickInk cream + coral palette · Cormorant Garamond + Inter.</p>
+</div>
+
+</body>
+</html>

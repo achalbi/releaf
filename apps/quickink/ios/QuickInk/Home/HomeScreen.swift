@@ -229,21 +229,6 @@ struct HomeScreen: View {
         // never sits behind the bar — no manual `Spacer` needed.
         ScrollView {
             VStack(alignment: .leading, spacing: QuickInkSpacing.s5) {
-                // Live-updating system date/time strip at top-right
-                // — small temporal anchor in the space where the OS
-                // status bar would be (hidden app-wide) and where
-                // the daylight bar would be (suppressed on Home).
-                // 60 s tick is enough; only the minute digit moves
-                // below the hour scale.
-                TimelineView(.periodic(from: Date(), by: 60)) { context in
-                    HStack {
-                        Text(Self.formatHomeStatusDate(context.date))
-                        Spacer()
-                        Text(Self.formatHomeStatusTime(context.date))
-                    }
-                    .font(.system(size: 14))
-                    .foregroundColor(.black)
-                }
                 headerBlock
                 // Daylight hero — slim card showing today's sunrise
                 // and sunset times with a now-marker meter beneath.
@@ -303,6 +288,7 @@ struct HomeScreen: View {
                 if syncState.state.localDirtyCount > 0 {
                     pendingSyncPill
                 }
+                sectionDivider
                 recentRail
                 // Sync pill at the bottom of the scroll content —
                 // scrolls with the page, no floating over content,
@@ -338,6 +324,14 @@ struct HomeScreen: View {
                     )
             }
         }
+    }
+
+    // MARK: - Section divider
+
+    private var sectionDivider: some View {
+        Rectangle()
+            .fill(QuickInkColors.border)
+            .frame(height: 1)
     }
 
     // MARK: - Header
@@ -489,53 +483,6 @@ struct HomeScreen: View {
     private var isEvening: Bool {
         let hour = Calendar.current.component(.hour, from: Date())
         return hour < 5 || hour >= 18
-    }
-
-    // MARK: - Date/time strip helpers
-
-    /// Cached formatters so the TimelineView's 60 s reformat doesn't
-    /// re-allocate one per tick. Locked to `en_US_POSIX` so the
-    /// abbreviated weekday and am/pm tokens read the same regardless
-    /// of the device locale — the format is the design spec, not
-    /// localized chrome.
-    private static let homeStatusDayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "EEE MMM"
-        f.locale     = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
-
-    private static let homeStatusTimeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "hh:mm a"
-        f.amSymbol   = "am"
-        f.pmSymbol   = "pm"
-        f.locale     = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
-
-    /// Standard English ordinal suffix — `1st`, `2nd`, `3rd`, `4th`,
-    /// with the 11/12/13 exception so "11th" not "11st".
-    private static func homeStatusOrdinal(_ n: Int) -> String {
-        let mod100 = n % 100
-        if mod100 >= 11 && mod100 <= 13 { return "th" }
-        switch n % 10 {
-        case 1: return "st"
-        case 2: return "nd"
-        case 3: return "rd"
-        default: return "th"
-        }
-    }
-
-    private static func formatHomeStatusDate(_ date: Date) -> String {
-        let cal  = Calendar.current
-        let day  = cal.component(.day, from: date)
-        let year = cal.component(.year, from: date)
-        return "\(day)\(homeStatusOrdinal(day)) \(homeStatusDayFormatter.string(from: date)), \(year)"
-    }
-
-    private static func formatHomeStatusTime(_ date: Date) -> String {
-        homeStatusTimeFormatter.string(from: date)
     }
 
     // MARK: - Pending-sync pill

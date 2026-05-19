@@ -99,14 +99,22 @@ public struct WorkspaceHomeScreen: View {
 
                 smartCollectionsStrip
 
+                sectionDivider
+
                 foldersSection
                     .padding(.horizontal, AppSpacing.s4)
+
+                sectionDivider
 
                 placesSection
                     .padding(.horizontal, AppSpacing.s4)
 
+                sectionDivider
+
                 peopleSection
                     .padding(.horizontal, AppSpacing.s4)
+
+                sectionDivider
 
                 tagsSection
                     .padding(.horizontal, AppSpacing.s4)
@@ -365,6 +373,15 @@ public struct WorkspaceHomeScreen: View {
             dirty:     true,
         )
         try? await dbQueue.write { db in try row.insert(db) }
+    }
+
+    // MARK: - Section divider
+
+    private var sectionDivider: some View {
+        Rectangle()
+            .fill(QuickInkColors.border)
+            .frame(height: 1)
+            .padding(.horizontal, AppSpacing.s4)
     }
 
     // MARK: - Header
