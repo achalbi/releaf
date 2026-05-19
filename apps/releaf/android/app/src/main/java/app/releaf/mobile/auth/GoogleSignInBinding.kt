@@ -31,11 +31,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import app.releaf.mobile.R
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
@@ -65,19 +63,39 @@ fun rememberGoogleSignInAction(authStore: AuthStore): () -> Unit {
 
     // One RealGoogleAuthClient per Activity.
     val client = remember(activity) { RealGoogleAuthClient(activity, webClientId) }
-    val scope  = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
+    // Compose-bound scope so the in-flight coroutine cancels on
+    // disposal. A manual
+    // `CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)`
+    // outlives Composable disposal — if a host that re-renders on
+    // AuthState (e.g. a future Settings-level reconnect screen) gets
+    // torn down mid-sign-in, the launcher unregisters but the
+    // coroutine keeps running, and the eventual
+    // `consentLauncher.launch(...)` crashes with
+    // `IllegalStateException: Attempting to launch an unregistered
+    // ActivityResultLauncher`. Latent today (launcher is hosted at
+    // MainActivity level), but the pattern would bite a deeper host.
+    val scope = rememberCoroutineScope()
+
+    // Tracks whether the in-flight sign-in started from a SignedIn
+    // session (a future "Reconnect" entry point). When true, cancel /
+    // failure paths must NOT flip auth state — see the long comment
+    // in the returned lambda below. mutableStateOf so the
+    // consentLauncher callback (a separate closure) can read it.
+    val reconnectInProgress = remember { mutableStateOf(false) }
 
     val consentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
         val identity = pendingIdentity.value
         pendingIdentity.value = null
+        val wasReconnect = reconnectInProgress.value
+        reconnectInProgress.value = false
         if (identity == null) {
-            authStore.cancelSignIn()
+            if (!wasReconnect) authStore.cancelSignIn()
             return@rememberLauncherForActivityResult
         }
         if (result.resultCode != Activity.RESULT_OK) {
-            authStore.cancelSignIn()
+            if (!wasReconnect) authStore.cancelSignIn()
             return@rememberLauncherForActivityResult
         }
         scope.launch {
@@ -85,15 +103,34 @@ fun rememberGoogleSignInAction(authStore: AuthStore): () -> Unit {
                 val session = client.completeConsent(identity, result.data)
                 authStore.adoptSession(session)
             } catch (_: GoogleAuthError.Cancelled) {
-                authStore.cancelSignIn()
+                if (!wasReconnect) authStore.cancelSignIn()
             } catch (e: Exception) {
-                authStore.failSignIn(e.localizedMessage ?: "Sign-in failed")
+                if (!wasReconnect) authStore.failSignIn(e.localizedMessage ?: "Sign-in failed")
+                // Reconnect from SignedIn: leave the existing session
+                // alone. Flipping to Failed here would route the user
+                // away from a still-valid session unexpectedly.
             }
         }
     }
 
     return {
-        authStore.beginExternalSignIn()
+        // Reconnect-aware state transition. Starting from SignedOut /
+        // Failed (the onboarding SignInScreen path), flip to SigningIn
+        // so the screen renders its in-flight spinner. Starting from
+        // SignedIn (a future Settings "Reconnect" path), DO NOT change
+        // auth state — a transient SignedIn → SigningIn flip would
+        // dispose any screen that routes on AuthState and hosts the
+        // consent launcher, unregister the launcher mid-flow, and
+        // make the eventual `consentLauncher.launch(...)` below crash
+        // with "Attempting to launch an unregistered
+        // ActivityResultLauncher". `adoptSession` still ends on
+        // SignedIn either way; for the reconnect path it's a no-op
+        // transition.
+        val startedSignedIn = authStore.state.value is AuthState.SignedIn
+        reconnectInProgress.value = startedSignedIn
+        if (!startedSignedIn) {
+            authStore.beginExternalSignIn()
+        }
         scope.launch {
             try {
                 val session = client.signIn()
@@ -104,9 +141,11 @@ fun rememberGoogleSignInAction(authStore: AuthStore): () -> Unit {
                     IntentSenderRequest.Builder(consent.intentSender).build()
                 )
             } catch (_: GoogleAuthError.Cancelled) {
-                authStore.cancelSignIn()
+                if (!startedSignedIn) authStore.cancelSignIn()
+                reconnectInProgress.value = false
             } catch (e: Exception) {
-                authStore.failSignIn(e.localizedMessage ?: "Sign-in failed")
+                if (!startedSignedIn) authStore.failSignIn(e.localizedMessage ?: "Sign-in failed")
+                reconnectInProgress.value = false
             }
         }
     }
