@@ -344,9 +344,7 @@ internal fun DaylightHero(
     // primary tokens, so the daylight card has the same legibility
     // ceiling the rest of the app does.
     val sunBg     = QuickInkColors.LeafYellowBase.copy(alpha = 0.20f)
-    val sunBorder = QuickInkColors.LeafYellowBase.copy(alpha = 0.55f)
     val setBg     = QuickInkColors.CoralBase.copy(alpha = 0.18f)
-    val setBorder = QuickInkColors.CoralBase.copy(alpha = 0.45f)
 
     // 60 s tick. Compose's `LaunchedEffect(Unit)` survives recomposes
     // and is cancelled when the composable leaves the tree, so the
@@ -420,7 +418,6 @@ internal fun DaylightHero(
                     arrow        = SunIcon.Set,
                     ringFill     = QuickInkColors.CoralBase,
                     bg           = setBg,
-                    border       = setBorder,
                     pulseScale   = setPulse,
                     titleStyle   = tileTitleStyle,
                     inkColor     = colors.ink,
@@ -436,7 +433,6 @@ internal fun DaylightHero(
                     arrow        = SunIcon.Rise,
                     ringFill     = QuickInkColors.LeafYellowBase,
                     bg           = sunBg,
-                    border       = sunBorder,
                     pulseScale   = risePulse,
                     titleStyle   = tileTitleStyle,
                     inkColor     = colors.ink,
@@ -452,7 +448,6 @@ internal fun DaylightHero(
                     arrow        = SunIcon.Rise,
                     ringFill     = QuickInkColors.LeafYellowBase,
                     bg           = sunBg,
-                    border       = sunBorder,
                     pulseScale   = risePulse,
                     titleStyle   = tileTitleStyle,
                     inkColor     = colors.ink,
@@ -468,7 +463,6 @@ internal fun DaylightHero(
                     arrow        = SunIcon.Set,
                     ringFill     = QuickInkColors.CoralBase,
                     bg           = setBg,
-                    border       = setBorder,
                     pulseScale   = setPulse,
                     titleStyle   = tileTitleStyle,
                     inkColor     = colors.ink,
@@ -609,7 +603,6 @@ private fun SplitTile(
     arrow: SunIcon,
     ringFill: androidx.compose.ui.graphics.Color,
     bg: androidx.compose.ui.graphics.Color,
-    border: androidx.compose.ui.graphics.Color,
     pulseScale: Float,
     titleStyle: androidx.compose.ui.text.TextStyle,
     inkColor: androidx.compose.ui.graphics.Color,
@@ -620,7 +613,6 @@ private fun SplitTile(
         modifier = modifier
             .clip(RoundedCornerShape(QuickInkRadius.md))
             .background(bg)
-            .border(1.dp, border, RoundedCornerShape(QuickInkRadius.md))
             .padding(
                 horizontal = QuickInkSpacing.s3,
                 vertical   = QuickInkSpacing.s2,

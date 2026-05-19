@@ -1374,13 +1374,13 @@ private fun TagChip(
 // ─── Locations section ───────────────────────────────────────────
 
 /**
- * Locations section — one row per user-defined place ("Home",
+ * Places section — one row per user-defined place ("Home",
  * "Work", custom search/GPS-pinned rows). Mirrors the FoldersSection
- * shape (header + list of rows) since each location has both a name
+ * shape (header + list of rows) since each place has both a name
  * and an optional address that benefit from the wider row layout.
  *
  * Tapping a row routes back into [LocationEditorDialog] in edit
- * mode; "NEW LOCATION" in the header opens it in create mode.
+ * mode; "NEW PLACE" in the header opens it in create mode.
  * Counts are sourced from the `capture_locations` join, so a row's
  * "N items" badge reflects active attachments only.
  */
@@ -1406,12 +1406,12 @@ private fun LocationsSection(
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(
-            text  = "Locations",
+            text  = "Places",
             style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
             color = colors.ink,
         )
         Text(
-            text     = "NEW LOCATION",
+            text     = "NEW PLACE",
             style    = type.label.copy(
                 letterSpacing = 1.2.sp,
                 fontSize      = 10.5.sp,
@@ -1431,7 +1431,7 @@ private fun LocationsSection(
     ) {
         if (locations.isEmpty()) {
             Text(
-                text     = "No locations yet.",
+                text     = "No places yet.",
                 style    = type.meta,
                 color    = colors.muted,
                 modifier = Modifier.padding(vertical = QuickInkSpacing.s3),

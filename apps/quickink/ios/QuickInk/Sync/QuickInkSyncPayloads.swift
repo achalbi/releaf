@@ -893,3 +893,319 @@ public struct ProfileSettingsPayloadV1: Codable, Equatable, Sendable {
         case updatedAt              = "updated_at"
     }
 }
+
+// =====================================================================
+// locations — QuickInk-only. User-defined places ("Home", "Work")
+// surfaced as "Places" in the Home screen. The wire kind keeps the
+// legacy `location` string for byte-for-byte parity with Android.
+// Mirror of Android's `LocationPayloadV1`.
+// =====================================================================
+
+public struct LocationPayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let userId: String
+    public let name: String
+    public let position: Int
+    public let color: String?
+    public let latitude: Double?
+    public let longitude: Double?
+    public let address: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    public init(
+        id: String,
+        userId: String,
+        name: String,
+        position: Int,
+        color: String? = nil,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        address: String? = nil,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id        = id
+        self.userId    = userId
+        self.name      = name
+        self.position  = position
+        self.color     = color
+        self.latitude  = latitude
+        self.longitude = longitude
+        self.address   = address
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case userId    = "user_id"
+        case name
+        case position
+        case color
+        case latitude
+        case longitude
+        case address
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+public extension LocationEntity {
+    func toV1Payload() -> LocationPayloadV1 {
+        LocationPayloadV1(
+            id:        id,
+            userId:    userId,
+            name:      name,
+            position:  position,
+            color:     color,
+            latitude:  latitude,
+            longitude: longitude,
+            address:   address,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+}
+
+public extension LocationPayloadV1 {
+    func toEntity(driveFileId: String?) -> LocationEntity {
+        LocationEntity(
+            id:          id,
+            userId:      userId,
+            name:        name,
+            position:    position,
+            color:       color,
+            latitude:    latitude,
+            longitude:   longitude,
+            address:     address,
+            driveFileId: driveFileId,
+            createdAt:   createdAt,
+            updatedAt:   updatedAt,
+            dirty:       false
+        )
+    }
+}
+
+// =====================================================================
+// capture_locations — QuickInk-only. Many-to-many join between
+// captures and locations. Mirror of `CaptureLocationPayloadV1`.
+// =====================================================================
+
+public struct CaptureLocationPayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let captureId: String
+    public let locationId: String
+    public let source: String
+    public let createdAt: String
+    public let updatedAt: String
+
+    public init(
+        id: String,
+        captureId: String,
+        locationId: String,
+        source: String = "manual",
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id         = id
+        self.captureId  = captureId
+        self.locationId = locationId
+        self.source     = source
+        self.createdAt  = createdAt
+        self.updatedAt  = updatedAt
+    }
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case captureId  = "capture_id"
+        case locationId = "location_id"
+        case source
+        case createdAt  = "created_at"
+        case updatedAt  = "updated_at"
+    }
+}
+
+public extension CaptureLocationEntity {
+    func toV1Payload() -> CaptureLocationPayloadV1 {
+        CaptureLocationPayloadV1(
+            id:         id,
+            captureId:  captureId,
+            locationId: locationId,
+            source:     source,
+            createdAt:  createdAt,
+            updatedAt:  updatedAt
+        )
+    }
+}
+
+public extension CaptureLocationPayloadV1 {
+    func toEntity(driveFileId: String?) -> CaptureLocationEntity {
+        CaptureLocationEntity(
+            id:          id,
+            captureId:   captureId,
+            locationId:  locationId,
+            source:      source,
+            driveFileId: driveFileId,
+            createdAt:   createdAt,
+            updatedAt:   updatedAt,
+            dirty:       false
+        )
+    }
+}
+
+// =====================================================================
+// people — QuickInk-only. User-defined people ("Me", "Mom", "Dr. Rao").
+// `contact_lookup_key` and `contact_photo_uri` are device-local and
+// stay off the wire — only `contact_phone` + `contact_email` travel.
+// Mirror of Android's `PersonPayloadV1`.
+// =====================================================================
+
+public struct PersonPayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let userId: String
+    public let name: String
+    public let position: Int
+    public let color: String?
+    public let contactPhone: String?
+    public let contactEmail: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    public init(
+        id: String,
+        userId: String,
+        name: String,
+        position: Int,
+        color: String? = nil,
+        contactPhone: String? = nil,
+        contactEmail: String? = nil,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id           = id
+        self.userId       = userId
+        self.name         = name
+        self.position     = position
+        self.color        = color
+        self.contactPhone = contactPhone
+        self.contactEmail = contactEmail
+        self.createdAt    = createdAt
+        self.updatedAt    = updatedAt
+    }
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case userId       = "user_id"
+        case name
+        case position
+        case color
+        case contactPhone = "contact_phone"
+        case contactEmail = "contact_email"
+        case createdAt    = "created_at"
+        case updatedAt    = "updated_at"
+    }
+}
+
+public extension PersonEntity {
+    func toV1Payload() -> PersonPayloadV1 {
+        PersonPayloadV1(
+            id:           id,
+            userId:       userId,
+            name:         name,
+            position:     position,
+            color:        color,
+            contactPhone: contactPhone,
+            contactEmail: contactEmail,
+            createdAt:    createdAt,
+            updatedAt:    updatedAt
+        )
+    }
+}
+
+public extension PersonPayloadV1 {
+    func toEntity(driveFileId: String?) -> PersonEntity {
+        PersonEntity(
+            id:               id,
+            userId:           userId,
+            name:             name,
+            position:         position,
+            color:            color,
+            contactLookupKey: nil,
+            contactPhone:     contactPhone,
+            contactEmail:     contactEmail,
+            contactPhotoUri:  nil,
+            driveFileId:      driveFileId,
+            createdAt:        createdAt,
+            updatedAt:        updatedAt,
+            dirty:            false
+        )
+    }
+}
+
+// =====================================================================
+// capture_people — QuickInk-only. Many-to-many join between captures
+// and people. Mirror of `CapturePersonPayloadV1`.
+// =====================================================================
+
+public struct CapturePersonPayloadV1: Codable, Equatable, Sendable {
+    public let id: String
+    public let captureId: String
+    public let personId: String
+    public let source: String
+    public let createdAt: String
+    public let updatedAt: String
+
+    public init(
+        id: String,
+        captureId: String,
+        personId: String,
+        source: String = "manual",
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id        = id
+        self.captureId = captureId
+        self.personId  = personId
+        self.source    = source
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case captureId = "capture_id"
+        case personId  = "person_id"
+        case source
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+public extension CapturePersonEntity {
+    func toV1Payload() -> CapturePersonPayloadV1 {
+        CapturePersonPayloadV1(
+            id:        id,
+            captureId: captureId,
+            personId:  personId,
+            source:    source,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+}
+
+public extension CapturePersonPayloadV1 {
+    func toEntity(driveFileId: String?) -> CapturePersonEntity {
+        CapturePersonEntity(
+            id:          id,
+            captureId:   captureId,
+            personId:    personId,
+            source:      source,
+            driveFileId: driveFileId,
+            createdAt:   createdAt,
+            updatedAt:   updatedAt,
+            dirty:       false
+        )
+    }
+}

@@ -22,6 +22,10 @@ public final class WorkspaceHomeViewModel: ObservableObject {
     @Published public private(set) var tags: [TagEntity] = []
     @Published public private(set) var tagCounts: [TagCount] = []
     @Published public private(set) var smartCollections: [SmartCollectionEntity] = []
+    @Published public private(set) var locations: [LocationEntity] = []
+    @Published public private(set) var locationCounts: [String: Int] = [:]
+    @Published public private(set) var people: [PersonEntity] = []
+    @Published public private(set) var personCounts: [String: Int] = [:]
     /// Most-recently-opened captures (newest first), capped at
     /// [recentlyOpenedLimit]. Row 0 renders as the Continue hero;
     /// rows 1..N feed the compact strip below it.
@@ -37,6 +41,8 @@ public final class WorkspaceHomeViewModel: ObservableObject {
     private let dbQueue: DatabaseQueue
     private let userId: String
     private let folderRepository: FolderRepository
+    private let locationRepository: LocationRepository
+    private let personRepository: PersonRepository
     private var folderCancellable: AnyCancellable?
     private var tagCancellable: AnyCancellable?
     private var tagCountCancellable: AnyCancellable?
@@ -44,11 +50,17 @@ public final class WorkspaceHomeViewModel: ObservableObject {
     private var continueCancellable: AnyCancellable?
     private var folderCountCancellable: AnyCancellable?
     private var folderNewCountCancellable: AnyCancellable?
+    private var locationCancellable: AnyCancellable?
+    private var locationCountCancellable: AnyCancellable?
+    private var personCancellable: AnyCancellable?
+    private var personCountCancellable: AnyCancellable?
 
     public init(userId: String, database: QuickInkDatabase = .shared) {
         self.userId = userId
         self.dbQueue = database.dbQueue
         self.folderRepository = FolderRepository(database: database)
+        self.locationRepository = LocationRepository(database: database)
+        self.personRepository = PersonRepository(database: database)
     }
 
     public func start() {
@@ -193,6 +205,36 @@ public final class WorkspaceHomeViewModel: ObservableObject {
         .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] in
             self?.folderCaptureCounts = $0
         })
+
+        // ─── Places (user-defined locations) ───────────────────
+        locationCancellable = locationRepository.observe(userId: userId)
+            .receive(on: DispatchQueue.main)
+            .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] in
+                self?.locations = $0
+            })
+
+        locationCountCancellable = locationRepository.observeLocationCounts(userId: userId)
+            .receive(on: DispatchQueue.main)
+            .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] counts in
+                var map: [String: Int] = [:]
+                for c in counts { map[c.locationId] = c.docCount }
+                self?.locationCounts = map
+            })
+
+        // ─── People (user-defined people) ──────────────────────
+        personCancellable = personRepository.observe(userId: userId)
+            .receive(on: DispatchQueue.main)
+            .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] in
+                self?.people = $0
+            })
+
+        personCountCancellable = personRepository.observePersonCounts(userId: userId)
+            .receive(on: DispatchQueue.main)
+            .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] counts in
+                var map: [String: Int] = [:]
+                for c in counts { map[c.personId] = c.docCount }
+                self?.personCounts = map
+            })
     }
 
     public func rankedTags(limit: Int) -> [(TagEntity, Int)] {
@@ -226,5 +268,91 @@ public final class WorkspaceHomeViewModel: ObservableObject {
 
     public func softDeleteFolder(folderId: String) async throws {
         try await folderRepository.softDelete(userId: userId, folderId: folderId)
+    }
+
+    // MARK: - Place writes
+
+    @discardableResult
+    public func createLocation(
+        name: String,
+        address: String? = nil,
+        latitude: Double? = nil,
+        longitude: Double? = nil
+    ) async throws -> Bool {
+        try await locationRepository.insert(
+            userId:    userId,
+            name:      name,
+            position:  locations.count,
+            latitude:  latitude,
+            longitude: longitude,
+            address:   address
+        )
+    }
+
+    public func renameLocation(id: String, newName: String) async throws {
+        try await locationRepository.rename(id: id, newName: newName)
+    }
+
+    public func setLocationCoordinates(
+        id: String,
+        latitude: Double?,
+        longitude: Double?,
+        address: String?
+    ) async throws {
+        try await locationRepository.setCoordinates(
+            id:        id,
+            latitude:  latitude,
+            longitude: longitude,
+            address:   address
+        )
+    }
+
+    public func softDeleteLocation(id: String) async throws {
+        try await locationRepository.softDelete(id: id)
+    }
+
+    // MARK: - Person writes
+
+    @discardableResult
+    public func createPerson(
+        name: String,
+        phone: String? = nil,
+        email: String? = nil,
+        contactLookupKey: String? = nil,
+        contactPhotoUri: String? = nil
+    ) async throws -> Bool {
+        try await personRepository.insert(
+            userId:           userId,
+            name:             name,
+            position:         people.count,
+            contactLookupKey: contactLookupKey,
+            contactPhone:     phone,
+            contactEmail:     email,
+            contactPhotoUri:  contactPhotoUri
+        )
+    }
+
+    public func renamePerson(id: String, newName: String) async throws {
+        try await personRepository.rename(id: id, newName: newName)
+    }
+
+    public func setPersonContact(
+        id: String,
+        lookupKey: String?,
+        phone: String?,
+        email: String?,
+        photoUri: String?
+    ) async throws {
+        try await personRepository.setContactLink(
+            id:        id,
+            lookupKey: lookupKey,
+            phone:     phone,
+            email:     email,
+            photoUri:  photoUri
+        )
+    }
+
+    public func softDeletePerson(id: String) async throws {
+        try await personRepository.softDelete(id: id)
     }
 }

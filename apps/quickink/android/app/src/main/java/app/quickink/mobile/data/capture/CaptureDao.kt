@@ -351,7 +351,7 @@ interface CaptureDao {
     /**
      * Move every active capture currently in [folderId] to
      * [newFolderId]. Used by [FolderRepository.softDelete] to
-     * relocate the folder's contents to Unfiled before tombstoning
+     * relocate the folder's contents to Unsorted before tombstoning
      * the folder row. Bumps `updated_at` + `dirty` on each touched
      * row so the move propagates via sync.
      */
@@ -382,7 +382,7 @@ interface CaptureDao {
 
     /**
      * Assign every active capture with `folder_id IS NULL` to the
-     * given folder (typically the seeded "Unfiled"). One-time
+     * given folder (typically the seeded "Unsorted"). One-time
      * backfill called from [FolderRepository.backfillFolderIdsIfNeeded]
      * on first launch after the v9 upgrade. Bumps `updated_at` +
      * `dirty` so the backfill propagates to other devices.

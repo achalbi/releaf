@@ -6,8 +6,10 @@
  * first launch after the v4 upgrade.
  *
  * One-time migration responsibilities (Phase A.3):
- *   - Seed the default "Unfiled" folder per user (idempotent).
- *   - Backfill every capture's `folder_id` to point at Unfiled.
+ *   - Seed the default "Unsorted" folder per user (idempotent).
+ *   - Rename legacy "Unfiled" default rows to "Unsorted" on next
+ *     launch — handles UNIQUE collisions by leaving the old name.
+ *   - Backfill every capture's `folder_id` to point at the default.
  *
  * The legacy `captures.category` → `capture_tags` materialize step
  * shipped in A.3a; A.3c then dropped the column, so the
@@ -22,6 +24,7 @@
 package app.quickink.mobile.data.folder
 
 import android.content.Context
+import android.database.sqlite.SQLiteConstraintException
 import app.quickink.mobile.data.capture.CaptureDao
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
@@ -83,16 +86,17 @@ class FolderRepository(
     }
 
     /**
-     * Soft-delete a folder. The captures inside are moved to Unfiled
-     * first — never cascade-delete the contents (per brief §10 #2).
-     * The default Unfiled folder itself is non-deletable; the DAO
-     * query guards against it via `is_default = 0`.
+     * Soft-delete a folder. The captures inside are moved to the
+     * default folder (Unsorted) first — never cascade-delete the
+     * contents (per brief §10 #2). The default folder itself is
+     * non-deletable; the DAO query guards against it via
+     * `is_default = 0`.
      */
     suspend fun softDelete(userId: String, folderId: String) {
-        val unfiled = folderDao.findDefault(userId) ?: return
-        if (unfiled.id == folderId) return
+        val defaultFolder = folderDao.findDefault(userId) ?: return
+        if (defaultFolder.id == folderId) return
         val now = IsoClock.nowIso()
-        captureDao?.moveCapturesToFolder(folderId, unfiled.id, now)
+        captureDao?.moveCapturesToFolder(folderId, defaultFolder.id, now)
         folderDao.softDelete(folderId, now)
     }
 
@@ -101,14 +105,25 @@ class FolderRepository(
     // ────────────────────────────────────────────────────────────
 
     /**
-     * Seed the default "Unfiled" folder if no `is_default` row
+     * Seed the default "Unsorted" folder if no `is_default` row
      * exists for this user. Idempotent. Returns the (possibly
-     * pre-existing) default folder.
+     * pre-existing) default folder. Also migrates a legacy default
+     * row named "Unfiled" to the current name on next launch; a
+     * UNIQUE collision (user has another folder already named
+     * "Unsorted") leaves the row as-is.
      */
     suspend fun seedDefaultsIfNeeded(userId: String): FolderEntity {
-        folderDao.findDefault(userId)?.let { return it }
+        folderDao.findDefault(userId)?.let { existing ->
+            if (existing.name != LEGACY_DEFAULT_FOLDER_NAME) return existing
+            try {
+                folderDao.rename(existing.id, DEFAULT_FOLDER_NAME, IsoClock.nowIso())
+            } catch (_: SQLiteConstraintException) {
+                return existing
+            }
+            return folderDao.findDefault(userId) ?: existing
+        }
         val now = IsoClock.nowIso()
-        val unfiled = FolderEntity(
+        val seed = FolderEntity(
             id          = Uuidv7.generate(),
             userId      = userId,
             name        = DEFAULT_FOLDER_NAME,
@@ -121,19 +136,19 @@ class FolderRepository(
             dirty       = true,
             deletedAt   = null,
         )
-        val rowId = folderDao.insert(unfiled)
+        val rowId = folderDao.insert(seed)
         // Race-safe: if another caller inserted first, re-query and
         // return that row.
-        return if (rowId != -1L) unfiled
+        return if (rowId != -1L) seed
         else folderDao.findDefault(userId)
             ?: error("Race: seed returned -1 but findDefault missed for userId=$userId")
     }
 
     /**
-     * Backfill every capture's `folder_id` to point at Unfiled for
-     * rows where it's still NULL (i.e. created before v9 added the
-     * column). Idempotent — captures already assigned to a folder
-     * are untouched.
+     * Backfill every capture's `folder_id` to point at the default
+     * folder for rows where it's still NULL (i.e. created before v9
+     * added the column). Idempotent — captures already assigned to a
+     * folder are untouched.
      *
      * Guarded by SharedPreferences so it runs once per install per
      * user; subsequent launches no-op even when called.
@@ -145,8 +160,8 @@ class FolderRepository(
         val flag = backfillFolderIdsFlag(userId)
         if (prefs.getBoolean(flag, false)) return
 
-        val unfiled = seedDefaultsIfNeeded(userId)
-        capDao.assignOrphanCapturesToFolder(userId, unfiled.id, IsoClock.nowIso())
+        val defaultFolder = seedDefaultsIfNeeded(userId)
+        capDao.assignOrphanCapturesToFolder(userId, defaultFolder.id, IsoClock.nowIso())
 
         prefs.edit().putBoolean(flag, true).apply()
     }
@@ -165,7 +180,14 @@ class FolderRepository(
     }
 
     companion object {
-        const val DEFAULT_FOLDER_NAME = "Unfiled"
+        const val DEFAULT_FOLDER_NAME = "Unsorted"
+
+        /**
+         * Prior seed name. Existing installs have a default folder
+         * row with this name; `seedDefaultsIfNeeded` migrates it on
+         * next launch.
+         */
+        private const val LEGACY_DEFAULT_FOLDER_NAME = "Unfiled"
 
         /**
          * Neutral stone — matches the design's "no judgement" tone

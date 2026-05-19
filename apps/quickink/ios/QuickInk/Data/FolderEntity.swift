@@ -26,19 +26,19 @@ public struct FolderEntity: Codable, FetchableRecord, PersistableRecord, Equatab
     public var name: String
     /// Hex color (e.g. "#E66943"). NOT NULL — every folder carries
     /// a visible identity in the Workspace home folder list. Seeded
-    /// "Unfiled" uses a neutral stone color; user-created folders
+    /// "Unsorted" uses a neutral stone color; user-created folders
     /// pick from the design's palette.
     public var color: String
     /// Caller-managed sort order — lower values render first.
-    /// Seeded "Unfiled" gets position = 0.
+    /// Seeded "Unsorted" gets position = 0.
     public var position: Int
     /// Reserved for the design's "covers" folder-visual mode
     /// (Milanote-style cover image). Out of scope for v1 ship.
     public var coverUri: String?
     /// Exactly one row per user has `isDefault = true`. That's the
-    /// seeded "Unfiled" folder. Used to guard the UI from deleting
+    /// seeded "Unsorted" folder. Used to guard the UI from deleting
     /// it and to backfill captures when a user-folder is deleted
-    /// (move-to-Unfiled, never cascade-delete).
+    /// (move-to-Unsorted, never cascade-delete).
     public var isDefault: Bool
     /// Reserved column for the post-v1 share flow. Defaults to
     /// false. Costs nothing to add now; saves a migration when

@@ -44,6 +44,21 @@ public enum DrivePath {
     /// QuickInk rule-based saved view.
     public static let kindSmartCollection  = "smart_collection"
 
+    /// QuickInk-only — user-defined place ("Home", "Work", etc.).
+    /// Optional axis attached to captures via [kindCaptureLocation].
+    /// Surfaced as "Places" in the UI; wire kind keeps the legacy
+    /// `location` string for Android parity.
+    public static let kindLocation         = "location"
+    /// QuickInk-only — capture↔location many-to-many join row.
+    public static let kindCaptureLocation  = "capture_location"
+
+    /// QuickInk-only — user-defined person ("Me", "Mom", "Dr. Rao").
+    /// Optional axis attached to captures via [kindCapturePerson].
+    /// Seeded with "Me" on first launch.
+    public static let kindPerson           = "person"
+    /// QuickInk-only — capture↔person many-to-many join row.
+    public static let kindCapturePerson    = "capture_person"
+
     /// QuickInk-only — voice note attached to a capture. The audio
     /// binary travels via `QuickInkBinarySync`; this JSON kind
     /// carries the metadata (duration, transcript,
@@ -91,6 +106,14 @@ public enum DrivePath {
     public static let folderCaptureTags     = "capture_tags"
     /// QuickInk smart collections — `smart_collections/{id}.json`.
     public static let folderSmartCollections = "smart_collections"
+    /// QuickInk locations — `locations/{id}.json`.
+    public static let folderLocations        = "locations"
+    /// QuickInk capture↔location joins — `capture_locations/{id}.json`.
+    public static let folderCaptureLocations = "capture_locations"
+    /// QuickInk people — `people/{id}.json`.
+    public static let folderPeople           = "people"
+    /// QuickInk capture↔person joins — `capture_people/{id}.json`.
+    public static let folderCapturePeople    = "capture_people"
     /// QuickInk voice notes — `{yyyy}/{mm}/{dd}/{captureId}/voice-{id}.json`,
     /// co-located with the parent capture's day folder like ocr_results.
     public static let folderVoiceNotes       = "voice_notes"
@@ -188,6 +211,18 @@ public enum DrivePath {
 
     /// QuickInk smart-collection payload — `smart_collections/{id}.json`.
     public static func smartCollection(id: String) -> String { "\(folderSmartCollections)/\(id).json" }
+
+    /// QuickInk's per-location file — `locations/{id}.json`.
+    public static func location(id: String) -> String { "\(folderLocations)/\(id).json" }
+
+    /// QuickInk capture↔location join payload — `capture_locations/{id}.json`.
+    public static func captureLocation(id: String) -> String { "\(folderCaptureLocations)/\(id).json" }
+
+    /// QuickInk's per-person file — `people/{id}.json`.
+    public static func person(id: String) -> String { "\(folderPeople)/\(id).json" }
+
+    /// QuickInk capture↔person join payload — `capture_people/{id}.json`.
+    public static func capturePerson(id: String) -> String { "\(folderCapturePeople)/\(id).json" }
 
     /// QuickInk per-user profile-settings payload —
     /// `profile_settings/{userId}.json`. One file per user. Mirror

@@ -7,12 +7,12 @@
  *
  * SwiftUI presentation flow (driven from `WorkspaceHomeScreen`):
  *   - Long-press a folder row → `FolderActionSheet` opens with
- *     Rename / Change color / Delete options. Unfiled (the
+ *     Rename / Change color / Delete options. Unsorted (the
  *     `is_default = true` row) shows only a read-only header.
  *   - Tapping the "NEW FOLDER" link or one of Rename / Change
  *     color presents `FolderEditorView` in the matching mode.
  *   - Tapping Delete presents a SwiftUI `.alert` confirming the
- *     move-to-Unfiled behaviour.
+ *     move-to-Unsorted behaviour.
  */
 
 import SwiftUI

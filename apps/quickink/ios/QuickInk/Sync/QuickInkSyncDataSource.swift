@@ -248,6 +248,75 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 ) { out.append(entry) }
             }
 
+            // ---- locations (Workspace — Places) ----
+            let locationRows = try LocationEntity
+                .filter(Column("user_id") == userId)
+                .filter(Column("dirty") == true)
+                .filter(Column("deleted_at") == nil)
+                .fetchAll(db)
+            for row in locationRows {
+                let payload = row.toV1Payload()
+                if let entry = try Self.makeEntry(
+                    id: row.id,
+                    kind: DrivePath.kindLocation,
+                    drivePath: DrivePath.location(id: row.id),
+                    updatedAt: row.updatedAt,
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
+            // ---- capture_locations. Join row; no user_id column,
+            // so the dirty filter alone is sufficient (mirror of
+            // capture_tags above). ----
+            let captureLocationRows = try CaptureLocationEntity
+                .filter(Column("dirty") == true)
+                .filter(Column("deleted_at") == nil)
+                .fetchAll(db)
+            for row in captureLocationRows {
+                let payload = row.toV1Payload()
+                if let entry = try Self.makeEntry(
+                    id: row.id,
+                    kind: DrivePath.kindCaptureLocation,
+                    drivePath: DrivePath.captureLocation(id: row.id),
+                    updatedAt: row.updatedAt,
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
+            // ---- people (Workspace — People) ----
+            let personRows = try PersonEntity
+                .filter(Column("user_id") == userId)
+                .filter(Column("dirty") == true)
+                .filter(Column("deleted_at") == nil)
+                .fetchAll(db)
+            for row in personRows {
+                let payload = row.toV1Payload()
+                if let entry = try Self.makeEntry(
+                    id: row.id,
+                    kind: DrivePath.kindPerson,
+                    drivePath: DrivePath.person(id: row.id),
+                    updatedAt: row.updatedAt,
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
+            // ---- capture_people. Join row; same pattern as
+            // capture_locations / capture_tags. ----
+            let capturePersonRows = try CapturePersonEntity
+                .filter(Column("dirty") == true)
+                .filter(Column("deleted_at") == nil)
+                .fetchAll(db)
+            for row in capturePersonRows {
+                let payload = row.toV1Payload()
+                if let entry = try Self.makeEntry(
+                    id: row.id,
+                    kind: DrivePath.kindCapturePerson,
+                    drivePath: DrivePath.capturePerson(id: row.id),
+                    updatedAt: row.updatedAt,
+                    encodable: payload
+                ) { out.append(entry) }
+            }
+
             // ---- voice_notes (typed via GRDB) ----
             let voiceNoteRows = try VoiceNoteEntity
                 .filter(Column("user_id") == userId)
@@ -533,6 +602,53 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 ))
             }
 
+            // locations / capture_locations / people / capture_people
+            // — Workspace Places + People tombstones.
+            let locationTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM locations
+                WHERE user_id = ? AND deleted_at IS NOT NULL AND dirty = 1
+                """, arguments: [userId])
+            for row in locationTombstones {
+                out.append(PendingTombstone(
+                    kind: DrivePath.kindLocation,
+                    id: row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+            let captureLocationTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM capture_locations
+                WHERE deleted_at IS NOT NULL AND dirty = 1
+                """)
+            for row in captureLocationTombstones {
+                out.append(PendingTombstone(
+                    kind: DrivePath.kindCaptureLocation,
+                    id: row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+            let personTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM people
+                WHERE user_id = ? AND deleted_at IS NOT NULL AND dirty = 1
+                """, arguments: [userId])
+            for row in personTombstones {
+                out.append(PendingTombstone(
+                    kind: DrivePath.kindPerson,
+                    id: row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+            let capturePersonTombstones = try Row.fetchAll(db, sql: """
+                SELECT id, deleted_at, updated_at FROM capture_people
+                WHERE deleted_at IS NOT NULL AND dirty = 1
+                """)
+            for row in capturePersonTombstones {
+                out.append(PendingTombstone(
+                    kind: DrivePath.kindCapturePerson,
+                    id: row["id"],
+                    deletedAt: (row["deleted_at"] as String?) ?? row["updated_at"]
+                ))
+            }
+
             // voice_notes — user-scoped.
             let voiceTombstones = try Row.fetchAll(db, sql: """
                 SELECT id, deleted_at, updated_at FROM voice_notes
@@ -657,6 +773,22 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             case DrivePath.kindSmartCollection:
                 let p = try decoder.decode(SmartCollectionPayloadV1.self, from: change.payload)
                 try Self.upsertSmartCollectionRow(db, payload: p, driveFileId: driveFileId)
+
+            case DrivePath.kindLocation:
+                let p = try decoder.decode(LocationPayloadV1.self, from: change.payload)
+                try Self.upsertLocationRow(db, payload: p, driveFileId: driveFileId)
+
+            case DrivePath.kindCaptureLocation:
+                let p = try decoder.decode(CaptureLocationPayloadV1.self, from: change.payload)
+                try Self.upsertCaptureLocationRow(db, payload: p, driveFileId: driveFileId)
+
+            case DrivePath.kindPerson:
+                let p = try decoder.decode(PersonPayloadV1.self, from: change.payload)
+                try Self.upsertPersonRow(db, payload: p, driveFileId: driveFileId)
+
+            case DrivePath.kindCapturePerson:
+                let p = try decoder.decode(CapturePersonPayloadV1.self, from: change.payload)
+                try Self.upsertCapturePersonRow(db, payload: p, driveFileId: driveFileId)
 
             case DrivePath.kindVoiceNote:
                 let p = try decoder.decode(VoiceNotePayloadV1.self, from: change.payload)
@@ -789,6 +921,10 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
         case DrivePath.kindFolder:          return "folders"
         case DrivePath.kindCaptureTag:      return "capture_tags"
         case DrivePath.kindSmartCollection: return "smart_collections"
+        case DrivePath.kindLocation:        return "locations"
+        case DrivePath.kindCaptureLocation: return "capture_locations"
+        case DrivePath.kindPerson:          return "people"
+        case DrivePath.kindCapturePerson:   return "capture_people"
         case DrivePath.kindVoiceNote:       return "voice_notes"
         case DrivePath.kindStory:           return "story"
         case DrivePath.kindStoryItem:       return "story_item"
@@ -884,6 +1020,103 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
             WHERE capture_tags.updated_at < excluded.updated_at
             """, arguments: [
                 payload.id, payload.captureId, payload.tagId, payload.source,
+                driveFileId, payload.createdAt, payload.updatedAt,
+            ])
+    }
+
+    private static func upsertLocationRow(_ db: Database, payload: LocationPayloadV1, driveFileId: String?) throws {
+        try db.execute(sql: """
+            INSERT INTO locations (
+                id, user_id, name, position, color,
+                latitude, longitude, address,
+                drive_file_id, created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                user_id       = excluded.user_id,
+                name          = excluded.name,
+                position      = excluded.position,
+                color         = excluded.color,
+                latitude      = excluded.latitude,
+                longitude     = excluded.longitude,
+                address       = excluded.address,
+                drive_file_id = excluded.drive_file_id,
+                updated_at    = excluded.updated_at,
+                dirty         = 0
+            WHERE locations.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.userId, payload.name, payload.position,
+                payload.color, payload.latitude, payload.longitude, payload.address,
+                driveFileId, payload.createdAt, payload.updatedAt,
+            ])
+    }
+
+    private static func upsertCaptureLocationRow(_ db: Database, payload: CaptureLocationPayloadV1, driveFileId: String?) throws {
+        try db.execute(sql: """
+            INSERT INTO capture_locations (
+                id, capture_id, location_id, source,
+                drive_file_id, created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                capture_id    = excluded.capture_id,
+                location_id   = excluded.location_id,
+                source        = excluded.source,
+                drive_file_id = excluded.drive_file_id,
+                updated_at    = excluded.updated_at,
+                dirty         = 0
+            WHERE capture_locations.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.captureId, payload.locationId, payload.source,
+                driveFileId, payload.createdAt, payload.updatedAt,
+            ])
+    }
+
+    /// Upsert a `people` row from a remote payload. The wire shape
+    /// omits the device-local `contact_lookup_key` / `contact_photo_uri`
+    /// — those stay at whatever the local row already has, so a sync
+    /// from another device doesn't drop a contact link the user
+    /// previously set here.
+    private static func upsertPersonRow(_ db: Database, payload: PersonPayloadV1, driveFileId: String?) throws {
+        try db.execute(sql: """
+            INSERT INTO people (
+                id, user_id, name, position, color,
+                contact_lookup_key, contact_phone, contact_email, contact_photo_uri,
+                drive_file_id, created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                user_id        = excluded.user_id,
+                name           = excluded.name,
+                position       = excluded.position,
+                color          = excluded.color,
+                contact_phone  = excluded.contact_phone,
+                contact_email  = excluded.contact_email,
+                drive_file_id  = excluded.drive_file_id,
+                updated_at     = excluded.updated_at,
+                dirty          = 0
+            WHERE people.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.userId, payload.name, payload.position,
+                payload.color,
+                payload.contactPhone, payload.contactEmail,
+                driveFileId, payload.createdAt, payload.updatedAt,
+            ])
+    }
+
+    private static func upsertCapturePersonRow(_ db: Database, payload: CapturePersonPayloadV1, driveFileId: String?) throws {
+        try db.execute(sql: """
+            INSERT INTO capture_people (
+                id, capture_id, person_id, source,
+                drive_file_id, created_at, updated_at, dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                capture_id    = excluded.capture_id,
+                person_id     = excluded.person_id,
+                source        = excluded.source,
+                drive_file_id = excluded.drive_file_id,
+                updated_at    = excluded.updated_at,
+                dirty         = 0
+            WHERE capture_people.updated_at < excluded.updated_at
+            """, arguments: [
+                payload.id, payload.captureId, payload.personId, payload.source,
                 driveFileId, payload.createdAt, payload.updatedAt,
             ])
     }

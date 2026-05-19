@@ -33,7 +33,7 @@ interface FolderDao {
     suspend fun findById(id: String): FolderEntity?
 
     /**
-     * The seeded "Unfiled" folder for this user. Used as the
+     * The seeded "Unsorted" folder for this user. Used as the
      * fallback destination when a user-folder is deleted (captures
      * move here rather than cascade-delete — per brief §10 #2).
      * Returns null only if seeding hasn't run yet, which should
@@ -105,7 +105,7 @@ interface FolderDao {
     /**
      * Soft-delete a folder. The UI must call
      * [moveCapturesToFolder] beforehand to relocate every capture
-     * out of this folder (typically into Unfiled). The
+     * out of this folder (typically into Unsorted). The
      * `is_default = 1` row is non-deletable; the Settings UI
      * suppresses the affordance, and a stray call here would
      * orphan every capture.

@@ -49,7 +49,7 @@ data class FolderEntity(
     /**
      * Hex color (`#E66943`). NOT NULL — every folder carries a
      * visible identity in the Workspace home folder list. Seeded
-     * "Unfiled" uses a neutral stone color; user-created folders
+     * "Unsorted" uses a neutral stone color; user-created folders
      * pick from the design's palette (coral, gold, green, blue,
      * purple, pink, teal). Stored as text so the palette can grow
      * without a schema migration.
@@ -59,7 +59,7 @@ data class FolderEntity(
 
     /**
      * Caller-managed sort order — lower values render first. Mirror
-     * of `tags.position`. Seeded "Unfiled" gets position = 0.
+     * of `tags.position`. Seeded "Unsorted" gets position = 0.
      */
     @ColumnInfo(name = "position", defaultValue = "0")
     val position: Int,
@@ -75,9 +75,9 @@ data class FolderEntity(
 
     /**
      * Exactly one row per user has `isDefault = true`. That's the
-     * seeded "Unfiled" folder. Used to guard the UI from deleting
+     * seeded "Unsorted" folder. Used to guard the UI from deleting
      * it and to backfill orphan captures when a user-folder is
-     * deleted (move-to-Unfiled, not cascade — per the brief).
+     * deleted (move-to-Unsorted, not cascade — per the brief).
      */
     @ColumnInfo(name = "is_default", defaultValue = "0")
     val isDefault: Boolean = false,

@@ -65,7 +65,7 @@ class ScanFlowController(
      */
     private val tagDao: TagDao? = null,
     /**
-     * DAO used to look up the user's seeded "Unfiled" folder so each
+     * DAO used to look up the user's seeded "Unsorted" folder so each
      * fresh capture defaults to a definite folder selection on the
      * review screen rather than NULL. Optional with a null default so
      * existing test / preview construction sites keep compiling — the
@@ -168,7 +168,7 @@ class ScanFlowController(
      * [setFolder] → `CaptureRepository.setFolder` (which writes
      * `captures.folder_id`). Defaults to `null`; the first-launch
      * backfill assigns every unassigned capture to the seeded
-     * "Unfiled" folder, so a capture without an explicit pick still
+     * "Unsorted" folder, so a capture without an explicit pick still
      * ends up filed correctly.
      */
     private val _selectedFolderId = MutableStateFlow<String?>(null)
@@ -316,22 +316,22 @@ class ScanFlowController(
                     } catch (_: Exception) { /* best-effort */ }
                 }
                 // Default-folder assignment — file the capture into
-                // the seeded "Unfiled" folder so the review screen
+                // the seeded "Unsorted" folder so the review screen
                 // lands on a definite selection and the row never
                 // lives orphaned outside any folder. The user can
                 // re-file via the folder buttons. Best-effort: a
                 // failure here leaves `folder_id` NULL, which the
-                // rest of the app already renders as Unfiled.
-                val unfiled = try {
+                // rest of the app already renders as Unsorted.
+                val defaultFolder = try {
                     folderDao?.findDefault(userId)
                 } catch (_: Exception) { null }
-                if (unfiled != null) {
+                if (defaultFolder != null) {
                     try {
                         repository.setFolder(
                             captureId = captureId,
-                            folderId  = unfiled.id,
+                            folderId  = defaultFolder.id,
                         )
-                        _selectedFolderId.value = unfiled.id
+                        _selectedFolderId.value = defaultFolder.id
                     } catch (_: Exception) { /* best-effort */ }
                 }
             } catch (e: Exception) {
@@ -545,7 +545,7 @@ class ScanFlowController(
      * redraws, then fires-and-forgets a `captures.folder_id`
      * write against the in-flight capture. No-ops when there's
      * no active capture. Pass `null` to clear back to the seeded
-     * Unfiled folder (the backfill catches the next launch); the
+     * Unsorted folder (the backfill catches the next launch); the
      * UI doesn't expose that path today but the API is shaped
      * the same as [setCategory] for symmetry.
      */

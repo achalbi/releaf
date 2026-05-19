@@ -597,8 +597,9 @@ private struct MainShell: View {
             // with the new canonical form. Idempotent + flag-guarded.
             try? await categoryRepo.migrateLegacySeedNamesToKebabIfNeeded(userId: userId)
 
-            // Workspace v1 first-launch migration — seed Unfiled
-            // folder + backfill every capture's folder_id. The
+            // Workspace v1 first-launch migration — seed the default
+            // folder (Unsorted; legacy installs migrate from "Unfiled"
+            // on next launch) + backfill every capture's folder_id. The
             // legacy `captures.category` → `capture_tags`
             // materialize step shipped in v8 and the column drop
             // shipped in v9; both now run inside the GRDB
@@ -614,6 +615,13 @@ private struct MainShell: View {
             // via is_seeded.
             let smartRepo = SmartCollectionRepository()
             try? await smartRepo.seedDefaultsIfNeeded(userId: userId)
+
+            // Workspace Places + People — seed "Home" / "Work" + "Me"
+            // on first launch. Both seeders no-op if the user already
+            // has any active rows, so they're safe to run on every
+            // launch.
+            try? await LocationRepository().seedDefaultsIfEmpty(userId: userId)
+            try? await PersonRepository().seedDefaultsIfEmpty(userId: userId)
 
             // Stories Phase 1 — debug-only dev seeder so the Stories
             // tab has cards to render in QA builds. Idempotent: skips

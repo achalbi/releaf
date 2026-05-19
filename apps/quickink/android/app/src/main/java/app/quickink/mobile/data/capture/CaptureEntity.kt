@@ -136,7 +136,7 @@ data class CaptureEntity(
     /**
      * Workspace v1: the folder this capture lives in. Nullable at the
      * column level so the v4 migration can backfill in a second pass
-     * (every existing capture is moved into the seeded "Unfiled"
+     * (every existing capture is moved into the seeded "Unsorted"
      * folder on first launch after upgrade — see
      * `FolderRepository.seedDefaultsIfNeeded` + `CaptureRepository
      * .backfillFolderId`). After backfill, app code asserts non-null

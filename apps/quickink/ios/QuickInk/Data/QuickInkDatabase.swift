@@ -409,8 +409,9 @@ public final class QuickInkDatabase: @unchecked Sendable {
         // Adds:
         //   1. `tags` (renamed from `categories`) + a `color` column.
         //   2. `folders` — intent axis. is_default=1 row is the
-        //      seeded "Unfiled" folder; is_shared reserved for the
-        //      post-v1 share flow.
+        //      seeded "Unsorted" folder (originally shipped as
+        //      "Unfiled"; existing rows migrate on next launch);
+        //      is_shared reserved for the post-v1 share flow.
         //   3. `capture_tags` many-to-many join — each row syncs
         //      independently so cross-device tag attachments don't
         //      require re-uploading the parent capture.
@@ -929,6 +930,120 @@ public final class QuickInkDatabase: @unchecked Sendable {
                 CREATE INDEX idx_profile_settings_tombstone
                     ON profile_settings (deleted_at) WHERE deleted_at IS NOT NULL
                 """)
+        }
+
+        // ─── v19_locations_and_people ──────────────────────────
+        //
+        // QuickInk Workspace — user-defined Places ("Home", "Work")
+        // and People ("Me", "Mom", "Dr. Rao"). Each axis is a
+        // many-to-many with `captures`:
+        //   - `locations` ← `capture_locations` → `captures`
+        //   - `people`    ← `capture_people`    → `captures`
+        //
+        // Mirror of Android's Room v16–v19 (locations, capture_
+        // locations, locations.lat/lng/address, people, capture_
+        // people, people.contact_*) collapsed into one iOS migration
+        // since iOS lands the surface fresh — there's no in-between
+        // state to preserve.
+        //
+        // Wire format matches Android's `LocationEntity` /
+        // `PersonEntity` byte-for-byte so round-tripping through
+        // Drive sync stays clean. The `Place` user-facing label is
+        // pure presentation; the table + payload kind keep the
+        // legacy `location` string to align with Android's wire.
+        migrator.registerMigration("v19_locations_and_people") { db in
+            try db.execute(sql: """
+                CREATE TABLE locations (
+                    id              TEXT PRIMARY KEY NOT NULL,
+                    user_id         TEXT NOT NULL,
+                    name            TEXT NOT NULL,
+                    position        INTEGER NOT NULL DEFAULT 0,
+                    color           TEXT,
+                    latitude        REAL,
+                    longitude       REAL,
+                    address         TEXT,
+                    drive_file_id   TEXT,
+                    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty           INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at      TEXT
+                )
+                """)
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX idx_locations_user_name
+                    ON locations (user_id, name)
+                """)
+            try db.execute(sql: "CREATE INDEX idx_locations_user_position ON locations (user_id, position)")
+            try db.execute(sql: "CREATE INDEX idx_locations_dirty         ON locations (dirty)      WHERE dirty = 1")
+            try db.execute(sql: "CREATE INDEX idx_locations_tombstone     ON locations (deleted_at) WHERE deleted_at IS NOT NULL")
+
+            try db.execute(sql: """
+                CREATE TABLE capture_locations (
+                    id              TEXT PRIMARY KEY NOT NULL,
+                    capture_id      TEXT NOT NULL,
+                    location_id     TEXT NOT NULL,
+                    source          TEXT NOT NULL DEFAULT 'manual',
+                    drive_file_id   TEXT,
+                    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty           INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at      TEXT,
+                    FOREIGN KEY (capture_id)  REFERENCES captures  (id),
+                    FOREIGN KEY (location_id) REFERENCES locations (id)
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_capture_locations_capture   ON capture_locations (capture_id)")
+            try db.execute(sql: "CREATE INDEX idx_capture_locations_location  ON capture_locations (location_id)")
+            try db.execute(sql: "CREATE INDEX idx_capture_locations_dirty     ON capture_locations (dirty)      WHERE dirty = 1")
+            try db.execute(sql: "CREATE INDEX idx_capture_locations_tombstone ON capture_locations (deleted_at) WHERE deleted_at IS NOT NULL")
+            try db.execute(sql: "CREATE INDEX idx_capture_locations_pair      ON capture_locations (capture_id, location_id)")
+
+            try db.execute(sql: """
+                CREATE TABLE people (
+                    id                  TEXT PRIMARY KEY NOT NULL,
+                    user_id             TEXT NOT NULL,
+                    name                TEXT NOT NULL,
+                    position            INTEGER NOT NULL DEFAULT 0,
+                    color               TEXT,
+                    contact_lookup_key  TEXT,
+                    contact_phone       TEXT,
+                    contact_email       TEXT,
+                    contact_photo_uri   TEXT,
+                    drive_file_id       TEXT,
+                    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty               INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at          TEXT
+                )
+                """)
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX idx_people_user_name
+                    ON people (user_id, name)
+                """)
+            try db.execute(sql: "CREATE INDEX idx_people_user_position ON people (user_id, position)")
+            try db.execute(sql: "CREATE INDEX idx_people_dirty         ON people (dirty)      WHERE dirty = 1")
+            try db.execute(sql: "CREATE INDEX idx_people_tombstone     ON people (deleted_at) WHERE deleted_at IS NOT NULL")
+
+            try db.execute(sql: """
+                CREATE TABLE capture_people (
+                    id              TEXT PRIMARY KEY NOT NULL,
+                    capture_id      TEXT NOT NULL,
+                    person_id       TEXT NOT NULL,
+                    source          TEXT NOT NULL DEFAULT 'manual',
+                    drive_file_id   TEXT,
+                    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    dirty           INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+                    deleted_at      TEXT,
+                    FOREIGN KEY (capture_id) REFERENCES captures (id),
+                    FOREIGN KEY (person_id)  REFERENCES people   (id)
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_capture_people_capture   ON capture_people (capture_id)")
+            try db.execute(sql: "CREATE INDEX idx_capture_people_person    ON capture_people (person_id)")
+            try db.execute(sql: "CREATE INDEX idx_capture_people_dirty     ON capture_people (dirty)      WHERE dirty = 1")
+            try db.execute(sql: "CREATE INDEX idx_capture_people_tombstone ON capture_people (deleted_at) WHERE deleted_at IS NOT NULL")
+            try db.execute(sql: "CREATE INDEX idx_capture_people_pair      ON capture_people (capture_id, person_id)")
         }
 
         return migrator

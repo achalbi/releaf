@@ -5,12 +5,12 @@
  * affordances (Phase B.1).
  *
  *   - [FolderActionSheet] — long-press a folder row opens this.
- *     Options: Rename / Change color / Delete. Unfiled (the
+ *     Options: Rename / Change color / Delete. Unsorted (the
  *     `is_default = 1` row) gets a read-only header instead.
  *   - [FolderEditorDialog] — used for both Create and Edit. Name
  *     field + 7-swatch color picker. Save / Cancel.
  *   - [FolderDeleteConfirmDialog] — confirms a soft-delete, calling
- *     out that captures move to Unfiled (never cascade-delete).
+ *     out that captures move to Unsorted (never cascade-delete).
  *
  * All three return Unit and accept a `onDismiss` callback so the
  * hosting screen can clear its open-modal state.
@@ -70,7 +70,7 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
 
 /**
  * Default 7-swatch folder palette — mirrors the design brief's
- * tagpill colors plus stone for Unfiled. Hex strings round-trip
+ * tagpill colors plus stone for Unsorted. Hex strings round-trip
  * directly through FolderEntity.color.
  */
 val WorkspaceFolderPalette: List<String> = listOf(
@@ -117,7 +117,7 @@ fun FolderActionSheet(
         containerColor   = colors.surface,
     ) {
         Column(modifier = Modifier.padding(horizontal = QuickInkSpacing.s4, vertical = QuickInkSpacing.s2)) {
-            // Header — folder name + color dot. Read-only for Unfiled.
+            // Header — folder name + color dot. Read-only for Unsorted.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -147,7 +147,7 @@ fun FolderActionSheet(
                 }
             }
 
-            // Unfiled is non-editable; show nothing but the header.
+            // Unsorted is non-editable; show nothing but the header.
             if (folder.isDefault) {
                 Spacer(Modifier.height(QuickInkSpacing.s4))
                 return@Column
@@ -319,8 +319,8 @@ fun FolderDeleteConfirmDialog(
             Text(
                 text  = when (captureCount) {
                     0    -> "The folder is empty. Deleting it can't be undone."
-                    1    -> "1 capture will move to Unfiled. The folder is removed from this and other devices."
-                    else -> "$captureCount captures will move to Unfiled. The folder is removed from this and other devices."
+                    1    -> "1 capture will move to Unsorted. The folder is removed from this and other devices."
+                    else -> "$captureCount captures will move to Unsorted. The folder is removed from this and other devices."
                 },
                 style = type.meta,
                 color = colors.inkSoft,

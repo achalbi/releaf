@@ -423,8 +423,10 @@ private fun MainShell(
             // with the new canonical form. Idempotent + flag-guarded.
             tagRepo.migrateLegacySeedNamesToKebabIfNeeded(context, userId)
 
-            // Workspace v1 Phase A.3 — seed Unfiled folder + backfill
-            // every capture's folder_id. The legacy
+            // Workspace v1 Phase A.3 — seed the default folder
+            // (Unsorted; legacy installs migrate from "Unfiled" on
+            // next launch) + backfill every capture's folder_id. The
+            // legacy
             // `captures.category` → `capture_tags` materialize step
             // shipped in A.3a and is gone post-A.3c column drop.
             // Idempotent via SharedPreferences guards.

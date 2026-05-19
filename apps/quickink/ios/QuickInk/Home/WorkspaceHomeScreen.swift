@@ -44,6 +44,8 @@ public struct WorkspaceHomeScreen: View {
     public let onOpenTag: (TagEntity) -> Void
     public let onOpenSmartCollection: (SmartCollectionEntity) -> Void
     public let onBrowseTags: () -> Void
+    public let onOpenLocation: (LocationEntity) -> Void
+    public let onOpenPerson: (PersonEntity) -> Void
 
     @StateObject private var viewModel: WorkspaceHomeViewModel
     @State private var folderEditorMode: FolderEditorMode? = nil
@@ -53,6 +55,8 @@ public struct WorkspaceHomeScreen: View {
     @State private var confirmDeleteCollection: SmartCollectionEntity? = nil
     @State private var actionsForCollection: SmartCollectionEntity? = nil
     @State private var editCollection: SmartCollectionEntity? = nil
+    @State private var locationEditorMode: LocationEditorMode? = nil
+    @State private var personEditorMode: PersonEditorMode? = nil
 
     public init(
         userId: String,
@@ -62,7 +66,9 @@ public struct WorkspaceHomeScreen: View {
         onOpenProfile: @escaping () -> Void,
         onOpenTag: @escaping (TagEntity) -> Void,
         onOpenSmartCollection: @escaping (SmartCollectionEntity) -> Void,
-        onBrowseTags: @escaping () -> Void
+        onBrowseTags: @escaping () -> Void,
+        onOpenLocation: @escaping (LocationEntity) -> Void = { _ in },
+        onOpenPerson: @escaping (PersonEntity) -> Void = { _ in }
     ) {
         self.userId = userId
         self.onOpenSearch = onOpenSearch
@@ -72,6 +78,8 @@ public struct WorkspaceHomeScreen: View {
         self.onOpenTag = onOpenTag
         self.onOpenSmartCollection = onOpenSmartCollection
         self.onBrowseTags = onBrowseTags
+        self.onOpenLocation = onOpenLocation
+        self.onOpenPerson = onOpenPerson
         _viewModel = StateObject(wrappedValue: WorkspaceHomeViewModel(userId: userId))
     }
 
@@ -92,6 +100,12 @@ public struct WorkspaceHomeScreen: View {
                 smartCollectionsStrip
 
                 foldersSection
+                    .padding(.horizontal, AppSpacing.s4)
+
+                placesSection
+                    .padding(.horizontal, AppSpacing.s4)
+
+                peopleSection
                     .padding(.horizontal, AppSpacing.s4)
 
                 tagsSection
@@ -245,7 +259,7 @@ public struct WorkspaceHomeScreen: View {
             Text(
                 count == 0
                     ? "The folder is empty. Deleting it can't be undone."
-                    : "\(count) capture\(count == 1 ? "" : "s") will move to Unfiled."
+                    : "\(count) capture\(count == 1 ? "" : "s") will move to Unsorted."
             )
         }
     }
@@ -726,6 +740,231 @@ public struct WorkspaceHomeScreen: View {
             .overlay(Capsule().stroke(QuickInkColors.border, lineWidth: 1))
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Places
+    //
+    // Mirror of Android's `LocationsSection` (renamed to "Places" in
+    // the UI; the storage layer still uses the legacy `location` name
+    // for wire-format parity).
+
+    private var placesSection: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s2) {
+            HStack {
+                Text("Places")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(QuickInkColors.ink)
+                Spacer()
+                Button(action: { locationEditorMode = .create }) {
+                    Text("NEW PLACE")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundColor(QuickInkColors.accent)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if viewModel.locations.isEmpty {
+                Text("No places yet.")
+                    .font(.system(size: 12.5))
+                    .foregroundColor(QuickInkColors.muted)
+                    .padding(.vertical, AppSpacing.s3)
+            } else {
+                ForEach(viewModel.locations) { loc in
+                    placeRow(loc)
+                }
+            }
+        }
+        .sheet(item: $locationEditorMode) { mode in
+            LocationEditorView(
+                mode:     mode,
+                onSubmit: { name, address, latitude, longitude in
+                    Task {
+                        switch mode {
+                        case .create:
+                            _ = try? await viewModel.createLocation(
+                                name:      name,
+                                address:   address?.isEmpty == true ? nil : address,
+                                latitude:  latitude,
+                                longitude: longitude
+                            )
+                        case .edit(let loc):
+                            if !name.isEmpty, name != loc.name {
+                                try? await viewModel.renameLocation(id: loc.id, newName: name)
+                            }
+                            let nextAddress = address?.isEmpty == true ? nil : address
+                            if nextAddress != loc.address ||
+                               latitude    != loc.latitude ||
+                               longitude   != loc.longitude {
+                                try? await viewModel.setLocationCoordinates(
+                                    id:        loc.id,
+                                    latitude:  latitude,
+                                    longitude: longitude,
+                                    address:   nextAddress
+                                )
+                            }
+                        }
+                    }
+                    locationEditorMode = nil
+                },
+                onCancel: { locationEditorMode = nil }
+            )
+            .presentationDetents([.medium])
+        }
+    }
+
+    private func placeRow(_ location: LocationEntity) -> some View {
+        let count = viewModel.locationCounts[location.id] ?? 0
+        return Button(action: { onOpenLocation(location) }) {
+            HStack(spacing: AppSpacing.s3) {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(colorFromHex(location.color) ?? QuickInkColors.accentSoft)
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(QuickInkColors.accent)
+                    )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(location.name)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(QuickInkColors.ink)
+                    if let address = location.address, !address.isEmpty {
+                        Text(address)
+                            .font(.system(size: 11.5))
+                            .foregroundColor(QuickInkColors.muted)
+                            .lineLimit(1)
+                    } else {
+                        Text("\(count) \(count == 1 ? "item" : "items")")
+                            .font(.system(size: 11.5))
+                            .foregroundColor(QuickInkColors.muted)
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+                    .foregroundColor(QuickInkColors.muted)
+            }
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onLongPressGesture { locationEditorMode = .edit(location: location) }
+    }
+
+    // MARK: - People
+
+    private var peopleSection: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.s2) {
+            HStack {
+                Text("People")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(QuickInkColors.ink)
+                Spacer()
+                Button(action: { personEditorMode = .create }) {
+                    Text("NEW PERSON")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundColor(QuickInkColors.accent)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if viewModel.people.isEmpty {
+                Text("No people yet.")
+                    .font(.system(size: 12.5))
+                    .foregroundColor(QuickInkColors.muted)
+                    .padding(.vertical, AppSpacing.s3)
+            } else {
+                ForEach(viewModel.people) { person in
+                    personRow(person)
+                }
+            }
+        }
+        .sheet(item: $personEditorMode) { mode in
+            PersonEditorView(
+                mode:     mode,
+                onSubmit: { name, phone, email, lookupKey, photoUri in
+                    Task {
+                        switch mode {
+                        case .create:
+                            _ = try? await viewModel.createPerson(
+                                name:             name,
+                                phone:            phone?.isEmpty == true ? nil : phone,
+                                email:            email?.isEmpty == true ? nil : email,
+                                contactLookupKey: lookupKey,
+                                contactPhotoUri:  photoUri
+                            )
+                        case .edit(let person):
+                            if !name.isEmpty, name != person.name {
+                                try? await viewModel.renamePerson(id: person.id, newName: name)
+                            }
+                            let nextPhone     = phone?.isEmpty == true ? nil : phone
+                            let nextEmail     = email?.isEmpty == true ? nil : email
+                            if nextPhone     != person.contactPhone ||
+                               nextEmail     != person.contactEmail ||
+                               lookupKey     != person.contactLookupKey ||
+                               photoUri      != person.contactPhotoUri {
+                                try? await viewModel.setPersonContact(
+                                    id:        person.id,
+                                    lookupKey: lookupKey,
+                                    phone:     nextPhone,
+                                    email:     nextEmail,
+                                    photoUri:  photoUri
+                                )
+                            }
+                        }
+                    }
+                    personEditorMode = nil
+                },
+                onCancel: { personEditorMode = nil }
+            )
+            .presentationDetents([.medium])
+        }
+    }
+
+    private func personRow(_ person: PersonEntity) -> some View {
+        let count = viewModel.personCounts[person.id] ?? 0
+        return Button(action: { onOpenPerson(person) }) {
+            HStack(spacing: AppSpacing.s3) {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(colorFromHex(person.color) ?? QuickInkColors.accentSoft)
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(QuickInkColors.accent)
+                    )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(person.name)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(QuickInkColors.ink)
+                    if let phone = person.contactPhone, !phone.isEmpty {
+                        Text(phone)
+                            .font(.system(size: 11.5))
+                            .foregroundColor(QuickInkColors.muted)
+                            .lineLimit(1)
+                    } else if let email = person.contactEmail, !email.isEmpty {
+                        Text(email)
+                            .font(.system(size: 11.5))
+                            .foregroundColor(QuickInkColors.muted)
+                            .lineLimit(1)
+                    } else {
+                        Text("\(count) \(count == 1 ? "item" : "items")")
+                            .font(.system(size: 11.5))
+                            .foregroundColor(QuickInkColors.muted)
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+                    .foregroundColor(QuickInkColors.muted)
+            }
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onLongPressGesture { personEditorMode = .edit(person: person) }
     }
 }
 

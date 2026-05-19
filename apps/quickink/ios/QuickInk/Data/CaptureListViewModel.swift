@@ -67,7 +67,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
     /// Workspace v1 — folder this capture lives in. Nullable
     /// at the column level so v8_workspace can backfill in a
     /// second pass; after the first-launch migration runs every
-    /// capture is in Unfiled (or a user-created folder).
+    /// capture is in Unsorted (or a user-created folder).
     public let folderId: String?
     /// Workspace v1 — ISO timestamp of the last time the user
     /// opened this capture. Powers the Continue card.

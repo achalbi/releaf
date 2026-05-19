@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.paddingFromBaseline
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
@@ -104,17 +105,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -618,181 +618,19 @@ private fun HomeHeader(
     }
     val resolvedName = (displayName?.trim().orEmpty()).ifEmpty { "QuickInk" }
 
-    // Avatar pill shares the centre Zap FAB's chrome (see
-    // QuickInkBottomNavBar.BrandTab): same 56/4/64 dimensions,
-    // same coral gradient brush, same canvas-coloured outer ring,
-    // same ambient/contact drop shadow stack. Differs in two
-    // intentional ways: no upward `lift` (the avatar isn't floating
-    // above a bar surface), and the inner glyph is dialled down
-    // from the FAB's 30dp Bolt to a 32dp Outlined.Face — the
-    // FAB is the primary action; the avatar is a secondary
-    // identity tap and reads quieter.
-    val avatarInner     = 56.dp
-    val avatarImageSize = 32.dp
-    val avatarRing      = 4.dp
-    val avatarOuter     = avatarInner + avatarRing * 2
-    val coralGradient = Brush.verticalGradient(
-        colors = listOf(colors.accent, colors.accentDeep),
-    )
+    // Header reads "greeting | calendar | profile" — both right-side
+    // affordances are 44dp coral discs (mirrors iOS). Calendar is
+    // a destination; profile (showing the user's first initial,
+    // picked photo, or Face fallback) opens the account drawer.
+    val nameInitial = displayName?.trim().orEmpty().firstOrNull()?.uppercaseChar()?.toString()
 
-    Row(verticalAlignment = Alignment.Top) {
-        // Top-left profile pill — a button, not a label. Mirrors
-        // the centre Zap FAB's chrome so the two read as siblings:
-        // user's space on the left, action space on the right.
-        // Profile photo (when picked) and the fallback Face glyph
-        // are capped at 22dp inside the coral disc. Tap slides the
-        // profile drawer in from the leading edge — same pattern
-        // as Releaf's home avatar → home drawer.
-        // No ripple — the coral disc + canvas ring + drop shadow
-        // already read as pressable, and the default rectangular
-        // ripple paints in the four corners outside the circular
-        // disc (since the layout box is 64dp square, not a circle).
-        // Mirror of BrandTab's interactionSource pattern.
-        val avatarInteraction = remember { MutableInteractionSource() }
-        Box(
-            modifier = Modifier
-                .size(avatarOuter)
-                .clickable(
-                    interactionSource = avatarInteraction,
-                    indication        = null,
-                    onClick           = onTapAvatar,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            // Outer ring + shadow disc. The drawBehind block paints
-            // the same two stacked drop shadows BrandTab uses
-            // (ambient: wider/softer, contact: tighter/darker), then
-            // a canvas-coloured ring sits on top — same `colors.bg`
-            // tone the FAB uses, kept consistent for cross-element
-            // coherence on the home screen.
-            //
-            // Critical: the parent Box deliberately does NOT
-            // `.clip(CircleShape)`. The ambient shadow extends ~8dp
-            // past the disc edge — clipping the parent kills it.
-            Box(
-                modifier = Modifier
-                    .size(avatarOuter)
-                    .drawBehind {
-                        val cx = size.width / 2f
-                        val cy = size.height / 2f
-                        val r  = size.width / 2f
-
-                        // Ambient — wider, softer.
-                        val ambientR    = r + 8.dp.toPx()
-                        val ambientStop = r / ambientR
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colorStops = arrayOf(
-                                    ambientStop to Color.Black.copy(alpha = 0.06f),
-                                    1f          to Color.Transparent,
-                                ),
-                                center = Offset(cx, cy + 3.dp.toPx()),
-                                radius = ambientR,
-                            ),
-                            radius = ambientR,
-                            center = Offset(cx, cy + 3.dp.toPx()),
-                        )
-
-                        // Contact — tighter, darker.
-                        val contactR    = r + 3.dp.toPx()
-                        val contactStop = r / contactR
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colorStops = arrayOf(
-                                    contactStop to Color.Black.copy(alpha = 0.14f),
-                                    1f          to Color.Transparent,
-                                ),
-                                center = Offset(cx, cy + 1.dp.toPx()),
-                                radius = contactR,
-                            ),
-                            radius = contactR,
-                            center = Offset(cx, cy + 1.dp.toPx()),
-                        )
-                    }
-                    .background(colors.bg, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(avatarInner)
-                        .clip(CircleShape)
-                        .background(coralGradient),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    // Default fallback: a canvas-tone face glyph on
-                    // the coral disc. Used directly when there's no
-                    // profile photo AND as the loading/error slot
-                    // for SubcomposeAsyncImage below — a stale URI
-                    // pointing at a deleted file would otherwise
-                    // leave the disc blank.
-                    //
-                    // Earlier passes rendered the user's first
-                    // initial here (Canvas + TextMeasurer to dodge
-                    // metric-vs-optical centering quirks), but the
-                    // person glyph reads more universally and avoids
-                    // the whole "what if the user's name starts
-                    // with a descender / non-Latin / emoji" question.
-                    val fallback: @Composable () -> Unit = {
-                        Box(
-                            modifier = Modifier.size(avatarImageSize),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector        = Icons.Outlined.Face,
-                                contentDescription = "Open profile menu",
-                                // Tinted to the canvas tone (`colors.bg`)
-                                // so the glyph echoes the outer ring and
-                                // reads as cream-on-coral rather than
-                                // pure white-on-coral — softer, warmer,
-                                // and ties the avatar's two cream-toned
-                                // surfaces (ring + glyph) together.
-                                tint               = colors.bg,
-                                modifier           = Modifier.fillMaxSize(),
-                            )
-                        }
-                    }
-
-                    if (profilePhotoUri.isNotEmpty()) {
-                        // SubcomposeAsyncImage (not AsyncImage) so a
-                        // stale URI / missing file falls through to
-                        // the Face icon fallback instead of leaving
-                        // the coral disc empty. profilePhotoUri
-                        // persists in SharedPreferences across
-                        // reinstalls, so pointing at a vanished file
-                        // is a real path.
-                        SubcomposeAsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(Uri.parse(profilePhotoUri))
-                                // Cache disabled because the user's
-                                // photo is overwritten in-place at the
-                                // same path — without this, a fresh
-                                // pick would keep serving the stale
-                                // bitmap. The rendered photo is small
-                                // (32dp), so the perf cost is nil.
-                                .memoryCachePolicy(CachePolicy.DISABLED)
-                                .diskCachePolicy(CachePolicy.DISABLED)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = "Open profile menu",
-                            contentScale       = ContentScale.Crop,
-                            modifier           = Modifier
-                                .size(avatarImageSize)
-                                .clip(CircleShape),
-                            loading = { fallback() },
-                            error   = { fallback() },
-                        )
-                    } else {
-                        fallback()
-                    }
-                }
-            }
-        }
-        Spacer(Modifier.size(QuickInkSpacing.s3))
+    Row(
+        verticalAlignment     = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
         Column(modifier = Modifier.weight(1f)) {
             // Daylight cue sits before the greeting — sun during the
             // day, moon-with-stars after 18:00 (and before 05:00).
-            // Replaces the glyph that used to live in the top status
-            // row.
             Row(
                 verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -819,50 +657,109 @@ private fun HomeHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        // Top-right calendar tile — squared surface card with a
-        // coral calendar glyph and a small "Calendar" label. Reads
-        // as a destination card (vs the avatar's identity disc) and
-        // matches the home mockup's tile-on-tile rhythm. Tap pushes
-        // the standalone Calendar screen (panchanga + Indian holidays
-        // + per-day capture dots).
+
         val calendarInteraction = remember { MutableInteractionSource() }
-        val calendarShape = RoundedCornerShape(QuickInkRadius.md)
-        Column(
+        Box(
             modifier = Modifier
-                .size(60.dp)
-                // Shadow renders before clip/background so it falls
-                // outside the tile rather than getting masked away.
-                // Soft 4dp lift to match the home mockup's raised
-                // calendar card.
-                .shadow(
-                    elevation = 4.dp,
-                    shape     = calendarShape,
-                    clip      = false,
-                )
-                .clip(calendarShape)
-                .background(colors.surface)
-                .border(1.dp, colors.border, calendarShape)
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(colors.borderSoft)
+                .border(1.dp, colors.borderSoft, CircleShape)
                 .clickable(
                     interactionSource = calendarInteraction,
                     indication        = null,
                     onClick           = onTapCalendar,
-                )
-                .padding(vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+                ),
+            contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector        = Icons.Outlined.CalendarMonth,
                 contentDescription = "Open calendar",
-                tint               = colors.accent,
-                modifier           = Modifier.size(24.dp),
+                // Matches the greeting text's deep-taupe (#5F5245).
+                tint               = Color(0xFF5F5245),
+                modifier           = Modifier.size(20.dp),
             )
-            Spacer(Modifier.size(2.dp))
-            Text(
-                text  = "Calendar",
-                style = type.caption,
-                color = colors.ink,
-            )
+        }
+
+        val avatarInteraction = remember { MutableInteractionSource() }
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(colors.borderSoft)
+                .border(1.dp, colors.borderSoft, CircleShape)
+                .clickable(
+                    interactionSource = avatarInteraction,
+                    indication        = null,
+                    onClick           = onTapAvatar,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            // Fallback chain: picked photo → first initial → Face
+            // glyph. The glyph is the last resort for pre-signin /
+            // empty-name states; once a display name is resolved
+            // the initial replaces it.
+            val fallback: @Composable () -> Unit = {
+                if (nameInitial != null) {
+                    // `paddingFromBaseline` pins the baseline at a known
+                    // y so the cap-height midline (the visible centroid
+                    // for a capital letter) lands on the disc centre.
+                    // Without this, the line box's descender slot pushes
+                    // the glyph visually high. Matches the larger drawer
+                    // avatar's centering trick (ProfileDrawerOverlay).
+                    //
+                    // Math (44dp disc, 22sp font, Roboto cap-height
+                    // ≈ 0.71 × fontSize ≈ 15.6dp):
+                    //   - disc centre y       = 22dp
+                    //   - A's visual centre   = baseline − 7.8dp
+                    //   - baseline from top   = 22 + 7.8 ≈ 30dp
+                    //   - bottom              = 44 − 30 = 14dp
+                    Text(
+                        text      = nameInitial,
+                        // Matches the greeting text's deep-taupe (#5F5245).
+                        color     = Color(0xFF5F5245),
+                        fontSize  = 22.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                        style     = TextStyle(
+                            platformStyle = PlatformTextStyle(includeFontPadding = false),
+                        ),
+                        modifier  = Modifier
+                            .size(44.dp)
+                            .paddingFromBaseline(top = 30.dp, bottom = 14.dp),
+                    )
+                } else {
+                    Icon(
+                        imageVector        = Icons.Outlined.Face,
+                        contentDescription = "Open profile menu",
+                        tint               = colors.accent,
+                        modifier           = Modifier.size(22.dp),
+                    )
+                }
+            }
+
+            if (profilePhotoUri.isNotEmpty()) {
+                // Cache disabled — the photo is overwritten in-place
+                // at the same path, so a cached bitmap would shadow
+                // a fresh pick.
+                SubcomposeAsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(Uri.parse(profilePhotoUri))
+                        .memoryCachePolicy(CachePolicy.DISABLED)
+                        .diskCachePolicy(CachePolicy.DISABLED)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "Open profile menu",
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape),
+                    loading = { fallback() },
+                    error   = { fallback() },
+                )
+            } else {
+                fallback()
+            }
         }
     }
 }
@@ -939,8 +836,7 @@ private fun SustainabilityHero(pagesBySize: Map<String, Int>) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(QuickInkRadius.lg))
-            .background(ecoBg)
-            .border(1.dp, ecoBorder, RoundedCornerShape(QuickInkRadius.lg))
+            .background(colors.borderSoft)
             // Tap to open the score-breakdown sheet. Always tappable
             // — the breakdown also serves as the explainer for the
             // empty-state ("here's how the score will work once you
@@ -1752,7 +1648,7 @@ private fun RecentActivityPill(
             modifier = Modifier
                 .size(32.dp)
                 .clip(CircleShape)
-                .background(colors.accentSoft),
+                .background(Color.White),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -2097,7 +1993,7 @@ private fun LocationsRail(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text  = "Locations",
+                text  = "Places",
                 style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
                 color = colors.ink,
             )
@@ -2118,9 +2014,6 @@ private fun LocationsRail(
         ) {
             items(locations, key = { it.id }) { loc ->
                 LocationChip(location = loc, onClick = { onChipTap(loc) })
-            }
-            item {
-                AddLocationChip(onClick = onAddTap)
             }
         }
     }
@@ -2153,35 +2046,6 @@ private fun LocationChip(
         Text(
             text  = location.name,
             style = type.label.copy(fontSize = 12.sp),
-            color = colors.inkSoft,
-        )
-    }
-}
-
-@Composable
-private fun AddLocationChip(onClick: () -> Unit) {
-    val colors = LocalQuickInkColors.current
-    val type   = LocalQuickInkTypography.current
-    val shape  = RoundedCornerShape(999.dp)
-    Row(
-        modifier = Modifier
-            .clip(shape)
-            .background(colors.borderSoft, shape)
-            .border(1.dp, colors.border, shape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 11.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector        = Icons.Filled.Add,
-            contentDescription = "Add location",
-            tint               = colors.inkSoft,
-            modifier           = Modifier.size(13.dp),
-        )
-        Spacer(Modifier.width(4.dp))
-        Text(
-            text  = "Add",
-            style = type.label.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
             color = colors.inkSoft,
         )
     }
@@ -2224,12 +2088,12 @@ private fun LocationsManageSheet(
             verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
         ) {
             Text(
-                text  = "Locations",
+                text  = "Places",
                 style = type.heading,
                 color = colors.ink,
             )
             Text(
-                text  = "Places you scan from. Tap a row to edit its address; attach a location to a document from the document's detail screen.",
+                text  = "Places you scan from. Tap a row to edit its address; attach a place to a document from the document's detail screen.",
                 style = type.meta,
                 color = colors.inkSoft,
             )
@@ -2255,7 +2119,7 @@ private fun LocationsManageSheet(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text  = "Add location",
+                        text  = "Add place",
                         style = type.label.copy(fontWeight = FontWeight.SemiBold),
                         color = colors.textOnAccent,
                     )
@@ -2264,7 +2128,7 @@ private fun LocationsManageSheet(
 
             if (locations.isEmpty()) {
                 Text(
-                    text  = "No locations yet. Add one to get started.",
+                    text  = "No places yet. Add one to get started.",
                     style = type.meta,
                     color = colors.muted,
                 )
@@ -2371,9 +2235,6 @@ private fun PeopleRail(
             items(people, key = { it.id }) { person ->
                 PersonChip(person = person, onClick = { onChipTap(person) })
             }
-            item {
-                AddPersonChip(onClick = onAddTap)
-            }
         }
     }
 }
@@ -2405,35 +2266,6 @@ private fun PersonChip(
         Text(
             text  = person.name,
             style = type.label.copy(fontSize = 12.sp),
-            color = colors.inkSoft,
-        )
-    }
-}
-
-@Composable
-private fun AddPersonChip(onClick: () -> Unit) {
-    val colors = LocalQuickInkColors.current
-    val type   = LocalQuickInkTypography.current
-    val shape  = RoundedCornerShape(999.dp)
-    Row(
-        modifier = Modifier
-            .clip(shape)
-            .background(colors.borderSoft, shape)
-            .border(1.dp, colors.border, shape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 11.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector        = Icons.Filled.Add,
-            contentDescription = "Add person",
-            tint               = colors.inkSoft,
-            modifier           = Modifier.size(13.dp),
-        )
-        Spacer(Modifier.width(4.dp))
-        Text(
-            text  = "Add",
-            style = type.label.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
             color = colors.inkSoft,
         )
     }

@@ -253,9 +253,7 @@ struct DaylightHero: View {
         // mode), so the daylight card has the same legibility
         // ceiling the rest of the app does.
         let sunBg     = QuickInkColors.leafYellowBase.opacity(0.20)
-        let sunBorder = QuickInkColors.leafYellowBase.opacity(0.55)
         let setBg     = QuickInkColors.coralBase.opacity(0.18)
-        let setBorder = QuickInkColors.coralBase.opacity(0.45)
 
         VStack(spacing: QuickInkSpacing.s2) {
             // Two split tiles — sunrise on the left, sunset on the
@@ -275,7 +273,6 @@ struct DaylightHero: View {
                         icon:     "sunset.fill",
                         ringFill: QuickInkColors.coralBase,
                         bg:       setBg,
-                        border:   setBorder,
                         pulsePhase: 0
                     )
                     splitTile(
@@ -284,7 +281,6 @@ struct DaylightHero: View {
                         icon:     "sunrise.fill",
                         ringFill: QuickInkColors.leafYellowBase,
                         bg:       sunBg,
-                        border:   sunBorder,
                         pulsePhase: 1.7
                     )
                 } else {
@@ -294,7 +290,6 @@ struct DaylightHero: View {
                         icon:     "sunrise.fill",
                         ringFill: QuickInkColors.leafYellowBase,
                         bg:       sunBg,
-                        border:   sunBorder,
                         pulsePhase: 0
                     )
                     splitTile(
@@ -303,7 +298,6 @@ struct DaylightHero: View {
                         icon:     "sunset.fill",
                         ringFill: QuickInkColors.coralBase,
                         bg:       setBg,
-                        border:   setBorder,
                         // 1.7 s phase offset on the second pulse so
                         // the two tiles don't breathe in lockstep —
                         // feels alive without being synchronous.
@@ -370,7 +364,6 @@ struct DaylightHero: View {
         icon: String,
         ringFill: Color,
         bg: Color,
-        border: Color,
         pulsePhase: Double
     ) -> some View {
         HStack(spacing: QuickInkSpacing.s2) {
@@ -401,10 +394,6 @@ struct DaylightHero: View {
         .background(
             RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
                 .fill(bg)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                .strokeBorder(border, lineWidth: 1)
         )
     }
 

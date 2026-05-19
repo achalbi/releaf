@@ -174,7 +174,7 @@ fun LocationPickerSheet(
 
             if (allLocations.isEmpty()) {
                 Text(
-                    text  = "No locations yet. Type one above to start.",
+                    text  = "No places yet. Type one above to start.",
                     style = type.meta,
                     color = colors.muted,
                     modifier = Modifier.padding(vertical = QuickInkSpacing.s2),
@@ -241,7 +241,7 @@ fun LocationPickerSheet(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text  = "Save $countDelta ${if (countDelta == 1) "location" else "locations"}",
+                        text  = "Save $countDelta ${if (countDelta == 1) "place" else "places"}",
                         style = type.body.copy(fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp),
                         color = Color.White,
                     )

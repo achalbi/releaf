@@ -89,6 +89,11 @@ struct ScanDetailScreen: View {
     /// `.fullScreenCover(item:)` a stable identity so it doesn't
     /// re-present on every state read.
     @State private var pendingEditorBundle: EditorPagesBundle? = nil
+    /// PDF-share activity items, set by [shareDocumentTo] when the
+    /// person-chip action sheet's "Share document" row fires. Drives
+    /// the same `ActivityView` flow as image-share, just with the
+    /// `.pdf` URL.
+    @State private var pdfShareItems: IdentifiedURLs? = nil
 
     /// Workspace v1 — folder picker presentation. Tapping the
     /// Actions card's "Move to folder" row flips this.
@@ -107,6 +112,25 @@ struct ScanDetailScreen: View {
     /// badge + the Business Card behavior switch.
     @State private var attachedTagIds: [String] = []
     @State private var tagIdsCancellable: AnyCancellable? = nil
+    /// Workspace Places — attached location ids (oldest-first) +
+    /// the full user-scoped list, so the details card can resolve
+    /// ids to names without a per-chip fetch.
+    @State private var attachedLocationIds: [String] = []
+    @State private var allLocations: [LocationEntity] = []
+    @State private var locationIdsCancellable: AnyCancellable? = nil
+    @State private var allLocationsCancellable: AnyCancellable? = nil
+    /// Workspace People — attached person ids + the full user-scoped
+    /// list. Mirrors the Locations pair.
+    @State private var attachedPersonIds: [String] = []
+    @State private var allPeople: [PersonEntity] = []
+    @State private var personIdsCancellable: AnyCancellable? = nil
+    @State private var allPeopleCancellable: AnyCancellable? = nil
+    /// Drives the person-chip bottom sheet (Share / Edit). Set when
+    /// the user taps an existing person chip; cleared on dismiss.
+    @State private var personActionTarget: PersonEntity? = nil
+    /// Set when the user taps "Edit person" in the chip action sheet.
+    /// Drives presentation of the in-place [PersonEditorView].
+    @State private var personEditorTarget: PersonEntity? = nil
     /// Workspace v1 — debouncer for the Continue card signal. The
     /// PDF reader writes last_opened_* 500ms after the user lands
     /// on a page so a quick flip-through doesn't pollute Home.
@@ -256,6 +280,46 @@ struct ScanDetailScreen: View {
                         receiveValue: { ids in attachedTagIds = ids }
                     )
             }
+            // Workspace Places + People — subscribe to both the
+            // attached-id lists and the user-scoped full lists so the
+            // details card's chip rows render names + the picker
+            // sheets re-emit the moment the user attaches a new row.
+            if locationIdsCancellable == nil {
+                locationIdsCancellable = LocationRepository()
+                    .observeLocationIds(captureId: captureId)
+                    .receive(on: DispatchQueue.main)
+                    .sink(
+                        receiveCompletion: { _ in },
+                        receiveValue: { ids in attachedLocationIds = ids }
+                    )
+            }
+            if allLocationsCancellable == nil {
+                allLocationsCancellable = LocationRepository()
+                    .observe(userId: userId)
+                    .receive(on: DispatchQueue.main)
+                    .sink(
+                        receiveCompletion: { _ in },
+                        receiveValue: { rows in allLocations = rows }
+                    )
+            }
+            if personIdsCancellable == nil {
+                personIdsCancellable = PersonRepository()
+                    .observePersonIds(captureId: captureId)
+                    .receive(on: DispatchQueue.main)
+                    .sink(
+                        receiveCompletion: { _ in },
+                        receiveValue: { ids in attachedPersonIds = ids }
+                    )
+            }
+            if allPeopleCancellable == nil {
+                allPeopleCancellable = PersonRepository()
+                    .observe(userId: userId)
+                    .receive(on: DispatchQueue.main)
+                    .sink(
+                        receiveCompletion: { _ in },
+                        receiveValue: { rows in allPeople = rows }
+                    )
+            }
             await loadCapture()
             // File size depends on the resolved capture (we need
             // pdf_uri before we can stat the file) so it runs after
@@ -316,6 +380,63 @@ struct ScanDetailScreen: View {
                 onDismiss: { showPeoplePicker = false }
             )
             .presentationDetents([.large])
+        }
+        // Workspace People — chip-tap action sheet (Share / Edit).
+        .confirmationDialog(
+            personActionTarget?.name ?? "",
+            isPresented: Binding(
+                get: { personActionTarget != nil },
+                set: { if !$0 { personActionTarget = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let person = personActionTarget {
+                let phone = person.contactPhone?.trimmingCharacters(in: .whitespaces)
+                let email = person.contactEmail?.trimmingCharacters(in: .whitespaces)
+                let canShare = !(phone?.isEmpty ?? true) || !(email?.isEmpty ?? true)
+                if canShare {
+                    Button("Share document") {
+                        let target = person
+                        personActionTarget = nil
+                        Task { await shareDocumentTo(person: target) }
+                    }
+                }
+                Button("Edit person") {
+                    let target = person
+                    personActionTarget = nil
+                    personEditorTarget = target
+                }
+                Button("Cancel", role: .cancel) { personActionTarget = nil }
+            }
+        }
+        .sheet(item: $personEditorTarget) { person in
+            PersonEditorView(
+                mode:     .edit(person: person),
+                onSubmit: { name, phone, email, lookupKey, photoUri in
+                    Task {
+                        if !name.isEmpty, name != person.name {
+                            try? await PersonRepository().rename(id: person.id, newName: name)
+                        }
+                        let nextPhone = phone?.isEmpty == true ? nil : phone
+                        let nextEmail = email?.isEmpty == true ? nil : email
+                        if nextPhone != person.contactPhone ||
+                           nextEmail != person.contactEmail ||
+                           lookupKey != person.contactLookupKey ||
+                           photoUri  != person.contactPhotoUri {
+                            try? await PersonRepository().setContactLink(
+                                id:        person.id,
+                                lookupKey: lookupKey,
+                                phone:     nextPhone,
+                                email:     nextEmail,
+                                photoUri:  photoUri
+                            )
+                        }
+                    }
+                    personEditorTarget = nil
+                },
+                onCancel: { personEditorTarget = nil }
+            )
+            .presentationDetents([.medium])
         }
         // Workspace v1 — folder picker on "Move to folder".
         .sheet(isPresented: $showFolderPicker) {
@@ -465,6 +586,14 @@ struct ScanDetailScreen: View {
         // render so a second share-as-image tap re-presents the
         // sheet rather than no-opping on identical state.
         .sheet(item: $imageShareItems) { wrapper in
+            ActivityView(activityItems: wrapper.urls)
+        }
+        // PDF share sheet — driven by the person-chip "Share document"
+        // action (and any future per-recipient share). The system
+        // share sheet doesn't expose Android-style recipient
+        // pre-targeting, so this is a plain UIActivityViewController
+        // around the PDF URL.
+        .sheet(item: $pdfShareItems) { wrapper in
             ActivityView(activityItems: wrapper.urls)
         }
         // WhatsApp-style image editor — fullscreen cover the user
@@ -1240,6 +1369,8 @@ struct ScanDetailScreen: View {
                     detailRow(label: "City", value: locality)
                 }
                 tagsRow(for: capture)
+                placesRow(for: capture)
+                peopleRow(for: capture)
             }
             .padding(QuickInkSpacing.s3)
         }
@@ -1313,6 +1444,117 @@ struct ScanDetailScreen: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Add tag")
             }
+        }
+    }
+
+    /// "Places" row inside [detailsCard]. Shows one pill per attached
+    /// location with a trailing "+" affordance. Mirror of Android's
+    /// `LocationsRow`. Tapping a pill OR the "+" opens the picker.
+    @ViewBuilder
+    private func placesRow(for capture: CaptureSummary) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Places")
+                .font(QuickInkFont.ui(11, weight: .medium))
+                .foregroundStyle(QuickInkColors.inkSoft)
+            Spacer()
+            HStack(spacing: QuickInkSpacing.s1) {
+                ForEach(attachedLocationNames, id: \.self) { name in
+                    Button {
+                        showPlacePicker = true
+                    } label: {
+                        Text(name)
+                            .font(QuickInkFont.ui(11, weight: .medium))
+                            .foregroundStyle(QuickInkColors.accent)
+                            .padding(.horizontal, QuickInkSpacing.s2)
+                            .padding(.vertical, 4)
+                            .background(QuickInkColors.accentSoft)
+                            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button {
+                    showPlacePicker = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(QuickInkColors.inkSoft)
+                        .frame(width: 26, height: 26)
+                        .background(QuickInkColors.borderSoft)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add place")
+            }
+        }
+    }
+
+    /// "People" row inside [detailsCard]. Same pattern as `placesRow`
+    /// but each chip tap opens a Share/Edit action sheet for that
+    /// person. Mirror of Android's `PeopleRow`.
+    @ViewBuilder
+    private func peopleRow(for capture: CaptureSummary) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("People")
+                .font(QuickInkFont.ui(11, weight: .medium))
+                .foregroundStyle(QuickInkColors.inkSoft)
+            Spacer()
+            HStack(spacing: QuickInkSpacing.s1) {
+                ForEach(attachedPeople) { person in
+                    Button {
+                        personActionTarget = person
+                    } label: {
+                        Text(person.name)
+                            .font(QuickInkFont.ui(11, weight: .medium))
+                            .foregroundStyle(QuickInkColors.accent)
+                            .padding(.horizontal, QuickInkSpacing.s2)
+                            .padding(.vertical, 4)
+                            .background(QuickInkColors.accentSoft)
+                            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button {
+                    showPeoplePicker = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(QuickInkColors.inkSoft)
+                        .frame(width: 26, height: 26)
+                        .background(QuickInkColors.borderSoft)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add person")
+            }
+        }
+    }
+
+    /// Names of every location currently attached to this capture,
+    /// resolved in the same order the join rows arrived. Drops ids
+    /// whose location row hasn't loaded yet (or was soft-deleted).
+    private var attachedLocationNames: [String] {
+        let byId = Dictionary(uniqueKeysWithValues: allLocations.map { ($0.id, $0) })
+        return attachedLocationIds.compactMap { byId[$0]?.name }
+    }
+
+    /// People currently attached to this capture, resolved in the
+    /// same order the join rows arrived. Mirror of
+    /// `attachedLocationNames`.
+    private var attachedPeople: [PersonEntity] {
+        let byId = Dictionary(uniqueKeysWithValues: allPeople.map { ($0.id, $0) })
+        return attachedPersonIds.compactMap { byId[$0] }
+    }
+
+    /// Hand the capture's PDF to the system share sheet. Mirror of
+    /// Android's `shareCapturePdfWithPerson` — iOS doesn't surface
+    /// Android-style recipient pre-targeting on `UIActivityViewController`,
+    /// so the system share sheet opens with just the PDF and the
+    /// user picks the recipient inside whichever app they choose.
+    private func shareDocumentTo(person: PersonEntity) async {
+        guard let capture = capture,
+              let url = shareablePdfURL(from: capture) else { return }
+        await MainActor.run {
+            pdfShareItems = IdentifiedURLs(urls: [url])
         }
     }
 

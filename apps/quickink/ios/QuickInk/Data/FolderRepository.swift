@@ -6,7 +6,8 @@
  * Workspace home + folder-detail screens need:
  *   - list active folders (live observation)
  *   - create / rename / recolor / reorder / soft-delete
- *   - first-launch seed of "Unfiled"
+ *   - first-launch seed of "Unsorted" (renamed from "Unfiled" — the
+ *     seed also migrates any pre-existing default row to the new name)
  *
  * The legacy `captures.category` → `capture_tags` materialize step
  * shipped in v8's first-launch pass; post-A.3c the column itself
@@ -27,8 +28,12 @@ import ReleafCoreData
 
 public final class FolderRepository: @unchecked Sendable {
 
-    /// Default folder name for the seeded Unfiled row.
-    public static let defaultFolderName = "Unfiled"
+    /// Default folder name for the seeded Unsorted row.
+    public static let defaultFolderName = "Unsorted"
+
+    /// Prior seed name. Existing installs have a default folder row
+    /// with this name; `seedDefaultsIfNeeded` migrates it on next launch.
+    private static let legacyDefaultFolderName = "Unfiled"
 
     /// Neutral stone color — matches the design's "no judgement"
     /// tone for the default folder. User-created folders pick
@@ -144,18 +149,18 @@ public final class FolderRepository: @unchecked Sendable {
     }
 
     /// Soft-delete a folder. The captures inside are relocated to
-    /// Unfiled first; the default folder itself is non-deletable
-    /// (guarded by the SQL `is_default = 0` clause).
+    /// the default folder (Unsorted) first; the default folder itself
+    /// is non-deletable (guarded by the SQL `is_default = 0` clause).
     public func softDelete(userId: String, folderId: String) async throws {
-        guard let unfiled = try await findDefault(userId: userId) else { return }
-        guard unfiled.id != folderId else { return }
+        guard let defaultFolder = try await findDefault(userId: userId) else { return }
+        guard defaultFolder.id != folderId else { return }
         let now = IsoClock.nowIso()
         try await dbQueue.write { db in
             try db.execute(sql: """
                 UPDATE captures
                 SET folder_id = ?, updated_at = ?, dirty = 1
                 WHERE folder_id = ? AND deleted_at IS NULL
-                """, arguments: [unfiled.id, now, folderId])
+                """, arguments: [defaultFolder.id, now, folderId])
             try db.execute(sql: """
                 UPDATE folders
                 SET deleted_at = ?, updated_at = ?, dirty = 1
@@ -166,12 +171,33 @@ public final class FolderRepository: @unchecked Sendable {
 
     // MARK: - First-launch seed + backfill
 
-    /// Seed the default "Unfiled" folder if no `is_default` row
+    /// Seed the default "Unsorted" folder if no `is_default` row
     /// exists for this user. Idempotent. Returns the (possibly
-    /// pre-existing) default folder.
+    /// pre-existing) default folder. Also migrates a legacy default
+    /// row named "Unfiled" to the current name on next launch; a
+    /// UNIQUE collision (user has another folder already named
+    /// "Unsorted") leaves the row as-is.
     @discardableResult
     public func seedDefaultsIfNeeded(userId: String) async throws -> FolderEntity {
-        if let existing = try await findDefault(userId: userId) { return existing }
+        if let existing = try await findDefault(userId: userId) {
+            guard existing.name == Self.legacyDefaultFolderName else { return existing }
+            let now = IsoClock.nowIso()
+            let renamed: Bool = try await dbQueue.write { db in
+                do {
+                    try db.execute(sql: """
+                        UPDATE folders
+                        SET name = ?, updated_at = ?, dirty = 1
+                        WHERE id = ?
+                        """, arguments: [Self.defaultFolderName, now, existing.id])
+                    return true
+                } catch let error as DatabaseError where error.resultCode == .SQLITE_CONSTRAINT {
+                    return false
+                }
+            }
+            return renamed
+                ? (try await findDefault(userId: userId) ?? existing)
+                : existing
+        }
         let id  = Uuidv7.generate()
         let now = IsoClock.nowIso()
         let entity = FolderEntity(
@@ -199,7 +225,7 @@ public final class FolderRepository: @unchecked Sendable {
     }
 
     /// Backfill every capture with `folder_id IS NULL` to point at
-    /// the seeded Unfiled folder. Idempotent via UserDefaults — the
+    /// the seeded default folder. Idempotent via UserDefaults — the
     /// flag's per-user suffix lets the migration re-run cleanly for
     /// a different signed-in account.
     public func backfillFolderIdsIfNeeded(userId: String) async throws {
@@ -207,7 +233,7 @@ public final class FolderRepository: @unchecked Sendable {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: key) else { return }
 
-        let unfiled = try await seedDefaultsIfNeeded(userId: userId)
+        let defaultFolder = try await seedDefaultsIfNeeded(userId: userId)
         let now = IsoClock.nowIso()
         try await dbQueue.write { db in
             try db.execute(sql: """
@@ -216,7 +242,7 @@ public final class FolderRepository: @unchecked Sendable {
                 WHERE user_id = ?
                   AND folder_id IS NULL
                   AND deleted_at IS NULL
-                """, arguments: [unfiled.id, now, userId])
+                """, arguments: [defaultFolder.id, now, userId])
         }
         defaults.set(true, forKey: key)
     }

@@ -478,7 +478,8 @@ private fun parseJsonArrayOrEmpty(raw: String?): JsonElement {
 // folders — QuickInk-only. Workspace v1 "intent" axis. One row per
 // user-defined folder; captures FK into folders.id via
 // captures.folder_id. The is_default = true row is the seeded
-// "Unfiled" folder. is_shared is reserved for the post-v1 share
+// "Unsorted" folder (originally shipped as "Unfiled"; existing rows
+// migrate on next launch). is_shared is reserved for the post-v1 share
 // flow — currently always 0.
 // =====================================================================
 
