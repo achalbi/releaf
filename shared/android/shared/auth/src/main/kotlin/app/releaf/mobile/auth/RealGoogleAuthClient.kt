@@ -180,10 +180,19 @@ class RealGoogleAuthClient(
      * after the user has signed in interactively elsewhere, so the
      * silent path always succeeds in production. Failures here are
      * swallowed by the worker (it leaves rows queued).
+     *
+     * Uses [buildBackgroundSilentOption] (strict — auto-select + filter
+     * by authorized accounts) rather than the permissive
+     * [buildSilentOption] used by interactive sign-in. With application
+     * context (no Activity attached), even a brief account-confirmation
+     * UI flash from GMS will fail to host and emit the system
+     * "Request cancelled by quickink" toast; the strict option forces
+     * GMS into "auto-return cached credential or throw NoCredential"
+     * with no UI path at all.
      */
     private suspend fun fetchFreshIdToken(): String {
         val response = try {
-            requestCredential(buildSilentOption())
+            requestCredential(buildBackgroundSilentOption())
         } catch (e: NoCredentialException) {
             throw GoogleAuthError.Underlying(
                 "ID-token fetch: no cached credential — sign in required " +
@@ -563,6 +572,40 @@ class RealGoogleAuthClient(
      */
     private fun buildButtonOption(): GetCredentialRequest {
         val option = GetSignInWithGoogleOption.Builder(serverClientId = webClientId).build()
+        return GetCredentialRequest.Builder().addCredentialOption(option).build()
+    }
+
+    /**
+     * Build the strict silent option used by [fetchFreshIdToken] — the
+     * background ID-token refresh path that runs from the analytics
+     * worker with `applicationContext` and no Activity attached.
+     *
+     *   - `setFilterByAuthorizedAccounts(true)`: only consider accounts
+     *     that have previously signed in to this server client. The
+     *     analytics worker only runs after the user has signed in
+     *     interactively, so the account is always in this set;
+     *     restricting the filter prevents GMS from offering UI to
+     *     "pick another account".
+     *   - `setAutoSelectEnabled(true)`: when there's a single matching
+     *     credential (the steady-state for our app, one Google
+     *     account signed in), GMS returns it without any user
+     *     interaction. Without this, even the "silent" path can
+     *     surface a brief account-confirmation UI flash — and from
+     *     an applicationContext caller that flash has nothing to
+     *     host on, triggering the GMS "Request cancelled by
+     *     quickink" toast a few times a day.
+     *
+     * If GMS can't satisfy the request silently under these stricter
+     * rules (multi-account ambiguity, cleared cache, etc.) it throws
+     * `NoCredentialException`; the analytics worker leaves the
+     * outbox queued and retries on the next periodic tick.
+     */
+    private fun buildBackgroundSilentOption(): GetCredentialRequest {
+        val option = GetGoogleIdOption.Builder()
+            .setServerClientId(webClientId)
+            .setFilterByAuthorizedAccounts(true)
+            .setAutoSelectEnabled(true)
+            .build()
         return GetCredentialRequest.Builder().addCredentialOption(option).build()
     }
 
