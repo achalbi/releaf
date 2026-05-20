@@ -1105,50 +1105,6 @@ private fun SustainabilityBreakdownSheet(
     val type = LocalQuickInkTypography.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // Hide the system status bar for the duration of this composition
-    // so the modal reads as a clean full-bleed surface rather than
-    // sitting under the system clock / battery strip.
-    //
-    // Critical: ModalBottomSheet (Material3 1.3.x) renders inside a
-    // private `ComponentDialog` which has its OWN window — separate
-    // from the host Activity's. System-bar visibility is determined
-    // by the topmost focused window, which is the dialog when the
-    // modal is open. Applying immersive flags to the Activity's
-    // window does nothing here; we have to reach the dialog's
-    // window and apply on its `WindowInsetsController`.
-    //
-    // Two layers, both on the dialog window:
-    //   1. Modern AndroidX `WindowInsetsControllerCompat.hide(
-    //      statusBars())` — works on stock Android / Pixel / most
-    //      OEMs.
-    //   2. Legacy `WindowManager.LayoutParams.FLAG_FULLSCREEN` —
-    //      MIUI / HyperOS and some ColorOS builds silently ignore
-    //      the modern API and only honor the older window flag.
-    //
-    // [findDialogWindow] walks the view-tree ancestry looking for
-    // `DialogWindowProvider` — Material3's
-    // `ModalBottomSheetDialogLayout` implements that interface,
-    // exposing the dialog's window. Returns `null` outside a Compose
-    // dialog (e.g., a preview), in which case the effect no-ops.
-    val view = LocalView.current
-    DisposableEffect(Unit) {
-        val window = findDialogWindow(view)
-        if (window != null) {
-            WindowCompat.setDecorFitsSystemWindows(window, false)
-            val controller = WindowInsetsControllerCompat(window, view)
-            controller.hide(WindowInsetsCompat.Type.statusBars())
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        }
-        onDispose {
-            // No explicit show() — the dialog window is being torn
-            // down anyway, and the activity window's status bar
-            // visibility is unaffected since we never touched it.
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        }
-    }
-
     val ecoDeep = QuickInkColors.LeafGreenDeep
     val ecoBg   = QuickInkColors.LeafGreenBase.copy(alpha = 0.18f)
 
@@ -1175,6 +1131,44 @@ private fun SustainabilityBreakdownSheet(
             }
         },
     ) {
+        // Hide the system status bar while the modal is up so it
+        // reads as a clean full-bleed surface rather than sitting
+        // under the system clock / battery strip.
+        //
+        // Critical placement: ModalBottomSheet renders inside a
+        // private dialog with its OWN window. System-bar visibility
+        // is owned by the topmost focused window — the dialog when
+        // the modal is open. We need `LocalView.current` to resolve
+        // to a view INSIDE the dialog's compose tree so
+        // [findDialogWindow] can walk up and find the
+        // `DialogWindowProvider`. That only happens here in the
+        // content lambda — calling `LocalView.current` in the outer
+        // SustainabilityBreakdownSheet scope returns the host
+        // Activity's view, whose ancestry has no dialog, and the
+        // effect silently no-ops.
+        //
+        // Two layers, both on the dialog window:
+        //   1. Modern AndroidX `WindowInsetsControllerCompat.hide(
+        //      statusBars())` — stock Android / Pixel / most OEMs.
+        //   2. Legacy `WindowManager.LayoutParams.FLAG_FULLSCREEN` —
+        //      MIUI / HyperOS and some ColorOS builds silently
+        //      ignore the modern API and only honor the older flag.
+        val dialogView = LocalView.current
+        DisposableEffect(Unit) {
+            val window = findDialogWindow(dialogView)
+            if (window != null) {
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                val controller = WindowInsetsControllerCompat(window, dialogView)
+                controller.hide(WindowInsetsCompat.Type.statusBars())
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            }
+            onDispose {
+                window?.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
