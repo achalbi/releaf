@@ -101,15 +101,20 @@ struct QuickCaptureScreen: View {
         self.controller = controller
         self.userId = userId
         self.onDismiss = onDismiss
-        let persistedPillMode = CaptureMode.fromAnalyticsKey(
+        let rawPersisted = CaptureMode.fromAnalyticsKey(
             UserDefaults.standard.string(forKey: "quickink.capture.last_mode")
         )
+        // BusinessCard is no longer a user-facing capture mode — it
+        // was retired alongside the Sundial FAB rollout. Map any
+        // legacy persisted `.businessCard` value back to `.document`
+        // so existing installs land on a still-supported surface.
+        let persistedPillMode: CaptureMode = (rawPersisted == .businessCard) ? .document : rawPersisted
         let starting: CaptureMode = initialMode ?? persistedPillMode
         // `lastPillMode` always tracks a pill-eligible mode
-        // (Document / Business Card). On long-press entry the
-        // surface starts on `.photo` but the pill still shows
-        // the persisted pill choice — never highlight `.photo`
-        // in the pill, since `.photo` doesn't have a pill slot.
+        // (Document only post-BusinessCard retirement). On
+        // long-press / sundial-photo entry the surface starts on
+        // `.photo` but the pill still reads as Document so the
+        // user has a one-tap escape back to scanning.
         _lastPillMode = State(initialValue: persistedPillMode == .photo ? .document : persistedPillMode)
         // Long-press → `.photo` is transient: it should NOT
         // overwrite the user's last pill choice. Gate the
@@ -192,30 +197,24 @@ struct QuickCaptureScreen: View {
             Spacer()
 
             // Top-bar control depends on which surface is up:
-            //   - `.document` / `.businessCard` → the two-wide
-            //     pill, highlighting whichever mode is active.
+            //   - `.document` → a plain "Scan" title. The
+            //     previous two-wide Document/Business Card pill
+            //     was retired when BusinessCard left the public
+            //     mode picker — single-option pills read as
+            //     non-affordances, so a static label is cleaner.
             //   - `.photo` → a single "Scan document" button
-            //     that jumps straight to Document mode. Photo
-            //     mode is a transient one-shot capture and the
-            //     pill's two-way toggle reads as unnecessary
-            //     decision-making while the user is mid-photo;
-            //     a single CTA back to scanning is the cleaner
-            //     escape hatch (still satisfies spec §11's
-            //     "user can leave photo via the top bar
-            //     without dismissing" expectation).
+            //     that jumps back to Document. Photo mode is a
+            //     transient one-shot surface; a one-tap escape
+            //     back to scanning satisfies spec §11.
             if coordinator.mode == .photo {
                 ScanDocumentButton(onTap: {
                     lastPillMode = .document
                     coordinator.select(.document)
                 })
             } else {
-                ModeTogglePill(
-                    current:  lastPillMode,
-                    onSelect: { mode in
-                        lastPillMode = mode
-                        coordinator.select(mode)
-                    },
-                )
+                Text("Scan")
+                    .font(QuickInkText.label)
+                    .foregroundStyle(Color.white)
             }
 
             Spacer()

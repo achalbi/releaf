@@ -543,18 +543,23 @@ private struct MainShell: View {
                                 captureMenuOpen = false
                             }
                         },
-                        onSelectDocument: {
+                        onSelectScan: {
                             withAnimation(.interpolatingSpring(stiffness: 200, damping: 18)) {
                                 captureMenuOpen = false
                             }
                             pendingInitialMode = .document
                             showQuickCapture = true
                         },
-                        onSelectCard: {
+                        // Video shares the Photo capture surface — the
+                        // surface supports tap-still + hold-to-record on
+                        // the same camera session, so routing Video here
+                        // gives users a "Video" entry point without
+                        // building a parallel surface.
+                        onSelectVideo: {
                             withAnimation(.interpolatingSpring(stiffness: 200, damping: 18)) {
                                 captureMenuOpen = false
                             }
-                            pendingInitialMode = .businessCard
+                            pendingInitialMode = .photo
                             showQuickCapture = true
                         },
                         onSelectPhoto: {

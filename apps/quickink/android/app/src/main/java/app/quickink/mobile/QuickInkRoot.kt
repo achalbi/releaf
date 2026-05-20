@@ -1084,16 +1084,21 @@ private fun MainShell(
             // nav bar card. Each ray closes the menu and routes
             // into the QuickCapture sheet with its chosen mode.
             SundialCaptureMenu(
-                isOpen           = captureMenuOpen,
-                onClose          = { captureMenuOpen = false },
-                onSelectDocument = {
+                isOpen        = captureMenuOpen,
+                onClose       = { captureMenuOpen = false },
+                onSelectScan  = {
                     captureMenuOpen     = false
                     pendingInitialMode  = CaptureMode.Document
                     showQuickCapture    = true
                 },
-                onSelectCard = {
+                // Video shares the Photo capture surface — the
+                // surface supports tap-still + hold-to-record on
+                // the same camera session, so routing Video here
+                // gives users a "Video" entry point without
+                // building a parallel surface.
+                onSelectVideo = {
                     captureMenuOpen     = false
-                    pendingInitialMode  = CaptureMode.BusinessCard
+                    pendingInitialMode  = CaptureMode.Photo
                     showQuickCapture    = true
                 },
                 onSelectPhoto = {

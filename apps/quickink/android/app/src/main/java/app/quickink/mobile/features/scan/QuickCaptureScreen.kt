@@ -121,7 +121,14 @@ fun QuickCaptureScreen(
     val context = LocalContext.current
     val prefs = remember { SettingsPreferences(context) }
 
-    val persistedPillMode = remember { prefs.lastCaptureMode }
+    // BusinessCard is no longer a user-facing capture mode — it
+    // was retired alongside the Sundial FAB rollout. Map any
+    // legacy persisted `BusinessCard` value back to `Document`
+    // so existing installs land on a still-supported surface.
+    val persistedPillMode = remember {
+        val raw = prefs.lastCaptureMode
+        if (raw == CaptureMode.BusinessCard) CaptureMode.Document else raw
+    }
     val startingMode = remember(initialMode) { initialMode ?: persistedPillMode }
 
     // Persisted starting mode. Captured once at composition time
@@ -200,29 +207,25 @@ fun QuickCaptureScreen(
                 CircleIconButton(icon = Icons.Filled.Close, onClick = onDismiss)
                 Spacer(Modifier.weight(1f))
                 // Top-bar control depends on which surface is up:
-                //   - `.Document` / `.BusinessCard` → the two-wide
-                //     pill, highlighting whichever mode is active.
-                //   - `.Photo` → a single "Scan document" button
-                //     that jumps straight to Document mode. Photo
-                //     mode is a transient one-shot capture and the
-                //     pill's two-way toggle reads as unnecessary
-                //     decision-making while the user is mid-photo;
-                //     a single CTA back to scanning is the cleaner
-                //     escape hatch (still satisfies spec §11's
-                //     "user can leave photo via the top bar
-                //     without dismissing" expectation).
+                //   - `Document` → a plain "Scan" title. The
+                //     previous Document/Business Card pill was
+                //     retired when BusinessCard left the public
+                //     mode picker — single-option pills read as
+                //     non-affordances, so a static label is cleaner.
+                //   - `Photo` → a single "Scan document" button
+                //     that jumps back to Document. Photo mode is a
+                //     transient one-shot surface; a one-tap escape
+                //     back to scanning satisfies spec §11.
                 if (coordinator.mode == CaptureMode.Photo) {
                     ScanDocumentButton(onClick = {
                         lastPillMode = CaptureMode.Document
                         coordinator.select(CaptureMode.Document)
                     })
                 } else {
-                    ModeTogglePill(
-                        current = lastPillMode,
-                        onSelect = { mode ->
-                            lastPillMode = mode
-                            coordinator.select(mode)
-                        },
+                    Text(
+                        text  = "Scan",
+                        style = LocalQuickInkTypography.current.label,
+                        color = Color.White,
                     )
                 }
                 Spacer(Modifier.weight(1f))

@@ -8,15 +8,22 @@
  * tap-for-last-mode + long-press-for-photo idiom with a single
  * explicit choice surface.
  *
- *        Scan
+ *        Video
  *      ╱
  *     ●  ← FAB centre (anchor)
  *      ╲
  *        Photo
  *
- *   - Card  → 150° (top-left)
- *   - Scan  →  90° (top, primary)
+ *   - Scan  → 150° (top-left)
+ *   - Video →  90° (top, primary)
  *   - Photo →  30° (top-right)
+ *
+ * Video and Photo both open the [PhotoCaptureSurface], which
+ * supports both still capture (tap shutter) and hold-to-record
+ * video on the same camera session. The two rays exist so users
+ * who think "I want a video" don't have to know that internally
+ * we share a surface — they pick the verb that matches their
+ * intent and the surface adapts.
  *
  * Geometry mirrors the design handoff: 110pt radius from the FAB
  * centre, vertical-spring overshoot on open, staggered left → top
@@ -42,21 +49,21 @@ public struct SundialCaptureMenu: View {
 
     public let isOpen: Bool
     public let onClose: () -> Void
-    public let onSelectDocument: () -> Void
-    public let onSelectCard: () -> Void
+    public let onSelectScan: () -> Void
+    public let onSelectVideo: () -> Void
     public let onSelectPhoto: () -> Void
 
     public init(
         isOpen: Bool,
         onClose: @escaping () -> Void,
-        onSelectDocument: @escaping () -> Void,
-        onSelectCard: @escaping () -> Void,
+        onSelectScan: @escaping () -> Void,
+        onSelectVideo: @escaping () -> Void,
         onSelectPhoto: @escaping () -> Void
     ) {
         self.isOpen = isOpen
         self.onClose = onClose
-        self.onSelectDocument = onSelectDocument
-        self.onSelectCard = onSelectCard
+        self.onSelectScan = onSelectScan
+        self.onSelectVideo = onSelectVideo
         self.onSelectPhoto = onSelectPhoto
     }
 
@@ -107,20 +114,20 @@ public struct SundialCaptureMenu: View {
                 // its angle + the shared radius.
                 ZStack {
                     ray(
-                        label: "Card",
-                        systemImage: "person.text.rectangle",
-                        angleDeg: 150,
-                        openDelay: 0,
-                        accessibilityLabel: "Scan business card",
-                        action: onSelectCard
-                    )
-                    ray(
                         label: "Scan",
                         systemImage: "doc.text.viewfinder",
+                        angleDeg: 150,
+                        openDelay: 0,
+                        accessibilityLabel: "Scan document",
+                        action: onSelectScan
+                    )
+                    ray(
+                        label: "Video",
+                        systemImage: "video",
                         angleDeg: 90,
                         openDelay: 60,
-                        accessibilityLabel: "Scan document",
-                        action: onSelectDocument
+                        accessibilityLabel: "Record video",
+                        action: onSelectVideo
                     )
                     ray(
                         label: "Photo",

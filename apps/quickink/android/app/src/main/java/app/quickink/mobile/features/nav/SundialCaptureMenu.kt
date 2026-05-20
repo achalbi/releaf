@@ -8,15 +8,22 @@
  * tap-for-last-mode + long-press-for-photo idiom with a single
  * explicit choice surface.
  *
- *        Scan
+ *        Video
  *      ╱
  *     ●  ← FAB centre (anchor)
  *      ╲
  *        Photo
  *
- *   - Card  → 150° (top-left)
- *   - Scan  →  90° (top, primary)
+ *   - Scan  → 150° (top-left)
+ *   - Video →  90° (top, primary)
  *   - Photo →  30° (top-right)
+ *
+ * Video and Photo both open the [PhotoCaptureSurface], which
+ * supports both still capture (tap shutter) and hold-to-record
+ * video on the same camera session. The two rays exist so users
+ * who think "I want a video" don't have to know that internally
+ * we share a surface — they pick the verb that matches their
+ * intent and the surface adapts.
  *
  * Geometry mirrors the design handoff: 110dp radius from the FAB
  * centre, vertical-spring overshoot on open, staggered left → top
@@ -52,8 +59,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CameraAlt
-import androidx.compose.material.icons.outlined.ContactPage
 import androidx.compose.material.icons.outlined.DocumentScanner
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -88,8 +95,8 @@ import kotlin.math.sin
 fun SundialCaptureMenu(
     isOpen: Boolean,
     onClose: () -> Unit,
-    onSelectDocument: () -> Unit,
-    onSelectCard: () -> Unit,
+    onSelectScan: () -> Unit,
+    onSelectVideo: () -> Unit,
     onSelectPhoto: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -141,22 +148,22 @@ fun SundialCaptureMenu(
             contentAlignment = Alignment.Center,
         ) {
             Ray(
-                label              = "Card",
-                icon               = Icons.Outlined.ContactPage,
-                angleDeg           = 150.0,
-                openDelayMs        = 0,
-                accessibilityLabel = "Scan business card",
-                isOpen             = isOpen,
-                onClick            = onSelectCard,
-            )
-            Ray(
                 label              = "Scan",
                 icon               = Icons.Outlined.DocumentScanner,
-                angleDeg           = 90.0,
-                openDelayMs        = 60,
+                angleDeg           = 150.0,
+                openDelayMs        = 0,
                 accessibilityLabel = "Scan document",
                 isOpen             = isOpen,
-                onClick            = onSelectDocument,
+                onClick            = onSelectScan,
+            )
+            Ray(
+                label              = "Video",
+                icon               = Icons.Outlined.Videocam,
+                angleDeg           = 90.0,
+                openDelayMs        = 60,
+                accessibilityLabel = "Record video",
+                isOpen             = isOpen,
+                onClick            = onSelectVideo,
             )
             Ray(
                 label              = "Photo",
