@@ -129,10 +129,13 @@ public enum CanonicalJson {
             return
         }
         // Integer-valued doubles emit as integers per spec §4.
+        // Use Int64(exactly:) — the obvious `d <= Double(Int64.max)`
+        // bound check is a trap: Double(Int64.max) rounds UP to
+        // 9223372036854775808.0, so values right at that boundary
+        // pass the bound then crash on Int64(d).
         let d = n.doubleValue
-        if d.truncatingRemainder(dividingBy: 1) == 0,
-           d >= Double(Int64.min), d <= Double(Int64.max) {
-            sb.append(String(Int64(d)))
+        if let i = Int64(exactly: d) {
+            sb.append(String(i))
         } else {
             sb.append(shortestDecimal(d))
         }

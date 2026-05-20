@@ -129,9 +129,12 @@ private func encodeJSONAny(_ any: Any, into container: inout SingleValueEncoding
             try container.encode(n.boolValue)
         } else {
             let d = n.doubleValue
-            if d.truncatingRemainder(dividingBy: 1) == 0,
-               d >= Double(Int64.min), d <= Double(Int64.max) {
-                try container.encode(Int64(d))
+            // Use Int64(exactly:) — the obvious `d <= Double(Int64.max)`
+            // bound check is a trap: Double(Int64.max) rounds UP to
+            // 9223372036854775808.0, so values right at that boundary
+            // pass the bound then crash on Int64(d).
+            if let i = Int64(exactly: d) {
+                try container.encode(i)
             } else {
                 try container.encode(d)
             }

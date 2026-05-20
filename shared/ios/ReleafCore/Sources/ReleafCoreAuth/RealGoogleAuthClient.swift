@@ -60,19 +60,15 @@ public final class RealGoogleAuthClient: GoogleAuthClient, @unchecked Sendable {
         guard GIDSignIn.sharedInstance.configuration != nil else {
             throw GoogleAuthError.underlying("Google Sign-In not configured")
         }
-        let presenter = try await Self.resolvePresenter()
-        // GoogleSignIn-iOS 7.x ships a native `async throws` overload
-        // of `signIn(withPresenting:hint:additionalScopes:)` — use it
-        // directly instead of bridging the callback variant through
-        // `withCheckedThrowingContinuation`. The async overload is
-        // already MainActor-isolated, so awaiting it from this method
-        // does the actor hop for us.
+        // Run the SDK call on @MainActor. The Swift bridging of
+        // GIDSignIn.signIn(withPresenting:hint:additionalScopes:) into
+        // `async throws` doesn't preserve main-thread execution on
+        // every install — calling it from the cooperative pool fires
+        // the Main Thread Checker on UIAccessibilityIsGuidedAccessEnabled
+        // / -[UIView window] / -[UIViewController view] inside
+        // OIDExternalUserAgentIOS's synchronous setup path.
         do {
-            let gidResult = try await GIDSignIn.sharedInstance.signIn(
-                withPresenting: presenter,
-                hint: nil,
-                additionalScopes: [Self.driveFileScope]
-            )
+            let gidResult = try await Self.performSignInOnMain()
             return try mapToSession(user: gidResult.user)
         } catch let err as NSError where err.domain == kGIDSignInErrorDomain
             && err.code == GIDSignInError.canceled.rawValue {
@@ -82,6 +78,16 @@ public final class RealGoogleAuthClient: GoogleAuthClient, @unchecked Sendable {
         } catch {
             throw GoogleAuthError.underlying((error as NSError).localizedDescription)
         }
+    }
+
+    @MainActor
+    private static func performSignInOnMain() async throws -> GIDSignInResult {
+        let presenter = try resolvePresenterMain()
+        return try await GIDSignIn.sharedInstance.signIn(
+            withPresenting: presenter,
+            hint: nil,
+            additionalScopes: [driveFileScope]
+        )
     }
 
     public func refresh(_ session: GoogleAuthSession) async throws -> GoogleAuthSession {
@@ -184,7 +190,7 @@ public final class RealGoogleAuthClient: GoogleAuthClient, @unchecked Sendable {
     /// Find a presenting view controller to hand to the SDK's consent
     /// sheet. Walks the active window scene's key window's root chain.
     @MainActor
-    private static func resolvePresenter() async throws -> UIViewController {
+    private static func resolvePresenterMain() throws -> UIViewController {
         let scenes = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .filter { $0.activationState == .foregroundActive }
