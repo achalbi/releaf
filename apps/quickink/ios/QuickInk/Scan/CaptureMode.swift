@@ -2,34 +2,46 @@
  * CaptureMode.swift
  *
  * Which capture surface QuickInk shows behind the shutter on
- * iOS. Three surfaces:
+ * iOS. Four surfaces:
  *
  *   - .document       → VisionKit's `VNDocumentCameraViewController`
  *                       (unchanged behavior; runs in Apple's UI).
  *   - .businessCard   → in-app `AVCaptureSession` preview with a
  *                       card-shaped guide overlay and a custom
  *                       detector that auto-captures on a stable
- *                       quad.
+ *                       quad. Retired from the public picker (the
+ *                       Sundial radial menu) but kept in the enum
+ *                       so legacy persisted values still decode.
  *   - .photo          → in-app `AVCaptureSession` preview with a
  *                       plain manual shutter. No quad detection,
  *                       no overlay — a single still that lands in
  *                       the same scan pipeline tagged
  *                       `source="photo"` / `paperSize=.custom`.
+ *                       Tap shutter → still capture (no hold-to-
+ *                       record; video lives on its own surface).
+ *   - .video          → in-app `AVCaptureSession` preview wired
+ *                       for `AVCaptureMovieFileOutput`. Tap shutter
+ *                       to start recording, tap again to stop. 2:00
+ *                       hard cap. Lands the same first-frame still
+ *                       in the scan pipeline (`source="photo"` /
+ *                       `paperSize=.custom`) with the recorded
+ *                       audio extracted as a voice note attachment.
  *
- * Pill toggle on QuickCaptureScreen stays two-wide
- * (Document / Business Card). `.photo` is reachable through a
- * transient entry only — long-press on the bottom-nav ⚡ FAB,
- * or a Photo icon in the shutter row of the other two surfaces.
- * That keeps the top-bar pill uncrowded on a 393pt-wide device
- * while still surfacing a one-tap shortcut from the FAB.
+ * Both `.photo` and `.video` are reached only through the radial
+ * Sundial menu on the bottom-nav FAB; neither lives on the legacy
+ * top-bar pill (which is now a static "Scan" title since the
+ * BusinessCard retirement). Keeping each capture intent on its own
+ * surface means the gesture stays a single explicit tap — no more
+ * tap-vs-hold ambiguity.
  *
  * The pill-selected mode is persisted under the UserDefaults key
  * `quickink.capture.last_mode` (see [SettingsState.lastCaptureMode])
  * so the next session opens on whatever the user used last.
  * First-launch fallback is `.document` — that's the established
- * capture path. The long-press → `.photo` path deliberately does
- * NOT persist (see `QuickCaptureScreen.init`): a transient photo
- * shouldn't overwrite the user's last pill choice.
+ * capture path. The Sundial → `.photo` / `.video` paths
+ * deliberately do NOT persist (see `QuickCaptureScreen.init`):
+ * transient capture surfaces shouldn't overwrite the user's last
+ * pill choice.
  *
  * Why not a single shared `AVCaptureSession` across all modes:
  * Document mode runs inside VisionKit's
@@ -47,12 +59,14 @@ public enum CaptureMode: String, CaseIterable, Sendable {
     case document
     case businessCard
     case photo
+    case video
 
     public var analyticsKey: String {
         switch self {
         case .document:     return "document"
         case .businessCard: return "business_card"
         case .photo:        return "photo"
+        case .video:        return "video"
         }
     }
 
@@ -61,6 +75,7 @@ public enum CaptureMode: String, CaseIterable, Sendable {
         case .document:     return "Document"
         case .businessCard: return "Business Card"
         case .photo:        return "Photo"
+        case .video:        return "Video"
         }
     }
 
@@ -68,6 +83,7 @@ public enum CaptureMode: String, CaseIterable, Sendable {
         switch key {
         case "business_card": return .businessCard
         case "photo":         return .photo
+        case "video":         return .video
         default:              return .document
         }
     }
@@ -77,16 +93,17 @@ public enum CaptureMode: String, CaseIterable, Sendable {
     /// weight each page (card +4, A4 +2, smaller +1). Document mode
     /// covers VisionKit's standard rectangular-document path; we
     /// assume A4 / Letter rather than trying to infer dimensions
-    /// from the captured pixels. Photo mode passes `.custom` — an
-    /// arbitrary phone-camera frame's aspect ratio is meaningless
-    /// against the A4 / Letter / card ratio bands, and `.custom`
-    /// shares A4's +0.2 pts/page weight so the sustainability hero
-    /// still scores the page.
+    /// from the captured pixels. Photo / Video mode pass `.custom`
+    /// — an arbitrary phone-camera frame's aspect ratio is
+    /// meaningless against the A4 / Letter / card ratio bands, and
+    /// `.custom` shares A4's +0.2 pts/page weight so the
+    /// sustainability hero still scores the page.
     public var paperSize: PaperSize {
         switch self {
         case .document:     return .a4
         case .businessCard: return .card
         case .photo:        return .custom
+        case .video:        return .custom
         }
     }
 }

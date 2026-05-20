@@ -92,6 +92,7 @@ public struct QuickInkBottomNavBar: View {
 
     public var body: some View {
         let cardShape = RoundedRectangle(cornerRadius: QuickInkRadius.lg, style: .continuous)
+        let fabLift: CGFloat = 16
 
         // ZStack(.top) so the FAB renders as a SIBLING of the bar,
         // AFTER the bar's `.overlay(border)` modifier. With the FAB
@@ -149,6 +150,11 @@ public struct QuickInkBottomNavBar: View {
                 cardShape.strokeBorder(QuickInkColors.border, lineWidth: 1)
             )
             .shadow(color: QuickInkColors.ink.opacity(0.12), radius: 8, x: 0, y: 2)
+            // Reserve the vertical area occupied by the lifted FAB
+            // inside the footer's layout. The button itself no
+            // longer relies on a negative offset, so its full visible
+            // circle is also inside the hit-test bounds.
+            .padding(.top, fabLift)
 
             zapFab
         }
@@ -300,7 +306,6 @@ public struct QuickInkBottomNavBar: View {
             }
         }
         .buttonStyle(.plain)
-        .offset(y: -16)
         .contentShape(Circle())
         .animation(
             .interpolatingSpring(stiffness: 220, damping: 18),

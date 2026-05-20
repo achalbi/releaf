@@ -1,7 +1,7 @@
 /*
  * CaptureMode.kt
  *
- * Which capture surface QuickInk shows behind the shutter. Three
+ * Which capture surface QuickInk shows behind the shutter. Four
  * surfaces:
  *
  *   - DOCUMENT       → ML Kit `GmsDocumentScanning` system intent
@@ -9,27 +9,39 @@
  *   - BUSINESS_CARD  → in-app CameraX preview with a card-shaped
  *                      guide overlay and a custom OpenCV-backed
  *                      detector that auto-captures on a stable
- *                      quad.
+ *                      quad. Retired from the public picker (the
+ *                      Sundial radial menu) but kept in the enum
+ *                      so legacy persisted values still decode.
  *   - PHOTO          → in-app CameraX preview with a plain manual
  *                      shutter. No quad detection, no overlay —
  *                      a single still that lands in the same scan
  *                      pipeline tagged `source="photo"` /
- *                      `paperSize=Custom`.
+ *                      `paperSize=Custom`. Tap shutter → still
+ *                      capture (no hold-to-record; video lives on
+ *                      its own surface).
+ *   - VIDEO          → in-app CameraX preview wired for
+ *                      [VideoCapture] + [Recorder]. Tap shutter to
+ *                      start recording, tap again to stop. 2:00
+ *                      hard cap. Lands the same first-frame still
+ *                      in the scan pipeline (`source="photo"` /
+ *                      `paperSize=Custom`) with the recorded audio
+ *                      extracted as a voice note attachment.
  *
- * Pill toggle on QuickCaptureScreen stays two-wide
- * (Document / Business Card). `.Photo` is reachable through a
- * transient entry only — long-press on the bottom-nav ⚡ FAB,
- * or a Photo icon in the shutter row of the other two surfaces.
- * That keeps the top bar uncluttered while still surfacing a
- * one-tap shortcut from the FAB.
+ * Both `.Photo` and `.Video` are reached only through the radial
+ * Sundial menu on the bottom-nav FAB; neither lives on the legacy
+ * top-bar pill (which is now a static "Scan" title since the
+ * BusinessCard retirement). Keeping each capture intent on its own
+ * surface means the gesture stays a single explicit tap — no more
+ * tap-vs-hold ambiguity.
  *
  * The pill-selected mode is persisted under the SharedPreferences
  * key `quickink.capture.last_mode` (see [SettingsPreferences]) so
  * the next session opens on whatever the user used last.
  * First-launch fallback is DOCUMENT — that's the established
- * capture path. The long-press → `.Photo` path deliberately does
- * NOT persist (see `QuickCaptureScreen`): a transient photo
- * shouldn't overwrite the user's last pill choice.
+ * capture path. The Sundial → `.Photo` / `.Video` paths
+ * deliberately do NOT persist (see `QuickCaptureScreen`):
+ * transient capture surfaces shouldn't overwrite the user's last
+ * pill choice.
  *
  * Why not a single shared CameraController across all modes:
  * Document mode runs inside Google's system scanner activity,
@@ -47,13 +59,15 @@ package app.quickink.mobile.features.scan
 enum class CaptureMode {
     Document,
     BusinessCard,
-    Photo;
+    Photo,
+    Video;
 
     val analyticsKey: String
         get() = when (this) {
             Document     -> "document"
             BusinessCard -> "business_card"
             Photo        -> "photo"
+            Video        -> "video"
         }
 
     val pillLabel: String
@@ -61,6 +75,7 @@ enum class CaptureMode {
             Document     -> "Document"
             BusinessCard -> "Business Card"
             Photo        -> "Photo"
+            Video        -> "Video"
         }
 
     /**
@@ -69,8 +84,8 @@ enum class CaptureMode {
      * weight each page (card +4, A4 +2, smaller +1). Document mode
      * covers ML Kit's standard rectangular-document path; we assume
      * A4 / Letter rather than trying to infer dimensions from the
-     * captured pixels. Photo mode passes [PaperSize.Custom] — an
-     * arbitrary phone-camera frame's aspect ratio is meaningless
+     * captured pixels. Photo / Video mode pass [PaperSize.Custom] —
+     * an arbitrary phone-camera frame's aspect ratio is meaningless
      * against the A4 / Letter / card ratio bands, and [Custom]
      * shares A4's +0.2 pts/page weight so the sustainability hero
      * still scores the page.
@@ -80,12 +95,14 @@ enum class CaptureMode {
             Document     -> PaperSize.A4
             BusinessCard -> PaperSize.Card
             Photo        -> PaperSize.Custom
+            Video        -> PaperSize.Custom
         }
 
     companion object {
         fun fromAnalyticsKey(key: String?): CaptureMode = when (key) {
             "business_card" -> BusinessCard
             "photo"         -> Photo
+            "video"         -> Video
             else            -> Document
         }
     }

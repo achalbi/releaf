@@ -550,16 +550,19 @@ private struct MainShell: View {
                             pendingInitialMode = .document
                             showQuickCapture = true
                         },
-                        // Video shares the Photo capture surface — the
-                        // surface supports tap-still + hold-to-record on
-                        // the same camera session, so routing Video here
-                        // gives users a "Video" entry point without
-                        // building a parallel surface.
+                        // Video routes to the dedicated
+                        // [VideoCaptureSurface] — tap-to-start/tap-to-
+                        // stop recording, voice-note extraction, filter
+                        // post-process baked into the saved .mov.
+                        // Replaced the old shared-surface behavior
+                        // (Photo and Video both opened PhotoCaptureSurface
+                        // with a dual tap/hold gesture) once the
+                        // Sundial menu gave each verb its own ray.
                         onSelectVideo: {
                             withAnimation(.interpolatingSpring(stiffness: 200, damping: 18)) {
                                 captureMenuOpen = false
                             }
-                            pendingInitialMode = .photo
+                            pendingInitialMode = .video
                             showQuickCapture = true
                         },
                         onSelectPhoto: {

@@ -112,10 +112,10 @@ struct QuickCaptureScreen: View {
         let starting: CaptureMode = initialMode ?? persistedPillMode
         // `lastPillMode` always tracks a pill-eligible mode
         // (Document only post-BusinessCard retirement). On
-        // long-press / sundial-photo entry the surface starts on
-        // `.photo` but the pill still reads as Document so the
-        // user has a one-tap escape back to scanning.
-        _lastPillMode = State(initialValue: persistedPillMode == .photo ? .document : persistedPillMode)
+        // Sundial-photo / Sundial-video entry the surface starts on
+        // `.photo` / `.video` but the pill still reads as Document
+        // so the user has a one-tap escape back to scanning.
+        _lastPillMode = State(initialValue: (persistedPillMode == .photo || persistedPillMode == .video) ? .document : persistedPillMode)
         // Long-press → `.photo` is transient: it should NOT
         // overwrite the user's last pill choice. Gate the
         // persist hook so only pill-eligible modes round-trip
@@ -125,7 +125,10 @@ struct QuickCaptureScreen: View {
         _coordinator = StateObject(wrappedValue: CaptureModeCoordinator(
             initial: starting,
             persist: { mode in
-                guard mode != .photo else { return }
+                // `.photo` and `.video` are transient entries via
+                // the Sundial menu — neither should overwrite the
+                // user's pill-selected last mode.
+                guard mode != .photo, mode != .video else { return }
                 UserDefaults.standard.set(mode.analyticsKey, forKey: "quickink.capture.last_mode")
             },
         ))
@@ -160,6 +163,12 @@ struct QuickCaptureScreen: View {
                         )
                     case .photo:
                         PhotoCaptureSurface(
+                            controller: controller,
+                            userId:     userId,
+                            onDismiss:  onDismiss,
+                        )
+                    case .video:
+                        VideoCaptureSurface(
                             controller: controller,
                             userId:     userId,
                             onDismiss:  onDismiss,
@@ -202,11 +211,11 @@ struct QuickCaptureScreen: View {
             //     was retired when BusinessCard left the public
             //     mode picker — single-option pills read as
             //     non-affordances, so a static label is cleaner.
-            //   - `.photo` → a single "Scan document" button
-            //     that jumps back to Document. Photo mode is a
-            //     transient one-shot surface; a one-tap escape
+            //   - `.photo` / `.video` → a single "Scan document"
+            //     button that jumps back to Document. Both are
+            //     transient one-shot surfaces; a one-tap escape
             //     back to scanning satisfies spec §11.
-            if coordinator.mode == .photo {
+            if coordinator.mode == .photo || coordinator.mode == .video {
                 ScanDocumentButton(onTap: {
                     lastPillMode = .document
                     coordinator.select(.document)

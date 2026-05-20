@@ -144,7 +144,10 @@ fun QuickCaptureScreen(
         CaptureModeCoordinator(
             initial = startingMode,
             persist = { mode ->
-                if (mode != CaptureMode.Photo) {
+                // `.Photo` and `.Video` are transient entries via
+                // the Sundial menu — neither should overwrite the
+                // user's pill-selected last mode.
+                if (mode != CaptureMode.Photo && mode != CaptureMode.Video) {
                     prefs.lastCaptureMode = mode
                 }
             },
@@ -164,7 +167,8 @@ fun QuickCaptureScreen(
     // Document mode via the pill without re-granting").
     var lastPillMode by remember {
         mutableStateOf(
-            if (persistedPillMode == CaptureMode.Photo) CaptureMode.Document
+            if (persistedPillMode == CaptureMode.Photo || persistedPillMode == CaptureMode.Video)
+                CaptureMode.Document
             else persistedPillMode
         )
     }
@@ -212,11 +216,11 @@ fun QuickCaptureScreen(
                 //     retired when BusinessCard left the public
                 //     mode picker — single-option pills read as
                 //     non-affordances, so a static label is cleaner.
-                //   - `Photo` → a single "Scan document" button
-                //     that jumps back to Document. Photo mode is a
-                //     transient one-shot surface; a one-tap escape
+                //   - `Photo` / `Video` → a single "Scan document"
+                //     button that jumps back to Document. Both are
+                //     transient one-shot surfaces; a one-tap escape
                 //     back to scanning satisfies spec §11.
-                if (coordinator.mode == CaptureMode.Photo) {
+                if (coordinator.mode == CaptureMode.Photo || coordinator.mode == CaptureMode.Video) {
                     ScanDocumentButton(onClick = {
                         lastPillMode = CaptureMode.Document
                         coordinator.select(CaptureMode.Document)
@@ -256,6 +260,12 @@ fun QuickCaptureScreen(
                     modifier      = Modifier.weight(1f),
                 )
                 CaptureMode.Photo -> PhotoCaptureSurface(
+                    controller = controller,
+                    userId     = userId,
+                    onDismiss  = onDismiss,
+                    modifier   = Modifier.weight(1f),
+                )
+                CaptureMode.Video -> VideoCaptureSurface(
                     controller = controller,
                     userId     = userId,
                     onDismiss  = onDismiss,

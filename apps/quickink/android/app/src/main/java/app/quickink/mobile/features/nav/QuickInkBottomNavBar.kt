@@ -49,7 +49,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -103,6 +102,8 @@ enum class NavTab { Home, Workspace, Stories, Settings, None }
  */
 val QuickInkBottomNavReservedHeight = 140.dp
 
+private val BrandFabLift = 16.dp
+
 @Composable
 fun QuickInkBottomNavBar(
     activeTab: NavTab,
@@ -145,69 +146,79 @@ fun QuickInkBottomNavBar(
                 bottom = QuickInkSpacing.s6,
             ),
     ) {
-        // Card surface — drawn BEHIND the tabs via matchParentSize so
-        // it takes the Row's bounds. Kept as a separate sibling (not a
-        // modifier on the Row) so the Row itself is unclipped; the
-        // lifted centre Zap FAB can overflow upward past the card's
-        // top edge.
         Box(
             modifier = Modifier
-                .matchParentSize()
-                .shadow(elevation = 8.dp, shape = navShape)
-                .background(colors.surface, navShape)
-                .border(1.dp, colors.border, navShape),
-        )
-
-        Row(
-            // s0 horizontal so each cell gets the full bar width; s1
-            // vertical so the selected pill doesn't kiss the bar edges.
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    horizontal = 0.dp,
-                    vertical   = QuickInkSpacing.s1,
-                ),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(top = BrandFabLift),
         ) {
-            RegularTab(
-                icon       = Icons.Outlined.Home,
-                label      = "Home",
-                isSelected = activeTab == NavTab.Home,
-                modifier   = Modifier.weight(1f),
-                onClick    = onHome,
+            // Card surface — drawn BEHIND the tabs via matchParentSize so
+            // it takes the Row's bounds. It lives in a lower box with top
+            // padding; that reserves the FAB's lifted hit area without
+            // making the cream card itself taller.
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .shadow(elevation = 8.dp, shape = navShape)
+                    .background(colors.surface, navShape)
+                    .border(1.dp, colors.border, navShape),
             )
-            RegularTabAsset(
-                drawableId        = R.drawable.ic_note,
-                label             = "Workspace",
-                isSelected        = activeTab == NavTab.Workspace,
-                modifier          = Modifier.weight(1f),
-                // 6dp instead of the default 8dp so the 9-char
-                // "Workspace" label clears its slot. The other
-                // tabs (4–8 chars) keep the s2 default.
-                horizontalPadding = 6.dp,
-                onClick           = onWorkspace,
-            )
-            BrandTab(
-                modifier         = Modifier.weight(1f),
-                isMenuOpen       = isCaptureMenuOpen,
-                onClick          = onToggleCaptureMenu,
-            )
-            RegularTabAsset(
-                drawableId = R.drawable.ic_story,
-                label      = "Stories",
-                isSelected = activeTab == NavTab.Stories,
-                modifier   = Modifier.weight(1f),
-                onClick    = onStories,
-            )
-            RegularTab(
-                icon       = Icons.Outlined.Settings,
-                label      = "Settings",
-                isSelected = activeTab == NavTab.Settings,
-                modifier   = Modifier.weight(1f),
-                onClick    = onSettings,
-            )
+
+            Row(
+                // s0 horizontal so each cell gets the full bar width; s1
+                // vertical so the selected pill doesn't kiss the bar edges.
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        horizontal = 0.dp,
+                        vertical   = QuickInkSpacing.s1,
+                    ),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RegularTab(
+                    icon       = Icons.Outlined.Home,
+                    label      = "Home",
+                    isSelected = activeTab == NavTab.Home,
+                    modifier   = Modifier.weight(1f),
+                    onClick    = onHome,
+                )
+                RegularTabAsset(
+                    drawableId        = R.drawable.ic_note,
+                    label             = "Workspace",
+                    isSelected        = activeTab == NavTab.Workspace,
+                    modifier          = Modifier.weight(1f),
+                    // 6dp instead of the default 8dp so the 9-char
+                    // "Workspace" label clears its slot. The other
+                    // tabs (4–8 chars) keep the s2 default.
+                    horizontalPadding = 6.dp,
+                    onClick           = onWorkspace,
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(64.dp),
+                )
+                RegularTabAsset(
+                    drawableId = R.drawable.ic_story,
+                    label      = "Stories",
+                    isSelected = activeTab == NavTab.Stories,
+                    modifier   = Modifier.weight(1f),
+                    onClick    = onStories,
+                )
+                RegularTab(
+                    icon       = Icons.Outlined.Settings,
+                    label      = "Settings",
+                    isSelected = activeTab == NavTab.Settings,
+                    modifier   = Modifier.weight(1f),
+                    onClick    = onSettings,
+                )
+            }
         }
+
+        BrandTab(
+            modifier         = Modifier.align(Alignment.TopCenter),
+            isMenuOpen       = isCaptureMenuOpen,
+            onClick          = onToggleCaptureMenu,
+        )
     }
 }
 
@@ -356,7 +367,6 @@ private fun BrandTab(
     val innerDiameter = 56.dp
     val ringWidth     = 4.dp
     val outerDiameter = innerDiameter + ringWidth * 2
-    val lift          = 16.dp
 
     // Coral gradient — lighter→deeper top-to-bottom by default,
     // collapses to a flat deep coral when the sundial menu is open
@@ -380,7 +390,7 @@ private fun BrandTab(
 
     val interactionSource = remember { MutableInteractionSource() }
     Box(
-        modifier         = modifier.height(outerDiameter),
+        modifier         = modifier.size(outerDiameter),
         contentAlignment = Alignment.Center,
     ) {
         // Two stacked drop shadows — outer ring carries the bigger
@@ -394,7 +404,6 @@ private fun BrandTab(
         // ring.
         Box(
             modifier = Modifier
-                .offset(y = -lift)
                 .size(outerDiameter)
                 .drawBehind {
                     val cx = size.width / 2f
