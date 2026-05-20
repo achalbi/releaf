@@ -766,58 +766,89 @@ public struct WorkspaceHomeScreen: View {
         return (workflow, life, creative, custom)
     }
 
-    // MARK: - Tags
+    // MARK: - Tag vocabulary
 
+    /// Tag vocabulary section — seven `TagBucketBlock`s in spec
+    /// order (Status / People / Org & Place / Energy / Time /
+    /// Kind / Source). Replaces the legacy top-10-chip cloud per
+    /// Phase 4 of `design/WORKSPACE_TAB_HANDOFF.md`. Pills route
+    /// via `onOpenTag` to the existing tag-filtered list; "BROWSE
+    /// ALL TAGS" at the bottom routes to `TagLibraryScreen` so the
+    /// user can still reach legacy unbucketed tags.
     private var tagsSection: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.s2) {
-            HStack {
-                Text("Tags")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(QuickInkColors.ink)
-                Spacer()
-                Button(action: onBrowseTags) {
-                    Text("BROWSE ALL")
+        VStack(alignment: .leading, spacing: 0) {
+            tagVocabularyHeader
+
+            ForEach(Array(workspaceTagBuckets.enumerated()), id: \.element.id) { idx, bucket in
+                let pills = pillsForBucket(bucket.id)
+                TagBucketBlock(
+                    bucket:           bucket,
+                    pills:            pills,
+                    showBottomBorder: idx != workspaceTagBuckets.count - 1,
+                    onTapTag:         { spec in
+                        if let tag = tagById[spec.id] { onOpenTag(tag) }
+                    },
+                    onAddTag:         { /* TODO Phase 5 polish — open create-tag sheet pre-bound to bucket */ }
+                )
+            }
+
+            Button(action: onBrowseTags) {
+                HStack(spacing: 4) {
+                    Text("BROWSE ALL TAGS")
                         .font(.system(size: 10.5, weight: .semibold))
                         .tracking(1.2)
-                        .foregroundColor(QuickInkColors.accent)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
                 }
-                .buttonStyle(.plain)
+                .foregroundColor(QuickInkColors.accent)
+                .padding(.top, 14)
+                .padding(.bottom, 4)
             }
-
-            let ranked = viewModel.rankedTags(limit: 10)
-            if ranked.isEmpty {
-                Text("No tags yet.")
-                    .font(.system(size: 12.5))
-                    .foregroundColor(QuickInkColors.muted)
-            } else {
-                FlowChips(tags: ranked) { (tag, count) in
-                    tagChip(tag: tag, count: count)
-                }
-            }
+            .buttonStyle(.plain)
         }
     }
 
-    private func tagChip(tag: TagEntity, count: Int) -> some View {
-        Button(action: { onOpenTag(tag) }) {
-            HStack(spacing: 4) {
-                Text("#")
-                    .font(.system(size: 11.5, weight: .bold))
-                    .foregroundColor(QuickInkColors.accent)
-                Text(tag.name)
-                    .font(.system(size: 11.5))
-                    .foregroundColor(QuickInkColors.inkSoft)
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 10))
-                        .foregroundColor(QuickInkColors.muted)
-                }
-            }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 5)
-            .background(QuickInkColors.surface, in: Capsule())
-            .overlay(Capsule().stroke(QuickInkColors.border, lineWidth: 1))
+    /// Header row above the bucket blocks — "Tag vocabulary"
+    /// eyebrow + total-tag-count subtitle.
+    private var tagVocabularyHeader: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("TAG VOCABULARY")
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(1.4)
+                .foregroundColor(QuickInkColors.ink)
+            Spacer()
+            Text("\(seededTagCount) tags · 7 buckets")
+                .font(.system(size: 11))
+                .italic()
+                .foregroundColor(QuickInkColors.muted)
         }
-        .buttonStyle(.plain)
+        .padding(.bottom, 6)
+    }
+
+    /// Pills for a given bucket id, derived from the live tags
+    /// list. Tags are sorted by `position` (which the seeder set
+    /// to the spec's listing order) — keeps Status reading
+    /// `active → todo → later → done` regardless of insertion
+    /// order on a re-seed.
+    private func pillsForBucket(_ bucketId: String) -> [TagBucketBlock.PillSpec] {
+        viewModel.tags
+            .filter { $0.bucket == bucketId && $0.deletedAt == nil }
+            .map { TagBucketBlock.PillSpec(id: $0.id, label: $0.name) }
+    }
+
+    /// Tag id → entity lookup so `TagBucketBlock`'s pill-tap
+    /// callback (which carries only the spec id) can re-resolve
+    /// to a full `TagEntity` for the navigation handler.
+    private var tagById: [String: TagEntity] {
+        Dictionary(uniqueKeysWithValues: viewModel.tags.map { ($0.id, $0) })
+    }
+
+    /// Total seeded-tag count for the "X tags · 7 buckets"
+    /// subtitle. Counts only tags with a bucket assignment so
+    /// the number tracks the spec'd vocabulary, not the user's
+    /// custom additions.
+    private var seededTagCount: Int {
+        viewModel.tags.filter { $0.bucket != nil && $0.deletedAt == nil }.count
     }
 
     // MARK: - Places

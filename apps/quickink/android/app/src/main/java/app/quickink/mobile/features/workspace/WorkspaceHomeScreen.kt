@@ -336,9 +336,8 @@ fun WorkspaceHomeScreen(
             Spacer(Modifier.height(QuickInkSpacing.s4))
 
             TagsSection(
-                tags = tags,
-                tagCounts = tagCounts,
-                onOpenTag = onOpenTag,
+                tags        = tags,
+                onOpenTag   = onOpenTag,
                 onBrowseAll = onBrowseTags,
             )
 
@@ -1306,107 +1305,94 @@ private fun descriptionForSeededFolder(folder: FolderEntity): String? {
     return workspaceFolderSeeds.firstOrNull { it.id == folder.id }?.desc
 }
 
-// ─── Tag cloud ───────────────────────────────────────────────────
+// ─── Tag vocabulary ──────────────────────────────────────────────
 
+/**
+ * Tag vocabulary section — seven [TagBucketBlock]s in spec order
+ * (Status / People / Org & Place / Energy / Time / Kind / Source).
+ * Replaces the legacy top-10-chip cloud per Phase 4 of
+ * `design/WORKSPACE_TAB_HANDOFF.md`. Pills route via [onOpenTag]
+ * to the existing tag-filtered list; the "BROWSE ALL TAGS" trail
+ * at the bottom routes to TagLibraryScreen so the user can still
+ * reach legacy unbucketed tags.
+ */
 @Composable
 private fun TagsSection(
     tags: List<TagEntity>,
-    tagCounts: List<TagCount>,
     onOpenTag: (TagEntity) -> Unit,
     onBrowseAll: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
 
-    val countById = remember(tagCounts) { tagCounts.associate { it.tagId to it.docCount } }
-    // Show top 10 tags by usage, or all when there are fewer.
-    val ranked = remember(tags, countById) {
-        tags
-            .map { it to (countById[it.id] ?: 0) }
-            .sortedByDescending { it.second }
-            .take(10)
+    val activeTags = remember(tags) { tags.filter { it.deletedAt == null } }
+    val tagById    = remember(activeTags) { activeTags.associateBy { it.id } }
+    val pillsByBucket = remember(activeTags) {
+        activeTags
+            .filter { !it.bucket.isNullOrEmpty() }
+            .groupBy { it.bucket!! }
+    }
+    val seededCount = remember(activeTags) {
+        activeTags.count { !it.bucket.isNullOrEmpty() }
     }
 
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = QuickInkSpacing.s4),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(
-            text  = "Tags",
-            style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
-            color = colors.ink,
-        )
-        Text(
-            text     = "BROWSE ALL",
-            style    = type.label.copy(letterSpacing = 1.2.sp, fontSize = 10.5.sp,
-                                       fontWeight = FontWeight.SemiBold),
-            color    = colors.accent,
-            modifier = Modifier.clickable(onClick = onBrowseAll),
-        )
-    }
-
-    Spacer(Modifier.height(QuickInkSpacing.s2))
-
-    androidx.compose.foundation.layout.FlowRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = QuickInkSpacing.s4),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        if (ranked.isEmpty()) {
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
             Text(
-                text  = "No tags yet.",
-                style = type.meta,
+                text  = "TAG VOCABULARY",
+                style = type.eyebrow.copy(letterSpacing = 1.4.sp, fontSize = 11.sp),
+                color = colors.ink,
+            )
+            Text(
+                text  = "$seededCount tags · 7 buckets",
+                style = type.meta.copy(fontSize = 11.sp, fontStyle = FontStyle.Italic),
                 color = colors.muted,
             )
-            return@FlowRow
         }
-        ranked.forEach { (tag, count) ->
-            TagChip(tag = tag, count = count, onClick = { onOpenTag(tag) })
+
+        Spacer(Modifier.height(6.dp))
+
+        workspaceTagBuckets.forEachIndexed { index, bucket ->
+            val rows = pillsByBucket[bucket.id].orEmpty()
+            TagBucketBlock(
+                bucket           = bucket,
+                pills            = rows.map { TagPillSpec(id = it.id, label = it.name) },
+                onTapTag         = { spec -> tagById[spec.id]?.let(onOpenTag) },
+                onAddTag         = { /* TODO Phase 5 polish — open create-tag sheet pre-bound to bucket */ },
+                showBottomBorder = index != workspaceTagBuckets.lastIndex,
+            )
         }
-    }
-}
 
-@Composable
-private fun TagChip(
-    tag: TagEntity,
-    count: Int,
-    onClick: () -> Unit,
-) {
-    val colors = LocalQuickInkColors.current
-    val type   = LocalQuickInkTypography.current
-    val shape  = RoundedCornerShape(999.dp)
-
-    Row(
-        modifier = Modifier
-            .clip(shape)
-            .background(colors.surface, shape)
-            .border(1.dp, colors.border, shape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 11.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text  = "#",
-            style = type.label.copy(fontWeight = FontWeight.Bold, fontSize = 11.5.sp),
-            color = colors.accent,
-        )
-        Text(
-            text  = tag.name,
-            style = type.label.copy(fontSize = 11.5.sp),
-            color = colors.inkSoft,
-            modifier = Modifier.padding(start = 2.dp),
-        )
-        if (count > 0) {
-            Spacer(Modifier.width(5.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier          = Modifier
+                .padding(top = 14.dp, bottom = 4.dp)
+                .clickable(onClick = onBrowseAll),
+        ) {
             Text(
-                text  = count.toString(),
-                style = type.meta.copy(fontSize = 10.sp),
-                color = colors.muted,
+                text  = "BROWSE ALL TAGS",
+                style = type.eyebrow.copy(
+                    letterSpacing = 1.2.sp,
+                    fontSize      = 10.5.sp,
+                    fontWeight    = FontWeight.SemiBold,
+                ),
+                color = colors.accent,
+            )
+            Icon(
+                imageVector       = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint              = colors.accent,
+                modifier          = Modifier
+                    .padding(start = 4.dp)
+                    .size(14.dp),
             )
         }
     }
