@@ -38,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.zIndex
 import app.quickink.mobile.data.voicenote.WhisperModelDownloadWorker
 import app.quickink.mobile.data.workspace.seedWorkspaceTaxonomyIfNeeded
 import app.quickink.mobile.features.nav.NavTab
@@ -1068,21 +1069,11 @@ private fun MainShell(
         // through every NavHost transition — the crossfade beneath
         // only swaps screen content, not the chrome.
         activeTab?.let { tab ->
-            QuickInkBottomNavBar(
-                activeTab           = tab,
-                onHome              = { navToTab(Routes.HOME) },
-                onWorkspace         = { navToTab(workspaceTabRoute) },
-                isCaptureMenuOpen   = captureMenuOpen,
-                onToggleCaptureMenu = { captureMenuOpen = !captureMenuOpen },
-                onStories           = { navToTab(Routes.STORIES) },
-                onSettings          = { navToTab(Routes.SETTINGS) },
-                modifier            = Modifier.align(Alignment.BottomCenter),
-            )
-
             // Sundial radial capture menu — full-screen sibling of
-            // the NavHost so the dim layer covers the floating
-            // nav bar card. Each ray closes the menu and routes
-            // into the QuickCapture sheet with its chosen mode.
+            // the NavHost. It is drawn before the bottom nav so the
+            // lifted FAB stays the topmost hit target; otherwise the
+            // transparent/animating menu layer can steal the upper
+            // half of the button.
             SundialCaptureMenu(
                 isOpen        = captureMenuOpen,
                 onClose       = { captureMenuOpen = false },
@@ -1109,6 +1100,19 @@ private fun MainShell(
                     pendingInitialMode  = CaptureMode.Photo
                     showQuickCapture    = true
                 },
+            )
+
+            QuickInkBottomNavBar(
+                activeTab           = tab,
+                onHome              = { navToTab(Routes.HOME) },
+                onWorkspace         = { navToTab(workspaceTabRoute) },
+                isCaptureMenuOpen   = captureMenuOpen,
+                onToggleCaptureMenu = { captureMenuOpen = !captureMenuOpen },
+                onStories           = { navToTab(Routes.STORIES) },
+                onSettings          = { navToTab(Routes.SETTINGS) },
+                modifier            = Modifier
+                    .align(Alignment.BottomCenter)
+                    .zIndex(1f),
             )
         }
 

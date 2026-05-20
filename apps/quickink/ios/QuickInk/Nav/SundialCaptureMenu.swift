@@ -152,10 +152,16 @@ public struct SundialCaptureMenu: View {
                         action: onSelectPhoto
                     )
                 }
-                .position(x: proxy.size.width / 2, y: fabCentreY + 16)
+                // +16pt aligns the icon (top of the 92pt column) with
+                // the FAB centre per the layout comment above; -32pt
+                // lifts the whole menu above the FAB so the rays read
+                // as emanating "above the bolt" rather than sitting on
+                // it. Net: anchor sits 16pt above the FAB centre.
+                .position(x: proxy.size.width / 2, y: fabCentreY + 16 - 32)
                 .allowsHitTesting(isOpen)
             }
         }
+        .allowsHitTesting(isOpen)
     }
 
     /// Single ray — circular icon button with a label chip beneath.

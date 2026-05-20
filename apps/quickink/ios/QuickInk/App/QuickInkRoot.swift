@@ -506,35 +506,10 @@ private struct MainShell: View {
                         destination(for: route)
                     }
                 }
-                // Bottom nav attaches to the NavigationStack via
-                // `safeAreaInset`, not to each screen's body — so a
-                // push / pop slides the screen content underneath
-                // while the bar stays stationary. Eliminates the
-                // double-footer crossfade the per-screen attachment
-                // used to produce, and reserves a stable safe-area
-                // for scroll content inside every destination.
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if let tab = activeTab {
-                        QuickInkBottomNavBar(
-                            activeTab:          tab,
-                            onHome:             { path.removeAll() },
-                            onWorkspace:        { navToTab(workspaceTabRoute) },
-                            isCaptureMenuOpen:  captureMenuOpen,
-                            onToggleCaptureMenu: {
-                                withAnimation(.interpolatingSpring(stiffness: 200, damping: 18)) {
-                                    captureMenuOpen.toggle()
-                                }
-                            },
-                            onStories:          { navToTab(.stories) },
-                            onSettings:         { navToTab(.settings) }
-                        )
-                    }
-                }
-                }   // closes VStack opened at the top of `case .idle:`
                 // Sundial radial capture menu — full-screen sibling
-                // of the NavigationStack so the dim overlay covers
-                // the floating nav bar card. Rays close the menu
-                // and route into QuickCapture with the chosen mode.
+                // of the NavigationStack. It is applied before the
+                // footer safe-area inset so the lifted FAB remains
+                // above the transparent/animating menu hit layer.
                 .overlay {
                     SundialCaptureMenu(
                         isOpen:   captureMenuOpen,
@@ -574,6 +549,32 @@ private struct MainShell: View {
                         }
                     )
                 }
+                // Bottom nav attaches to the NavigationStack via
+                // `safeAreaInset`, not to each screen's body — so a
+                // push / pop slides the screen content underneath
+                // while the bar stays stationary. Eliminates the
+                // double-footer crossfade the per-screen attachment
+                // used to produce, and reserves a stable safe-area
+                // for scroll content inside every destination.
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if let tab = activeTab {
+                        QuickInkBottomNavBar(
+                            activeTab:          tab,
+                            onHome:             { path.removeAll() },
+                            onWorkspace:        { navToTab(workspaceTabRoute) },
+                            isCaptureMenuOpen:  captureMenuOpen,
+                            onToggleCaptureMenu: {
+                                withAnimation(.interpolatingSpring(stiffness: 200, damping: 18)) {
+                                    captureMenuOpen.toggle()
+                                }
+                            },
+                            onStories:          { navToTab(.stories) },
+                            onSettings:         { navToTab(.settings) }
+                        )
+                        .zIndex(1)
+                    }
+                }
+                }   // closes VStack opened at the top of `case .idle:`
             }
         }
         .task(id: userId) {

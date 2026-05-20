@@ -149,37 +149,42 @@ fun SundialCaptureMenu(
         // explicit size restores the label; the padding moves
         // from 56dp down to 24dp to compensate (so the icon
         // centre lands at the same screen Y as before).
-        Box(
-            modifier = Modifier.padding(bottom = 24.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Ray(
-                label              = "Scan",
-                iconResId          = R.drawable.ic_scan,
-                angleDeg           = 150.0,
-                openDelayMs        = 0,
-                accessibilityLabel = "Scan document",
-                isOpen             = isOpen,
-                onClick            = onSelectScan,
-            )
-            Ray(
-                label              = "Video",
-                iconResId          = R.drawable.ic_video,
-                angleDeg           = 90.0,
-                openDelayMs        = 60,
-                accessibilityLabel = "Record video",
-                isOpen             = isOpen,
-                onClick            = onSelectVideo,
-            )
-            Ray(
-                label              = "Photo",
-                iconResId          = R.drawable.ic_camera,
-                angleDeg           = 30.0,
-                openDelayMs        = 120,
-                accessibilityLabel = "Take photo",
-                isOpen             = isOpen,
-                onClick            = onSelectPhoto,
-            )
+        if (isOpen || overlayAlpha > 0f) {
+            // 24dp was the original FAB-centre anchor; the extra 32dp
+            // lifts the whole menu above the FAB so the rays read as
+            // emanating "above the bolt" rather than sitting on it.
+            Box(
+                modifier = Modifier.padding(bottom = 56.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Ray(
+                    label              = "Scan",
+                    iconResId          = R.drawable.ic_scan,
+                    angleDeg           = 150.0,
+                    openDelayMs        = 0,
+                    accessibilityLabel = "Scan document",
+                    isOpen             = isOpen,
+                    onClick            = onSelectScan,
+                )
+                Ray(
+                    label              = "Video",
+                    iconResId          = R.drawable.ic_video,
+                    angleDeg           = 90.0,
+                    openDelayMs        = 60,
+                    accessibilityLabel = "Record video",
+                    isOpen             = isOpen,
+                    onClick            = onSelectVideo,
+                )
+                Ray(
+                    label              = "Photo",
+                    iconResId          = R.drawable.ic_camera,
+                    angleDeg           = 30.0,
+                    openDelayMs        = 120,
+                    accessibilityLabel = "Take photo",
+                    isOpen             = isOpen,
+                    onClick            = onSelectPhoto,
+                )
+            }
         }
     }
 }
