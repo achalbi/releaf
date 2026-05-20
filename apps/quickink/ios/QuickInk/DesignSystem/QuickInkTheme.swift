@@ -130,6 +130,30 @@ public enum QuickInkColors {
     public static let warning      = Color(hex: 0xC97A2C)
     public static let danger       = Color(hex: 0xB54B3F)
 
+    // MARK: - Workspace taxonomy
+
+    // Tag-bucket hues — seven brand-fixed accents used by the
+    // Workspace tab's tag vocabulary section. Each bucket answers
+    // one question (`design/WORKSPACE_TAB_HANDOFF.md` §4.2) and
+    // carries a single hue across pill border, pill text, and
+    // bucket-bar fill. Values are preserved across light/dark
+    // (same treatment as `accentDeep`) — readability on the
+    // canvas is maintained by the 12 %-opacity pill fill.
+    public static let bucketStatus    = Color(hex: 0x4F46E5)
+    public static let bucketPeople    = Color(hex: 0x0F9F6E)
+    public static let bucketOrgPlace  = Color(hex: 0x0891B2)
+    public static let bucketEnergy    = Color(hex: 0xC2570A)
+    public static let bucketTime      = Color(hex: 0xD33B4D)
+    public static let bucketKind      = Color(hex: 0x7C3AED)
+    public static let bucketSource    = Color(hex: 0x0E7FB8)
+
+    // Tier stripes — the 3-px vertical bar on the left of every
+    // folder row. Tier 2 reuses `ink` so the folder list reads
+    // as a single editorial column with the "workflow" /
+    // "creative" tiers as accent moments.
+    public static let tier1           = Color(hex: 0x6366F1)
+    public static let tier3           = Color(hex: 0x10B981)
+
     /// Rotate through paper tones for note thumbnails so a wall
     /// of cards doesn't look monotonous. Keyed by note ID hash so
     /// each note gets a stable tone across sessions.

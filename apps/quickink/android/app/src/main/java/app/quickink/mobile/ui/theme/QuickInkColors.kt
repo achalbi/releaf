@@ -89,6 +89,30 @@ object QuickInkColors {
     val Warning     = Color(0xFFC97A2C)
     val Danger      = Color(0xFFB54B3F)
 
+    // ─── Workspace taxonomy ───────────────────────────────────
+    //
+    // Tag-bucket hues — seven brand-fixed accents used by the
+    // Workspace tab's tag vocabulary section. Each bucket answers
+    // one question (`design/WORKSPACE_TAB_HANDOFF.md` §4.2) and
+    // carries a single hue across pill border, pill text, and
+    // bucket-bar fill. Values are preserved across light/dark
+    // (same treatment as `AccentDeep`) — readability on the
+    // canvas is maintained by the 12 %-opacity pill fill.
+    val BucketStatus    = Color(0xFF4F46E5)
+    val BucketPeople    = Color(0xFF0F9F6E)
+    val BucketOrgPlace  = Color(0xFF0891B2)
+    val BucketEnergy    = Color(0xFFC2570A)
+    val BucketTime      = Color(0xFFD33B4D)
+    val BucketKind      = Color(0xFF7C3AED)
+    val BucketSource    = Color(0xFF0E7FB8)
+
+    // Tier stripes — the 3-dp vertical bar on the left of every
+    // folder row. Tier 2 reuses `Ink` so the folder list reads
+    // as a single editorial column with the "workflow" /
+    // "creative" tiers as accent moments.
+    val Tier1           = Color(0xFF6366F1)
+    val Tier3           = Color(0xFF10B981)
+
     /**
      * Rotate through paper tones for note thumbnails so a wall of
      * cards doesn't look monotonous. Keyed by note ID hash so each
