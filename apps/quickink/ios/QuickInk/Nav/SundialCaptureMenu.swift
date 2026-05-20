@@ -112,6 +112,19 @@ public struct SundialCaptureMenu: View {
                 // Ray anchor — three buttons emanating from the FAB
                 // centre point. Each ray's offset is computed from
                 // its angle + the shared radius.
+                //
+                // The ZStack uses its natural size (60pt wide ×
+                // 92pt tall — the height of one ray's icon + label
+                // group). Earlier revisions clamped it to 60×60,
+                // which silently dropped the text pill below each
+                // circle (a Column / VStack constrained to 60pt
+                // total height can fit the 60pt icon but nothing
+                // else, so the label was layout-evicted). Removing
+                // the frame restores the label; we then shift the
+                // ZStack centre +16pt downward so the icon (which
+                // now sits 16pt above the ZStack centre by virtue
+                // of being at the top of a 92pt tall column) lands
+                // exactly on the FAB centre again.
                 ZStack {
                     ray(
                         label: "Scan",
@@ -138,8 +151,7 @@ public struct SundialCaptureMenu: View {
                         action: onSelectPhoto
                     )
                 }
-                .frame(width: 60, height: 60)
-                .position(x: proxy.size.width / 2, y: fabCentreY)
+                .position(x: proxy.size.width / 2, y: fabCentreY + 16)
                 .allowsHitTesting(isOpen)
             }
         }

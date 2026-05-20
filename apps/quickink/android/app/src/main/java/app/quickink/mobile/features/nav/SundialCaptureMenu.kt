@@ -141,10 +141,18 @@ fun SundialCaptureMenu(
         // safeArea + 24 + 32 (half bar) - 16 (lift) + 0 = +40dp
         // above the bar bottom. Mirror that with padding here so
         // the rays emanate from the bolt.
+        //
+        // The anchor Box uses its natural size (60dp × 92dp —
+        // one ray's icon + label group). Earlier revisions
+        // clamped it to size(60.dp), which silently dropped the
+        // text pill below each circle (a Column constrained to
+        // 60dp total height fits the 60dp icon but nothing
+        // else, so the label was layout-evicted). Removing the
+        // explicit size restores the label; the padding moves
+        // from 56dp down to 24dp to compensate (so the icon
+        // centre lands at the same screen Y as before).
         Box(
-            modifier = Modifier
-                .padding(bottom = 56.dp)
-                .size(60.dp),
+            modifier = Modifier.padding(bottom = 24.dp),
             contentAlignment = Alignment.Center,
         ) {
             Ray(
