@@ -643,16 +643,44 @@ public struct WorkspaceHomeScreen: View {
     private var foldersSection: some View {
         let grouped = groupedFolders
         return VStack(alignment: .leading, spacing: 0) {
-            tierBlock(.workflow, folders: grouped.workflow)
-            tierBlock(.life,     folders: grouped.life)
-            tierBlock(.creative, folders: grouped.creative)
-            tierBlock(
-                .custom,
-                folders:      grouped.custom,
-                allowCreate:  true,
-                emptyState:   "No custom folders yet — tap NEW FOLDER to add one."
-            )
+            // Pre-seed placeholder: the LaunchedEffect-style seeder
+            // runs on first sign-in and lands the 12 seeded folders
+            // a beat later. While it's in flight (and on any prior
+            // install that hasn't reached the v20 migration yet)
+            // the section reads "Setting up your workspace…" so the
+            // user doesn't see a bare Custom tier and wonder where
+            // the rest went.
+            if viewModel.folders.isEmpty {
+                workspaceSettingUpPlaceholder
+            } else {
+                tierBlock(.workflow, folders: grouped.workflow)
+                tierBlock(.life,     folders: grouped.life)
+                tierBlock(.creative, folders: grouped.creative)
+                tierBlock(
+                    .custom,
+                    folders:      grouped.custom,
+                    allowCreate:  true,
+                    emptyState:   "No custom folders yet — tap NEW FOLDER to add one."
+                )
+            }
         }
+    }
+
+    /// Transient empty-state for the folders + tag-vocabulary
+    /// regions while the first-launch seeder is in flight. Shows
+    /// once per fresh install; after the seeder lands (typically
+    /// sub-second) the tiered list takes over.
+    @ViewBuilder
+    private var workspaceSettingUpPlaceholder: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text("Setting up your workspace…")
+                .font(.system(size: 12.5))
+                .italic()
+                .foregroundColor(QuickInkColors.muted)
+        }
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .combine)
     }
 
     /// Render a single tier block — header + folder rows. When the
@@ -779,17 +807,28 @@ public struct WorkspaceHomeScreen: View {
         VStack(alignment: .leading, spacing: 0) {
             tagVocabularyHeader
 
-            ForEach(Array(workspaceTagBuckets.enumerated()), id: \.element.id) { idx, bucket in
-                let pills = pillsForBucket(bucket.id)
-                TagBucketBlock(
-                    bucket:           bucket,
-                    pills:            pills,
-                    showBottomBorder: idx != workspaceTagBuckets.count - 1,
-                    onTapTag:         { spec in
-                        if let tag = tagById[spec.id] { onOpenTag(tag) }
-                    },
-                    onAddTag:         { /* TODO Phase 5 polish — open create-tag sheet pre-bound to bucket */ }
-                )
+            if seededTagCount == 0 {
+                // Mirror of foldersSection's pre-seed placeholder.
+                // Bucketless legacy tags (`ideas`, `projects`, …) are
+                // still reachable via the "BROWSE ALL TAGS" trail
+                // below; this state only renders while the v20
+                // migration's tag seed is in flight.
+                workspaceSettingUpPlaceholder
+            } else {
+                ForEach(Array(workspaceTagBuckets.enumerated()), id: \.element.id) { idx, bucket in
+                    let pills = pillsForBucket(bucket.id)
+                    TagBucketBlock(
+                        bucket:           bucket,
+                        pills:            pills,
+                        showBottomBorder: idx != workspaceTagBuckets.count - 1,
+                        onTapTag:         { spec in
+                            if let tag = tagById[spec.id] { onOpenTag(tag) }
+                        },
+                        onAddTag:         { /* TODO Phase 5 polish — open create-tag sheet pre-bound to bucket */ }
+                    )
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(Text("\(bucket.name), \(pills.count) tags"))
+                }
             }
 
             Button(action: onBrowseTags) {
@@ -805,6 +844,7 @@ public struct WorkspaceHomeScreen: View {
                 .padding(.bottom, 4)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text("Browse all tags"))
         }
     }
 

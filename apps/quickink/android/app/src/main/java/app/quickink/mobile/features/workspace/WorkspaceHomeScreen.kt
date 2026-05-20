@@ -1156,36 +1156,75 @@ private fun FoldersSection(
             .fillMaxWidth()
             .padding(horizontal = QuickInkSpacing.s4),
     ) {
-        TierBlock(
-            tier              = FolderTier.Workflow,
-            folders           = grouped.workflow,
-            captureCounts     = folderCaptureCounts,
-            onOpenFolder      = onOpenFolder,
-            onLongPressFolder = onLongPressFolder,
-            topSpacing        = 0.dp,
+        if (folders.isEmpty()) {
+            // Pre-seed placeholder: the LaunchedEffect-style seeder
+            // runs on first sign-in and lands the 12 seeded folders
+            // a beat later. While it's in flight the section reads
+            // "Setting up your workspace…" so the user doesn't see
+            // a bare Custom tier and wonder where the rest went.
+            WorkspaceSettingUpPlaceholder()
+        } else {
+            TierBlock(
+                tier              = FolderTier.Workflow,
+                folders           = grouped.workflow,
+                captureCounts     = folderCaptureCounts,
+                onOpenFolder      = onOpenFolder,
+                onLongPressFolder = onLongPressFolder,
+                topSpacing        = 0.dp,
+            )
+            TierBlock(
+                tier              = FolderTier.Life,
+                folders           = grouped.life,
+                captureCounts     = folderCaptureCounts,
+                onOpenFolder      = onOpenFolder,
+                onLongPressFolder = onLongPressFolder,
+            )
+            TierBlock(
+                tier              = FolderTier.Creative,
+                folders           = grouped.creative,
+                captureCounts     = folderCaptureCounts,
+                onOpenFolder      = onOpenFolder,
+                onLongPressFolder = onLongPressFolder,
+            )
+            TierBlock(
+                tier              = FolderTier.Custom,
+                folders           = grouped.custom,
+                captureCounts     = folderCaptureCounts,
+                onOpenFolder      = onOpenFolder,
+                onLongPressFolder = onLongPressFolder,
+                onNewFolder       = onNewFolder,
+                emptyState        = "No custom folders yet — tap NEW FOLDER to add one.",
+            )
+        }
+    }
+}
+
+/**
+ * Transient empty state for the folders + tag-vocabulary regions
+ * while the first-launch seeder is in flight. Shows once per fresh
+ * install; after the seeder lands (typically sub-second) the
+ * tiered list takes over.
+ */
+@Composable
+private fun WorkspaceSettingUpPlaceholder() {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Row(
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier              = Modifier
+            .padding(vertical = 12.dp)
+            .semantics { contentDescription = "Setting up your workspace" },
+    ) {
+        androidx.compose.material3.CircularProgressIndicator(
+            color       = colors.accent,
+            strokeWidth = 2.dp,
+            modifier    = Modifier.size(14.dp),
         )
-        TierBlock(
-            tier              = FolderTier.Life,
-            folders           = grouped.life,
-            captureCounts     = folderCaptureCounts,
-            onOpenFolder      = onOpenFolder,
-            onLongPressFolder = onLongPressFolder,
-        )
-        TierBlock(
-            tier              = FolderTier.Creative,
-            folders           = grouped.creative,
-            captureCounts     = folderCaptureCounts,
-            onOpenFolder      = onOpenFolder,
-            onLongPressFolder = onLongPressFolder,
-        )
-        TierBlock(
-            tier              = FolderTier.Custom,
-            folders           = grouped.custom,
-            captureCounts     = folderCaptureCounts,
-            onOpenFolder      = onOpenFolder,
-            onLongPressFolder = onLongPressFolder,
-            onNewFolder       = onNewFolder,
-            emptyState        = "No custom folders yet — tap NEW FOLDER to add one.",
+        Text(
+            text  = "Setting up your workspace…",
+            style = type.meta.copy(fontStyle = FontStyle.Italic, fontSize = 12.5.sp),
+            color = colors.muted,
         )
     }
 }
@@ -1360,15 +1399,27 @@ private fun TagsSection(
 
         Spacer(Modifier.height(6.dp))
 
-        workspaceTagBuckets.forEachIndexed { index, bucket ->
-            val rows = pillsByBucket[bucket.id].orEmpty()
-            TagBucketBlock(
-                bucket           = bucket,
-                pills            = rows.map { TagPillSpec(id = it.id, label = it.name) },
-                onTapTag         = { spec -> tagById[spec.id]?.let(onOpenTag) },
-                onAddTag         = { /* TODO Phase 5 polish — open create-tag sheet pre-bound to bucket */ },
-                showBottomBorder = index != workspaceTagBuckets.lastIndex,
-            )
+        if (seededCount == 0) {
+            // Mirror of FoldersSection's pre-seed placeholder.
+            // Bucketless legacy tags are still reachable via the
+            // "BROWSE ALL TAGS" trail below; this state only
+            // renders while the v25 destructive-rebuild tag seed
+            // is in flight.
+            WorkspaceSettingUpPlaceholder()
+        } else {
+            workspaceTagBuckets.forEachIndexed { index, bucket ->
+                val rows = pillsByBucket[bucket.id].orEmpty()
+                TagBucketBlock(
+                    bucket           = bucket,
+                    pills            = rows.map { TagPillSpec(id = it.id, label = it.name) },
+                    onTapTag         = { spec -> tagById[spec.id]?.let(onOpenTag) },
+                    onAddTag         = { /* TODO Phase 5 polish — open create-tag sheet pre-bound to bucket */ },
+                    showBottomBorder = index != workspaceTagBuckets.lastIndex,
+                    modifier         = Modifier.semantics {
+                        contentDescription = "${bucket.name}, ${rows.size} tags"
+                    },
+                )
+            }
         }
 
         Row(
