@@ -43,6 +43,7 @@ import app.quickink.mobile.data.workspace.seedWorkspaceTaxonomyIfNeeded
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkTimeBar
+import app.quickink.mobile.features.nav.SundialCaptureMenu
 import app.quickink.mobile.features.scan.SpeechModelDownloadModal
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -79,7 +80,6 @@ import app.quickink.mobile.features.onboarding.SignInScreen
 import app.quickink.mobile.features.scan.CaptureMode
 import app.quickink.mobile.features.scan.LocationService
 import app.quickink.mobile.features.scan.PendingShare
-import app.quickink.mobile.features.scan.PhotoFabHint
 import app.quickink.mobile.features.scan.QuickCaptureScreen
 import app.quickink.mobile.features.scan.ScanDetailScreen
 import app.quickink.mobile.features.scan.ScanFlowController
@@ -611,16 +611,12 @@ private fun MainShell(
     // mode. Cleared back to `null` on dismiss so a subsequent
     // tap-FAB doesn't inherit the override.
     var pendingInitialMode by remember { mutableStateOf<CaptureMode?>(null) }
-    // Photo-FAB hint state. Mirror of iOS `PhotoFabHint`
-    // `@StateObject`: a simple `mutableStateOf` seeded from
-    // SharedPreferences so the chip's visibility re-renders on
-    // dismiss without polling. Spec §3.1 — chip shows on every
-    // launch until the user long-presses the FAB once, after
-    // which it stays dismissed permanently.
-    val photoFabHintContext = LocalContext.current
-    var photoFabHintDismissed by remember {
-        mutableStateOf(PhotoFabHint.isDismissed(photoFabHintContext))
-    }
+    // Sundial capture-menu open state. Tap on the ⚡ FAB toggles
+    // this; tapping the dim overlay or a ray closes it. Drives the
+    // FAB's bolt rotation in [QuickInkBottomNavBar] AND the
+    // visibility of the [SundialCaptureMenu] overlay rendered as a
+    // sibling of the NavHost below.
+    var captureMenuOpen by remember { mutableStateOf(false) }
     if (showQuickCapture) {
         // Intercept back so it dismisses the capture sheet instead
         // of falling through to the OS default (which would finish
@@ -1073,26 +1069,38 @@ private fun MainShell(
         // only swaps screen content, not the chrome.
         activeTab?.let { tab ->
             QuickInkBottomNavBar(
-                activeTab   = tab,
-                onHome      = { navToTab(Routes.HOME) },
-                onWorkspace = { navToTab(workspaceTabRoute) },
-                onScan      = { showQuickCapture = true },
-                onStories   = { navToTab(Routes.STORIES) },
-                onSettings  = { navToTab(Routes.SETTINGS) },
-                modifier    = Modifier.align(Alignment.BottomCenter),
-                // Long-press jumps the FAB directly into the photo
-                // surface. Also marks the FAB hint dismissed — the
-                // user has discovered the gesture, no need to
-                // surface the chip ever again. Routed through both
-                // the persisted flag and the in-memory state so
-                // the chip's fade-out fires on the same render tick.
-                onLongPressScan = {
-                    PhotoFabHint.markDismissed(photoFabHintContext)
-                    photoFabHintDismissed = true
-                    pendingInitialMode = CaptureMode.Photo
-                    showQuickCapture = true
+                activeTab           = tab,
+                onHome              = { navToTab(Routes.HOME) },
+                onWorkspace         = { navToTab(workspaceTabRoute) },
+                isCaptureMenuOpen   = captureMenuOpen,
+                onToggleCaptureMenu = { captureMenuOpen = !captureMenuOpen },
+                onStories           = { navToTab(Routes.STORIES) },
+                onSettings          = { navToTab(Routes.SETTINGS) },
+                modifier            = Modifier.align(Alignment.BottomCenter),
+            )
+
+            // Sundial radial capture menu — full-screen sibling of
+            // the NavHost so the dim layer covers the floating
+            // nav bar card. Each ray closes the menu and routes
+            // into the QuickCapture sheet with its chosen mode.
+            SundialCaptureMenu(
+                isOpen           = captureMenuOpen,
+                onClose          = { captureMenuOpen = false },
+                onSelectDocument = {
+                    captureMenuOpen     = false
+                    pendingInitialMode  = CaptureMode.Document
+                    showQuickCapture    = true
                 },
-                showPhotoHint = !photoFabHintDismissed,
+                onSelectCard = {
+                    captureMenuOpen     = false
+                    pendingInitialMode  = CaptureMode.BusinessCard
+                    showQuickCapture    = true
+                },
+                onSelectPhoto = {
+                    captureMenuOpen     = false
+                    pendingInitialMode  = CaptureMode.Photo
+                    showQuickCapture    = true
+                },
             )
         }
 

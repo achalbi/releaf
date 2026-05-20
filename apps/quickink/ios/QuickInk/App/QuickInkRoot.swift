@@ -356,22 +356,12 @@ private struct MainShell: View {
     /// inherit the override.
     @State private var pendingInitialMode: CaptureMode? = nil
 
-    /// Photo-FAB hint state. Owns the single persisted `dismissed`
-    /// flag that gates the "Hold ⚡ for a quick photo" chip above
-    /// the ⚡ FAB. Routed through a `@StateObject` (rather than
-    /// `@AppStorage`) because `@AppStorage` doesn't reliably re-
-    /// render when the underlying UserDefaults key is written via
-    /// a direct `UserDefaults.standard.set(...)` call — the chip
-    /// would otherwise stay stuck on the previous value until the
-    /// next unrelated state change nudged the view tree. The chip
-    /// shows on every launch until the user long-presses once,
-    /// after which it stays dismissed permanently.
-    @StateObject private var photoFabHint = PhotoFabHint()
-
-    /// Derived gate for the bar's `showPhotoHint` prop.
-    private var showPhotoFabHint: Bool {
-        !photoFabHint.dismissed
-    }
+    /// Sundial capture-menu open state. Tap on the ⚡ FAB
+    /// toggles this; tapping the dim overlay or a ray closes it.
+    /// Drives the FAB's icon rotation in `QuickInkBottomNavBar`
+    /// AND the visibility of the `SundialCaptureMenu` overlay
+    /// rendered as a sibling of the NavigationStack below.
+    @State private var captureMenuOpen = false
 
     /// Tab-style switch between top-level destinations (Library,
     /// Search, Settings). Replaces the nav stack with a single entry,
@@ -526,34 +516,56 @@ private struct MainShell: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if let tab = activeTab {
                         QuickInkBottomNavBar(
-                            activeTab:       tab,
-                            onHome:          { path.removeAll() },
-                            onWorkspace:     { navToTab(workspaceTabRoute) },
-                            onScan:          { showQuickCapture = true },
-                            // Long-press jumps the FAB directly into
-                            // the photo surface. Setting both the
-                            // pending mode AND the cover flag in the
-                            // same tick guarantees the fullScreenCover
-                            // body re-runs with `pendingInitialMode`
-                            // resolved before SwiftUI evaluates the
-                            // `QuickCaptureScreen` init. Also marks
-                            // the FAB hint dismissed — the user has
-                            // discovered the gesture, no need to
-                            // surface the chip ever again. Routed
-                            // through the @StateObject so the chip's
-                            // fade-out fires on the same render tick.
-                            onLongPressScan: {
-                                photoFabHint.markDismissed()
-                                pendingInitialMode = .photo
-                                showQuickCapture = true
+                            activeTab:          tab,
+                            onHome:             { path.removeAll() },
+                            onWorkspace:        { navToTab(workspaceTabRoute) },
+                            isCaptureMenuOpen:  captureMenuOpen,
+                            onToggleCaptureMenu: {
+                                withAnimation(.interpolatingSpring(stiffness: 200, damping: 18)) {
+                                    captureMenuOpen.toggle()
+                                }
                             },
-                            onStories:       { navToTab(.stories) },
-                            onSettings:      { navToTab(.settings) },
-                            showPhotoHint:   showPhotoFabHint
+                            onStories:          { navToTab(.stories) },
+                            onSettings:         { navToTab(.settings) }
                         )
                     }
                 }
                 }   // closes VStack opened at the top of `case .idle:`
+                // Sundial radial capture menu — full-screen sibling
+                // of the NavigationStack so the dim overlay covers
+                // the floating nav bar card. Rays close the menu
+                // and route into QuickCapture with the chosen mode.
+                .overlay {
+                    SundialCaptureMenu(
+                        isOpen:   captureMenuOpen,
+                        onClose:  {
+                            withAnimation(.interpolatingSpring(stiffness: 200, damping: 18)) {
+                                captureMenuOpen = false
+                            }
+                        },
+                        onSelectDocument: {
+                            withAnimation(.interpolatingSpring(stiffness: 200, damping: 18)) {
+                                captureMenuOpen = false
+                            }
+                            pendingInitialMode = .document
+                            showQuickCapture = true
+                        },
+                        onSelectCard: {
+                            withAnimation(.interpolatingSpring(stiffness: 200, damping: 18)) {
+                                captureMenuOpen = false
+                            }
+                            pendingInitialMode = .businessCard
+                            showQuickCapture = true
+                        },
+                        onSelectPhoto: {
+                            withAnimation(.interpolatingSpring(stiffness: 200, damping: 18)) {
+                                captureMenuOpen = false
+                            }
+                            pendingInitialMode = .photo
+                            showQuickCapture = true
+                        }
+                    )
+                }
             }
         }
         .task(id: userId) {

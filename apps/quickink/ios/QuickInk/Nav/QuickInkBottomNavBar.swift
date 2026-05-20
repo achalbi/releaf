@@ -56,48 +56,38 @@ public struct QuickInkBottomNavBar: View {
     public let activeTab: NavTab
     public let onHome: () -> Void
     public let onWorkspace: () -> Void
-    public let onScan: () -> Void
-    /// Long-press on the ⚡ FAB — jumps the user directly into
-    /// the Photo capture surface (QuickCaptureScreen with
-    /// `initialMode: .photo`). Tap still goes to `onScan`, which
-    /// opens whichever pill-selected mode the user last used.
-    /// Defaults to a no-op so callers that don't care about the
-    /// long-press path (legacy hosts, previews) keep working.
-    public let onLongPressScan: () -> Void
+    /// Whether the radial Sundial capture menu is currently open.
+    /// Drives the FAB's icon rotation (135° on open, back to 0° on
+    /// close) so the bolt visually morphs into a close (×). The
+    /// menu itself (overlay + rays) is rendered by MainShell as a
+    /// full-screen sibling, not by the bar — keeps the dim layer
+    /// from being clipped by the bar's own bounds.
+    public let isCaptureMenuOpen: Bool
+    /// Tap on the ⚡ FAB — toggles the Sundial capture menu open
+    /// / closed. The menu's three rays each launch a specific
+    /// capture mode (Document / Business Card / Photo); see
+    /// [SundialCaptureMenu]. Replaces the prior tap-for-last-mode
+    /// + long-press-for-photo idiom with one explicit choice.
+    public let onToggleCaptureMenu: () -> Void
     public let onStories: () -> Void
     public let onSettings: () -> Void
-    /// Discoverability hint above the ⚡ FAB — renders the
-    /// floating "Hold ⚡ for a quick photo" chip when `true`.
-    /// The caller (MainShell) reads this from `PhotoFabHint`'s
-    /// `@StateObject` (`!dismissed`): the chip shows on every
-    /// launch until the user long-presses the FAB once, after
-    /// which it stays dismissed permanently across launches.
-    /// Defaults to `false` so legacy hosts / previews opt in
-    /// explicitly. Spec §3.1 (the spec also gated this on
-    /// "after the user has scanned at least once"; we dropped
-    /// that gate so existing users upgrading into this build
-    /// see the chip immediately rather than after one more
-    /// scan — see `PhotoFabHint` docblock).
-    public let showPhotoHint: Bool
 
     public init(
         activeTab: NavTab,
         onHome: @escaping () -> Void,
         onWorkspace: @escaping () -> Void,
-        onScan: @escaping () -> Void,
-        onLongPressScan: @escaping () -> Void = {},
+        isCaptureMenuOpen: Bool = false,
+        onToggleCaptureMenu: @escaping () -> Void,
         onStories: @escaping () -> Void,
-        onSettings: @escaping () -> Void,
-        showPhotoHint: Bool = false
+        onSettings: @escaping () -> Void
     ) {
         self.activeTab = activeTab
         self.onHome = onHome
         self.onWorkspace = onWorkspace
-        self.onScan = onScan
-        self.onLongPressScan = onLongPressScan
+        self.isCaptureMenuOpen = isCaptureMenuOpen
+        self.onToggleCaptureMenu = onToggleCaptureMenu
         self.onStories = onStories
         self.onSettings = onSettings
-        self.showPhotoHint = showPhotoHint
     }
 
     public var body: some View {
@@ -160,51 +150,10 @@ public struct QuickInkBottomNavBar: View {
             )
             .shadow(color: QuickInkColors.ink.opacity(0.12), radius: 8, x: 0, y: 2)
 
-            // Photo-hint chip rendered as a peer of the FAB so
-            // it floats above the bar's top edge alongside the
-            // lifted ⚡ disc. `.allowsHitTesting(false)` so the
-            // chip never intercepts FAB taps even when overlap
-            // is close — discoverability shouldn't block the
-            // action it's pointing at.
-            if showPhotoHint {
-                photoHintChip
-                    // FAB visual top sits at y ≈ -16 from the
-                    // ZStack top edge (FAB is 64pt aligned to top,
-                    // then shifted `.offset(y: -16)`). Push the
-                    // chip a further ~52pt up so its bottom edge
-                    // clears the FAB with breathing room.
-                    .offset(y: -68)
-                    .allowsHitTesting(false)
-                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
-            }
-
             zapFab
         }
         .padding(.horizontal, QuickInkSpacing.s4)
         .padding(.bottom, QuickInkSpacing.s6)
-        .animation(.easeInOut(duration: 0.25), value: showPhotoHint)
-    }
-
-    /// Floating chip — "Hold ⚡ for a quick photo." Cream pill
-    /// with the same surface + hairline + shadow vocabulary the
-    /// bar itself uses, so it reads as part of the same surface
-    /// family rather than a foreign callout. No tail / caret in
-    /// v1 — the proximity to the FAB carries the affordance.
-    @ViewBuilder
-    private var photoHintChip: some View {
-        Text("Hold ⚡ for a quick photo")
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(QuickInkColors.ink)
-            .padding(.horizontal, QuickInkSpacing.s3)
-            .padding(.vertical, QuickInkSpacing.s2)
-            .background(
-                Capsule().fill(QuickInkColors.surface)
-            )
-            .overlay(
-                Capsule().strokeBorder(QuickInkColors.border, lineWidth: 1)
-            )
-            .shadow(color: QuickInkColors.ink.opacity(0.18), radius: 6, x: 0, y: 2)
-            .accessibilityLabel("Tip: hold the quick-capture button for a quick photo")
     }
 
     @ViewBuilder
@@ -316,56 +265,48 @@ public struct QuickInkBottomNavBar: View {
     }
 
     /// The signature ⚡ Zap FAB — coral disc with a top→bottom
-    /// gradient, lifted ~16pt above the card's top edge so it reads
-    /// as a hovering brand mark. Delegates to `onScan` on tap and
-    /// `onLongPressScan` on a 0.4s hold. Tap opens the user's last
-    /// pill-selected mode (Document or Business Card); long-press
-    /// jumps straight into the Photo surface — the canonical
-    /// "I just want a photo, fast" shortcut from the spec.
-    ///
-    /// Implementation note: the disc uses a single
-    /// `ExclusiveGesture(LongPress before Tap)` instead of
-    /// stacking `.onLongPressGesture` + `.onTapGesture`. SwiftUI
-    /// evaluates the OUTERMOST modifier first, which means a
-    /// chained `.onLongPressGesture(...).onTapGesture(...)` puts
-    /// tap on top and the tap recognizer consumes the touch
-    /// sequence before long-press ever gets a chance to fire on a
-    /// 0.4s hold. `ExclusiveGesture` is the documented combinator
-    /// for "long-press wins, tap is the fallback for quick
-    /// releases" and avoids the shadowing problem.
+    /// gradient, lifted ~16pt above the card's top edge so it
+    /// reads as a hovering brand mark. Tap toggles the
+    /// [SundialCaptureMenu] open / closed. When the menu is open
+    /// the bolt rotates 135° so it visually morphs into a close
+    /// (×) glyph and the disc deepens to `accentDeep`, mirroring
+    /// the design handoff's open-state spec.
     @ViewBuilder
     private var zapFab: some View {
         let gradient = LinearGradient(
-            colors: [QuickInkColors.accent, QuickInkColors.accentDeep],
+            colors: isCaptureMenuOpen
+                ? [QuickInkColors.accentDeep, QuickInkColors.accentDeep]
+                : [QuickInkColors.accent, QuickInkColors.accentDeep],
             startPoint: .top,
             endPoint: .bottom
         )
-        let longPress = LongPressGesture(minimumDuration: 0.4)
-            .onEnded { _ in
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                onLongPressScan()
+        Button(action: {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            onToggleCaptureMenu()
+        }) {
+            ZStack {
+                Circle()
+                    .fill(QuickInkColors.bg)
+                    .frame(width: 64, height: 64)
+                    .shadow(color: QuickInkColors.ink.opacity(0.22), radius: 10, x: 0, y: 5)
+                Circle()
+                    .fill(gradient)
+                    .frame(width: 56, height: 56)
+                    .shadow(color: QuickInkColors.accent.opacity(0.38), radius: 16, x: 0, y: 8)
+                Image(systemName: "bolt")
+                    .font(.system(size: 32, weight: .semibold))
+                    .foregroundStyle(QuickInkColors.textOnAccent)
+                    .rotationEffect(.degrees(isCaptureMenuOpen ? 135 : 0))
             }
-        let tap = TapGesture()
-            .onEnded {
-                onScan()
-            }
-        ZStack {
-            Circle()
-                .fill(QuickInkColors.bg)
-                .frame(width: 64, height: 64)
-                .shadow(color: QuickInkColors.ink.opacity(0.22), radius: 10, x: 0, y: 5)
-            Circle()
-                .fill(gradient)
-                .frame(width: 56, height: 56)
-                .shadow(color: QuickInkColors.accent.opacity(0.38), radius: 16, x: 0, y: 8)
-            Image(systemName: "bolt")
-                .font(.system(size: 32, weight: .semibold))
-                .foregroundStyle(QuickInkColors.textOnAccent)
         }
+        .buttonStyle(.plain)
         .offset(y: -16)
         .contentShape(Circle())
-        .gesture(longPress.exclusively(before: tap))
-        .accessibilityLabel("Quick capture")
-        .accessibilityHint("Double tap to scan, long press for photo")
+        .animation(
+            .interpolatingSpring(stiffness: 220, damping: 18),
+            value: isCaptureMenuOpen
+        )
+        .accessibilityLabel(isCaptureMenuOpen ? "Close capture menu" : "Open capture menu")
+        .accessibilityAddTraits(.isButton)
     }
 }
