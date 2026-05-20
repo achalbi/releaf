@@ -4,9 +4,8 @@
  * Radial capture menu that fans three action buttons out in a 180°
  * arc above the centred ⚡ FAB on the bottom-nav. Tapping the FAB
  * opens the menu; each ray launches a specific capture mode
- * (Document / Business Card / Photo). Replaces the prior
- * tap-for-last-mode + long-press-for-photo idiom with a single
- * explicit choice surface.
+ * (Scan / Video / Photo). Replaces the prior tap-for-last-mode +
+ * long-press-for-photo idiom with a single explicit choice surface.
  *
  *        Video
  *      ╱
@@ -18,12 +17,14 @@
  *   - Video →  90° (top, primary)
  *   - Photo →  30° (top-right)
  *
- * Video and Photo both open the [PhotoCaptureSurface], which
- * supports both still capture (tap shutter) and hold-to-record
- * video on the same camera session. The two rays exist so users
- * who think "I want a video" don't have to know that internally
- * we share a surface — they pick the verb that matches their
- * intent and the surface adapts.
+ * Each ray opens its own dedicated surface — Scan launches the
+ * VisionKit document scanner, Video opens [VideoCaptureSurface]
+ * (tap-to-start / tap-to-stop recording with voice-note
+ * extraction), and Photo opens [PhotoCaptureSurface] (single-
+ * tap still capture). Earlier revisions routed Video to a
+ * shared photo+video surface with a tap-vs-hold gesture; the
+ * dedicated surfaces replaced that once the radial menu made
+ * separate verbs cheap.
  *
  * Geometry mirrors the design handoff: 110pt radius from the FAB
  * centre, vertical-spring overshoot on open, staggered left → top
@@ -128,7 +129,7 @@ public struct SundialCaptureMenu: View {
                 ZStack {
                     ray(
                         label: "Scan",
-                        systemImage: "doc.text.viewfinder",
+                        assetName: "IconScan",
                         angleDeg: 150,
                         openDelay: 0,
                         accessibilityLabel: "Scan document",
@@ -136,7 +137,7 @@ public struct SundialCaptureMenu: View {
                     )
                     ray(
                         label: "Video",
-                        systemImage: "video",
+                        assetName: "IconVideo",
                         angleDeg: 90,
                         openDelay: 60,
                         accessibilityLabel: "Record video",
@@ -144,7 +145,7 @@ public struct SundialCaptureMenu: View {
                     )
                     ray(
                         label: "Photo",
-                        systemImage: "camera",
+                        assetName: "IconCamera",
                         angleDeg: 30,
                         openDelay: 120,
                         accessibilityLabel: "Take photo",
@@ -166,7 +167,7 @@ public struct SundialCaptureMenu: View {
     @ViewBuilder
     private func ray(
         label: String,
-        systemImage: String,
+        assetName: String,
         angleDeg: Double,
         openDelay: Double,
         accessibilityLabel: String,
@@ -193,8 +194,11 @@ public struct SundialCaptureMenu: View {
                             x: 0,
                             y: 5
                         )
-                    Image(systemName: systemImage)
-                        .font(.system(size: 24, weight: .medium))
+                    Image(assetName, bundle: .module)
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 26, height: 26)
                         .foregroundStyle(QuickInkColors.accent)
                 }
                 Text(label)

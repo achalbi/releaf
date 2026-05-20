@@ -4,9 +4,8 @@
  * Radial capture menu that fans three action buttons out in a 180°
  * arc above the centred ⚡ FAB on the bottom-nav. Tapping the FAB
  * opens the menu; each ray launches a specific capture mode
- * (Document / Business Card / Photo). Replaces the prior
- * tap-for-last-mode + long-press-for-photo idiom with a single
- * explicit choice surface.
+ * (Scan / Video / Photo). Replaces the prior tap-for-last-mode +
+ * long-press-for-photo idiom with a single explicit choice surface.
  *
  *        Video
  *      ╱
@@ -18,12 +17,14 @@
  *   - Video →  90° (top, primary)
  *   - Photo →  30° (top-right)
  *
- * Video and Photo both open the [PhotoCaptureSurface], which
- * supports both still capture (tap shutter) and hold-to-record
- * video on the same camera session. The two rays exist so users
- * who think "I want a video" don't have to know that internally
- * we share a surface — they pick the verb that matches their
- * intent and the surface adapts.
+ * Each ray opens its own dedicated surface — Scan launches the
+ * ML Kit system document scanner, Video opens
+ * [VideoCaptureSurface] (tap-to-start / tap-to-stop recording
+ * with voice-note extraction), and Photo opens
+ * [PhotoCaptureSurface] (single-tap still capture). Earlier
+ * revisions routed Video to a shared photo+video surface with a
+ * tap-vs-hold gesture; the dedicated surfaces replaced that
+ * once the radial menu made separate verbs cheap.
  *
  * Geometry mirrors the design handoff: 110dp radius from the FAB
  * centre, vertical-spring overshoot on open, staggered left → top
@@ -57,10 +58,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CameraAlt
-import androidx.compose.material.icons.outlined.DocumentScanner
-import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.ui.res.painterResource
+import app.quickink.mobile.R
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -74,7 +73,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -157,7 +155,7 @@ fun SundialCaptureMenu(
         ) {
             Ray(
                 label              = "Scan",
-                icon               = Icons.Outlined.DocumentScanner,
+                iconResId          = R.drawable.ic_scan,
                 angleDeg           = 150.0,
                 openDelayMs        = 0,
                 accessibilityLabel = "Scan document",
@@ -166,7 +164,7 @@ fun SundialCaptureMenu(
             )
             Ray(
                 label              = "Video",
-                icon               = Icons.Outlined.Videocam,
+                iconResId          = R.drawable.ic_video,
                 angleDeg           = 90.0,
                 openDelayMs        = 60,
                 accessibilityLabel = "Record video",
@@ -175,7 +173,7 @@ fun SundialCaptureMenu(
             )
             Ray(
                 label              = "Photo",
-                icon               = Icons.Outlined.CameraAlt,
+                iconResId          = R.drawable.ic_camera,
                 angleDeg           = 30.0,
                 openDelayMs        = 120,
                 accessibilityLabel = "Take photo",
@@ -196,7 +194,7 @@ private val RAY_RADIUS = 110.dp
 @Composable
 private fun Ray(
     label: String,
-    icon: ImageVector,
+    iconResId: Int,
     angleDeg: Double,
     openDelayMs: Int,
     accessibilityLabel: String,
@@ -266,7 +264,7 @@ private fun Ray(
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector        = icon,
+                painter            = painterResource(id = iconResId),
                 contentDescription = null,
                 tint               = colors.accent,
                 modifier           = Modifier.size(26.dp),
