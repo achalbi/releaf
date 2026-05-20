@@ -259,7 +259,14 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // Free-form TEXT, nullable, no index — read pattern is "load the
     // whole field for the detail screen" so a full-text index isn't
     // useful yet.
-    version       = 24,
+    // v25 — Workspace tab refresh (Phase 2 of
+    // `design/WORKSPACE_TAB_HANDOFF.md`). Adds `folders.type`,
+    // `folders.tier`, `folders.is_seeded` + relaxes the
+    // (user_id, name) UNIQUE on folders to include `is_seeded`,
+    // and adds `tags.bucket` + `tags.is_seeded`. The seeder in
+    // `WorkspaceTaxonomySeed` writes the 12 spec'd folders + 32
+    // spec'd tags on first launch after the bump.
+    version       = 25,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {

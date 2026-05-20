@@ -28,6 +28,15 @@ public struct TagEntity: Codable, FetchableRecord, PersistableRecord, Equatable,
     /// (e.g. "#E66943"). NULL → UI falls back to the accent
     /// tint. Added in v8_workspace.
     public var color: String?
+    /// Tag-bucket id (`status` / `people` / `orgplace` / `energy` /
+    /// `time` / `kind` / `source`). NULL on legacy user tags from
+    /// pre-refresh — UI treats those as bucketless and lets the
+    /// user assign one later. Added in v20_workspace_taxonomy.
+    public var bucket: String?
+    /// 1 for the 32 spec'd seeded tags (`active`, `todo`, `p/mom`,
+    /// `org/aws`, …), 0 for user-created tags. Added in
+    /// v20_workspace_taxonomy.
+    public var isSeeded: Bool
     public var driveFileId: String?
     public var createdAt: String
     public var updatedAt: String
@@ -40,6 +49,8 @@ public struct TagEntity: Codable, FetchableRecord, PersistableRecord, Equatable,
         name: String,
         position: Int,
         color: String? = nil,
+        bucket: String? = nil,
+        isSeeded: Bool = false,
         driveFileId: String? = nil,
         createdAt: String,
         updatedAt: String,
@@ -51,6 +62,8 @@ public struct TagEntity: Codable, FetchableRecord, PersistableRecord, Equatable,
         self.name = name
         self.position = position
         self.color = color
+        self.bucket = bucket
+        self.isSeeded = isSeeded
         self.driveFileId = driveFileId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -64,6 +77,8 @@ public struct TagEntity: Codable, FetchableRecord, PersistableRecord, Equatable,
         case name
         case position
         case color
+        case bucket
+        case isSeeded    = "is_seeded"
         case driveFileId = "drive_file_id"
         case createdAt   = "created_at"
         case updatedAt   = "updated_at"

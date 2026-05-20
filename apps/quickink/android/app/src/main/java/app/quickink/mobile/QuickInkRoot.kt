@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import app.quickink.mobile.data.voicenote.WhisperModelDownloadWorker
+import app.quickink.mobile.data.workspace.seedWorkspaceTaxonomyIfNeeded
 import app.quickink.mobile.features.nav.NavTab
 import app.quickink.mobile.features.nav.QuickInkBottomNavBar
 import app.quickink.mobile.features.nav.QuickInkTimeBar
@@ -454,6 +455,24 @@ private fun MainShell(
             PersonRepository(
                 personDao = app.database.personDao(),
             ).seedDefaultsIfEmpty(userId)
+
+            // Workspace tab refresh (Phase 2 of
+            // `design/WORKSPACE_TAB_HANDOFF.md`) — seed the 12
+            // spec'd folders (Inbox / Archive / Finance / … /
+            // Ideas) + the 32 spec'd tags across 7 buckets. Stable
+            // IDs + is_seeded distinguish these from any user-
+            // created folders / tags that happen to share a name;
+            // the (user_id, name, is_seeded) UNIQUE on folders and
+            // the existing (user_id, name) UNIQUE on tags keep
+            // this idempotent. Phase 3 wires the seeded folders
+            // into the Workspace tab as three tier blocks; Phase
+            // 4 wires the seeded tags into the new bucket
+            // vocabulary section.
+            seedWorkspaceTaxonomyIfNeeded(
+                userId    = userId,
+                folderDao = app.database.folderDao(),
+                tagDao    = app.database.tagDao(),
+            )
 
             // Stories Phase 1 — debug-only dev seeder so the Stories
             // tab has cards to render in QA builds. Idempotent: skips

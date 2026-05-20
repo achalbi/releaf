@@ -1,0 +1,143 @@
+{
+  "_meta": {
+    "owner": "QuickInk",
+    "spec": "apps/quickink/design/WORKSPACE_TAB_HANDOFF.md §4",
+    "consumed_by": "iOS QuickInkRoot.seedWorkspaceTaxonomyIfNeeded + Android WorkspaceTaxonomySeed",
+    "notes": [
+      "Canonical seed for the Workspace tab folders + tag vocabulary refresh.",
+      "Both platforms ship hard-coded mirrors of these values; this JSON is the source of truth they diff against during code review.",
+      "Stable IDs are intentional — they're the primary key the idempotent seeder uses to short-circuit on subsequent launches and to deduplicate across devices via sync."
+    ]
+  },
+
+  "folders": [
+    { "id": "inbox",     "name": "Inbox",     "tier": 1, "type": "Inbox",     "color": "#6366F1", "desc": "Capture zone — everything lands here first",   "is_system_managed": true },
+    { "id": "archive",   "name": "Archive",   "tier": 1, "type": "Archive",   "color": "#6366F1", "desc": "Completed or dormant, kept for reference",     "is_system_managed": false },
+
+    { "id": "finance",   "name": "Finance",   "tier": 2, "type": "Reference", "color": "#2C2826", "desc": "bills, taxes, subscriptions" },
+    { "id": "medical",   "name": "Medical",   "tier": 2, "type": "Reference", "color": "#2C2826", "desc": "appointments, scripts, results" },
+    { "id": "family",    "name": "Family",    "tier": 2, "type": "Reference", "color": "#2C2826", "desc": "people, relationships, home" },
+    { "id": "travel",    "name": "Travel",    "tier": 2, "type": "Project",   "color": "#2C2826", "desc": "trips, bookings, places" },
+    { "id": "events",    "name": "Events",    "tier": 2, "type": "Project",   "color": "#2C2826", "desc": "weddings, parties, conferences" },
+    { "id": "legal",     "name": "Legal",     "tier": 2, "type": "Reference", "color": "#2C2826", "desc": "contracts, IDs, records" },
+    { "id": "lifestyle", "name": "Lifestyle", "tier": 2, "type": "Reference", "color": "#2C2826", "desc": "fitness, food, hobbies, style" },
+
+    { "id": "learning",  "name": "Learning",  "tier": 3, "type": "Reference", "color": "#10B981", "desc": "notes from books, podcasts" },
+    { "id": "projects",  "name": "Projects",  "tier": 3, "type": "Project",   "color": "#10B981", "desc": "committed efforts w/ an end" },
+    { "id": "ideas",     "name": "Ideas",     "tier": 3, "type": "Reference", "color": "#10B981", "desc": "sparks, someday/maybe" }
+  ],
+
+  "buckets": [
+    {
+      "id": "status",
+      "name": "Status",
+      "question": "what state is it in?",
+      "controlled": true,
+      "exclusive": false,
+      "auto_applied": false,
+      "hue": "#4F46E5",
+      "tags": [
+        { "id": "tag-status-active", "name": "active" },
+        { "id": "tag-status-todo",   "name": "todo"   },
+        { "id": "tag-status-later",  "name": "later"  },
+        { "id": "tag-status-done",   "name": "done"   }
+      ]
+    },
+    {
+      "id": "people",
+      "name": "People",
+      "question": "who is this about?",
+      "controlled": false,
+      "exclusive": false,
+      "auto_applied": false,
+      "prefixes": ["p/"],
+      "hue": "#0F9F6E",
+      "tags": [
+        { "id": "tag-people-mom",     "name": "p/mom"     },
+        { "id": "tag-people-manager", "name": "p/manager" },
+        { "id": "tag-people-sarah",   "name": "p/sarah"   }
+      ]
+    },
+    {
+      "id": "orgplace",
+      "name": "Org & Place",
+      "question": "what organization or location?",
+      "controlled": false,
+      "exclusive": false,
+      "auto_applied": false,
+      "prefixes": ["org/", "place/"],
+      "hue": "#0891B2",
+      "tags": [
+        { "id": "tag-orgplace-aws",         "name": "org/aws"     },
+        { "id": "tag-orgplace-clinic",      "name": "org/clinic"  },
+        { "id": "tag-orgplace-lisbon",      "name": "place/lisbon" },
+        { "id": "tag-orgplace-home",        "name": "place/home"   }
+      ]
+    },
+    {
+      "id": "energy",
+      "name": "Energy",
+      "question": "what state of mind does it need?",
+      "controlled": true,
+      "exclusive": false,
+      "auto_applied": false,
+      "hue": "#C2570A",
+      "tags": [
+        { "id": "tag-energy-focus",   "name": "focus"   },
+        { "id": "tag-energy-shallow", "name": "shallow" },
+        { "id": "tag-energy-errand",  "name": "errand"  },
+        { "id": "tag-energy-call",    "name": "call"    }
+      ]
+    },
+    {
+      "id": "time",
+      "name": "Time-sensitivity",
+      "question": "which horizon?",
+      "controlled": true,
+      "exclusive": true,
+      "auto_applied": false,
+      "hue": "#D33B4D",
+      "tags": [
+        { "id": "tag-time-today",     "name": "today"     },
+        { "id": "tag-time-thisweek",  "name": "thisweek"  },
+        { "id": "tag-time-thismonth", "name": "thismonth" }
+      ]
+    },
+    {
+      "id": "kind",
+      "name": "Kind",
+      "question": "what kind of content?",
+      "controlled": false,
+      "exclusive": false,
+      "auto_applied": false,
+      "hue": "#7C3AED",
+      "tags": [
+        { "id": "tag-kind-idea",      "name": "idea"      },
+        { "id": "tag-kind-quote",     "name": "quote"     },
+        { "id": "tag-kind-recipe",    "name": "recipe"    },
+        { "id": "tag-kind-checklist", "name": "checklist" },
+        { "id": "tag-kind-template",  "name": "template"  }
+      ]
+    },
+    {
+      "id": "source",
+      "name": "Source",
+      "question": "where did it come from?",
+      "controlled": true,
+      "exclusive": false,
+      "auto_applied": true,
+      "hue": "#0E7FB8",
+      "tags": [
+        { "id": "tag-source-scan",         "name": "scan"         },
+        { "id": "tag-source-voice",        "name": "voice"        },
+        { "id": "tag-source-handwritten",  "name": "handwritten"  },
+        { "id": "tag-source-web",          "name": "web"          },
+        { "id": "tag-source-email",        "name": "email"        },
+        { "id": "tag-source-book",         "name": "book"         },
+        { "id": "tag-source-podcast",      "name": "podcast"      },
+        { "id": "tag-source-article",      "name": "article"      },
+        { "id": "tag-source-conversation", "name": "conversation" }
+      ]
+    }
+  ]
+}

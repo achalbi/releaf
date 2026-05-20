@@ -58,6 +58,23 @@ data class TagEntity(
     @ColumnInfo(name = "color")
     val color: String? = null,
 
+    /**
+     * Tag-bucket id (`status` / `people` / `orgplace` / `energy` /
+     * `time` / `kind` / `source`). NULL on legacy user tags from
+     * pre-refresh — UI treats those as bucketless and lets the user
+     * assign one later. Added in v25 (Workspace tab refresh).
+     */
+    @ColumnInfo(name = "bucket")
+    val bucket: String? = null,
+
+    /**
+     * `true` for the 32 spec'd seeded tags (`active`, `todo`,
+     * `p/mom`, `org/aws`, …), `false` for user-created tags.
+     * Added in v25.
+     */
+    @ColumnInfo(name = "is_seeded", defaultValue = "0")
+    val isSeeded: Boolean = false,
+
     @ColumnInfo(name = "drive_file_id")
     val driveFileId: String?,
 

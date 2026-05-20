@@ -24,12 +24,16 @@ import androidx.room.PrimaryKey
 @Entity(
     tableName = "folders",
     indices = [
-        // One folder name per user, excluding tombstones — same
-        // pattern as `tags` (formerly `categories`). The partial
-        // UNIQUE lives below as a SQL index; Room can't express
-        // partial uniqueness via @Index, so the @Index here just
-        // mirrors the regular indexes for query-plan parity.
-        Index(value = ["user_id", "name"], unique = true),
+        // One folder name per user, per is_seeded value, excluding
+        // tombstones. v25 relaxed this from (user_id, name) so
+        // seeded + user folders can share names — the Workspace tab
+        // refresh ships 12 spec'd folders (Inbox, Archive, Finance,
+        // …) alongside any pre-existing user folders that happen
+        // to use the same name. The partial UNIQUE lives below as
+        // a SQL index; Room can't express partial uniqueness via
+        // @Index, so the @Index here just mirrors the regular
+        // indexes for query-plan parity.
+        Index(value = ["user_id", "name", "is_seeded"], unique = true),
         Index(value = ["user_id", "position"], name = "idx_folders_user_position"),
         Index(value = ["dirty"], name = "idx_folders_dirty"),
         Index(value = ["deleted_at"], name = "idx_folders_tombstone"),
@@ -89,6 +93,33 @@ data class FolderEntity(
      */
     @ColumnInfo(name = "is_shared", defaultValue = "0")
     val isShared: Boolean = false,
+
+    /**
+     * Behavioral type — "Inbox" / "Archive" / "Project" /
+     * "Reference" (`WORKSPACE_SPEC.md` §6). Seeded folders carry
+     * the spec'd value; user-created folders are NULL until they
+     * pick a type. Added in v25 (Workspace tab refresh).
+     */
+    @ColumnInfo(name = "type")
+    val type: String? = null,
+
+    /**
+     * Presentation tier — 1 (Workflow), 2 (Life domains), 3
+     * (Creative & output); 0 (= Custom) is the visual bucket for
+     * user-created folders that coexist with the 12 seeded ones.
+     * Added in v25.
+     */
+    @ColumnInfo(name = "tier", defaultValue = "0")
+    val tier: Int = 0,
+
+    /**
+     * `true` for the 12 spec'd seeded folders (Inbox, Archive,
+     * Finance, …), `false` for user-created folders. Distinguishes
+     * the two without relying on the stable seed IDs at every read
+     * site. Added in v25.
+     */
+    @ColumnInfo(name = "is_seeded", defaultValue = "0")
+    val isSeeded: Boolean = false,
 
     @ColumnInfo(name = "drive_file_id")
     val driveFileId: String? = null,

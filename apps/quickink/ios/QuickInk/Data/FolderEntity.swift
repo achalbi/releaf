@@ -44,6 +44,22 @@ public struct FolderEntity: Codable, FetchableRecord, PersistableRecord, Equatab
     /// false. Costs nothing to add now; saves a migration when
     /// sharing ships.
     public var isShared: Bool
+    /// Behavioral type — "Inbox" / "Archive" / "Project" /
+    /// "Reference" (`WORKSPACE_SPEC.md` §6). Seeded folders carry
+    /// the spec'd value; user-created folders are NULL until they
+    /// pick a type, at which point Phase B.1 lets them assign one.
+    /// Added in v20_workspace_taxonomy.
+    public var type: String?
+    /// Presentation tier — 1 (Workflow), 2 (Life domains), 3
+    /// (Creative & output); 0 (= Custom) is the visual bucket for
+    /// user-created folders that coexist with the 12 seeded ones.
+    /// Added in v20_workspace_taxonomy.
+    public var tier: Int
+    /// 1 for the 12 spec'd seeded folders (Inbox, Archive, Finance,
+    /// …), 0 for user-created folders. Distinguishes the two without
+    /// relying on the stable seed IDs at every read site. Added in
+    /// v20_workspace_taxonomy.
+    public var isSeeded: Bool
     public var driveFileId: String?
     public var createdAt: String
     public var updatedAt: String
@@ -59,6 +75,9 @@ public struct FolderEntity: Codable, FetchableRecord, PersistableRecord, Equatab
         coverUri: String? = nil,
         isDefault: Bool = false,
         isShared: Bool = false,
+        type: String? = nil,
+        tier: Int = 0,
+        isSeeded: Bool = false,
         driveFileId: String? = nil,
         createdAt: String,
         updatedAt: String,
@@ -73,6 +92,9 @@ public struct FolderEntity: Codable, FetchableRecord, PersistableRecord, Equatab
         self.coverUri    = coverUri
         self.isDefault   = isDefault
         self.isShared    = isShared
+        self.type        = type
+        self.tier        = tier
+        self.isSeeded    = isSeeded
         self.driveFileId = driveFileId
         self.createdAt   = createdAt
         self.updatedAt   = updatedAt
@@ -89,6 +111,9 @@ public struct FolderEntity: Codable, FetchableRecord, PersistableRecord, Equatab
         case coverUri    = "cover_uri"
         case isDefault   = "is_default"
         case isShared    = "is_shared"
+        case type
+        case tier
+        case isSeeded    = "is_seeded"
         case driveFileId = "drive_file_id"
         case createdAt   = "created_at"
         case updatedAt   = "updated_at"

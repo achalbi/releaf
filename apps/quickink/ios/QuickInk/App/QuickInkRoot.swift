@@ -600,6 +600,20 @@ private struct MainShell: View {
             try? await LocationRepository().seedDefaultsIfEmpty(userId: userId)
             try? await PersonRepository().seedDefaultsIfEmpty(userId: userId)
 
+            // Workspace tab refresh (Phase 2 of
+            // `design/WORKSPACE_TAB_HANDOFF.md`) — seed the 12 spec'd
+            // folders (Inbox / Archive / Finance / … / Ideas) + the
+            // 32 spec'd tags across 7 buckets. Stable IDs +
+            // is_seeded distinguish these from any user-created
+            // folders / tags that happen to share a name; the
+            // (user_id, name, is_seeded) partial UNIQUE on folders
+            // and the existing (user_id, name) partial UNIQUE on
+            // tags keep this idempotent. Phase 3 wires the seeded
+            // folders into the Workspace tab as three tier blocks;
+            // Phase 4 wires the seeded tags into the new bucket
+            // vocabulary section.
+            try? await seedWorkspaceTaxonomyIfNeeded(userId: userId)
+
             // Stories Phase 1 — debug-only dev seeder so the Stories
             // tab has cards to render in QA builds. Idempotent: skips
             // when the user already has any active stories. Stripped

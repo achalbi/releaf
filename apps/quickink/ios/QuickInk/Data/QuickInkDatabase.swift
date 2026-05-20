@@ -1046,6 +1046,63 @@ public final class QuickInkDatabase: @unchecked Sendable {
             try db.execute(sql: "CREATE INDEX idx_capture_people_pair      ON capture_people (capture_id, person_id)")
         }
 
+        // ─── v20_workspace_taxonomy ────────────────────────────
+        //
+        // Workspace tab refresh — folders + tag vocabulary
+        // (`design/WORKSPACE_TAB_HANDOFF.md` Phase 2). Adds:
+        //
+        //   • folders.type       (Inbox / Archive / Project / Reference)
+        //   • folders.tier       (1 Workflow / 2 Life Domains /
+        //                         3 Creative & Output; 0 = Custom,
+        //                         the visual bucket for user-created
+        //                         folders that coexist with the 12
+        //                         seeded ones)
+        //   • folders.is_seeded  (1 for the 12 spec'd folders; 0 for
+        //                         user-created folders)
+        //   • tags.bucket        (status / people / orgplace / energy
+        //                         / time / kind / source; NULL on
+        //                         legacy user tags from pre-refresh)
+        //   • tags.is_seeded     (1 for the 32 spec'd tags)
+        //
+        // The folders UNIQUE-name index is dropped and recreated to
+        // include `is_seeded`, so a user's pre-existing "Finance"
+        // folder can coexist with the seeded "Finance" without a
+        // UNIQUE collision. The seeder (FolderRepository
+        // .seedTaxonomyIfNeeded) writes the 12 rows with stable IDs
+        // (`inbox`, `archive`, `finance`, …) on first launch after
+        // upgrade.
+        //
+        // Mirror of Android's Room v25 destructive rebuild — Android
+        // wipes-and-recreates with the new columns in the entity,
+        // iOS lands a real ALTER TABLE so users keep their data.
+        migrator.registerMigration("v20_workspace_taxonomy") { db in
+            // ─── folders additions ───────────────────────────
+            try db.execute(sql: "ALTER TABLE folders ADD COLUMN type TEXT")
+            try db.execute(sql: "ALTER TABLE folders ADD COLUMN tier INTEGER NOT NULL DEFAULT 0")
+            try db.execute(sql: """
+                ALTER TABLE folders ADD COLUMN is_seeded INTEGER NOT NULL DEFAULT 0
+                """)
+
+            // Recreate the partial UNIQUE on folder names to include
+            // is_seeded so seeded + user-created folders can share a
+            // name (the user picked "Keep both" in the Phase 2 scope
+            // decision — see handoff §5 row 2).
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_folders_user_name_active")
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX idx_folders_user_name_seeded_active
+                    ON folders (user_id, name, is_seeded)
+                    WHERE deleted_at IS NULL
+                """)
+
+            // ─── tags additions ──────────────────────────────
+            try db.execute(sql: "ALTER TABLE tags ADD COLUMN bucket TEXT")
+            try db.execute(sql: """
+                ALTER TABLE tags ADD COLUMN is_seeded INTEGER NOT NULL DEFAULT 0
+                """)
+
+            try db.execute(sql: "CREATE INDEX idx_tags_bucket ON tags (bucket) WHERE bucket IS NOT NULL")
+        }
+
         return migrator
     }
 }
