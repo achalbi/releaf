@@ -632,77 +632,138 @@ public struct WorkspaceHomeScreen: View {
 
     // MARK: - Folders
 
+    /// Folders section — three tier blocks (Workflow / Life domains
+    /// / Creative & output) for the 12 seeded folders, plus a
+    /// `Custom` tier block for any user-created folders that
+    /// coexist with the seed (per the Phase 2 scope call). Phase 3
+    /// of `design/WORKSPACE_TAB_HANDOFF.md`. The "NEW FOLDER"
+    /// affordance moved into the Custom tier header — fresh
+    /// installs see the seeded folders first; folder CRUD lives
+    /// inside the user-owned region.
     private var foldersSection: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.s2) {
-            HStack {
-                Text("Folders")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(QuickInkColors.ink)
-                Spacer()
-                Button(action: { folderEditorMode = .create }) {
-                    Text("NEW FOLDER")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .tracking(1.2)
-                        .foregroundColor(QuickInkColors.accent)
-                }
-                .buttonStyle(.plain)
-            }
+        let grouped = groupedFolders
+        return VStack(alignment: .leading, spacing: 0) {
+            tierBlock(.workflow, folders: grouped.workflow)
+            tierBlock(.life,     folders: grouped.life)
+            tierBlock(.creative, folders: grouped.creative)
+            tierBlock(
+                .custom,
+                folders:      grouped.custom,
+                allowCreate:  true,
+                emptyState:   "No custom folders yet — tap NEW FOLDER to add one."
+            )
+        }
+    }
 
-            if viewModel.folders.isEmpty {
-                Text("No folders yet.")
-                    .font(.system(size: 12.5))
-                    .foregroundColor(QuickInkColors.muted)
-                    .padding(.vertical, AppSpacing.s3)
-            } else {
-                ForEach(viewModel.folders) { folder in
-                    folderRow(folder)
+    /// Render a single tier block — header + folder rows. When the
+    /// tier has no rows and is the Custom tier, the empty state
+    /// + "NEW FOLDER" button still render so first-time users have
+    /// an obvious affordance. Seeded tiers with zero rows shouldn't
+    /// happen post-Phase 2 seeder, but the guard keeps the UI
+    /// resilient during the rolling migration window.
+    @ViewBuilder
+    private func tierBlock(
+        _ tier: FolderTier,
+        folders: [FolderEntity],
+        allowCreate: Bool = false,
+        emptyState: String? = nil
+    ) -> some View {
+        if folders.isEmpty && !allowCreate { EmptyView() }
+        else {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline) {
+                    TierHeader(tier: tier)
+                    if allowCreate {
+                        Spacer(minLength: 8)
+                        Button(action: { folderEditorMode = .create }) {
+                            Text("NEW FOLDER")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .tracking(1.2)
+                                .foregroundColor(QuickInkColors.accent)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, tier == .workflow ? 0 : 18)
+
+                if folders.isEmpty, let emptyState {
+                    Text(emptyState)
+                        .font(.system(size: 12.5))
+                        .italic()
+                        .foregroundColor(QuickInkColors.muted)
+                        .padding(.vertical, 12)
+                } else {
+                    ForEach(Array(folders.enumerated()), id: \.element.id) { idx, folder in
+                        folderRow(
+                            folder,
+                            tier:             tier,
+                            isLastInTier:     idx == folders.count - 1
+                        )
+                    }
                 }
             }
         }
     }
 
-    private func folderRow(_ folder: FolderEntity) -> some View {
+    /// Folder-list rows. Wraps the shared `FolderRow` primitive +
+    /// the long-press action sheet that the screen owns. The
+    /// `isLastInTier` flag drops the bottom border on the final
+    /// row so the divider doesn't double up with the next tier
+    /// header's divider.
+    @ViewBuilder
+    private func folderRow(_ folder: FolderEntity, tier: FolderTier, isLastInTier: Bool) -> some View {
         let count = viewModel.folderCaptureCounts[folder.id] ?? 0
-        let newCount = viewModel.folderNewCounts[folder.id] ?? 0
-        return Button(action: { onOpenFolder(folder) }) {
-            HStack(spacing: AppSpacing.s3) {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(colorFromHex(folder.color) ?? QuickInkColors.accent)
-                    .frame(width: 24, height: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(folder.name)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(QuickInkColors.ink)
-                    HStack(spacing: 6) {
-                        Text("\(count) \(count == 1 ? "item" : "items")")
-                            .font(.system(size: 11.5))
-                            .foregroundColor(QuickInkColors.muted)
-                        if newCount > 0 {
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(QuickInkColors.accent)
-                                    .frame(width: 5, height: 5)
-                                Text("\(newCount) new")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundColor(QuickInkColors.accentDeep)
-                            }
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(QuickInkColors.accentSoft,
-                                        in: RoundedRectangle(cornerRadius: 4))
-                        }
-                    }
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12))
-                    .foregroundColor(QuickInkColors.muted)
-            }
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        FolderRow(
+            name:             folder.name,
+            description:      descriptionFor(folder),
+            count:            count,
+            tier:             tier,
+            isSystemManaged:  isInboxFolder(folder),
+            showBottomBorder: !isLastInTier,
+            action:           { onOpenFolder(folder) }
+        )
+        .contentShape(Rectangle())
         .onLongPressGesture { folderActionsTarget = folder }
+    }
+
+    /// Inbox row carries the lock glyph; everything else doesn't.
+    /// Inbox is identified by the seeded stable ID — works even if
+    /// the user accidentally creates their own folder named "Inbox"
+    /// in the Custom tier (which the (user_id, name, is_seeded)
+    /// UNIQUE allows).
+    private func isInboxFolder(_ folder: FolderEntity) -> Bool {
+        folder.isSeeded && folder.id == "inbox"
+    }
+
+    /// Description for the row — uses the spec'd one-liner for
+    /// seeded folders, drops to nil for user folders. Custom
+    /// folders read as `name → count` since user-typed names
+    /// already telegraph intent.
+    private func descriptionFor(_ folder: FolderEntity) -> String? {
+        guard folder.isSeeded else { return nil }
+        return workspaceFolderSeeds.first(where: { $0.id == folder.id })?.desc
+    }
+
+    /// Group the live folder list by tier. Inside each tier, rows
+    /// follow their seeded `position` (which the seeder set to the
+    /// spec's listing order). User folders go into `.custom`
+    /// regardless of any stale `tier` value the column might
+    /// carry.
+    private var groupedFolders: (workflow: [FolderEntity], life: [FolderEntity], creative: [FolderEntity], custom: [FolderEntity]) {
+        var workflow: [FolderEntity] = []
+        var life:     [FolderEntity] = []
+        var creative: [FolderEntity] = []
+        var custom:   [FolderEntity] = []
+        for folder in viewModel.folders {
+            guard folder.isSeeded else { custom.append(folder); continue }
+            switch folder.tier {
+            case 1: workflow.append(folder)
+            case 2: life.append(folder)
+            case 3: creative.append(folder)
+            default: custom.append(folder)
+            }
+        }
+        return (workflow, life, creative, custom)
     }
 
     // MARK: - Tags

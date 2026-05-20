@@ -105,6 +105,7 @@ import app.quickink.mobile.data.smartcollection.RuleClause
 import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
 import app.quickink.mobile.data.smartcollection.SmartCollectionRule
 import app.quickink.mobile.data.smartcollection.SmartCollectionRuleInput
+import app.quickink.mobile.data.workspace.workspaceFolderSeeds
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import app.quickink.mobile.data.tag.TagEntity
@@ -268,21 +269,12 @@ fun WorkspaceHomeScreen(
     // "N new" badge — captures created in the last 7 days. ISO
     // string compare on `created_at` is chronologically correct
     // because the timestamp is always stored in the same format.
-    val newSinceIso = remember(userId) {
-        val instant = java.time.Instant.now().minus(7, java.time.temporal.ChronoUnit.DAYS)
-        instant.toString()
-    }
-    val folderNewCounts by produceState(
-        initialValue = emptyMap<String, Int>(),
-        key1         = userId,
-        key2         = newSinceIso,
-    ) {
-        app.database.captureDao()
-            .observeNewCountByFolder(userId, newSinceIso)
-            .collect { rows ->
-                value = rows.associate { it.folderId to it.count }
-            }
-    }
+    //
+    // Phase 3 of the Workspace tab refresh dropped the "N new"
+    // badge from FolderRow per the spec's row layout. The
+    // `observeNewCountByFolder` query stays in `CaptureDao` so a
+    // future polish pass can re-attach the indicator without
+    // touching the data layer.
 
     Box(
         modifier = modifier
@@ -334,7 +326,6 @@ fun WorkspaceHomeScreen(
             FoldersSection(
                 folders             = folders,
                 folderCaptureCounts = folderCaptureCounts,
-                folderNewCounts     = folderNewCounts,
                 onOpenFolder        = onOpenFolder,
                 onLongPressFolder   = { folder -> actionsForFolder = folder },
                 onNewFolder         = { editorTarget = FolderEditorTarget.Create },
@@ -1142,147 +1133,177 @@ private fun SmartCollectionCard(
 
 // ─── Folders ─────────────────────────────────────────────────────
 
+/**
+ * Folders section — three tier blocks (Workflow / Life domains /
+ * Creative & output) for the 12 seeded folders, plus a `Custom`
+ * tier block for any user-created folders that coexist with the
+ * seed (Phase 2 scope call: "Keep both"). Phase 3 of
+ * `design/WORKSPACE_TAB_HANDOFF.md`. The NEW FOLDER affordance
+ * moved into the Custom tier header so the user-owned region owns
+ * the CRUD entry point.
+ */
 @Composable
 private fun FoldersSection(
     folders: List<FolderEntity>,
     folderCaptureCounts: Map<String, Int>,
-    folderNewCounts: Map<String, Int>,
     onOpenFolder: (FolderEntity) -> Unit,
     onLongPressFolder: (FolderEntity) -> Unit,
     onNewFolder: () -> Unit,
 ) {
-    val colors = LocalQuickInkColors.current
-    val type   = LocalQuickInkTypography.current
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = QuickInkSpacing.s4),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            text  = "Folders",
-            style = type.label.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
-            color = colors.ink,
-        )
-        Text(
-            text     = "NEW FOLDER",
-            style    = type.label.copy(letterSpacing = 1.2.sp, fontSize = 10.5.sp,
-                                       fontWeight = FontWeight.SemiBold),
-            color    = colors.accent,
-            modifier = Modifier.clickable(onClick = onNewFolder),
-        )
-    }
-
-    Spacer(Modifier.height(QuickInkSpacing.s2))
+    val grouped = remember(folders) { groupFoldersByTier(folders) }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = QuickInkSpacing.s4),
     ) {
-        folders.forEach { folder ->
-            FolderRow(
-                folder       = folder,
-                captureCount = folderCaptureCounts[folder.id] ?: 0,
-                newCount     = folderNewCounts[folder.id] ?: 0,
-                onClick      = { onOpenFolder(folder) },
-                onLongPress  = { onLongPressFolder(folder) },
+        TierBlock(
+            tier              = FolderTier.Workflow,
+            folders           = grouped.workflow,
+            captureCounts     = folderCaptureCounts,
+            onOpenFolder      = onOpenFolder,
+            onLongPressFolder = onLongPressFolder,
+            topSpacing        = 0.dp,
+        )
+        TierBlock(
+            tier              = FolderTier.Life,
+            folders           = grouped.life,
+            captureCounts     = folderCaptureCounts,
+            onOpenFolder      = onOpenFolder,
+            onLongPressFolder = onLongPressFolder,
+        )
+        TierBlock(
+            tier              = FolderTier.Creative,
+            folders           = grouped.creative,
+            captureCounts     = folderCaptureCounts,
+            onOpenFolder      = onOpenFolder,
+            onLongPressFolder = onLongPressFolder,
+        )
+        TierBlock(
+            tier              = FolderTier.Custom,
+            folders           = grouped.custom,
+            captureCounts     = folderCaptureCounts,
+            onOpenFolder      = onOpenFolder,
+            onLongPressFolder = onLongPressFolder,
+            onNewFolder       = onNewFolder,
+            emptyState        = "No custom folders yet — tap NEW FOLDER to add one.",
+        )
+    }
+}
+
+/**
+ * One tier of the folders section — header + (optional) NEW FOLDER
+ * pill + folder rows. Seeded tiers without rows hide entirely.
+ * The Custom tier always renders (it owns the create affordance
+ * and shows its empty-state copy when the user has none).
+ */
+@Composable
+private fun TierBlock(
+    tier: FolderTier,
+    folders: List<FolderEntity>,
+    captureCounts: Map<String, Int>,
+    onOpenFolder: (FolderEntity) -> Unit,
+    onLongPressFolder: (FolderEntity) -> Unit,
+    onNewFolder: (() -> Unit)? = null,
+    emptyState: String? = null,
+    topSpacing: androidx.compose.ui.unit.Dp = 18.dp,
+) {
+    if (folders.isEmpty() && onNewFolder == null) return
+
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+
+    Spacer(Modifier.height(topSpacing))
+    Row(
+        modifier              = Modifier.fillMaxWidth(),
+        verticalAlignment     = Alignment.Bottom,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        TierHeader(tier = tier, modifier = Modifier.weight(1f))
+        if (onNewFolder != null) {
+            Text(
+                text     = "NEW FOLDER",
+                style    = type.label.copy(
+                    letterSpacing = 1.2.sp,
+                    fontSize      = 10.5.sp,
+                    fontWeight    = FontWeight.SemiBold,
+                ),
+                color    = colors.accent,
+                modifier = Modifier
+                    .clickable(onClick = onNewFolder)
+                    .padding(bottom = 6.dp, start = 8.dp),
             )
         }
-        if (folders.isEmpty()) {
-            Text(
-                text  = "No folders yet.",
-                style = type.meta,
-                color = colors.muted,
-                modifier = Modifier.padding(vertical = QuickInkSpacing.s3),
+    }
+
+    if (folders.isEmpty() && emptyState != null) {
+        Text(
+            text     = emptyState,
+            style    = type.meta.copy(fontStyle = FontStyle.Italic),
+            color    = colors.muted,
+            modifier = Modifier.padding(vertical = 12.dp),
+        )
+    } else {
+        folders.forEachIndexed { index, folder ->
+            val isLast = index == folders.lastIndex
+            FolderRow(
+                name             = folder.name,
+                count            = captureCounts[folder.id] ?: 0,
+                tier             = tier,
+                onClick          = { onOpenFolder(folder) },
+                modifier         = Modifier.combinedClickable(
+                    onClick     = { onOpenFolder(folder) },
+                    onLongClick = { onLongPressFolder(folder) },
+                ),
+                description      = descriptionForSeededFolder(folder),
+                isSystemManaged  = isInboxFolder(folder),
+                showBottomBorder = !isLast,
             )
         }
     }
 }
 
-@Composable
-private fun FolderRow(
-    folder: FolderEntity,
-    captureCount: Int,
-    newCount: Int,
-    onClick: () -> Unit,
-    onLongPress: () -> Unit,
-) {
-    val colors = LocalQuickInkColors.current
-    val type   = LocalQuickInkTypography.current
-    val tint   = parseFolderColor(folder.color)
+private data class GroupedFolders(
+    val workflow: List<FolderEntity>,
+    val life:     List<FolderEntity>,
+    val creative: List<FolderEntity>,
+    val custom:   List<FolderEntity>,
+)
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick     = onClick,
-                onLongClick = onLongPress,
-            )
-            .padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Folder glyph — a colored rounded square. Compose-side
-        // SVG would be ideal but a tinted Box is faithful enough.
-        Box(
-            modifier = Modifier
-                .size(24.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(tint),
-        )
-
-        Spacer(Modifier.width(QuickInkSpacing.s3))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text  = folder.name,
-                style = type.body.copy(fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
-                color = colors.ink,
-            )
-            Spacer(Modifier.height(2.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(
-                    text  = "$captureCount ${if (captureCount == 1) "item" else "items"}",
-                    style = type.meta.copy(fontSize = 11.5.sp),
-                    color = colors.muted,
-                )
-                if (newCount > 0) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(colors.accentSoft, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(5.dp)
-                                .clip(CircleShape)
-                                .background(colors.accent),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            text  = "$newCount new",
-                            style = type.label.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
-                            color = colors.accentDeep,
-                        )
-                    }
-                }
-            }
+private fun groupFoldersByTier(folders: List<FolderEntity>): GroupedFolders {
+    val workflow = mutableListOf<FolderEntity>()
+    val life     = mutableListOf<FolderEntity>()
+    val creative = mutableListOf<FolderEntity>()
+    val custom   = mutableListOf<FolderEntity>()
+    folders.forEach { folder ->
+        if (!folder.isSeeded) { custom.add(folder); return@forEach }
+        when (folder.tier) {
+            1 -> workflow.add(folder)
+            2 -> life.add(folder)
+            3 -> creative.add(folder)
+            else -> custom.add(folder)
         }
-
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = colors.muted,
-            modifier = Modifier.size(18.dp),
-        )
     }
+    return GroupedFolders(workflow, life, creative, custom)
+}
+
+/**
+ * Inbox row carries the lock glyph; everything else doesn't.
+ * Inbox is identified by the seeded stable ID — works even if
+ * the user accidentally creates their own folder named "Inbox"
+ * in the Custom tier.
+ */
+private fun isInboxFolder(folder: FolderEntity): Boolean =
+    folder.isSeeded && folder.id == "inbox"
+
+/**
+ * One-line description for the row — pulled from the seeded
+ * vocabulary for spec'd folders, null for user folders (their
+ * names already telegraph intent).
+ */
+private fun descriptionForSeededFolder(folder: FolderEntity): String? {
+    if (!folder.isSeeded) return null
+    return workspaceFolderSeeds.firstOrNull { it.id == folder.id }?.desc
 }
 
 // ─── Tag cloud ───────────────────────────────────────────────────
