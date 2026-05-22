@@ -6,8 +6,8 @@
  * appropriate at v1, with a clear path to a typed raw-SQL builder
  * once the workspace grows.
  *
- * Seeded "Needs review" depends on the `#needs-review` tag
- * landing via TagRepository.defaultSeed first.
+ * Seeded "Today" is date-only; "Needs review" depends on the
+ * `#needs-review` tag landing via TagRepository.defaultSeed first.
  */
 
 import Foundation
@@ -17,7 +17,9 @@ import ReleafCoreData
 
 public final class SmartCollectionRepository: @unchecked Sendable {
 
+    public static let seedToday = "Today"
     public static let seedNeedsReview = "Needs review"
+    private static let seedBlue = "#3A78AE"
 
     private let dbQueue: DatabaseQueue
     private let tagRepository: TagRepository
@@ -119,6 +121,10 @@ public final class SmartCollectionRepository: @unchecked Sendable {
         let cal = Calendar.current
         let now = Date()
         switch preset {
+        case "today":
+            return cal.isDateInToday(date)
+        case "yesterday":
+            return cal.isDateInYesterday(date)
         case "this_week":
             return cal.isDate(date, equalTo: now, toGranularity: .weekOfYear)
         case "this_month":
@@ -145,13 +151,47 @@ public final class SmartCollectionRepository: @unchecked Sendable {
                 .filter(Column("deleted_at") == nil)
                 .fetchAll(db)
         }
-        if existing.contains(where: { $0.name == Self.seedNeedsReview }) {
+        let existingNames = Set(existing.map(\.name))
+        let now = IsoClock.nowIso()
+
+        if !existingNames.contains(Self.seedToday) {
+            let row = SmartCollectionEntity(
+                id:        Uuidv7.generate(),
+                userId:    userId,
+                name:      Self.seedToday,
+                icon:      "star",
+                color:     Self.seedBlue,
+                ruleJson:  SmartCollectionRule.encode([.dateRange(field: "created_at", preset: "today")]),
+                position:  0,
+                isSeeded:  true,
+                createdAt: now,
+                updatedAt: now,
+                dirty:     true,
+            )
+            try await dbQueue.write { db in
+                do { try row.insert(db) }
+                catch let e as DatabaseError where e.resultCode == .SQLITE_CONSTRAINT {
+                    // Race lost — another seed pass won.
+                }
+            }
+        }
+
+        if var needsReview = existing.first(where: { $0.name == Self.seedNeedsReview }),
+           needsReview.position != 1 {
+            needsReview.position = 1
+            needsReview.updatedAt = now
+            needsReview.dirty = true
+            try await dbQueue.write { db in
+                try needsReview.update(db)
+            }
+        }
+
+        if existingNames.contains(Self.seedNeedsReview) {
             return
         }
         guard let needsReviewTag = try await tagRepository.findByName(userId: userId, name: "needs-review") else {
             return
         }
-        let now = IsoClock.nowIso()
         let row = SmartCollectionEntity(
             id:        Uuidv7.generate(),
             userId:    userId,
@@ -159,7 +199,7 @@ public final class SmartCollectionRepository: @unchecked Sendable {
             icon:      "eye",
             color:     "#E8AE17",
             ruleJson:  SmartCollectionRule.encode([.tagIs(tagId: needsReviewTag.id)]),
-            position:  0,
+            position:  1,
             isSeeded:  true,
             createdAt: now,
             updatedAt: now,

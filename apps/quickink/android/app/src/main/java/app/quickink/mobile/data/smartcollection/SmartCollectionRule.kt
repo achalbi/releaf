@@ -53,13 +53,13 @@ sealed class RuleClause {
     @SerialName("date_range")
     data class DateRange(
         @SerialName("field")  val field:  String, // "created_at" | "last_opened_at"
-        @SerialName("preset") val preset: String, // "this_week" | "this_month" | "last_30_days" | "this_quarter"
+        @SerialName("preset") val preset: String, // "today" | "yesterday" | "this_week" | "this_month" | "last_30_days" | "this_quarter"
     ) : RuleClause()
 
     @Serializable
     @SerialName("source_is")
     data class SourceIs(
-        @SerialName("value") val value: String, // "scan" | "import" | "share-extension"
+        @SerialName("value") val value: String, // "scan" | "import" | "photo" | "video" | "share-extension"
     ) : RuleClause()
 
     /**

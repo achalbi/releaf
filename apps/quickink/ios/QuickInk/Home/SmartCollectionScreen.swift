@@ -170,13 +170,15 @@ public struct SmartCollectionScreen: View {
         case .tagIsNot(let id):   label = "not #\(tagNamesById[id] ?? "tag")"
         case .dateRange(_, let p):
             switch p {
+            case "today":       label = "today"
+            case "yesterday":   label = "yesterday"
             case "this_week":    label = "this week"
             case "this_month":   label = "this month"
             case "last_30_days": label = "last 30 days"
             case "this_quarter": label = "this quarter"
             default:             label = p
             }
-        case .sourceIs(let v):       label = "source: \(v)"
+        case .sourceIs(let v):       label = "source: \(sourceLabel(v))"
         case .hasHandwriting(let v): label = v ? "handwritten" : "not handwritten"
         case .hasSignature(let v):   label = v ? "has signature" : "no signature"
         case .hasOcrText(let v):     label = v ? "has OCR text" : "no OCR text"
@@ -188,6 +190,17 @@ public struct SmartCollectionScreen: View {
             .padding(.vertical, 3)
             .background(QuickInkColors.surface, in: RoundedRectangle(cornerRadius: 4))
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(QuickInkColors.accentSoft, lineWidth: 1))
+    }
+
+    private func sourceLabel(_ value: String) -> String {
+        switch value {
+        case "scan":            return "Scan"
+        case "import":          return "Import"
+        case "photo":           return "Photo"
+        case "video":           return "Video"
+        case "share-extension": return "Share"
+        default:                return value
+        }
     }
 
     private func docRow(_ cap: CaptureSummary) -> some View {

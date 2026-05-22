@@ -685,12 +685,10 @@ public final class CaptureRepository: @unchecked Sendable {
         }
     }
 
-    /// Soft-delete a capture. Stamps `deleted_at` + bumps `dirty`
-    /// so the sync worker mirrors the tombstone to Drive on its
-    /// next pass. The cascade rule on `ocr_results.capture_id`
-    /// only fires on hard DELETE, so OCR rows stay around in
-    /// SQLite until a future cleanup pass — the home rail filters
-    /// captures by `deleted_at IS NULL` either way.
+    /// Soft-delete a capture and its user-authored children. The
+    /// SQLite cascade rules only fire on hard DELETE, so soft-delete
+    /// must explicitly tombstone OCR rows and voice notes to avoid
+    /// invisible dirty children under a deleted capture.
     public func softDelete(id: String) async throws {
         let now = IsoClock.nowIso()
         try await dbQueue.write { db in
@@ -698,6 +696,18 @@ public final class CaptureRepository: @unchecked Sendable {
                 UPDATE captures
                 SET deleted_at = ?, updated_at = ?, dirty = 1
                 WHERE id = ?
+                """, arguments: [now, now, id])
+            try db.execute(sql: """
+                UPDATE ocr_results
+                SET deleted_at = ?, updated_at = ?, dirty = 1
+                WHERE capture_id = ?
+                  AND deleted_at IS NULL
+                """, arguments: [now, now, id])
+            try db.execute(sql: """
+                UPDATE voice_notes
+                SET deleted_at = ?, updated_at = ?, dirty = 1
+                WHERE capture_id = ?
+                  AND deleted_at IS NULL
                 """, arguments: [now, now, id])
         }
     }

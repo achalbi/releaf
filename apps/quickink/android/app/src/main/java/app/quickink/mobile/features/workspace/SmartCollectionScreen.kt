@@ -336,13 +336,15 @@ private fun RuleChip(
         is RuleClause.TagIs    -> "#${tagNamesById[clause.tagId] ?: "tag"}"
         is RuleClause.TagIsNot -> "not #${tagNamesById[clause.tagId] ?: "tag"}"
         is RuleClause.DateRange -> when (clause.preset) {
+            "today"        -> "today"
+            "yesterday"    -> "yesterday"
             "this_week"     -> "this week"
             "this_month"    -> "this month"
             "last_30_days"  -> "last 30 days"
             "this_quarter"  -> "this quarter"
             else            -> clause.preset
         }
-        is RuleClause.SourceIs  -> "source: ${clause.value}"
+        is RuleClause.SourceIs  -> "source: ${sourceLabel(clause.value)}"
         is RuleClause.HasHandwriting -> if (clause.value) "handwritten" else "not handwritten"
         is RuleClause.HasSignature   -> if (clause.value) "has signature" else "no signature"
         is RuleClause.HasOcrText     -> if (clause.value) "has OCR text" else "no OCR text"
@@ -361,6 +363,15 @@ private fun RuleChip(
             color = colors.accentDeep,
         )
     }
+}
+
+private fun sourceLabel(value: String): String = when (value) {
+    "scan"            -> "Scan"
+    "import"          -> "Import"
+    "photo"           -> "Photo"
+    "video"           -> "Video"
+    "share-extension" -> "Share"
+    else              -> value
 }
 
 // ─── Doc rows ────────────────────────────────────────────────

@@ -305,12 +305,10 @@ fun WorkspaceHomeScreen(
             Spacer(Modifier.height(QuickInkSpacing.s3))
 
             val hero = recentlyOpened.firstOrNull()
-            val rest = if (recentlyOpened.size > 1) recentlyOpened.drop(1) else emptyList()
             if (hero != null) {
                 RecentsCarousel(
-                    hero    = hero,
-                    rest    = rest,
-                    onOpen  = onOpenContinue,
+                    hero   = hero,
+                    onOpen = onOpenContinue,
                 )
                 Spacer(Modifier.height(QuickInkSpacing.s4))
             }
@@ -798,6 +796,7 @@ private fun WorkspaceSearchBar(onClick: () -> Unit) {
 private fun ContinueCard(
     capture: CaptureEntity,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
@@ -810,8 +809,7 @@ private fun ContinueCard(
     val progressFraction = (page.toFloat() / total.toFloat()).coerceIn(0f, 1f)
 
     Row(
-        modifier = Modifier
-            .width(280.dp)
+        modifier = modifier
             .height(RecentsCarouselHeight)
             .clip(shape)
             .background(colors.ink, shape)
@@ -906,124 +904,33 @@ private fun ContinueCard(
 
 // ─── Recently-opened strip ───────────────────────────────────
 
-/** Hero + carousel cap. The first item is the [ContinueCard], the
- *  rest feed in as [RecentDocCard]s — all in a single horizontally
- *  scrollable [RecentsCarousel]. */
-private const val RECENTLY_OPENED_LIMIT = 6
+/** Workspace recents currently shows only the primary Continue hero. */
+private const val RECENTLY_OPENED_LIMIT = 1
 
 /**
- * Single horizontal carousel that combines the Continue hero with
- * the recents thumbnails so the user can swipe horizontally instead
- * of scrolling the page to reach older items. The hero stays wider
- * (~280 dp) so it still reads as the "primary" pick on first paint;
- * the rest are 100 dp thumbnail cards.
+ * Single horizontal row that keeps the Continue hero aligned with the
+ * workspace sections while leaving room for future recents expansion.
  */
 @Composable
 private fun RecentsCarousel(
     hero: CaptureEntity,
-    rest: List<CaptureEntity>,
     onOpen: (CaptureEntity) -> Unit,
 ) {
-    LazyRow(
-        modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = QuickInkSpacing.s4),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        item(key = "continue-${hero.id}") {
-            ContinueCard(
-                capture = hero,
-                onClick = { onOpen(hero) },
-            )
-        }
-        items(rest, key = { it.id }) { capture ->
-            RecentDocCard(
-                capture = capture,
-                onClick = { onOpen(capture) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun RecentDocCard(
-    capture: CaptureEntity,
-    onClick: () -> Unit,
-) {
-    val colors = LocalQuickInkColors.current
-    val type   = LocalQuickInkTypography.current
-    val shape  = RoundedCornerShape(8.dp)
-
-    val title = capture.title?.takeIf { it.isNotBlank() } ?: "Untitled scan"
-    val page  = capture.lastOpenedPage ?: 1
-    val total = capture.pageCount.coerceAtLeast(1)
-    val progressFraction = (page.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-
-    Column(
+    Box(
         modifier = Modifier
-            .width(100.dp)
-            .height(RecentsCarouselHeight)
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick),
+            .fillMaxWidth()
+            .padding(horizontal = QuickInkSpacing.s4),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(54.dp)
-                .clip(shape)
-                .background(colors.surface)
-                .border(1.dp, colors.borderSoft, shape),
-        ) {
-            val previewUri = capture.previewUri?.takeIf { it.isNotBlank() }
-            if (previewUri != null) {
-                coil.compose.AsyncImage(
-                    model = coil.request.ImageRequest.Builder(LocalContext.current)
-                        .data(android.net.Uri.parse(previewUri))
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                )
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(3.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(colors.borderSoft),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(progressFraction)
-                    .height(3.dp)
-                    .background(colors.accent),
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text     = title,
-            style    = type.body.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium),
-            color    = colors.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text  = "p. $page / $total",
-            style = type.meta.copy(fontSize = 10.5.sp),
-            color = colors.muted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        ContinueCard(
+            capture  = hero,
+            onClick  = { onOpen(hero) },
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }
 
-/** Shared height for every card in [RecentsCarousel] so the hero
- *  and the thumbnail cards align as a single row regardless of how
- *  much content each holds. Matches the Continue card's natural
- *  height (thumb 70 + s3 padding × 2). */
+/** Shared Continue hero height. Matches the card's natural height
+ *  (thumb 70 + s3 padding × 2). */
 private val RecentsCarouselHeight = 94.dp
 
 // ─── Smart collections strip ─────────────────────────────────
@@ -1768,4 +1675,3 @@ private fun PersonRow(
         )
     }
 }
-

@@ -85,6 +85,9 @@ import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -92,6 +95,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -153,6 +157,7 @@ import app.quickink.mobile.ui.theme.QuickInkRadius
 import app.quickink.mobile.ui.theme.QuickInkSpacing
 import app.quickink.mobile.ui.theme.quickInkLinedPaper
 import app.releaf.mobile.data.notepad.NotepadEntry
+import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.sync.SyncStateKeys
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -261,6 +266,7 @@ fun HomeScreen(
     val locations by remember(userId, locationDao) {
         locationRepo.observe(userId)
     }.collectAsState(initial = emptyList())
+    val homeActionScope = rememberCoroutineScope()
     val locationScope = rememberCoroutineScope()
     var showLocationsSheet by remember { mutableStateOf(false) }
     // Editor dialog state — `editorOpen` toggles the dialog,
@@ -421,6 +427,12 @@ fun HomeScreen(
                 primaryTagByCapture = primaryTagByCapture,
                 onAllNotes          = onOpenNotes,
                 onOpenScan          = onOpenScan,
+                onDeleteCapture     = { capture ->
+                    homeActionScope.launch {
+                        captureDao.softDelete(capture.id, IsoClock.nowIso())
+                        app.refreshPendingPushState()
+                    }
+                },
             )
             Spacer(Modifier.size(QuickInkSpacing.s4))
             HomeSectionDivider()
@@ -1644,6 +1656,7 @@ private fun RecentRail(
     primaryTagByCapture: Map<String, String>,
     onAllNotes: () -> Unit,
     onOpenScan: ((String) -> Unit)?,
+    onDeleteCapture: (CaptureEntity) -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
@@ -1705,6 +1718,7 @@ private fun RecentRail(
                         capture        = capture,
                         primaryTagName = primaryTagByCapture[capture.id],
                         onTap          = { onOpenScan?.invoke(capture.id) },
+                        onDelete       = { onDeleteCapture(capture) },
                     )
                 }
             }
@@ -1723,6 +1737,7 @@ private fun RecentScanThumb(
     capture: CaptureEntity,
     primaryTagName: String?,
     onTap: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
@@ -1749,6 +1764,44 @@ private fun RecentScanThumb(
         !capture.videoUri.isNullOrBlank() ||
             !capture.videoDriveFileId.isNullOrBlank()
     ))
+    var menuExpanded by remember(capture.id) { mutableStateOf(false) }
+    var showDeleteConfirm by remember(capture.id) { mutableStateOf(false) }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = {
+                Text(
+                    text  = captureDeleteTitle(capture),
+                    style = type.body,
+                    color = colors.ink,
+                )
+            },
+            text = {
+                Text(
+                    text  = captureDeleteMessage(capture),
+                    style = type.meta,
+                    color = colors.inkSoft,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDelete()
+                    },
+                ) {
+                    Text("Delete", color = colors.danger)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel", color = colors.ink)
+                }
+            },
+            containerColor = colors.surface,
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -1857,8 +1910,8 @@ private fun RecentScanThumb(
         }
 
         // Footer row — title + date on the left, three-dot menu on
-        // the right. Menu is currently visual only; tapping the card
-        // surface routes to scan detail.
+        // the right. The menu exposes quick actions while tapping the
+        // main card surface still opens detail.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1889,14 +1942,85 @@ private fun RecentScanThumb(
                     color = colors.muted,
                 )
             }
-            Icon(
-                imageVector        = Icons.Filled.MoreVert,
-                contentDescription = "More",
-                tint               = colors.muted,
-                modifier           = Modifier.size(20.dp),
-            )
+            Box {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .clickable { menuExpanded = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector        = Icons.Filled.MoreVert,
+                        contentDescription = "More actions",
+                        tint               = colors.muted,
+                        modifier           = Modifier.size(20.dp),
+                    )
+                }
+                DropdownMenu(
+                    expanded         = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                    modifier         = Modifier.background(colors.surface),
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Open", color = colors.ink) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector        = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint               = colors.accent,
+                            )
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            onTap()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Delete", color = colors.danger) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector        = Icons.Filled.Delete,
+                                contentDescription = null,
+                                tint               = colors.danger,
+                            )
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            showDeleteConfirm = true
+                        },
+                    )
+                }
+            }
         }
     }
+}
+
+private fun captureDeleteTitle(capture: CaptureEntity): String =
+    "Delete this ${captureDeleteNoun(capture)}?"
+
+private fun captureDeleteMessage(capture: CaptureEntity): String {
+    val related = if (isRecentVideoCapture(capture)) {
+        "related notes"
+    } else {
+        "recognised text and related notes"
+    }
+    return "This ${captureDeleteNoun(capture)} and its $related will be removed from this device and your other devices on the next sync."
+}
+
+private fun captureDeleteNoun(capture: CaptureEntity): String =
+    when {
+        isRecentVideoCapture(capture) -> "video"
+        capture.source == "photo"     -> "photo"
+        capture.source == "import"    -> "imported item"
+        else                          -> "scan"
+    }
+
+private fun isRecentVideoCapture(capture: CaptureEntity): Boolean {
+    val hasVideoArtifact = !capture.videoUri.isNullOrBlank() ||
+        !capture.videoDriveFileId.isNullOrBlank()
+    return capture.source == "video" ||
+        (capture.source == "photo" && hasVideoArtifact)
 }
 
 /**

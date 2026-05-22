@@ -136,6 +136,10 @@ class SmartCollectionRepository(
         val today = LocalDate.now(zone)
 
         return when (preset) {
+            "today" ->
+                tsDate == today
+            "yesterday" ->
+                tsDate == today.minusDays(1)
             "this_week" -> {
                 val weekFields = java.time.temporal.WeekFields.ISO
                 tsDate.get(weekFields.weekOfWeekBasedYear()) == today.get(weekFields.weekOfWeekBasedYear()) &&
@@ -158,7 +162,7 @@ class SmartCollectionRepository(
 
     /**
      * Idempotent seed of the Workspace v1 default smart
-     * collections — currently just "Needs review", which depends
+     * collections. "Today" is date-only; "Needs review" depends
      * on the `#needs-review` tag seeded in [TagRepository.DEFAULT_SEED].
      *
      * "Invoices this month" and "Contains signatures" from the
@@ -169,12 +173,42 @@ class SmartCollectionRepository(
      *     Phase E OCR-derived metadata.
      */
     suspend fun seedDefaultsIfNeeded(userId: String) {
-        val tags = tagDao ?: return
         val existing = smartCollectionDao.listSeeded(userId)
-        if (existing.any { it.name == SEED_NEEDS_REVIEW }) return
-
-        val needsReviewTag = tags.findByName(userId, "needs-review") ?: return
+        val existingNames = existing.map { it.name }.toSet()
         val now = IsoClock.nowIso()
+
+        if (SEED_TODAY !in existingNames) {
+            smartCollectionDao.insert(
+                SmartCollectionEntity(
+                    id        = Uuidv7.generate(),
+                    userId    = userId,
+                    name      = SEED_TODAY,
+                    icon      = "star",
+                    color     = SEED_BLUE,
+                    ruleJson  = SmartCollectionRule.encode(
+                        listOf(RuleClause.DateRange(field = "created_at", preset = "today")),
+                    ),
+                    position  = 0,
+                    isSeeded  = true,
+                    createdAt = now,
+                    updatedAt = now,
+                    dirty     = true,
+                    deletedAt = null,
+                ),
+            )
+        }
+
+        existing.firstOrNull { it.name == SEED_NEEDS_REVIEW && it.position != 1 }
+            ?.let { row ->
+                smartCollectionDao.update(
+                    row.copy(position = 1, updatedAt = now, dirty = true),
+                )
+            }
+
+        if (SEED_NEEDS_REVIEW in existingNames) return
+
+        val tags = tagDao ?: return
+        val needsReviewTag = tags.findByName(userId, "needs-review") ?: return
         smartCollectionDao.insert(
             SmartCollectionEntity(
                 id        = Uuidv7.generate(),
@@ -185,7 +219,7 @@ class SmartCollectionRepository(
                 ruleJson  = SmartCollectionRule.encode(
                     listOf(RuleClause.TagIs(needsReviewTag.id)),
                 ),
-                position  = 0,
+                position  = 1,
                 isSeeded  = true,
                 createdAt = now,
                 updatedAt = now,
@@ -196,6 +230,8 @@ class SmartCollectionRepository(
     }
 
     companion object {
+        const val SEED_TODAY = "Today"
         const val SEED_NEEDS_REVIEW = "Needs review"
+        private const val SEED_BLUE = "#3A78AE"
     }
 }

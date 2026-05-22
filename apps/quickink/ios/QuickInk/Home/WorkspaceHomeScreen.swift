@@ -93,8 +93,7 @@ public struct WorkspaceHomeScreen: View {
                     .padding(.horizontal, AppSpacing.s4)
 
                 if let hero = viewModel.recentlyOpened.first {
-                    let rest = Array(viewModel.recentlyOpened.dropFirst())
-                    recentsCarousel(hero: hero, rest: rest)
+                    recentsCarousel(hero: hero)
                 }
 
                 smartCollectionsStrip
@@ -443,6 +442,7 @@ public struct WorkspaceHomeScreen: View {
             )
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Continue card
@@ -480,6 +480,7 @@ public struct WorkspaceHomeScreen: View {
                     }
                     .frame(height: 3)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 Circle()
                     .fill(QuickInkColors.accent)
@@ -491,72 +492,23 @@ public struct WorkspaceHomeScreen: View {
                     )
             }
             .padding(AppSpacing.s3)
-            .frame(width: 280, height: recentsCarouselHeight)
+            .frame(maxWidth: .infinity, minHeight: recentsCarouselHeight, maxHeight: recentsCarouselHeight)
             .background(QuickInkColors.ink, in: RoundedRectangle(cornerRadius: 18))
         }
         .buttonStyle(.plain)
     }
 
-    /// Shared height for every card in the Recents carousel so the
-    /// hero and the thumbnail cards align as a single row regardless
-    /// of content. Matches the Continue card's natural height
+    /// Shared Continue hero height. Matches the Continue card's natural height
     /// (thumbnail 70 + AppSpacing.s3 padding × 2).
     private var recentsCarouselHeight: CGFloat { 94 }
 
     // MARK: - Recently-opened strip
 
-    /// Single horizontal carousel that combines the Continue hero
-    /// with recents thumbnails so the user can swipe horizontally
-    /// instead of scrolling the page to reach older items. The hero
-    /// stays wider (~280pt) so it still reads as the "primary" pick
-    /// on first paint; the rest are 100pt thumbnail cards.
-    private func recentsCarousel(hero: CaptureSummary, rest: [CaptureSummary]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .center, spacing: 10) {
-                continueCard(hero)
-                ForEach(rest) { cap in
-                    recentDocCard(cap)
-                }
-            }
+    /// Single horizontal row that keeps the Continue hero aligned with
+    /// the workspace sections while leaving room for future expansion.
+    private func recentsCarousel(hero: CaptureSummary) -> some View {
+        continueCard(hero)
             .padding(.horizontal, AppSpacing.s4)
-        }
-    }
-
-    private func recentDocCard(_ capture: CaptureSummary) -> some View {
-        let title = capture.title?.isEmpty == false ? capture.title! : "Untitled scan"
-        let page  = capture.lastOpenedPage ?? 1
-        let total = max(capture.pageCount, 1)
-        let frac  = min(max(Double(page) / Double(total), 0), 1)
-
-        return Button(action: { onOpenContinue(capture) }) {
-            VStack(alignment: .leading, spacing: 4) {
-                RecentDocThumbnail(previewUri: capture.previewUri)
-
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(QuickInkColors.borderSoft)
-                        .frame(height: 3)
-                    GeometryReader { geo in
-                        Capsule()
-                            .fill(QuickInkColors.accent)
-                            .frame(width: geo.size.width * frac, height: 3)
-                    }
-                    .frame(height: 3)
-                }
-                .frame(width: 100, height: 3)
-
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(QuickInkColors.ink)
-                    .lineLimit(1)
-                Text("p. \(page) / \(total)")
-                    .font(.system(size: 10.5))
-                    .foregroundColor(QuickInkColors.muted)
-                    .lineLimit(1)
-            }
-            .frame(width: 100, height: recentsCarouselHeight, alignment: .topLeading)
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Smart collections strip

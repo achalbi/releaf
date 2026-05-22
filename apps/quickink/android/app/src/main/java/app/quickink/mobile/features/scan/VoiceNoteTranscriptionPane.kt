@@ -153,7 +153,8 @@ fun VoiceNoteTranscriptionPane(
                         .clickable(enabled = !canceling) {
                             canceling = true
                             scope.launch {
-                                runCatching { repo.softDelete(voiceNoteId) }
+                                val deleted = runCatching { repo.softDelete(voiceNoteId) }.isSuccess
+                                if (deleted) app.refreshPendingPushState()
                                 onCancel()
                             }
                         },

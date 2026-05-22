@@ -434,6 +434,7 @@ final class VoiceNoteSectionViewModel: ObservableObject {
     func delete(id: String) async {
         do {
             try await repo.softDelete(id: id)
+            await QuickInkSyncEnvironment.shared.refreshPendingPushState()
         } catch {
             print("VoiceNoteSection.delete failed: \(error)")
         }

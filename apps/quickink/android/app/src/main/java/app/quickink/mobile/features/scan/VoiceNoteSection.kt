@@ -233,7 +233,8 @@ fun VoiceNoteSection(
                 onShareAudio = { shareVoiceNote(context, note) },
                 onDelete = {
                     scope.launch {
-                        runCatching { repository.softDelete(note.id) }
+                        val deleted = runCatching { repository.softDelete(note.id) }.isSuccess
+                        if (deleted) app.refreshPendingPushState()
                     }
                 },
             )

@@ -264,5 +264,6 @@ private final class VoiceNoteTranscriptionPaneModel: ObservableObject {
 
     func deleteVoiceNote() async {
         try? await repo.softDelete(id: voiceNoteId)
+        await QuickInkSyncEnvironment.shared.refreshPendingPushState()
     }
 }

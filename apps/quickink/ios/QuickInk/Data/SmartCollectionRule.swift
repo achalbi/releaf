@@ -124,7 +124,9 @@ public enum SmartCollectionRule {
 ///
 /// The `dateRange` clause's `field` is collapsed to `"created_at"`
 /// here — the editor doesn't yet expose the `last_opened_at`
-/// variant. `nil` / empty values mean "no clause of that kind".
+/// variant. Date presets include `today`, `yesterday`, `this_week`,
+/// `this_month`, `last_30_days`, and `this_quarter`. `nil` / empty
+/// values mean "no clause of that kind".
 public struct SmartCollectionRuleInput: Equatable, Sendable {
     public var folderId: String?
     public var datePreset: String?

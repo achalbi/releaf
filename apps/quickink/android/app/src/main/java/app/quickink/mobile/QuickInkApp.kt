@@ -346,9 +346,9 @@ class QuickInkApp : Application() {
 
     /**
      * One iteration of the pending-push loop. Computes the dirty
-     * count for the active user, writes the user-visible capture
-     * count to `sync_state`, and checks whether the daily auto-sync
-     * policy should enqueue a worker.
+     * count for the active user, writes the user-visible item count
+     * to `sync_state`, and checks whether the daily auto-sync policy
+     * should enqueue a worker.
      *
      * No-ops gracefully when:
      *   - the user is signed out (nothing to push),
@@ -357,10 +357,28 @@ class QuickInkApp : Application() {
      *     caller, the loop continues on the next tick).
      */
     private suspend fun tickPendingPush() {
+        refreshPendingPushState()
+    }
+
+    /**
+     * Recompute the Home "items pending" count immediately after a
+     * local mutation, then nudge the sync scheduler using the full
+     * dirty-row count. The visible count intentionally excludes
+     * tombstones because deleted rows are no longer user-visible
+     * items; the scheduler count still includes tombstones so remote
+     * deletes are backed up.
+     */
+    suspend fun refreshPendingPushState() {
         val authState = authStore.state.value
-        if (authState !is AuthState.SignedIn) return
+        if (authState !is AuthState.SignedIn) {
+            writeLocalDirtyCount(0)
+            return
+        }
         val prefs = SettingsPreferences(this)
-        if (!prefs.driveBackupEnabled) return
+        if (!prefs.driveBackupEnabled) {
+            writeLocalDirtyCount(0)
+            return
+        }
 
         // Token refresh is intentionally NOT piggybacked on this
         // tick. Earlier code re-checked the access token here every
@@ -377,15 +395,7 @@ class QuickInkApp : Application() {
         // Always write — including 0 — so the Home pill clears
         // promptly when the user signs out / pauses backup / a sync
         // run completes between ticks.
-        runCatching {
-            database.syncStateDao().upsert(
-                SyncStateEntity(
-                    key       = SyncStateKeys.LOCAL_DIRTY_COUNT,
-                    value     = dirty.toString(),
-                    updatedAt = IsoClock.nowIso(),
-                )
-            )
-        }
+        writeLocalDirtyCount(dirty)
 
         val syncDirty = countDirtyRowsForSync(authState.session.userId)
         if (syncDirty <= 0) return
@@ -415,22 +425,40 @@ class QuickInkApp : Application() {
         QuickInkSyncScheduler.requestAutoSyncIfDue(this, dirtyCount = syncDirty)
     }
 
+    private suspend fun writeLocalDirtyCount(count: Int) {
+        runCatching {
+            database.syncStateDao().upsert(
+                SyncStateEntity(
+                    key       = SyncStateKeys.LOCAL_DIRTY_COUNT,
+                    value     = count.toString(),
+                    updatedAt = IsoClock.nowIso(),
+                )
+            )
+        }.onFailure { Log.w("QuickInkSync", "writeLocalDirtyCount($count) failed: $it") }
+    }
+
     /**
-     * Count of dirty user-visible items pending sync. Counts only
-     * captures (scans + imports) — what the user thinks of as "an
-     * item I made". OCR result rows and category rows are dirty
-     * too whenever a capture changes, but they're derived metadata
-     * the user didn't create directly; including them in the pill
-     * over-counts (a single 2-page scan becomes "3 pending" when
-     * it's really one scan). The sync worker still pushes those
-     * derived rows on every pass; this number drives the
-     * Settings + Home pending-count surface only.
+     * Count of active, dirty user-visible items pending sync. Deleted
+     * rows are excluded from this display count because they are no
+     * longer visible items; [countDirtyRowsForSync] still includes
+     * tombstones so remote deletes are pushed.
+     *
+     * Derived rows (OCR results, tags, join rows) are not counted here
+     * because they can over-count one user action. The sync worker still
+     * pushes them on every pass; this number drives the Home pending
+     * count only.
      *
      * Returns 0 on any read failure — better than erroring out
      * the loop entirely.
      */
     private suspend fun countLocalDirty(userId: String): Int = try {
-        database.captureDao().dirtyRows().count { it.userId == userId }
+        database.notepadDao().dirtyRows().count {
+            it.userId == userId && it.deletedAt == null
+        } +
+            database.captureDao().dirtyRows().count {
+                it.userId == userId && it.deletedAt == null
+            } +
+            database.voiceNoteDao().countActiveDirtyForUser(userId)
     } catch (e: Exception) {
         Log.w("QuickInkSync", "countLocalDirty failed: $e")
         0

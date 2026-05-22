@@ -491,9 +491,16 @@ fun ScanDetailScreen(
         if (showDeleteConfirm) {
             AlertDialog(
                 onDismissRequest = { showDeleteConfirm = false },
-                title            = { Text("Delete this scan?", style = type.body, color = colors.ink) },
+                title            = {
+                    Text(
+                        text  = capture?.let { captureDeleteTitle(it) } ?: "Delete this capture?",
+                        style = type.body,
+                        color = colors.ink,
+                    )
+                },
                 text             = { Text(
-                    text  = "The scan and its recognised text will be removed from this device and your other devices on the next sync.",
+                    text  = capture?.let { captureDeleteMessage(it) }
+                        ?: "This capture and its related notes will be removed from this device and your other devices on the next sync.",
                     style = type.meta,
                     color = colors.inkSoft,
                 ) },
@@ -504,6 +511,7 @@ fun ScanDetailScreen(
                             scope.launch {
                                 try {
                                     captureDao.softDelete(captureId, IsoClock.nowIso())
+                                    app.refreshPendingPushState()
                                     onBack()
                                 } catch (_: Exception) { /* best-effort */ }
                             }
@@ -2886,6 +2894,26 @@ private fun isVideoCapture(capture: CaptureEntity): Boolean {
     return capture.source == "video" ||
         (capture.source == "photo" && hasVideoArtifact)
 }
+
+private fun captureDeleteTitle(capture: CaptureEntity): String =
+    "Delete this ${captureDeleteNoun(capture)}?"
+
+private fun captureDeleteMessage(capture: CaptureEntity): String {
+    val related = if (isVideoCapture(capture)) {
+        "related notes"
+    } else {
+        "recognised text and related notes"
+    }
+    return "This ${captureDeleteNoun(capture)} and its $related will be removed from this device and your other devices on the next sync."
+}
+
+private fun captureDeleteNoun(capture: CaptureEntity): String =
+    when {
+        isVideoCapture(capture)    -> "video"
+        capture.source == "photo"  -> "photo"
+        capture.source == "import" -> "imported item"
+        else                       -> "scan"
+    }
 
 /**
  * Resolve the PDF's on-disk size for the [DetailsCard] Size row.

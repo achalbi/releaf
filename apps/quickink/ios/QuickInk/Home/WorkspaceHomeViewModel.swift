@@ -26,13 +26,12 @@ public final class WorkspaceHomeViewModel: ObservableObject {
     @Published public private(set) var locationCounts: [String: Int] = [:]
     @Published public private(set) var people: [PersonEntity] = []
     @Published public private(set) var personCounts: [String: Int] = [:]
-    /// Most-recently-opened captures (newest first), capped at
-    /// [recentlyOpenedLimit]. Row 0 renders as the Continue hero;
-    /// rows 1..N feed the compact strip below it.
+    /// Most-recently-opened capture for the Continue hero, capped at
+    /// [recentlyOpenedLimit].
     @Published public private(set) var recentlyOpened: [CaptureSummary] = []
 
-    /// Hero + carousel cap. Matches Android's `RECENTLY_OPENED_LIMIT`.
-    public static let recentlyOpenedLimit: Int = 6
+    /// Workspace recents currently shows only the primary Continue hero.
+    public static let recentlyOpenedLimit: Int = 1
     @Published public private(set) var folderCaptureCounts: [String: Int] = [:]
     /// Per-folder count of captures created in the last 7 days.
     /// Drives the Workspace home folder list's "N new" badge.

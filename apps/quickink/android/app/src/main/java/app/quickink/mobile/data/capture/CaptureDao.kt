@@ -150,7 +150,7 @@ interface CaptureDao {
 
     /**
      * Soft-delete a capture AND cascade-soft-delete its child
-     * `ocr_results` rows in the same transaction.
+     * `ocr_results` + `voice_notes` rows in the same transaction.
      *
      * Why the cascade: `ocr_results.capture_id` has `ON DELETE CASCADE`
      * at the schema level, but that only fires on PHYSICAL DELETE.
@@ -200,6 +200,7 @@ interface CaptureDao {
     ) {
         softDeleteCaptureRow(id, timestamp)
         softDeleteChildOcrRows(id, timestamp, dirty = markChildrenDirty)
+        softDeleteChildVoiceNoteRows(id, timestamp, dirty = markChildrenDirty)
     }
 
     /**
@@ -237,6 +238,23 @@ interface CaptureDao {
           AND deleted_at IS NULL
     """)
     suspend fun softDeleteChildOcrRows(id: String, timestamp: String, dirty: Boolean)
+
+    /**
+     * Cascade helper for [softDelete]: soft-deletes every active voice
+     * note attached to [id]. Voice notes are user-authored children of
+     * the capture; keeping them live under a tombstoned capture leaves
+     * an invisible dirty item that can keep the Home pending count from
+     * changing after delete.
+     */
+    @Query("""
+        UPDATE voice_notes
+        SET deleted_at = :timestamp,
+            updated_at = :timestamp,
+            dirty      = :dirty
+        WHERE capture_id = :id
+          AND deleted_at IS NULL
+    """)
+    suspend fun softDeleteChildVoiceNoteRows(id: String, timestamp: String, dirty: Boolean)
 
     /**
      * Update the user-editable title on a capture. Bumps

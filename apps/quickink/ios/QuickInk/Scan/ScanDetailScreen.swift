@@ -316,13 +316,13 @@ struct ScanDetailScreen: View {
         .onChange(of: selectedPageIndex) { _ in
             scheduleLastOpenedWrite()
         }
-        .alert("Delete this scan?", isPresented: $showDeleteConfirm) {
+        .alert(deleteDialogTitle, isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
                 Task { await deleteCapture() }
             }
         } message: {
-            Text("The scan and its recognised text will be removed from this device and your other devices on the next sync.")
+            Text(deleteDialogMessage)
         }
         // Retag picker — tapping the category pill (or the "Tag
         // scan" affordance) opens this. One button per active
@@ -882,7 +882,7 @@ struct ScanDetailScreen: View {
         }
         .menuOrder(.fixed)
         .accessibilityLabel("More actions")
-        .accessibilityHint("Open the actions menu for this scan")
+        .accessibilityHint("Open the actions menu for this item")
     }
 
     /// Heuristic height for the embedded PDFView. Single-page scans
@@ -1767,6 +1767,30 @@ struct ScanDetailScreen: View {
             (capture.source == "photo" && hasVideoArtifact)
     }
 
+    private var deleteDialogTitle: String {
+        guard let capture else { return "Delete this capture?" }
+        return "Delete this \(deleteNoun(for: capture))?"
+    }
+
+    private var deleteDialogMessage: String {
+        guard let capture else {
+            return "This capture and its related notes will be removed from this device and your other devices on the next sync."
+        }
+        let related = isVideoCapture(for: capture)
+            ? "related notes"
+            : "recognised text and related notes"
+        return "This \(deleteNoun(for: capture)) and its \(related) will be removed from this device and your other devices on the next sync."
+    }
+
+    private func deleteNoun(for capture: CaptureSummary) -> String {
+        if isVideoCapture(for: capture) { return "video" }
+        switch capture.source {
+        case "photo":  return "photo"
+        case "import": return "imported item"
+        default:       return "scan"
+        }
+    }
+
     /// Format a byte count as "1.2 MB" / "340 KB" using the system
     /// formatter so the locale-aware separator is correct.
     private func formatBytes(_ bytes: Int64) -> String {
@@ -2028,6 +2052,7 @@ struct ScanDetailScreen: View {
     private func deleteCapture() async {
         do {
             try await CaptureRepository().softDelete(id: captureId)
+            await QuickInkSyncEnvironment.shared.refreshPendingPushState()
             onBack()
         } catch {
             print("ScanDetailScreen.deleteCapture failed: \(error)")

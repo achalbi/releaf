@@ -682,9 +682,15 @@ struct HomeScreen: View {
                         ForEach(capturesVM.captures.prefix(6)) { capture in
                             RecentScanThumb(
                                 capture:        capture,
-                                primaryTagName: primaryTagByCapture[capture.id]
+                                primaryTagName: primaryTagByCapture[capture.id],
+                                onOpen:         { onOpenScan?(capture.id) },
+                                onDelete:       {
+                                    Task {
+                                        try? await CaptureRepository().softDelete(id: capture.id)
+                                        await QuickInkSyncEnvironment.shared.refreshPendingPushState()
+                                    }
+                                }
                             )
-                            .onTapGesture { onOpenScan?(capture.id) }
                         }
                     }
                     .padding(.vertical, 2) // Avoid shadow clipping at top.
@@ -739,6 +745,10 @@ struct RecentScanThumb: View {
     /// the pre-A.3c `captures.category` field. Nil → cascade
     /// stops at "Scan".
     let primaryTagName: String?
+    let onOpen: () -> Void
+    let onDelete: () -> Void
+
+    @State private var showDeleteConfirm = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -770,22 +780,54 @@ struct RecentScanThumb: View {
                 RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
                     .stroke(QuickInkColors.border, lineWidth: 1)
             )
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onOpen)
 
-            VStack(alignment: .leading, spacing: 2) {
-                // Title Case — matches the library grid/list/search
-                // normalisation. `.capitalized` is per-word, splits
-                // on whitespace.
-                Text(displayTitle.capitalized)
-                    .font(QuickInkText.cardTitle)
-                    .foregroundStyle(QuickInkColors.ink)
-                    .lineLimit(1)
-                Text(displayDate)
-                    .font(QuickInkText.caption)
-                    .foregroundStyle(QuickInkColors.muted)
+            HStack(alignment: .center, spacing: QuickInkSpacing.s2) {
+                VStack(alignment: .leading, spacing: 2) {
+                    // Title Case — matches the library grid/list/search
+                    // normalisation. `.capitalized` is per-word, splits
+                    // on whitespace.
+                    Text(displayTitle.capitalized)
+                        .font(QuickInkText.cardTitle)
+                        .foregroundStyle(QuickInkColors.ink)
+                        .lineLimit(1)
+                    Text(displayDate)
+                        .font(QuickInkText.caption)
+                        .foregroundStyle(QuickInkColors.muted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onOpen)
+
+                Menu {
+                    Button(action: onOpen) {
+                        Label("Open", systemImage: "arrow.up.right.square")
+                    }
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(QuickInkColors.muted)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Circle())
+                }
+                .menuOrder(.fixed)
+                .accessibilityLabel("More actions")
             }
             .padding(.top, QuickInkSpacing.s2)
         }
         .frame(width: 140)
+        .alert(deleteDialogTitle, isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive, action: onDelete)
+        } message: {
+            Text(deleteDialogMessage)
+        }
     }
 
     /// Resolves `previewUri` (a `file://` URL string written by the
@@ -859,6 +901,13 @@ struct RecentScanThumb: View {
         }
     }
 
+    private var isVideoCapture: Bool {
+        let hasVideo = !(capture.videoUri ?? "").isEmpty
+            || !(capture.videoDriveFileId ?? "").isEmpty
+        return capture.source == "video" ||
+            (capture.source == "photo" && hasVideo)
+    }
+
     @ViewBuilder
     private var sourceChip: some View {
         let info = sourceChipInfo
@@ -883,6 +932,26 @@ struct RecentScanThumb: View {
             return t
         }
         return primaryTagName ?? "Scan"
+    }
+
+    private var deleteDialogTitle: String {
+        "Delete this \(deleteNoun)?"
+    }
+
+    private var deleteDialogMessage: String {
+        let related = isVideoCapture
+            ? "related notes"
+            : "recognised text and related notes"
+        return "This \(deleteNoun) and its \(related) will be removed from this device and your other devices on the next sync."
+    }
+
+    private var deleteNoun: String {
+        if isVideoCapture { return "video" }
+        switch capture.source {
+        case "photo":  return "photo"
+        case "import": return "imported item"
+        default:       return "scan"
+        }
     }
 
     /// Friendly date — `2026-05-02T14:30:00.000Z` → `May 2`. Falls

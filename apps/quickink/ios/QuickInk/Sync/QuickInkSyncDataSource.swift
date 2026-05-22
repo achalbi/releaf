@@ -870,21 +870,37 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
         // No-op until v2 etag tracking lands.
     }
 
-    /// Cheap aggregate count of every locally-dirty row that the
-    /// sync worker would push on its next pass — across notepad
-    /// entries, captures, ocr_results, and categories. Drives the
-    /// "N pending" pill on Home and the auto-safety-net's decision
-    /// to fire `requestImmediate`. Mirror of Android's
-    /// `QuickInkApp.countLocalDirty(userId:)`.
-    ///
-    /// `ocr_results` is intentionally NOT user-scoped here — the
-    /// table doesn't carry a `user_id` column (rows FK into
-    /// `captures` and inherit user via that join). The dirty count
-    /// across all OCR rows is a tight upper bound; in single-user
-    /// installs it equals the per-user count, and the result is
-    /// only ever shown as "N pending", so a small over-count is
-    /// fine.
-    public func countDirtyRows(userId: String) async throws -> Int {
+    /// Active, dirty user-created items for the Home "N pending" pill.
+    /// Tombstones and derived rows are excluded from this display count
+    /// so deleting a dirty item removes it from the visible pending
+    /// total immediately. `countDirtyRowsForSync` still includes
+    /// tombstones so remote deletes are pushed.
+    public func countLocalDirtyItems(userId: String) async throws -> Int {
+        try await database.dbQueue.read { db -> Int in
+            let notepad: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM notepad_entries
+                WHERE user_id = ? AND dirty = 1 AND deleted_at IS NULL
+                """, arguments: [userId])) ?? 0
+            let captures: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM captures
+                WHERE user_id = ? AND dirty = 1 AND deleted_at IS NULL
+                """, arguments: [userId])) ?? 0
+            let voiceNotes: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM voice_notes
+                JOIN captures ON captures.id = voice_notes.capture_id
+                WHERE voice_notes.user_id = ?
+                  AND voice_notes.dirty = 1
+                  AND voice_notes.deleted_at IS NULL
+                  AND captures.deleted_at IS NULL
+                """, arguments: [userId])) ?? 0
+            return notepad + captures + voiceNotes
+        }
+    }
+
+    /// Cheap aggregate count of every locally-dirty row that the sync
+    /// worker would push on its next pass. Used only for scheduling,
+    /// not for the Home pill; includes tombstones and derived rows.
+    public func countDirtyRowsForSync(userId: String) async throws -> Int {
         try await database.dbQueue.read { db -> Int in
             let notepad: Int = (try? Int.fetchOne(db, sql: """
                 SELECT COUNT(*) FROM notepad_entries
@@ -896,9 +912,10 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 """, arguments: [userId])) ?? 0
             let ocr: Int = (try? Int.fetchOne(db, sql: """
                 SELECT COUNT(*) FROM ocr_results
-                WHERE dirty = 1
-                """)) ?? 0
-            let categories: Int = (try? Int.fetchOne(db, sql: """
+                JOIN captures ON captures.id = ocr_results.capture_id
+                WHERE captures.user_id = ? AND ocr_results.dirty = 1
+                """, arguments: [userId])) ?? 0
+            let tags: Int = (try? Int.fetchOne(db, sql: """
                 SELECT COUNT(*) FROM tags
                 WHERE user_id = ? AND dirty = 1
                 """, arguments: [userId])) ?? 0
@@ -906,7 +923,58 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 SELECT COUNT(*) FROM profile_settings
                 WHERE user_id = ? AND dirty = 1
                 """, arguments: [userId])) ?? 0
-            return notepad + captures + ocr + categories + profileSettings
+            let folders: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM folders
+                WHERE user_id = ? AND dirty = 1
+                """, arguments: [userId])) ?? 0
+            let captureTags: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM capture_tags
+                JOIN captures ON captures.id = capture_tags.capture_id
+                WHERE captures.user_id = ? AND capture_tags.dirty = 1
+                """, arguments: [userId])) ?? 0
+            let smartCollections: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM smart_collections
+                WHERE user_id = ? AND dirty = 1
+                """, arguments: [userId])) ?? 0
+            let voiceNotes: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM voice_notes
+                WHERE user_id = ? AND dirty = 1
+                """, arguments: [userId])) ?? 0
+            let locations: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM locations
+                WHERE user_id = ? AND dirty = 1
+                """, arguments: [userId])) ?? 0
+            let captureLocations: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM capture_locations
+                JOIN captures ON captures.id = capture_locations.capture_id
+                WHERE captures.user_id = ? AND capture_locations.dirty = 1
+                """, arguments: [userId])) ?? 0
+            let people: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM people
+                WHERE user_id = ? AND dirty = 1
+                """, arguments: [userId])) ?? 0
+            let capturePeople: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM capture_people
+                JOIN captures ON captures.id = capture_people.capture_id
+                WHERE captures.user_id = ? AND capture_people.dirty = 1
+                """, arguments: [userId])) ?? 0
+            let stories: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM story
+                WHERE user_id = ? AND dirty = 1
+                """, arguments: [userId])) ?? 0
+            let storyItems: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM story_item
+                JOIN story ON story.id = story_item.story_id
+                WHERE story.user_id = ? AND story_item.dirty = 1
+                """, arguments: [userId])) ?? 0
+            let storyVoiceClips: Int = (try? Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM story_voice_clip
+                WHERE user_id = ? AND dirty = 1
+                """, arguments: [userId])) ?? 0
+            return notepad + captures + ocr + tags + profileSettings +
+                folders + captureTags + smartCollections + voiceNotes +
+                locations + captureLocations + people + capturePeople +
+                stories + storyItems + storyVoiceClips
         }
     }
 

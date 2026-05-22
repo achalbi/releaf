@@ -1,18 +1,14 @@
 /*
  * SmartCollectionEditorDialog.kt
  *
- * Workspace v1 smart-collection editor. Six clause types from
- * `SmartCollectionRule.kt` are now reachable from the UI:
+ * Workspace v1 smart-collection editor. The commonly-used clause
+ * types from `SmartCollectionRule.kt` are reachable from the UI:
  *
  *   - folder_is        (one folder)
  *   - date_range       (created_at preset)
  *   - tag_is           (one or more tags the capture must carry)
  *   - tag_is_not       (one or more tags the capture must NOT carry)
- *   - source_is        (scan / import / share-extension)
- *   - has_handwriting / has_signature / has_ocr_text (OCR signals;
- *     evaluator returns false until Phase E lights up the columns,
- *     but authoring them is exposed today so users can pre-build
- *     rules that activate when the signals arrive).
+ *   - source_is        (scan / import / photo / video / share-extension)
  *
  * Mirror of `SmartCollectionEditorView.swift` (iOS).
  */
@@ -31,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -46,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -76,9 +74,19 @@ internal fun SmartCollectionEditorDialog(
     val type   = LocalQuickInkTypography.current
 
     var name        by remember(initialName)  { mutableStateOf(initialName) }
-    var input       by remember(initialInput) { mutableStateOf(initialInput) }
+    var input       by remember(initialInput) {
+        mutableStateOf(
+            initialInput.copy(
+                hasHandwriting = null,
+                hasSignature   = null,
+                hasOcrText     = null,
+            ),
+        )
+    }
     var iconSlug    by remember(initialIcon)  { mutableStateOf(initialIcon) }
-    var colorHex    by remember(initialColor) { mutableStateOf(initialColor) }
+    var colorHex    by remember(initialColor) {
+        mutableStateOf(initialColor ?: WorkspaceFolderPalette.first())
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -118,16 +126,18 @@ internal fun SmartCollectionEditorDialog(
                 )
 
                 SectionLabel("FOLDER")
-                ChoiceWrapRow(
-                    options    = listOf(null to "Any") + folders.map { it.id to it.name },
-                    selected   = input.folderId,
-                    onSelect   = { input = input.copy(folderId = it) },
+                FolderChoiceWrapRow(
+                    folders  = folders,
+                    selected = input.folderId,
+                    onSelect = { input = input.copy(folderId = it) },
                 )
 
                 SectionLabel("WHEN CREATED")
                 ChoiceWrapRow(
                     options    = listOf(
                         null to "Any time",
+                        "today" to "Today",
+                        "yesterday" to "Yesterday",
                         "this_week" to "This week",
                         "this_month" to "This month",
                         "last_30_days" to "Last 30 days",
@@ -169,32 +179,12 @@ internal fun SmartCollectionEditorDialog(
                         null to "Any",
                         "scan" to "Scan",
                         "import" to "Import",
+                        "photo" to "Photo",
+                        "video" to "Video",
                         "share-extension" to "Share",
                     ),
                     selected = input.sourceValue,
                     onSelect = { input = input.copy(sourceValue = it) },
-                )
-
-                SectionLabel("OCR SIGNALS")
-                // Each OCR signal is a TRI-STATE chip: unset (no
-                // clause), require true, require false. Tap cycles
-                // through the three states. The dimmed third state
-                // (require absent) is rare but cheap to expose and
-                // matches the rule grammar's `Boolean` payload.
-                OcrTriStateChip(
-                    label   = "Handwriting",
-                    state   = input.hasHandwriting,
-                    onCycle = { input = input.copy(hasHandwriting = it) },
-                )
-                OcrTriStateChip(
-                    label   = "Signature",
-                    state   = input.hasSignature,
-                    onCycle = { input = input.copy(hasSignature = it) },
-                )
-                OcrTriStateChip(
-                    label   = "OCR text",
-                    state   = input.hasOcrText,
-                    onCycle = { input = input.copy(hasOcrText = it) },
                 )
 
                 SectionLabel("ICON")
@@ -249,8 +239,6 @@ private fun ChoiceWrapRow(
     selected: String?,
     onSelect: (String?) -> Unit,
 ) {
-    val colors = LocalQuickInkColors.current
-    val type   = LocalQuickInkTypography.current
     androidx.compose.foundation.layout.FlowRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement   = Arrangement.spacedBy(6.dp),
@@ -265,64 +253,52 @@ private fun ChoiceWrapRow(
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
+private fun FolderChoiceWrapRow(
+    folders: List<FolderEntity>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+) {
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement   = Arrangement.spacedBy(6.dp),
+    ) {
+        ChipBox(label = "Any", active = selected == null) { onSelect(null) }
+        folders.forEach { folder ->
+            ColoredChipBox(
+                label  = folder.name,
+                hue    = parseFolderColor(folder.color),
+                active = selected == folder.id,
+            ) {
+                onSelect(folder.id)
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
 private fun TagMultiSelectRow(
     tags: List<TagEntity>,
     selected: List<String>,
     onToggle: (String) -> Unit,
 ) {
     if (tags.isEmpty()) return
+    val colors = LocalQuickInkColors.current
+    val orderedTags = remember(tags) { orderedTagOptions(tags) }
     androidx.compose.foundation.layout.FlowRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement   = Arrangement.spacedBy(6.dp),
     ) {
-        tags.forEach { tag ->
+        orderedTags.forEach { tag ->
             val isActive = tag.id in selected
-            ChipBox(label = tag.name, active = isActive) { onToggle(tag.id) }
+            ColoredChipBox(
+                label  = tag.name,
+                hue    = tagVocabularyHue(tag, colors.accent),
+                active = isActive,
+            ) {
+                onToggle(tag.id)
+            }
         }
-    }
-}
-
-@Composable
-private fun OcrTriStateChip(
-    label: String,
-    state: Boolean?,
-    onCycle: (Boolean?) -> Unit,
-) {
-    val colors = LocalQuickInkColors.current
-    val type   = LocalQuickInkTypography.current
-    // null → "Any" (no clause); true → "Yes"; false → "No".
-    // Cycle order matches that triple.
-    val (suffix, isActive) = when (state) {
-        null  -> "Any" to false
-        true  -> "Yes" to true
-        false -> "No"  to true
-    }
-    val cycled: Boolean? = when (state) {
-        null  -> true
-        true  -> false
-        false -> null
-    }
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(
-                if (isActive) colors.ink else colors.surface,
-                RoundedCornerShape(999.dp),
-            )
-            .border(
-                1.dp,
-                if (isActive) colors.ink else colors.border,
-                RoundedCornerShape(999.dp),
-            )
-            .clickable { onCycle(cycled) }
-            .padding(horizontal = 11.dp, vertical = 5.dp),
-    ) {
-        Text(
-            text  = "$label · $suffix",
-            style = type.label.copy(fontSize = 11.5.sp),
-            color = if (isActive) androidx.compose.ui.graphics.Color.White
-                    else colors.inkSoft,
-        )
     }
 }
 
@@ -352,6 +328,55 @@ private fun ChipBox(label: String, active: Boolean, onTap: () -> Unit) {
                     else colors.inkSoft,
         )
     }
+}
+
+@Composable
+private fun ColoredChipBox(
+    label: String,
+    hue: Color,
+    active: Boolean,
+    onTap: () -> Unit,
+) {
+    val type = LocalQuickInkTypography.current
+    val shape = RoundedCornerShape(999.dp)
+    Box(
+        modifier = Modifier
+            .clip(shape)
+            .background(if (active) hue else hue.copy(alpha = 0.12f), shape)
+            .border(1.dp, hue, shape)
+            .clickable { onTap() }
+            .padding(horizontal = 11.dp, vertical = 5.dp),
+    ) {
+        Text(
+            text  = label,
+            style = type.label.copy(fontSize = 11.5.sp),
+            color = if (active) Color.White else hue,
+        )
+    }
+}
+
+private fun parseTagColor(hex: String?, fallback: Color): Color {
+    val target = hex.takeUnless { it.isNullOrBlank() } ?: return fallback
+    return runCatching { Color(android.graphics.Color.parseColor(target)) }
+        .getOrElse { fallback }
+}
+
+private fun tagVocabularyHue(tag: TagEntity, fallback: Color): Color =
+    workspaceTagBuckets.firstOrNull { it.id == tag.bucket }?.hue
+        ?: parseTagColor(tag.color, fallback)
+
+private fun orderedTagOptions(tags: List<TagEntity>): List<TagEntity> {
+    val bucketOrder = workspaceTagBuckets
+        .mapIndexed { index, bucket -> bucket.id to index }
+        .toMap()
+    return tags.sortedWith(
+        compareBy<TagEntity>(
+            { tag -> tag.bucket?.let { bucketOrder[it] } ?: Int.MAX_VALUE },
+            { tag -> tag.position },
+            { tag -> tag.name.lowercase() },
+            { tag -> tag.id },
+        ),
+    )
 }
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -403,7 +428,7 @@ private fun IconPaletteRow(
 @Composable
 private fun ColorPaletteRow(
     selected: String?,
-    onSelect: (String?) -> Unit,
+    onSelect: (String) -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     androidx.compose.foundation.layout.FlowRow(
@@ -411,25 +436,18 @@ private fun ColorPaletteRow(
         verticalArrangement   = Arrangement.spacedBy(6.dp),
     ) {
         WorkspaceFolderPalette.forEach { hex ->
-            val isActive = hex == selected
-            val swatchColor = runCatching {
-                androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(hex))
-            }.getOrDefault(colors.accent)
+            val isActive = hex.equals(selected, ignoreCase = true)
             Box(
                 modifier = Modifier
-                    .size(28.dp)
-                    .clip(androidx.compose.foundation.shape.CircleShape)
-                    .background(swatchColor)
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(parseFolderColor(hex), CircleShape)
                     .border(
-                        if (isActive) 2.dp else 1.dp,
-                        if (isActive) colors.ink else colors.border,
-                        androidx.compose.foundation.shape.CircleShape,
+                        width = if (isActive) 2.dp else 0.dp,
+                        color = if (isActive) colors.ink else Color.Transparent,
+                        shape = CircleShape,
                     )
-                    .clickable {
-                        // Tap a selected swatch again to clear — the
-                        // card's tint falls back to the accent.
-                        onSelect(if (isActive) null else hex)
-                    },
+                    .clickable { onSelect(hex) },
             )
         }
     }

@@ -83,7 +83,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
-import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import app.quickink.mobile.features.settings.SettingsPreferences
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
@@ -118,7 +117,7 @@ fun NoteEditorScreen(
             // once per day; manual Sync now remains immediate.
             onMutated = {
                 scope.launch {
-                    QuickInkSyncScheduler.requestAutoSyncIfDue(context)
+                    app.refreshPendingPushState()
                 }
             },
         )

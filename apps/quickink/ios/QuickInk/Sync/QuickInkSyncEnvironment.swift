@@ -265,10 +265,9 @@ public final class QuickInkSyncEnvironment {
     /// loop. Started by `QuickInkRoot`'s scene-phase observer when
     /// the app enters `.active`; cancelled when it leaves to
     /// `.background`. The loop:
-    ///   1. Counts locally-dirty rows via the data source.
-    ///   2. Writes the count to `SyncStateStore.localDirtyCount`
-    ///      (drives the Home pill via `@Published`).
-    ///   3. Calls `scheduler.requestImmediate()` when count > 0.
+    ///   1. Counts active locally-dirty user items for the Home pill.
+    ///   2. Counts all dirty sync rows, including tombstones.
+    ///   3. Calls `scheduler.requestImmediate()` when sync rows exist.
     ///      The scheduler's coalesce-while-running guard prevents
     ///      back-to-back ticks from spamming WorkManager-equivalent
     ///      task replacement.
@@ -300,29 +299,45 @@ public final class QuickInkSyncEnvironment {
         pendingPushTask = nil
     }
 
+    /// Recompute Home's "items pending" count immediately after a
+    /// local mutation. The visible count excludes tombstones because
+    /// deleted rows are no longer visible items; the scheduler count
+    /// still includes tombstones so remote deletes are pushed.
+    public func refreshPendingPushState() async {
+        await tickPendingPush()
+    }
+
     /// One iteration of the loop. Counts dirty rows, writes the
-    /// total to `SyncStateStore`, and kicks `requestImmediate()`
-    /// when > 0. No-ops gracefully when signed-out, when Drive
-    /// backup is off, or when the data source read throws.
+    /// visible item total to `SyncStateStore`, and kicks
+    /// `requestImmediate()` when any sync row exists. No-ops
+    /// gracefully when signed out, when Drive backup is off, or when
+    /// the data source read throws.
     private func tickPendingPush() async {
         guard installed,
               let store = installedAuthStore,
               let session = await currentSession(authStore: store)
-        else { return }
+        else {
+            stateStore.recordLocalDirtyCount(0)
+            return
+        }
         let defaults = UserDefaults.standard
         let driveBackupEnabled: Bool = {
             guard defaults.object(forKey: Self.driveBackupKey) != nil else { return true }
             return defaults.bool(forKey: Self.driveBackupKey)
         }()
-        guard driveBackupEnabled else { return }
+        guard driveBackupEnabled else {
+            stateStore.recordLocalDirtyCount(0)
+            return
+        }
 
         let dataSource = QuickInkSyncDataSource(userId: session.userId)
-        let dirty = (try? await dataSource.countDirtyRows(userId: session.userId)) ?? 0
+        let dirty = (try? await dataSource.countLocalDirtyItems(userId: session.userId)) ?? 0
 
         await MainActor.run { stateStore.recordLocalDirtyCount(dirty) }
 
-        if dirty > 0 {
-            print("[QuickInkSync] pending-push tick: \(dirty) dirty rows — kicking sync")
+        let syncDirty = (try? await dataSource.countDirtyRowsForSync(userId: session.userId)) ?? 0
+        if syncDirty > 0 {
+            print("[QuickInkSync] pending-push tick: \(syncDirty) dirty rows — kicking sync")
             await MainActor.run { scheduler.requestImmediate() }
         }
     }

@@ -420,14 +420,14 @@ struct NoteEditorScreen: View {
         // always call.
         if vm.canSave {
             vm.save()
-            QuickInkSyncEnvironment.shared.scheduler.requestImmediate()
+            Task { await QuickInkSyncEnvironment.shared.refreshPendingPushState() }
         }
         onBack()
     }
 
     private func deleteAndDismiss() {
         vm.delete(onDeleted: {
-            QuickInkSyncEnvironment.shared.scheduler.requestImmediate()
+            Task { await QuickInkSyncEnvironment.shared.refreshPendingPushState() }
             onBack()
         })
     }

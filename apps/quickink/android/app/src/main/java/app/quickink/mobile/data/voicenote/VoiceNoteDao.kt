@@ -99,6 +99,21 @@ interface VoiceNoteDao {
     @Query("SELECT * FROM voice_notes WHERE dirty = 1")
     suspend fun dirtyRows(): List<VoiceNoteEntity>
 
+    /**
+     * Active voice-note count for Home's visible pending count. Joins
+     * through captures so notes attached to a tombstoned capture don't
+     * keep surfacing as visible pending items.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM voice_notes
+        JOIN captures ON captures.id = voice_notes.capture_id
+        WHERE voice_notes.user_id = :userId
+          AND voice_notes.dirty = 1
+          AND voice_notes.deleted_at IS NULL
+          AND captures.deleted_at IS NULL
+    """)
+    suspend fun countActiveDirtyForUser(userId: String): Int
+
     /** Live rows for the given user. Used by the sync push path. */
     @Query("""
         SELECT * FROM voice_notes

@@ -1,18 +1,14 @@
 /*
  * SmartCollectionEditorView.swift
  *
- * Workspace v1 smart-collection editor. All six clause types from
- * `SmartCollectionRule.swift` are reachable from the UI:
+ * Workspace v1 smart-collection editor. The commonly-used clause
+ * types from `SmartCollectionRule.swift` are reachable from the UI:
  *
  *   - folder_is        (one folder)
  *   - date_range       (created_at preset)
  *   - tag_is           (one or more tags the capture must carry)
  *   - tag_is_not       (one or more tags the capture must NOT carry)
- *   - source_is        (scan / import / share-extension)
- *   - has_handwriting / has_signature / has_ocr_text (OCR signals;
- *     evaluator returns false until Phase E lights up the columns,
- *     but authoring them is exposed today so users can pre-build
- *     rules that activate when the signals arrive).
+ *   - source_is        (scan / import / photo / video / share-extension)
  *
  * Mirror of `SmartCollectionEditorDialog.kt` (Android).
  */
@@ -60,10 +56,14 @@ struct SmartCollectionEditorView: View {
         self.isEdit = isEdit
         self.onSubmit = onSubmit
         self.onCancel = onCancel
+        var visibleInput = initialInput
+        visibleInput.hasHandwriting = nil
+        visibleInput.hasSignature = nil
+        visibleInput.hasOcrText = nil
         _name     = State(initialValue: initialName)
-        _input    = State(initialValue: initialInput)
+        _input    = State(initialValue: visibleInput)
         _iconSlug = State(initialValue: initialIcon)
-        _colorHex = State(initialValue: initialColor)
+        _colorHex = State(initialValue: initialColor ?? workspaceFolderPalette[0])
     }
 
     private struct Option<T: Hashable>: Hashable {
@@ -71,13 +71,10 @@ struct SmartCollectionEditorView: View {
         let label: String
     }
 
-    private var folderOptions: [Option<String>] {
-        [Option(id: nil, label: "Any")] +
-            folders.map { Option(id: $0.id, label: $0.name) }
-    }
-
     private let dateOptions: [Option<String>] = [
         Option(id: nil,             label: "Any time"),
+        Option(id: "today",         label: "Today"),
+        Option(id: "yesterday",     label: "Yesterday"),
         Option(id: "this_week",     label: "This week"),
         Option(id: "this_month",    label: "This month"),
         Option(id: "last_30_days",  label: "Last 30 days"),
@@ -88,6 +85,8 @@ struct SmartCollectionEditorView: View {
         Option(id: nil,                 label: "Any"),
         Option(id: "scan",              label: "Scan"),
         Option(id: "import",            label: "Import"),
+        Option(id: "photo",             label: "Photo"),
+        Option(id: "video",             label: "Video"),
         Option(id: "share-extension",   label: "Share"),
     ]
 
@@ -99,7 +98,7 @@ struct SmartCollectionEditorView: View {
                         .textFieldStyle(.roundedBorder)
 
                     sectionLabel("FOLDER")
-                    chipRow(options: folderOptions, selected: input.folderId) {
+                    folderChipRow(selected: input.folderId) {
                         input.folderId = $0
                     }
 
@@ -131,21 +130,6 @@ struct SmartCollectionEditorView: View {
                     sectionLabel("SOURCE")
                     chipRow(options: sourceOptions, selected: input.sourceValue) {
                         input.sourceValue = $0
-                    }
-
-                    sectionLabel("OCR SIGNALS")
-                    // Each OCR signal is a tri-state chip: unset →
-                    // require true → require false. Tap cycles
-                    // through. Cycling matches the rule grammar's
-                    // `Bool` payload.
-                    ocrChip(label: "Handwriting", state: input.hasHandwriting) {
-                        input.hasHandwriting = cycle(input.hasHandwriting)
-                    }
-                    ocrChip(label: "Signature", state: input.hasSignature) {
-                        input.hasSignature = cycle(input.hasSignature)
-                    }
-                    ocrChip(label: "OCR text", state: input.hasOcrText) {
-                        input.hasOcrText = cycle(input.hasOcrText)
                     }
 
                     sectionLabel("ICON")
@@ -204,15 +188,15 @@ struct SmartCollectionEditorView: View {
             ForEach(workspaceFolderPalette, id: \.self) { hex in
                 let isActive = hex == colorHex
                 Button(action: {
-                    colorHex = isActive ? nil : hex
+                    colorHex = hex
                 }) {
                     Circle()
                         .fill(colorFromHex(hex) ?? QuickInkColors.accent)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 32, height: 32)
                         .overlay(
                             Circle().stroke(
-                                isActive ? QuickInkColors.ink : QuickInkColors.border,
-                                lineWidth: isActive ? 2 : 1
+                                isActive ? QuickInkColors.ink : Color.clear,
+                                lineWidth: 2
                             )
                         )
                 }
@@ -247,15 +231,24 @@ struct SmartCollectionEditorView: View {
     }
 
     @ViewBuilder
-    private func tagMultiSelect(
-        selected: [String],
-        onToggle: @escaping (String) -> Void
+    private func folderChipRow(
+        selected: String?,
+        onSelect: @escaping (String?) -> Void
     ) -> some View {
         FlowChipsRow {
-            ForEach(tags, id: \.id) { tag in
-                let isActive = selected.contains(tag.id)
-                Button(action: { onToggle(tag.id) }) {
-                    chipLabel(label: tag.name, active: isActive)
+            Button(action: { onSelect(nil) }) {
+                chipLabel(label: "Any", active: selected == nil)
+            }
+            .buttonStyle(.plain)
+
+            ForEach(folders, id: \.id) { folder in
+                let isActive = folder.id == selected
+                Button(action: { onSelect(folder.id) }) {
+                    coloredChipLabel(
+                        label: folder.name,
+                        hue: colorFromHex(folder.color) ?? QuickInkColors.accent,
+                        active: isActive
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -263,25 +256,23 @@ struct SmartCollectionEditorView: View {
     }
 
     @ViewBuilder
-    private func ocrChip(
-        label: String,
-        state: Bool?,
-        onCycle: @escaping () -> Void
+    private func tagMultiSelect(
+        selected: [String],
+        onToggle: @escaping (String) -> Void
     ) -> some View {
-        // Mirror the Android `OcrTriStateChip`: unset → "Any",
-        // true → "Yes", false → "No".
-        let suffix: String = {
-            switch state {
-            case .none:        return "Any"
-            case .some(true):  return "Yes"
-            case .some(false): return "No"
+        FlowChipsRow {
+            ForEach(orderedTagOptions(tags), id: \.id) { tag in
+                let isActive = selected.contains(tag.id)
+                Button(action: { onToggle(tag.id) }) {
+                    coloredChipLabel(
+                        label: tag.name,
+                        hue: tagVocabularyHue(tag),
+                        active: isActive
+                    )
+                }
+                .buttonStyle(.plain)
             }
-        }()
-        let isActive = state != nil
-        Button(action: onCycle) {
-            chipLabel(label: "\(label) · \(suffix)", active: isActive)
         }
-        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -301,13 +292,42 @@ struct SmartCollectionEditorView: View {
             )
     }
 
-    private func cycle(_ s: Bool?) -> Bool? {
-        switch s {
-        case .none:        return true
-        case .some(true):  return false
-        case .some(false): return nil
+    private func tagVocabularyHue(_ tag: TagEntity) -> Color {
+        if let bucketId = tag.bucket,
+           let bucket = workspaceTagBuckets.first(where: { $0.id == bucketId }) {
+            return bucket.hue
+        }
+        return colorFromHex(tag.color) ?? QuickInkColors.accent
+    }
+
+    private func orderedTagOptions(_ source: [TagEntity]) -> [TagEntity] {
+        let bucketOrder = Dictionary(uniqueKeysWithValues: workspaceTagBuckets.enumerated().map {
+            ($0.element.id, $0.offset)
+        })
+        return source.sorted { lhs, rhs in
+            let lhsBucket = lhs.bucket.flatMap { bucketOrder[$0] } ?? Int.max
+            let rhsBucket = rhs.bucket.flatMap { bucketOrder[$0] } ?? Int.max
+            if lhsBucket != rhsBucket { return lhsBucket < rhsBucket }
+            if lhs.position != rhs.position { return lhs.position < rhs.position }
+            let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            return lhs.id < rhs.id
         }
     }
+
+    @ViewBuilder
+    private func coloredChipLabel(label: String, hue: Color, active: Bool) -> some View {
+        Text(label)
+            .font(.system(size: 11.5))
+            .foregroundColor(active ? .white : hue)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .background(active ? hue : hue.opacity(0.12), in: Capsule())
+            .overlay(
+                Capsule().stroke(hue, lineWidth: 1)
+            )
+    }
+
 }
 
 /// Lightweight wrapping HStack stand-in for SwiftUI Layout APIs.
