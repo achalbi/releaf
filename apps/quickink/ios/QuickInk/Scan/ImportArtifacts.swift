@@ -3,8 +3,8 @@
  *
  * Bridge between the system PhotosPicker and `ScanFlowController`.
  * Takes the `UIImage`s the user picked from the gallery, writes each
- * as a JPEG into `AttachmentStorage`, renders a single multi-page
- * PDF wrapping every page, and returns the URL triple
+ * as a bounded JPEG into `AttachmentStorage`, renders a single
+ * multi-page PDF wrapping every page, and returns the URL triple
  * `ScanFlowController.onScanComplete` expects
  * (pdfURL / previewURL / pageURLs).
  *
@@ -22,8 +22,12 @@
 import Foundation
 import UIKit
 import ReleafCoreData
+import ReleafCoreScan
 
 enum ImportArtifacts {
+
+    private static let pageImageMaxLongEdge: CGFloat = 1800
+    private static let pageJpegQuality: CGFloat = 0.82
 
     /// Result triple — same shape `DocumentScannerView.onComplete`
     /// surfaces, so callers can hand it straight to
@@ -43,10 +47,14 @@ enum ImportArtifacts {
     /// than aborting, since the JPEGs alone are enough to let
     /// downstream OCR run and the library preview show.
     ///
-    /// Compression quality 0.92 matches what `DocumentScannerView`'s
-    /// per-page JPEG writer uses, so imported photos and scanned
-    /// pages share the same quality budget.
-    static func build(from images: [UIImage]) -> Result? {
+    /// Imported/system-camera photos can arrive at full sensor
+    /// resolution, so every page is normalized into a bounded JPEG
+    /// before it becomes a preview, OCR input, synced binary, or PDF
+    /// source.
+    static func build(
+        from images: [UIImage],
+        compressedPdfEnabled: Bool = SettingsState.compressedPdfSavesDefault
+    ) -> Result? {
         guard !images.isEmpty else { return nil }
 
         // Pass 1 — write every JPEG into AttachmentStorage. We do
@@ -54,22 +62,67 @@ enum ImportArtifacts {
         // page-urls list is fully formed before we touch the PDF
         // context. If any one fails we abort the whole import
         // rather than silently dropping pages.
+        var pageImages: [UIImage] = []
+        pageImages.reserveCapacity(images.count)
         var jpegURLs: [URL] = []
         jpegURLs.reserveCapacity(images.count)
         for image in images {
-            guard let jpegData = image.jpegData(compressionQuality: 0.92),
+            guard let pageImage = preparePageImage(image),
+                  let jpegData = pageImage.jpegData(compressionQuality: pageJpegQuality),
                   let jpegURL  = AttachmentStorage.write(jpegData, ext: "jpg") else {
                 return nil
             }
+            pageImages.append(pageImage)
             jpegURLs.append(jpegURL)
         }
 
-        // Pass 2 — render every image into a single PDF document.
-        // Each `UIGraphicsBeginPDFPageWithInfo` opens a new page
-        // sized to that image's pixel dimensions; we don't try to
-        // fit to A4 / letter since the downstream PDF viewer
-        // (PDFKitView) scales to the available width regardless,
-        // and a 1:1 page size keeps the embedded image lossless.
+        // Pass 2 — render every image into a PDF. Some platform
+        // encoders already produce compact PDFs, so when compression
+        // is enabled we keep the smaller of the optimized and raw
+        // artifacts instead of blindly returning the re-encoded copy.
+        // If PDF rendering fails, we degrade to a JPEG-only result.
+        let pdfURL: URL?
+        if compressedPdfEnabled {
+            let compressed = CompressedImagePdfWriter.writeToAttachment(images: pageImages)
+            let raw = writeRawImagePdf(pageImages)
+            pdfURL = chooseSmallerPDF(compressed: compressed, raw: raw)
+        } else {
+            pdfURL = writeRawImagePdf(pageImages)
+        }
+
+        return Result(
+            pdfURL:     pdfURL,
+            previewURL: jpegURLs[0],
+            pageURLs:   jpegURLs
+        )
+    }
+
+    private static func preparePageImage(_ image: UIImage) -> UIImage? {
+        let sourceSize = image.size
+        guard sourceSize.width > 0, sourceSize.height > 0 else { return nil }
+
+        let longest = max(sourceSize.width, sourceSize.height)
+        let scale = longest > pageImageMaxLongEdge ? pageImageMaxLongEdge / longest : 1
+        let targetSize = CGSize(
+            width:  max(1, (sourceSize.width  * scale).rounded()),
+            height: max(1, (sourceSize.height * scale).rounded())
+        )
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+        return renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: targetSize))
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+    }
+
+    private static func writeRawImagePdf(_ images: [UIImage]) -> URL? {
+        guard !images.isEmpty else { return nil }
+
         let pdfData = NSMutableData()
         UIGraphicsBeginPDFContextToData(pdfData, .zero, nil)
         for image in images {
@@ -79,12 +132,26 @@ enum ImportArtifacts {
         }
         UIGraphicsEndPDFContext()
 
-        let pdfURL = AttachmentStorage.write(pdfData as Data, ext: "pdf")
+        return AttachmentStorage.write(pdfData as Data, ext: "pdf")
+    }
 
-        return Result(
-            pdfURL:     pdfURL,
-            previewURL: jpegURLs[0],
-            pageURLs:   jpegURLs
-        )
+    private static func chooseSmallerPDF(compressed: URL?, raw: URL?) -> URL? {
+        guard let compressed else { return raw }
+        guard let raw else { return compressed }
+
+        if let compressedSize = fileSize(compressed),
+           let rawSize = fileSize(raw),
+           rawSize < compressedSize {
+            try? FileManager.default.removeItem(at: compressed)
+            return raw
+        }
+
+        try? FileManager.default.removeItem(at: raw)
+        return compressed
+    }
+
+    private static func fileSize(_ url: URL) -> UInt64? {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes?[.size] as? NSNumber)?.uint64Value
     }
 }

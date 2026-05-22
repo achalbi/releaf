@@ -5,26 +5,17 @@
  * [SyncRepository.sync]. Mirror of Releaf's `SyncWorker.kt`, scoped
  * to QuickInk's three entity kinds via [QuickInkSyncDataSource].
  *
- * Drive-toggle gate (per QUICKINK_PROPOSAL.md Phase 4 Q3): the
- * scheduler always registers the periodic job — whether to actually
- * sync is decided here, on each pass, by reading
- * `SettingsPreferences.driveBackupEnabled`. When the user has the
- * Drive backup toggle off, the worker returns [Result.success] with
- * no Drive interaction. This way:
- *   - Toggling the switch in Settings doesn't need to talk to
- *     WorkManager (no race with cancel/reschedule)
- *   - The user can flip it back on and the next 15-min tick picks
- *     up where it left off, no re-registration needed
- *   - Tests can isolate the worker from preferences trivially
+ * Drive-toggle gate: whether to actually sync is decided here, on
+ * each pass, by reading `SettingsPreferences.driveBackupEnabled`.
+ * When the user has the Drive backup toggle off, the worker returns
+ * [Result.success] with no Drive interaction.
  *
  * Not signed in: returns [Result.success] with no-op (also defended
  * by the lifecycle observer in [QuickInkApp.observeAuthForSyncLifecycle]).
  *
- * Access-token freshness: we don't try to refresh here. If the
- * stored token is past expiry, return [Result.retry] — the
- * WorkManager backoff comes back later, by which time the UI (or a
- * future background refresher) should have rotated it. Same posture
- * as Releaf's SyncWorker.
+ * Access-token freshness: try the stored token first. If Drive
+ * returns 401/403, attempt a background-safe silent refresh and
+ * retry before surfacing AUTH_REJECTED.
  *
  * Partial pass (`failed > 0`): return [Result.retry] so WorkManager
  * schedules an exponential backoff to retry the remaining rows. The
@@ -121,7 +112,8 @@ internal suspend fun logDriveTokenInfo(accessToken: String) {
             Log.w(tag, "tokeninfo: drive.file is NOT in granted scopes (got=$scopes). " +
                 "User didn't tick the Drive checkbox at consent, OR the OAuth " +
                 "consent screen doesn't list drive.file as an authorized scope. " +
-                "Sign out, revoke at myaccount.google.com/permissions, sign in fresh.")
+                "Use Settings → Reconnect; if that keeps failing, revoke at " +
+                "myaccount.google.com/permissions and sign in fresh.")
         }
     }
 }
@@ -161,45 +153,34 @@ class QuickInkSyncWorker(
         }
         Log.i(TAG, "gate-2 (drive-backup): on")
 
-        // ---- Pre-flight token refresh ----
-        // Closes the "user keeps app open past 55 min, sync 401s,
-        // AUTH_REJECTED banner shows" gap. Refresh fires only when
-        // the token is genuinely about to expire AND a foreground
-        // Activity is available — see
-        // [QuickInkApp.ensureFreshSessionForSyncIfPossible] for the
-        // full predicate. Background runs (no Activity) skip the
-        // refresh entirely so we don't surface the GMS "Request
-        // cancelled by quickink" toast; the existing 401 → AUTH_-
-        // REJECTED banner path takes over for them.
-        app.ensureFreshSessionForSyncIfPossible()
-
-        // Re-read auth state — the pre-flight may have rotated the
-        // session under us. Skip cleanly if the user signed out
-        // during the refresh attempt.
-        val authStateAfterRefresh = app.authStore.state.value
-        if (authStateAfterRefresh !is AuthState.SignedIn) {
-            Log.i(TAG, "post-refresh: signed out, skipping")
-            return Result.success()
+        val appInitiated = inputData.getBoolean(INPUT_APP_INITIATED, false)
+        if (appInitiated) {
+            val dirty = app.countDirtyRowsForSync(initialAuthState.session.userId)
+            if (dirty <= 0) {
+                Log.i(TAG, "gate-3 (dirty-records): none — skipping app-initiated sync")
+                writeLocalDirtyCount(app, 0)
+                return Result.success()
+            }
+            Log.i(TAG, "gate-3 (dirty-records): ok ($dirty dirty rows)")
         }
-        val session = authStateAfterRefresh.session
 
-        // (Previously: a `gate-3` here returned Result.retry when
+        val session = initialAuthState.session
+
+        // (Previously: a token-freshness gate here returned Result.retry when
         // `session.expiresAt` was past now. That was the source of
         // the "Sync now silently does nothing" bug — the local TTL
         // stamp is conservative (55min vs Google's ~60min) and the
-        // worker has no Activity context to refresh the token in
-        // the background. Better posture: try the sync anyway and
-        // let the actual Drive 401 be the source of truth — the
-        // catch block below signs the user out so QuickInkRoot's
-        // ReSignInGate prompts a fresh consent + token. No more
-        // infinite-retry-loop on stale TTL stamps.)
+        // UI-bound refresh path can trigger Android's "Request
+        // cancelled by QuickInk" toast. Better posture: try the sync
+        // anyway and let the actual Drive 401 be the source of truth;
+        // the catch block below tries a background-safe silent refresh
+        // before showing AUTH_REJECTED.)
         if (!session.expiresAt.isAfter(Instant.now())) {
-            Log.i(TAG, "gate-3 (token-fresh): local TTL stamp is stale " +
+            Log.i(TAG, "token-fresh: local TTL stamp is stale " +
                 "(expiresAt=${session.expiresAt}) — proceeding anyway, " +
-                "Drive will reject if the wire token is also dead and " +
-                "the catch block will trigger sign-out.")
+                "Drive will reject if the wire token is also dead.")
         } else {
-            Log.i(TAG, "gate-3 (token-fresh): ok (expiresAt=${session.expiresAt})")
+            Log.i(TAG, "token-fresh: ok (expiresAt=${session.expiresAt})")
         }
 
         // PR #3c (per Releaf's pattern): construct fresh per work
@@ -402,9 +383,8 @@ class QuickInkSyncWorker(
                     logLine = "Drive 401 → silent token refresh succeeded → retrying.",
                 )
                 // Result.retry() lets WorkManager re-run the worker
-                // with the standard backoff. The pre-flight refresh
-                // gate at the top will be a no-op (token is fresh
-                // again), and the retry runs against the new token.
+                // with the standard backoff. The retry reads the
+                // session again and runs against the new token.
                 Result.retry()
             } else {
                 // Silent refresh wasn't possible (consent revoked,
@@ -418,13 +398,13 @@ class QuickInkSyncWorker(
                 // Conservative posture: log loudly, mark the pass
                 // as permanently-failed (no retry — repeating won't
                 // help if the auth is actually dead), and let the
-                // user manually re-authenticate via Settings →
-                // Account if they notice "Last synced" not updating.
+                // user manually reconnect via Settings if they notice
+                // "Last synced" not updating.
                 // The pending-count surfaces the issue without
                 // destroying their session.
                 Log.w(TAG, "sync: result=FAILURE (Drive auth rejected — 401/403, " +
-                    "silent refresh also failed). User can manually sign out + " +
-                    "back in via Settings if this persists.")
+                    "silent refresh also failed). User can reconnect via Settings " +
+                    "if this persists.")
                 writeSyncProgress(
                     phase = SYNC_PROGRESS_PHASE_DONE,
                     label = "Backup stopped: Drive needs re-authentication.",
@@ -450,16 +430,12 @@ class QuickInkSyncWorker(
         } catch (e: CancellationException) {
             // Cancellation = caller asked us to stop, OR the OS tore
             // the worker down (BACKGROUND_RESTRICTION, PREEMPT,
-            // TIMEOUT, CONSTRAINT_CONNECTIVITY dropping, etc.). The
-            // app cancels its own ONESHOT_WORK on background, so most
-            // cancellations land here from there.
+            // TIMEOUT, CONSTRAINT_CONNECTIVITY dropping, etc.).
             //
             // Return Result.failure() (not retry) so WorkManager
-            // doesn't auto-reschedule with backoff — the next time
-            // the user opens the app, the foreground pending-push
-            // tick fires immediately, sees the still-dirty rows, and
-            // re-kicks `requestImmediate`. This breaks the prior
-            // cancel/retry loop on ROMs that kill backgrounded work.
+            // doesn't auto-reschedule with backoff. Manual Sync now
+            // can be tapped immediately, and the once-per-day
+            // app-initiated path will pick up dirty rows when due.
             //
             // Still log at INFO (not ERROR) and skip writing the
             // UNKNOWN error code — cancellation isn't a sync fault.
@@ -634,6 +610,9 @@ class QuickInkSyncWorker(
          * is failing — pre-fix, the entire flow returned silently.
          */
         private const val TAG = "QuickInkSync"
+
+        /** True when this run was enqueued by app policy, not a user tap. */
+        const val INPUT_APP_INITIATED = "quickink.app_initiated_sync"
 
         const val SYNC_PROGRESS_PHASE_KEY   = "phase"
         const val SYNC_PROGRESS_LABEL_KEY   = "label"

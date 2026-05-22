@@ -363,6 +363,14 @@ private struct MainShell: View {
     /// rendered as a sibling of the NavigationStack below.
     @State private var captureMenuOpen = false
 
+    /// Footer Photo ray presents the platform camera picker directly
+    /// and feeds the result into QuickInk's normal capture pipeline.
+    /// Video routes through `showQuickCapture` so the AVFoundation
+    /// recorder can control capture quality.
+    @State private var systemCameraMode: SystemCameraCaptureMode? = nil
+    @State private var systemCameraHandoffActive: Bool = false
+    @State private var systemCameraHandoffMode: SystemCameraCaptureMode? = nil
+
     /// Tab-style switch between top-level destinations (Library,
     /// Search, Settings). Replaces the nav stack with a single entry,
     /// so back from any tab returns to Home — matches the standard
@@ -474,7 +482,13 @@ private struct MainShell: View {
             case .recognizing, .complete, .failed:
                 ScanCaptureSurface(controller: controller, userId: userId)
             case .idle:
-                VStack(spacing: 0) {
+                if systemCameraHandoffActive {
+                    ScanCaptureHandoffSurface(
+                        eyebrow: systemCameraHandoffMode == .video ? "VIDEO" : "PHOTO",
+                        title: systemCameraHandoffMode == .video ? "Saving video" : "Saving photo"
+                    )
+                } else {
+                    VStack(spacing: 0) {
                     // Global status strip — present on every screen.
                     // Doubles as the app's clock + date strip now
                     // that the system status bar is hidden.
@@ -525,14 +539,9 @@ private struct MainShell: View {
                             pendingInitialMode = .document
                             showQuickCapture = true
                         },
-                        // Video routes to the dedicated
-                        // [VideoCaptureSurface] — tap-to-start/tap-to-
-                        // stop recording, voice-note extraction, filter
-                        // post-process baked into the saved .mov.
-                        // Replaced the old shared-surface behavior
-                        // (Photo and Video both opened PhotoCaptureSurface
-                        // with a dual tap/hold gesture) once the
-                        // Sundial menu gave each verb its own ray.
+                        // Photo keeps using the native camera picker.
+                        // Video uses QuickInk's AVFoundation recorder
+                        // so quality selection is under app control.
                         onSelectVideo: {
                             withAnimation(.interpolatingSpring(stiffness: 200, damping: 18)) {
                                 captureMenuOpen = false
@@ -544,8 +553,7 @@ private struct MainShell: View {
                             withAnimation(.interpolatingSpring(stiffness: 200, damping: 18)) {
                                 captureMenuOpen = false
                             }
-                            pendingInitialMode = .photo
-                            showQuickCapture = true
+                            systemCameraMode = .photo
                         }
                     )
                 }
@@ -574,7 +582,8 @@ private struct MainShell: View {
                         .zIndex(1)
                     }
                 }
-                }   // closes VStack opened at the top of `case .idle:`
+                    }   // closes VStack opened at the top of `case .idle:`
+                }
             }
         }
         .task(id: userId) {
@@ -679,6 +688,49 @@ private struct MainShell: View {
                     pendingInitialMode = nil
                 }
             )
+        }
+        .fullScreenCover(item: $systemCameraMode) { mode in
+            SystemCameraCapturePicker(
+                mode: mode,
+                onPhotoCaptured: { image in
+                    systemCameraHandoffActive = true
+                    systemCameraHandoffMode = .photo
+                    systemCameraMode = nil
+                    Task { @MainActor in
+                        let committed = await SystemCameraCaptureCommit.commitPhoto(
+                            image:      image,
+                            controller: controller
+                        )
+                        systemCameraHandoffActive = false
+                        systemCameraHandoffMode = nil
+                        if !committed {
+                            NSLog("[SystemCameraCapture] photo commit failed")
+                        }
+                    }
+                },
+                onVideoCaptured: { url in
+                    systemCameraHandoffActive = true
+                    systemCameraHandoffMode = .video
+                    systemCameraMode = nil
+                    Task { @MainActor in
+                        let committed = await SystemCameraCaptureCommit.commitVideo(
+                            videoURL:   url,
+                            controller: controller
+                        )
+                        try? FileManager.default.removeItem(at: url)
+                        systemCameraHandoffActive = false
+                        systemCameraHandoffMode = nil
+                        if !committed {
+                            NSLog("[SystemCameraCapture] video commit failed")
+                        }
+                    }
+                },
+                onCancel: {
+                    systemCameraMode = nil
+                    systemCameraHandoffMode = nil
+                }
+            )
+            .ignoresSafeArea()
         }
         // Appearance overrides — `preferredColorScheme(nil)` lets
         // the OS decide; passing .light / .dark forces the override

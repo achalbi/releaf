@@ -155,7 +155,9 @@ struct ScanReviewScreen: View {
                     if !folders.isEmpty, !isFailed {
                         folderButtonsGrid
                     }
-                    if !isFailed {
+                    if !isFailed,
+                       controller.currentSource != "photo",
+                       controller.currentSource != "video" {
                         paperSizeChipRow
                     }
                     if !isFailed,

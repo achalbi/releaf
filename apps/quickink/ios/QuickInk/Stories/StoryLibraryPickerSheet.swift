@@ -142,8 +142,16 @@ struct StoryLibraryPickerSheet: View {
 
     private func metaLine(_ row: PickerRow) -> String {
         let date = monthDay(from: row.createdAt) ?? "—"
-        let kind = row.source == "import" ? "photo" : "scan"
+        let kind = storyPickerSourceLabel(row.source)
         return "\(kind) · \(date)"
+    }
+
+    private func storyPickerSourceLabel(_ source: String) -> String {
+        switch source {
+        case "import", "photo": return "photo"
+        case "video":           return "video"
+        default:                return "scan"
+        }
     }
 
     private var headerTitle: String {

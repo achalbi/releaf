@@ -3,8 +3,8 @@
  *
  * Bridge between the system photo picker (PickMultipleVisualMedia)
  * and `ScanFlowController`. Takes the URIs the user picked from the
- * gallery, copies each as a JPEG into AttachmentStorage, renders a
- * single multi-page PDF wrapping every page, and returns the
+ * gallery, writes each as a bounded JPEG into AttachmentStorage,
+ * renders a single multi-page PDF wrapping every page, and returns the
  * `DocumentScanResult` shape `controller.onScanComplete` already
  * expects (pdfUri / previewUri / pageUris).
  *
@@ -27,8 +27,9 @@
  *
  * Memory: each bitmap is decoded → drawn → recycled before the
  * next iteration, so picking 30 large photos doesn't pin 30 full-
- * res bitmaps in heap simultaneously. The PdfDocument accumulates
- * pages cheaply (it holds the page rendering as compressed JPEG).
+ * res bitmaps in heap simultaneously. The compressed PDF writer
+ * also encodes one downscaled JPEG-backed page at a time before
+ * assembling the final PDF bytes.
  *
  * Mirror of iOS `ImportArtifacts.swift`.
  */
@@ -38,14 +39,21 @@ package app.quickink.mobile.features.scan
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
+import android.media.ExifInterface
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import app.quickink.mobile.features.settings.SettingsPreferences
 import app.releaf.mobile.data.common.AttachmentStorage
 import app.releaf.mobile.data.common.Uuidv7
+import app.releaf.shared.scan.CompressedImagePdfWriter
 import app.releaf.shared.scan.DocumentScanResult
 import java.io.File
+import kotlin.math.roundToInt
 
 /**
  * URIs handed off from a system share intent (ACTION_SEND /
@@ -72,32 +80,181 @@ data class PendingShare(
     val isPdf: Boolean,
 )
 
-fun buildImportArtifacts(context: Context, sourceUris: List<Uri>): DocumentScanResult? {
-    if (sourceUris.isEmpty()) return null
-    val resolver = context.contentResolver
+private const val IMPORT_PAGE_MAX_LONG_EDGE_PX: Int = 1800
+private const val IMPORT_PAGE_JPEG_QUALITY: Int = 82
 
-    // Pass 1 — copy every picked photo into AttachmentStorage as a
-    // JPEG. We do this first (separately from PDF rendering) so the
-    // page-uris list is fully formed before we touch the PDF
-    // builder. If a single copy fails we abort the whole import
-    // rather than silently dropping pages, since a partial result
-    // would silently misorder a multi-page document.
+fun buildImportArtifacts(
+    context: Context,
+    sourceUris: List<Uri>,
+    compressedPdfEnabled: Boolean = SettingsPreferences(context).compressedPdfSavesEnabled,
+): DocumentScanResult? {
+    if (sourceUris.isEmpty()) return null
+
+    // Pass 1 — write every picked photo into AttachmentStorage as a
+    // bounded page JPEG. System camera / gallery images can arrive at
+    // full sensor resolution, so copying bytes directly can leave
+    // 10-25MB page artifacts in the capture row. Re-encoding here
+    // keeps preview, OCR input, sync, and share payloads within the
+    // same compact budget as the compressed PDF path.
     val jpegUris = sourceUris.map { src ->
-        AttachmentStorage.copyIntoStorage(context, src, "jpg") ?: return null
+        writeImportPageJpeg(context, src) ?: return null
     }
 
-    // Pass 2 — render each picked photo into a PdfDocument page.
-    // Each iteration: decode → drawBitmap → finishPage → recycle,
-    // so peak heap is one bitmap, not N. If decoding any page
-    // fails (corrupt image, unsupported format) we degrade to a
-    // PDF-less result rather than aborting — the JPEGs are still
-    // useful for OCR and library preview. The else-branch below is
-    // hit when the very first page fails to decode and we never
-    // open a PDF context at all.
-    val pdfUri: Uri? = try {
-        val doc = PdfDocument()
+    // Pass 2 — render the picked photos into a PDF. Some platform
+    // encoders already produce surprisingly compact PDFs, so when
+    // compression is enabled we keep the smaller of the optimized and
+    // raw artifacts instead of blindly returning the re-encoded copy.
+    // If PDF rendering fails, degrade to a JPEG-only result rather
+    // than aborting.
+    val pdfUri: Uri? =
+        if (compressedPdfEnabled) {
+            val compressed = CompressedImagePdfWriter.writeToAttachment(context, jpegUris)
+            val raw = buildRawImagePdf(context, jpegUris)
+            chooseSmallerPdfAttachment(compressed, raw)
+        } else {
+            buildRawImagePdf(context, jpegUris)
+        }
+
+    return DocumentScanResult(
+        pdfUri     = pdfUri,
+        previewUri = jpegUris.first(),
+        pageUris   = jpegUris,
+    )
+}
+
+private fun writeImportPageJpeg(context: Context, sourceUri: Uri): Uri? {
+    val bitmap = decodeImportPageBitmap(context, sourceUri, IMPORT_PAGE_MAX_LONG_EDGE_PX)
+        ?: return AttachmentStorage.copyIntoStorage(context, sourceUri, "jpg")
+
+    var dest: File? = null
+    return try {
+        val file = File(AttachmentStorage.directory(context), "${Uuidv7.generate()}.jpg")
+        dest = file
+        val wrote = file.outputStream().use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, IMPORT_PAGE_JPEG_QUALITY, out)
+        }
+        if (wrote) {
+            Uri.fromFile(file)
+        } else {
+            file.delete()
+            null
+        }
+    } catch (_: Exception) {
+        dest?.delete()
+        null
+    } finally {
+        bitmap.recycle()
+    }
+}
+
+private fun decodeImportPageBitmap(
+    context: Context,
+    sourceUri: Uri,
+    maxLongEdge: Int,
+): Bitmap? {
+    val resolver = context.contentResolver
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    resolver.openInputStream(sourceUri)?.use { input ->
+        BitmapFactory.decodeStream(input, null, bounds)
+    }
+
+    val srcW = bounds.outWidth
+    val srcH = bounds.outHeight
+    if (srcW <= 0 || srcH <= 0) return null
+
+    val decoded = resolver.openInputStream(sourceUri)?.use { input ->
+        BitmapFactory.decodeStream(
+            input,
+            null,
+            BitmapFactory.Options().apply {
+                inSampleSize = importPageSampleSize(srcW, srcH, maxLongEdge)
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            },
+        )
+    } ?: return null
+
+    val orientation = readExifOrientation(context, sourceUri)
+    val oriented = applyExifOrientation(decoded, orientation)
+    if (oriented !== decoded) decoded.recycle()
+
+    val opaque = makeOpaque(oriented)
+    if (opaque !== oriented) oriented.recycle()
+
+    val scaled = scaleToLongEdge(opaque, maxLongEdge)
+    if (scaled !== opaque) opaque.recycle()
+    return scaled
+}
+
+private fun importPageSampleSize(width: Int, height: Int, maxLongEdge: Int): Int {
+    var sampleSize = 1
+    val longest = maxOf(width, height)
+    while (longest / (sampleSize * 2) >= maxLongEdge) {
+        sampleSize *= 2
+    }
+    return sampleSize
+}
+
+private fun readExifOrientation(context: Context, sourceUri: Uri): Int =
+    runCatching {
+        context.contentResolver.openInputStream(sourceUri)?.use { input ->
+            ExifInterface(input).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL,
+            )
+        } ?: ExifInterface.ORIENTATION_NORMAL
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+
+private fun applyExifOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+    val matrix = Matrix()
+    when (orientation) {
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> {
+            matrix.setRotate(180f)
+            matrix.postScale(-1f, 1f)
+        }
+        ExifInterface.ORIENTATION_TRANSPOSE -> {
+            matrix.setRotate(90f)
+            matrix.postScale(-1f, 1f)
+        }
+        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
+        ExifInterface.ORIENTATION_TRANSVERSE -> {
+            matrix.setRotate(-90f)
+            matrix.postScale(-1f, 1f)
+        }
+        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(270f)
+        else -> return bitmap
+    }
+
+    return runCatching {
+        Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }.getOrElse { bitmap }
+}
+
+private fun makeOpaque(bitmap: Bitmap): Bitmap {
+    if (!bitmap.hasAlpha()) return bitmap
+    val opaque = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(opaque)
+    canvas.drawColor(Color.WHITE)
+    canvas.drawBitmap(bitmap, 0f, 0f, null)
+    return opaque
+}
+
+private fun scaleToLongEdge(bitmap: Bitmap, maxLongEdge: Int): Bitmap {
+    val longest = maxOf(bitmap.width, bitmap.height)
+    if (longest <= maxLongEdge) return bitmap
+    val scale = maxLongEdge.toFloat() / longest
+    val targetW = (bitmap.width * scale).roundToInt().coerceAtLeast(1)
+    val targetH = (bitmap.height * scale).roundToInt().coerceAtLeast(1)
+    return Bitmap.createScaledBitmap(bitmap, targetW, targetH, true)
+}
+
+private fun buildRawImagePdf(context: Context, sourceUris: List<Uri>): Uri? {
+    val resolver = context.contentResolver
+    val doc = PdfDocument()
+    return try {
         var pageNumber = 1
-        for ((index, src) in sourceUris.withIndex()) {
+        for (src in sourceUris) {
             val bitmap = resolver.openInputStream(src)?.use { input ->
                 BitmapFactory.decodeStream(input)
             } ?: continue
@@ -112,26 +269,39 @@ fun buildImportArtifacts(context: Context, sourceUris: List<Uri>): DocumentScanR
         }
 
         if (pageNumber == 1) {
-            // Every picked photo failed to decode — close the empty
-            // doc and return null PDF so the JPEG list is still
-            // surfaced to the user.
-            doc.close()
             null
         } else {
             val dest = File(AttachmentStorage.directory(context), "${Uuidv7.generate()}.pdf")
             dest.outputStream().use { out -> doc.writeTo(out) }
-            doc.close()
             Uri.fromFile(dest)
         }
     } catch (_: Exception) {
         null
+    } finally {
+        doc.close()
     }
+}
 
-    return DocumentScanResult(
-        pdfUri     = pdfUri,
-        previewUri = jpegUris.first(),
-        pageUris   = jpegUris,
-    )
+private fun chooseSmallerPdfAttachment(compressed: Uri?, raw: Uri?): Uri? {
+    if (compressed == null) return raw
+    if (raw == null) return compressed
+
+    val compressedSize = localFileSize(compressed)
+    val rawSize = localFileSize(raw)
+    val keepCompressed = compressedSize == null ||
+        rawSize == null ||
+        compressedSize <= rawSize
+
+    val discarded = if (keepCompressed) raw else compressed
+    AttachmentStorage.deleteIfLocal(discarded.toString())
+
+    return if (keepCompressed) compressed else raw
+}
+
+private fun localFileSize(uri: Uri): Long? {
+    if (uri.scheme != "file") return null
+    val path = uri.path ?: return null
+    return File(path).takeIf { it.exists() }?.length()
 }
 
 /**

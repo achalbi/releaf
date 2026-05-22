@@ -23,7 +23,7 @@
  *                       for `AVCaptureMovieFileOutput`. Tap shutter
  *                       to start recording, tap again to stop. 2:00
  *                       hard cap. Lands the same first-frame still
- *                       in the scan pipeline (`source="photo"` /
+     *                       in the scan pipeline (`source="video"` /
  *                       `paperSize=.custom`) with the recorded
  *                       audio extracted as a voice note attachment.
  *
@@ -180,4 +180,3 @@ public func classifyPaperSize(width: Int, height: Int) -> PaperSize {
     default:          return .custom
     }
 }
-

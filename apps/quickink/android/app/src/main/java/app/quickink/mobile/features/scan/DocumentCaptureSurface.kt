@@ -5,17 +5,16 @@
  * existing ML Kit `GmsDocumentScanning` flow verbatim. Owned by
  * [QuickCaptureScreen], which mounts this composable when
  * [CaptureMode.Document] is active and tears it down on a flip
- * to [CaptureMode.BusinessCard] (pill) or [CaptureMode.Photo]
- * (shutter-row Photo icon → `onSelectPhoto` callback).
+ * to [CaptureMode.BusinessCard] (pill), [CaptureMode.Photo]
+ * (shutter-row camera icon tap), or [CaptureMode.Video]
+ * (shutter-row camera icon long-press).
  *
  * Behavior is the same as the previous all-in-one QuickCaptureScreen
  * body: page-mode pill (Single/Multi-page) + tilted lined-
  * paper page mock + shutter that launches the system scanner +
  * Import button that opens the system photo picker. The shutter
- * row's left slot now hosts a Photo icon that fires
- * `onSelectPhoto` so the user can jump into the Photo capture
- * surface from inside the Document flow (a discoverability mirror
- * of the FAB long-press shortcut). The scanner result flows
+ * row's left slot now hosts a camera icon: tap fires
+ * `onSelectPhoto`, long-press fires `onSelectVideo`. The scanner result flows
  * through `ScanFlowController.onScanComplete` exactly as before —
  * no detector swap, no overlay, no in-app camera.
  *
@@ -42,6 +41,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,9 +82,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.quickink.mobile.features.settings.SettingsPreferences
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
@@ -121,11 +123,19 @@ internal fun DocumentCaptureSurface(
      * tests) keep compiling.
      */
     onSelectPhoto: () -> Unit = {},
+    /**
+     * Callback fired when the user long-presses that same camera
+     * icon. Starts the dedicated Video surface without changing
+     * the persisted document capture mode.
+     */
+    onSelectVideo: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
+    val context = LocalContext.current
     val view = LocalView.current
+    val preferences = remember { SettingsPreferences(context) }
 
     var pageMode by remember { mutableStateOf(ScanPageMode.Single) }
 
@@ -142,9 +152,9 @@ internal fun DocumentCaptureSurface(
         onError = { /* TODO surface error */ },
         pageLimit = if (pageMode == ScanPageMode.Single) 1 else null,
         galleryImportAllowed = false,
+        compressedPdfEnabled = preferences.compressedPdfSavesEnabled,
     )
 
-    val context = LocalContext.current
     val importScope = rememberCoroutineScope()
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(),
@@ -260,6 +270,10 @@ internal fun DocumentCaptureSurface(
                         view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                         onSelectPhoto()
                     },
+                    onLongClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        onSelectVideo()
+                    },
                 )
             }
 
@@ -370,13 +384,21 @@ private fun DocumentImportButton(onClick: () -> Unit) {
 }
 
 @Composable
-private fun PhotoModeButton(onClick: () -> Unit) {
+private fun PhotoModeButton(
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     Box(
         modifier = Modifier
             .size(48.dp)
             .clip(CircleShape)
             .background(Color.White.copy(alpha = 0.10f))
-            .clickable(onClick = onClick),
+            .pointerInput(onClick, onLongClick) {
+                detectTapGestures(
+                    onTap       = { onClick() },
+                    onLongPress = { onLongClick() },
+                )
+            },
         contentAlignment = Alignment.Center,
     ) {
         Icon(

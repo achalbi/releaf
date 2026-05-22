@@ -16,8 +16,9 @@
  *   - On Continue: if the user changed the text we call
  *     [VoiceNoteRepository.setTranscription] to persist the edit,
  *     then invoke `onContinue`.
- *   - Close in the header dismisses the whole scan back to home,
- *     matching the capture pane's behaviour.
+ *   - Close in the header deletes the just-recorded voice note,
+ *     then returns to the add-context recorder phase so the user
+ *     can re-record before review.
  */
 
 package app.quickink.mobile.features.scan
@@ -37,11 +38,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
@@ -60,7 +60,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
@@ -77,6 +80,9 @@ import kotlinx.coroutines.launch
 fun VoiceNoteTranscriptionPane(
     captureId: String,
     voiceNoteId: String,
+    showCancelButton: Boolean = true,
+    placeContinueBelowEditor: Boolean = false,
+    continueLabel: String = "Continue to review",
     onContinue: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -97,16 +103,21 @@ fun VoiceNoteTranscriptionPane(
     }
     val row by rowFlow.collectAsState(initial = null)
 
-    var editedText by remember(voiceNoteId) { mutableStateOf("") }
+    var editedValue by remember(voiceNoteId) { mutableStateOf(TextFieldValue("")) }
     var seeded by remember(voiceNoteId) { mutableStateOf(false) }
+    var userEdited by remember(voiceNoteId) { mutableStateOf(false) }
+    var canceling by remember(voiceNoteId) { mutableStateOf(false) }
 
     // Seed the editor once when the transcript lands so the user's
     // subsequent edits aren't clobbered by later observation ticks
     // (e.g. if a sync push echoes the same value back).
     LaunchedEffect(row?.transcription) {
         val text = row?.transcription
-        if (!seeded && !text.isNullOrEmpty()) {
-            editedText = text
+        if (!seeded && !text.isNullOrEmpty() && !userEdited) {
+            editedValue = TextFieldValue(
+                text      = text,
+                selection = TextRange(text.length),
+            )
             seeded = true
         }
     }
@@ -128,25 +139,35 @@ fun VoiceNoteTranscriptionPane(
                 .padding(
                     start  = QuickInkSpacing.s4,
                     end    = QuickInkSpacing.s4,
-                    top    = QuickInkSpacing.s4,
+                    top    = QuickInkSpacing.s6,
                     bottom = QuickInkSpacing.s2,
                 ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.8f))
-                    .clickable(onClick = onCancel),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector       = Icons.Filled.Close,
-                    contentDescription = "Close",
-                    tint              = colors.inkSoft,
-                    modifier          = Modifier.size(14.dp),
-                )
+            if (showCancelButton) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.8f))
+                        .clickable(enabled = !canceling) {
+                            canceling = true
+                            scope.launch {
+                                runCatching { repo.softDelete(voiceNoteId) }
+                                onCancel()
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector       = Icons.Filled.Close,
+                        contentDescription = "Close",
+                        tint              = colors.inkSoft,
+                        modifier          = Modifier.size(14.dp),
+                    )
+                }
+            } else {
+                Spacer(modifier = Modifier.size(50.dp))
             }
             Spacer(modifier = Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -197,18 +218,24 @@ fun VoiceNoteTranscriptionPane(
                     .border(1.dp, colors.border, editorShape)
                     .padding(horizontal = QuickInkSpacing.s3, vertical = QuickInkSpacing.s3),
             ) {
-                val scroll = rememberScrollState()
                 BasicTextField(
-                    value         = editedText,
-                    onValueChange = { editedText = it },
+                    value         = editedValue,
+                    onValueChange = {
+                        editedValue = it
+                        userEdited = true
+                    },
                     textStyle     = type.body.copy(color = colors.ink, fontSize = 14.sp),
                     cursorBrush   = SolidColor(colors.accent),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                    ),
+                    minLines = 8,
+                    maxLines = 14,
                     modifier      = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 160.dp, max = 320.dp)
-                        .verticalScroll(scroll),
+                        .heightIn(min = 160.dp, max = 320.dp),
                     decorationBox = { inner ->
-                        if (editedText.isEmpty()) {
+                        if (editedValue.text.isEmpty()) {
                             Text(
                                 text  = if (transcribing) "Listening for your words…"
                                         else "No transcript was generated. You can type notes here.",
@@ -220,56 +247,105 @@ fun VoiceNoteTranscriptionPane(
                     },
                 )
             }
-        }
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        // Bottom bar — single "Continue to review" CTA.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    start  = AppSpacing.s5,
-                    end    = AppSpacing.s5,
-                    bottom = AppSpacing.s5,
-                ),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(colors.accent)
-                    .clickable {
-                        val original = row?.transcription.orEmpty()
-                        val edited   = editedText
-                        if (edited != original) {
-                            scope.launch {
-                                runCatching {
-                                    repo.setTranscription(
-                                        id     = voiceNoteId,
-                                        text   = edited.ifBlank { null },
-                                        // Preserve whichever backend
-                                        // produced the original draft;
-                                        // fall back to "manual" for a
-                                        // pure user-typed transcript.
-                                        source = row?.transcriptionSource ?: "manual",
-                                    )
-                                }
-                                onContinue()
-                            }
-                        } else {
-                            onContinue()
-                        }
-                    }
-                    .padding(vertical = AppSpacing.s3),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text  = "Continue to review",
-                    style = type.body.copy(fontWeight = FontWeight.SemiBold),
-                    color = colors.textOnAccent,
+            if (placeContinueBelowEditor) {
+                Spacer(modifier = Modifier.size(QuickInkSpacing.s3))
+                ContinueReviewButton(
+                    label   = continueLabel,
+                    onClick = {
+                        persistTranscriptAndContinue(
+                            editedText  = editedValue.text,
+                            original    = row?.transcription.orEmpty(),
+                            voiceNoteId = voiceNoteId,
+                            source      = row?.transcriptionSource ?: "manual",
+                            repo        = repo,
+                            scope       = scope,
+                            onContinue  = onContinue,
+                        )
+                    },
                 )
             }
         }
+
+        if (!placeContinueBelowEditor) {
+            Spacer(modifier = Modifier.weight(1f))
+
+            // Bottom bar — single "Continue to review" CTA.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start  = AppSpacing.s5,
+                        end    = AppSpacing.s5,
+                        bottom = AppSpacing.s5,
+                    ),
+            ) {
+                ContinueReviewButton(
+                    label   = continueLabel,
+                    onClick = {
+                        persistTranscriptAndContinue(
+                            editedText  = editedValue.text,
+                            original    = row?.transcription.orEmpty(),
+                            voiceNoteId = voiceNoteId,
+                            source      = row?.transcriptionSource ?: "manual",
+                            repo        = repo,
+                            scope       = scope,
+                            onContinue  = onContinue,
+                        )
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContinueReviewButton(
+    label: String,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(999.dp))
+            .background(colors.accent)
+            .clickable(onClick = onClick)
+            .padding(vertical = AppSpacing.s3),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text  = label,
+            style = type.body.copy(fontWeight = FontWeight.SemiBold),
+            color = colors.textOnAccent,
+        )
+    }
+}
+
+private fun persistTranscriptAndContinue(
+    editedText: String,
+    original: String,
+    voiceNoteId: String,
+    source: String,
+    repo: VoiceNoteRepository,
+    scope: kotlinx.coroutines.CoroutineScope,
+    onContinue: () -> Unit,
+) {
+    if (editedText != original) {
+        scope.launch {
+            runCatching {
+                repo.setTranscription(
+                    id     = voiceNoteId,
+                    text   = editedText.ifBlank { null },
+                    // Preserve whichever backend produced the
+                    // original draft; fall back to "manual" for a
+                    // pure user-typed transcript.
+                    source = source,
+                )
+            }
+            onContinue()
+        }
+    } else {
+        onContinue()
     }
 }

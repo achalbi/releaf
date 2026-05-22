@@ -59,8 +59,8 @@ public final class CaptureRepository: @unchecked Sendable {
         pageCount: Int,
         /// Capture origin. `"scan"` (default) — went through
         /// VisionKit's document scanner. `"import"` — picked from
-        /// the system photo picker. Drives the "Import" pill in
-        /// the Library cards.
+        /// the system photo picker. `"photo"` / `"video"` —
+        /// captured from QuickInk's camera media surfaces.
         source: String = "scan",
         /// Page-size class. Drives the sustainability hero's per-page
         /// weight — `.card` scores +4 pts/page, `.a4` +2, `.small`
@@ -742,4 +742,3 @@ public final class CaptureRepository: @unchecked Sendable {
         }
     }
 }
-

@@ -159,12 +159,19 @@ private fun PickerRow(row: CaptureEntity, onClick: () -> Unit) {
                 maxLines = 1,
             )
             Text(
-                text     = "${if (row.source == "import") "photo" else "scan"} · ${formatMonthDay(row.createdAt) ?: "—"}",
+                text     = "${storyPickerSourceLabel(row.source)} · ${formatMonthDay(row.createdAt) ?: "—"}",
                 color    = colors.inkSoft,
                 fontSize = 11.sp,
             )
         }
     }
+}
+
+private fun storyPickerSourceLabel(source: String): String = when (source) {
+    "import" -> "photo"
+    "photo"  -> "photo"
+    "video"  -> "video"
+    else     -> "scan"
 }
 
 @Composable

@@ -5,18 +5,17 @@
  * existing VisionKit `VNDocumentCameraViewController` flow
  * verbatim. Owned by `QuickCaptureScreen`, which mounts this
  * view when `CaptureMode.document` is active and tears it
- * down on a flip to `.businessCard` (pill) or `.photo`
- * (shutter-row Photo icon → `onSelectPhoto` callback).
+ * down on a flip to `.businessCard` (pill), `.photo`
+ * (shutter-row camera icon tap), or `.video` (shutter-row
+ * camera icon long-press).
  *
  * Behavior is the same as the previous all-in-one
  * QuickCaptureScreen body: page-mode pill (Single /
  * Multi-page) + tilted lined-paper page mock + shutter
  * that presents the system scanner + Import button that opens
  * PhotosPicker. The shutter row's left slot now hosts a
- * Photo icon that fires `onSelectPhoto` so the user can jump
- * into the Photo capture surface from inside the Document
- * flow (a discoverability mirror of the FAB long-press
- * shortcut). The scanner result flows through
+ * camera icon: tap fires `onSelectPhoto`, long-press fires
+ * `onSelectVideo`. The scanner result flows through
  * `ScanFlowController.onScanComplete` exactly as before — no
  * detector swap, no overlay, no in-app camera.
  *
@@ -53,6 +52,9 @@ struct DocumentCaptureSurface: View {
     /// in `PhotoCaptureSurface`. Defaults to a no-op so callers
     /// that don't host a coordinator (previews) keep compiling.
     var onSelectPhoto: () -> Void = {}
+    /// Long-press counterpart to `onSelectPhoto`; starts the
+    /// dedicated Video surface from the same camera icon.
+    var onSelectVideo: () -> Void = {}
 
     @State private var pageMode: ScanPageMode = .single
     @State private var sweepOffset: CGFloat = -50
@@ -86,6 +88,7 @@ struct DocumentCaptureSurface: View {
                 },
                 onCancel: { showSystemScanner = false },
                 pageLimit: pageMode == .single ? 1 : nil,
+                compressedPdfEnabled: SettingsState.compressedPdfSavesDefault,
             )
             .ignoresSafeArea()
         }
@@ -173,19 +176,31 @@ struct DocumentCaptureSurface: View {
 
     @ViewBuilder
     private var photoModeButton: some View {
-        Button(action: {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            onSelectPhoto()
-        }) {
-            Image(systemName: "camera")
-                .font(.system(size: 22, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.85))
-                .frame(width: 48, height: 48)
-                .background(Color.white.opacity(0.10))
-                .clipShape(Circle())
-        }
-        .buttonStyle(.plain)
+        Image(systemName: "camera")
+            .font(.system(size: 22, weight: .medium))
+            .foregroundStyle(Color.white.opacity(0.85))
+            .frame(width: 48, height: 48)
+            .background(Color.white.opacity(0.10))
+            .clipShape(Circle())
+            .contentShape(Circle())
+            .gesture(
+                LongPressGesture(minimumDuration: 0.45)
+                    .exclusively(before: TapGesture())
+                    .onEnded { value in
+                        switch value {
+                        case .first(true):
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            onSelectVideo()
+                        case .second:
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            onSelectPhoto()
+                        default:
+                            break
+                        }
+                    }
+            )
         .accessibilityLabel("Take a photo")
+        .accessibilityHint("Long press to record a video")
     }
 
     @ViewBuilder

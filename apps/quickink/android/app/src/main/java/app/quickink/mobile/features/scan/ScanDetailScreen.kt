@@ -123,6 +123,7 @@ import app.quickink.mobile.features.workspace.PersonEditorDialog
 import app.quickink.mobile.features.workspace.TagPickerSheet
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.sync.DeviceIdentity
+import app.releaf.shared.scan.CompressedImagePdfWriter
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
@@ -212,6 +213,10 @@ fun ScanDetailScreen(
     // On-disk size of the capture's PDF in bytes, loaded lazily so
     // the Details row can render "2.4 MB" etc. Null until resolved.
     var pdfFileSize by remember(captureId) { mutableStateOf<Long?>(null) }
+    // Whether the local PDF is one of QuickInk's compressed
+    // JPEG-backed PDFs or a raw scanner/import PDF. Null until the
+    // local file marker has been read.
+    var pdfStorageKind by remember(captureId) { mutableStateOf<PdfStorageKind?>(null) }
     // Extracted contact for the in-flight Business Card review
     // sheet. Set on tap of "Add to contact"; the sheet observes it
     // through the non-null check, and clearing it dismisses.
@@ -387,13 +392,15 @@ fun ScanDetailScreen(
         }
     }
 
-    // Resolve the on-disk PDF size after the capture row lands.
-    // Best-effort — leaves `pdfFileSize = null` if the file isn't
-    // readable, in which case the Details row falls back to "—".
+    // Resolve local PDF metadata after the capture row lands.
+    // Best-effort — leaves values null if the file isn't readable.
     LaunchedEffect(capture?.pdfUri) {
-        pdfFileSize = withContext(Dispatchers.IO) {
-            resolvePdfFileSize(capture?.pdfUri)
+        val pdfUri = capture?.pdfUri
+        val metadata = withContext(Dispatchers.IO) {
+            resolvePdfFileSize(pdfUri) to resolvePdfStorageKind(pdfUri)
         }
+        pdfFileSize = metadata.first
+        pdfStorageKind = metadata.second
     }
 
     // Rasterise PDF pages for the thumbnails strip once the capture
@@ -564,16 +571,12 @@ fun ScanDetailScreen(
                     },
                     onMoreClick         = { moreMenuExpanded = true },
                     moreMenuContent     = {
-                        // Video subtype = a hold-to-record photo capture
-                        // that produced a `.mp4`. Same rule as HomeScreen
-                        // / fileTypeLabel — source == "photo" + a video
-                        // URI (local or Drive). The dropdown swaps the
+                        // Video subtype = a capture whose source is
+                        // "video" or a legacy "photo" row with a
+                        // video URI. The dropdown swaps the
                         // image/PDF share pair for a single "Share video"
                         // when this trips.
-                        val isVideo = current.source == "photo" && (
-                            !current.videoUri.isNullOrBlank() ||
-                                !current.videoDriveFileId.isNullOrBlank()
-                        )
+                        val isVideo = isVideoCapture(current)
                         ScanActionsDropdown(
                             expanded              = moreMenuExpanded,
                             onDismiss             = { moreMenuExpanded = false },
@@ -714,6 +717,7 @@ fun ScanDetailScreen(
                     capture                = current,
                     primaryTagName         = primaryTagName,
                     pdfFileSize            = pdfFileSize,
+                    pdfStorageKind         = pdfStorageKind,
                     onAddTag               = { showRetagSheet = true },
                     attachedLocationNames  = attachedLocationNames,
                     onAddLocation          = { showLocationPicker = true },
@@ -736,6 +740,7 @@ fun ScanDetailScreen(
                         notesDraft = current.notes.orEmpty()
                         showNotesEditor = true
                     },
+                    onShare  = { shareCaptureNotes(context, current.notes, current.title) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = QuickInkSpacing.s5),
@@ -1633,6 +1638,38 @@ private fun shareVideo(
     }
 }
 
+private fun shareCaptureNotes(
+    context: android.content.Context,
+    notes: String?,
+    title: String?,
+) {
+    val text = notes?.trim().orEmpty()
+    if (text.isEmpty()) {
+        android.widget.Toast.makeText(
+            context,
+            "Add notes before sharing.",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+        return
+    }
+
+    val subject = title?.trim()?.takeIf { it.isNotEmpty() } ?: "QuickInk notes"
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, subject)
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    try {
+        context.startActivity(Intent.createChooser(intent, "Share notes"))
+    } catch (_: Exception) {
+        android.widget.Toast.makeText(
+            context,
+            "Couldn't open the share sheet for these notes",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+    }
+}
+
 private fun exportAsPdf(
     context: android.content.Context,
     pdfUri: String?,
@@ -2240,6 +2277,7 @@ private fun VideoPendingCard(modifier: Modifier = Modifier) {
 private fun NotesCard(
     notes: String?,
     onTap: () -> Unit,
+    onShare: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalQuickInkColors.current
@@ -2276,6 +2314,29 @@ private fun NotesCard(
                 color = colors.ink,
             )
             Spacer(Modifier.weight(1f))
+            if (hasNotes && onShare != null) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(QuickInkRadius.pill))
+                        .background(colors.accentSoft)
+                        .clickable(onClick = onShare)
+                        .padding(horizontal = QuickInkSpacing.s2, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1),
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Share,
+                        contentDescription = null,
+                        tint = colors.accent,
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Text(
+                        text = "Share",
+                        style = type.caption,
+                        color = colors.accent,
+                    )
+                }
+            }
         }
 
         Column(
@@ -2306,6 +2367,7 @@ private fun DetailsCard(
     capture: CaptureEntity,
     primaryTagName: String?,
     pdfFileSize: Long?,
+    pdfStorageKind: PdfStorageKind?,
     onAddTag: () -> Unit,
     attachedLocationNames: List<String>,
     onAddLocation: () -> Unit,
@@ -2353,7 +2415,7 @@ private fun DetailsCard(
             modifier            = Modifier.padding(QuickInkSpacing.s3),
             verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
         ) {
-            DetailRow(label = "File type", value = fileTypeLabel(capture))
+            DetailRow(label = "File type", value = fileTypeLabel(capture, pdfStorageKind))
             DetailRow(
                 label = "Size",
                 value = pdfFileSize?.let { android.text.format.Formatter.formatFileSize(context, it) } ?: "—",
@@ -2788,30 +2850,41 @@ private fun LoadingSkeleton(modifier: Modifier = Modifier) {
 }
 
 /**
- * File-type label for the [DetailsCard] row. Every capture
- * produces a PDF via `buildImportArtifacts` regardless of how
- * the bytes got in, so just gating on `pdfUri` would always
- * read "PDF document" — even for in-app photos / videos /
- * gallery imports. Mirror HomeScreen's `sourceChipInfo` logic
- * by branching on `source` (+ the presence of a video URI) so
- * the label reads "Photo", "Video", "Image" or "PDF document"
- * to match how the row is presented elsewhere in the app.
+ * File-type label for the [DetailsCard] row. For local PDFs,
+ * surface whether the saved artifact is QuickInk's compressed PDF
+ * or a raw scanner/import PDF. Video captures keep their
+ * user-facing "Video" label because the playable movie is the
+ * primary artifact.
  */
-private fun fileTypeLabel(capture: CaptureEntity): String {
+private enum class PdfStorageKind {
+    Raw,
+    Compressed,
+}
+
+private const val LEGACY_COMPRESSED_PDF_SIGNATURE =
+    "<< /Type /Catalog /Pages 2 0 R >>"
+
+private fun fileTypeLabel(capture: CaptureEntity, pdfStorageKind: PdfStorageKind?): String {
     val isPhotoSource  = capture.source == "photo"
     val isImportSource = capture.source == "import"
-    val isVideo        = isPhotoSource && (
-        !capture.videoUri.isNullOrBlank() ||
-            !capture.videoDriveFileId.isNullOrBlank()
-    )
+    val pdfPresent = capture.pdfUri.isNotBlank() && localFileExists(capture.pdfUri)
     return when {
-        isVideo                                                                    -> "Video"
+        isVideoCapture(capture)                                                     -> "Video"
         isPhotoSource                                                              -> "Photo"
+        pdfPresent && pdfStorageKind == PdfStorageKind.Compressed                  -> "Compressed PDF document"
+        pdfPresent && pdfStorageKind == PdfStorageKind.Raw                         -> "PDF document"
+        pdfPresent                                                                 -> "PDF document"
         isImportSource                                                             -> "Image"
-        capture.pdfUri.isNotBlank() && localFileExists(capture.pdfUri)             -> "PDF document"
         !capture.previewUri.isNullOrBlank() && localFileExists(capture.previewUri) -> "Image"
         else                                                                       -> "Document"
     }
+}
+
+private fun isVideoCapture(capture: CaptureEntity): Boolean {
+    val hasVideoArtifact = !capture.videoUri.isNullOrBlank() ||
+        !capture.videoDriveFileId.isNullOrBlank()
+    return capture.source == "video" ||
+        (capture.source == "photo" && hasVideoArtifact)
 }
 
 /**
@@ -2821,14 +2894,39 @@ private fun fileTypeLabel(capture: CaptureEntity): String {
  * suspend block.
  */
 private fun resolvePdfFileSize(rawUri: String?): Long? {
+    val file = localFileForUri(rawUri) ?: return null
+    return runCatching { file.length().takeIf { it > 0 } }.getOrNull()
+}
+
+private fun resolvePdfStorageKind(rawUri: String?): PdfStorageKind? {
+    val file = localFileForUri(rawUri)?.takeIf { it.exists() } ?: return null
+    return runCatching {
+        val headerSize = minOf(file.length(), 4096L).toInt()
+        if (headerSize <= 0) return@runCatching null
+        val header = ByteArray(headerSize)
+        val read = file.inputStream().use { it.read(header) }
+        if (read <= 0) return@runCatching null
+        val text = header.copyOf(read).toString(Charsets.US_ASCII)
+        val isMarkedCompressed = CompressedImagePdfWriter.PDF_MARKER in text
+        val isLegacyCompressed = LEGACY_COMPRESSED_PDF_SIGNATURE in text &&
+            "/DCTDecode" in text &&
+            "/Im1" in text
+        if (isMarkedCompressed || isLegacyCompressed) {
+            PdfStorageKind.Compressed
+        } else {
+            PdfStorageKind.Raw
+        }
+    }.getOrNull()
+}
+
+private fun localFileForUri(rawUri: String?): File? {
     if (rawUri.isNullOrBlank()) return null
     val parsed = runCatching { Uri.parse(rawUri) }.getOrNull() ?: return null
-    val file = when (parsed.scheme) {
+    return when (parsed.scheme) {
         "file" -> parsed.path?.let(::File)
         null   -> File(rawUri)
         else   -> null
-    } ?: return null
-    return runCatching { file.length().takeIf { it > 0 } }.getOrNull()
+    }
 }
 
 /**

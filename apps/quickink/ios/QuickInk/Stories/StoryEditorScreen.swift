@@ -150,7 +150,8 @@ struct StoryEditorScreen: View {
                     let precedingId = addSheetPrecedingId
                     showingAddSheet = false
                     onRequestCapture(mode) { summary in
-                        let kind: StoryItem.Kind = summary.source == "photo" ? .photo : .document
+                        let kind: StoryItem.Kind =
+                            (summary.source == "photo" || summary.source == "video") ? .photo : .document
                         Task {
                             _ = await vm.insertCaptureItem(
                                 after:     precedingId,

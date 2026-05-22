@@ -7,7 +7,7 @@
  * flight capture so the transcript can feed the AI-suggested tags
  * strip on the review screen (alongside the first-page OCR text).
  *
- * Layout: slim header with Close / Skip, the existing
+ * Layout: slim header with Skip, the existing
  * [VoicePageRecorder] body, and a bottom bar that toggles between:
  *   - Idle: single "Continue to review" CTA that skips the voice
  *     note entirely. Skip lives in the header for the same effect.
@@ -39,11 +39,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -78,7 +74,7 @@ fun VoiceNoteCapturePane(
     captureId: String,
     userId: String,
     onContinue: (voiceNoteId: String?) -> Unit,
-    onCancel: () -> Unit,
+    autoSkipExistingNote: Boolean = true,
 ) {
     val colors  = LocalQuickInkColors.current
     val type    = LocalQuickInkTypography.current
@@ -96,22 +92,21 @@ fun VoiceNoteCapturePane(
 
     // Auto-skip guard. On first mount we query the repository
     // for any existing voice note attached to this captureId; if
-    // one is already there (e.g. Photo-mode video capture pre-
-    // attached the extracted audio), advance straight to the
-    // review screen so the user isn't prompted to record over
-    // audio we already have. `checkComplete` flips to true once
-    // the query lands; while it's false we render nothing (just
-    // the warm bg) so the recorder UI doesn't flash for a frame.
+    // one is already there (e.g. video capture pre-attached the
+    // extracted audio), advance to the transcript-review pane
+    // with that note's id so the user can review/edit it before
+    // metadata review. `checkComplete` flips to true once the
+    // query lands; while it's false we render nothing (just the
+    // warm bg) so the recorder UI doesn't flash for a frame.
     var checkComplete by remember { mutableStateOf(false) }
-    LaunchedEffect(captureId) {
-        val exists = runCatching { repo.anyForCapture(captureId) }.getOrNull() ?: false
-        if (exists) {
-            // Pass null — the parent only uses the voiceNoteId
-            // to decide whether to mount the transcript-edit
-            // pane. For auto-skip the pre-attached note's
-            // transcript lives on the scan-detail screen, not
-            // on the transient pane.
-            onContinue(null)
+    LaunchedEffect(captureId, autoSkipExistingNote) {
+        val existing = if (autoSkipExistingNote) {
+            runCatching { repo.firstForCapture(captureId) }.getOrNull()
+        } else {
+            null
+        }
+        if (existing != null) {
+            onContinue(existing.id)
         } else {
             checkComplete = true
         }
@@ -147,26 +142,12 @@ fun VoiceNoteCapturePane(
                 .padding(
                     start  = QuickInkSpacing.s4,
                     end    = QuickInkSpacing.s4,
-                    top    = QuickInkSpacing.s4,
+                    top    = QuickInkSpacing.s8,
                     bottom = QuickInkSpacing.s2,
                 ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.8f))
-                    .clickable(onClick = onCancel),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector       = Icons.Filled.Close,
-                    contentDescription = "Close",
-                    tint              = colors.inkSoft,
-                    modifier          = Modifier.size(14.dp),
-                )
-            }
+            Spacer(modifier = Modifier.size(50.dp))
             Spacer(modifier = Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
@@ -306,4 +287,3 @@ fun VoiceNoteCapturePane(
         }
     }
 }
-

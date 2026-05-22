@@ -63,7 +63,8 @@ class CaptureRepository(
         /**
          * Capture origin. `"scan"` (default) — went through the ML
          * Kit scanner. `"import"` — picked from the system photo
-         * picker. Drives the "Import" pill in the Library cards.
+         * picker. `"photo"` / `"video"` — captured from QuickInk's
+         * camera media surfaces.
          */
         source: String = "scan",
         /**

@@ -181,6 +181,14 @@ struct SettingsScreen: View {
                         }
                     }
 
+                    section(title: "PDFs") {
+                        toggleRow(
+                            label: "Compress saved PDFs",
+                            help:  "Targets under 250 KB per page for new scans and photo imports, and keeps raw when raw is smaller.",
+                            isOn:  $settings.compressedPdfSavesEnabled
+                        )
+                    }
+
                     section(title: "Experimental") {
                         toggleRow(
                             label: "Searchable PDF export",

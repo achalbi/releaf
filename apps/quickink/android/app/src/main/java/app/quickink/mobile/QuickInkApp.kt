@@ -16,8 +16,8 @@
  *   - DriveClient               (OkHttpDriveClient when web client ID is
  *                                populated, InMemoryDriveClient otherwise)
  *   - Sync lifecycle            ([observeAuthForSyncLifecycle]
- *                                schedules periodic on SignedIn,
- *                                cancels otherwise)
+ *                                clears legacy periodic work,
+ *                                cancels on sign-out)
  *
  * Mirror of the wiring already present in `ReleafApp.kt`.
  */
@@ -57,9 +57,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.lang.ref.WeakReference
-import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -73,25 +73,6 @@ import java.util.concurrent.atomic.AtomicBoolean
  * pattern Releaf uses (`ReleafApp.APP_VERSION`).
  */
 internal const val QUICKINK_APP_VERSION = "0.1.0"
-
-/**
- * Refresh the access token when the app is foregrounded with
- * `expiresAt - now < this`. Five minutes is a balance between
- * "long enough that any in-flight worker pass finishes with a
- * still-valid token" and "short enough that we're not chatting
- * to Google's auth endpoint on every brief resume". Tunable.
- */
-private const val REFRESH_THRESHOLD_SECONDS = 300L
-
-/**
- * Tighter threshold used by the sync-worker pre-flight refresh
- * (`ensureFreshSessionForSyncIfPossible`). The on-resume hook uses
- * a 5-min window because it has the freedom to refresh
- * speculatively; the pre-flight only fires when sync is about to
- * happen, so we wait until the token is genuinely about to expire
- * before paying the AuthorizationClient round-trip.
- */
-private const val SYNC_PREFLIGHT_THRESHOLD_SECONDS = 60L
 
 class QuickInkApp : Application() {
 
@@ -221,23 +202,18 @@ class QuickInkApp : Application() {
         // wires nothing.
         AnalyticsFlushWorker.scheduleAll(this)
 
-        // Foreground token-refresh hook. The sync worker can't call
-        // `RealGoogleAuthClient.refresh` itself because that path
-        // requires an Activity context (Identity.getAuthorizationClient
-        // is Activity-bound). Without a proactive refresh, every
-        // ~60-min idle period would expire the cached access token,
-        // the next sync pass would 401, and the AUTH_REJECTED banner
-        // would push the user through a sign-out / sign-in cycle for
-        // what should be a silent token rotation. By tracking the
-        // foreground Activity here, we get an Activity context the
-        // moment the user opens the app and can rotate the token
-        // before the worker runs again. See
-        // [maybeRefreshTokenInForeground] for the full check.
+        // Foreground tracking for analytics gating and the dirty-row
+        // auto-sync safety net. Google auth itself does not refresh
+        // from this callback; UI-bound AuthorizationClient calls on
+        // resume can surface Android's "Request cancelled by
+        // QuickInk" toast when the user backgrounds the app quickly.
+        // Drive workers instead try a background-safe silent refresh
+        // only after Drive rejects an access token.
         registerActivityLifecycleCallbacks(activityTracker)
     }
 
     // ------------------------------------------------------------------
-    // Foreground token refresh
+    // Foreground tracking
     // ------------------------------------------------------------------
 
     /**
@@ -246,7 +222,7 @@ class QuickInkApp : Application() {
      * never hold the Activity across configuration changes (each
      * resume rebinds). When the app has no Activity in the foreground
      * (cold launch with worker running first, or backgrounded), the
-     * ref is null and the foreground refresh path no-ops.
+     * ref is null and foreground-only work defers.
      */
     private val activityTracker = object : ActivityLifecycleCallbacks {
         override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
@@ -254,7 +230,6 @@ class QuickInkApp : Application() {
 
         override fun onActivityResumed(activity: Activity) {
             topActivityRef = WeakReference(activity)
-            maybeRefreshTokenInForeground(activity)
             startPendingPushLoopIfNeeded()
         }
 
@@ -264,20 +239,8 @@ class QuickInkApp : Application() {
             // null-out a fresher reference written by the next resume.
             if (topActivityRef?.get() === activity) {
                 topActivityRef = null
-                // App is fully backgrounded — cancel any in-flight or
-                // queued one-shot sync. We deliberately don't run sync
-                // in the background (battery + restrictive ROMs like
-                // ColorOS kill backgrounded workers, producing a
-                // cancel/retry loop). The next resume's pending-push
-                // tick will catch up: it fires immediately on
-                // `onActivityResumed`, sees the still-dirty rows, and
-                // re-kicks `requestImmediate`. Restore is left alone —
-                // it's user-initiated and the user is staring at a
-                // progress UI that already gates app exit.
-                runCatching {
-                    androidx.work.WorkManager.getInstance(this@QuickInkApp)
-                        .cancelUniqueWork(QuickInkSyncWorker.ONESHOT_WORK_NAME)
-                }
+                pendingPushLoopJob?.cancel()
+                pendingPushLoopJob = null
             }
         }
 
@@ -301,40 +264,12 @@ class QuickInkApp : Application() {
     fun isInForeground(): Boolean = topActivityRef?.get() != null
 
     /**
-     * Pre-flight access-token refresh used by `QuickInkSyncWorker`
-     * before it makes Drive calls. Closes the gap left by removing
-     * the 60s in-app refresh tick: a user who keeps the app open
-     * for 55+ minutes used to see a one-time 401 → AUTH_REJECTED
-     * banner the next time sync fired. With this hook the worker
-     * rotates the session itself before the impending Drive call,
-     * so the banner never appears for that flow.
-     *
-     * Conditions to attempt refresh:
-     *   - real Google client is wired (web client id configured),
-     *   - user is signed in,
-     *   - access token is within [SYNC_PREFLIGHT_THRESHOLD_SECONDS]
-     *     of expiry,
-     *   - a foreground Activity is available (so
-     *     `AuthorizationClient.authorize()` has the context it
-     *     needs and the GMS "Request cancelled by quickink" toast
-     *     can't fire on a missing-Activity cancellation).
-     *
-     * Background runs (no Activity) skip the refresh — the worker
-     * proceeds with the current token, the Drive call may still
-     * 401, and the existing AUTH_REJECTED banner path takes over.
-     * The user clears it with the in-place Reconnect on next open.
-     *
-     * Single-flight via the same `refreshInFlight` AtomicBoolean
-     * the on-resume hook uses, so a sync-worker pre-flight that
-     * collides with an in-flight on-resume refresh just returns.
-     */
-    /**
      * Background-safe silent token refresh used by
      * `QuickInkSyncWorker` after a 401 from Drive. Wraps
-     * `RealGoogleAuthClient.refreshSilentBackground` with the same
-     * single-flight guard the foreground refresh uses; on success
-     * adopts the rotated session through `authStore` so the next
-     * worker pass sees the new access token.
+     * `RealGoogleAuthClient.refreshSilentBackground` with a
+     * single-flight guard; on success adopts the rotated session
+     * through `authStore` so the next worker pass sees the new
+     * access token.
      *
      * Returns the rotated session when GMS still has the user's
      * authorization cached; returns `null` when it would need a
@@ -362,166 +297,6 @@ class QuickInkApp : Application() {
         }
     }
 
-    suspend fun ensureFreshSessionForSyncIfPossible(): Boolean {
-        val webClientId = getString(R.string.google_web_client_id)
-        if (webClientId == "REPLACE_WITH_GOOGLE_WEB_CLIENT_ID") return false
-        val signedIn = authStore.state.value as? AuthState.SignedIn ?: return false
-        val session: GoogleAuthSession = signedIn.session
-
-        val now = Instant.now()
-        val refreshAt = session.expiresAt.minusSeconds(SYNC_PREFLIGHT_THRESHOLD_SECONDS)
-        if (now.isBefore(refreshAt)) {
-            return false                                    // still fresh
-        }
-        val activity = topActivityRef?.get() ?: return false  // background → skip
-        if (!refreshInFlight.compareAndSet(false, true)) {
-            Log.i("QuickInkAuth", "preflight-refresh: already in flight, skipping")
-            return false
-        }
-        return try {
-            Log.i(
-                "QuickInkAuth",
-                "preflight-refresh: starting (secondsUntilExpiry=" +
-                    "${session.expiresAt.epochSecond - now.epochSecond})"
-            )
-            val client = RealGoogleAuthClient(activity, webClientId)
-            val fresh = client.refresh(session)
-            authStore.adoptSession(fresh)
-            Log.i(
-                "QuickInkAuth",
-                "preflight-refresh: ok (newSecondsUntilExpiry=" +
-                    "${fresh.expiresAt.epochSecond - Instant.now().epochSecond})"
-            )
-            true
-        } catch (e: Exception) {
-            Log.w("QuickInkAuth", "preflight-refresh: failed: $e")
-            false
-        } finally {
-            refreshInFlight.set(false)
-        }
-    }
-
-    /**
-     * If the cached session's access token is near or past expiry,
-     * silently rotate it via `RealGoogleAuthClient.refresh` against
-     * the just-resumed Activity. On success, persist the fresh
-     * session, clear any stale `AUTH_REJECTED` banner, and kick an
-     * immediate sync so the user sees "Last synced: just now"
-     * without taking any action themselves.
-     *
-     * No-ops in any of these cases:
-     *   - Web client ID isn't configured (real client not wired).
-     *   - User isn't signed in.
-     *   - Token has more than [REFRESH_THRESHOLD_SECONDS] left.
-     *   - Another refresh is already in flight (rapid resumes).
-     *
-     * Failure is best-effort: if `refresh()` throws (consent revoked,
-     * network down, etc.) we log and leave the existing session
-     * alone. The worker's eventual 401 path then writes
-     * AUTH_REJECTED and the Settings banner takes over — same dead-
-     * end the app had before this hook, so we don't regress.
-     */
-    /**
-     * Public trigger for the foreground token-refresh hook. UI sites
-     * that have a special reason to nudge a refresh outside the
-     * usual on-resume / 60s-ticker schedule (Settings open, banner
-     * appearance, Sync-now tap, etc.) call this. No-ops cleanly
-     * when there's no foreground Activity or the cached token is
-     * still healthy — same gates as the on-resume call.
-     */
-    fun requestTokenRefresh() {
-        val activity = topActivityRef?.get() ?: return
-        maybeRefreshTokenInForeground(activity)
-    }
-
-    private fun maybeRefreshTokenInForeground(activity: Activity) {
-        val webClientId = getString(R.string.google_web_client_id)
-        if (webClientId == "REPLACE_WITH_GOOGLE_WEB_CLIENT_ID") {
-            // Real client not configured — InMemoryDriveClient is the
-            // active transport, no real Drive calls happen, no point
-            // asking Google for a token rotation.
-            return
-        }
-
-        val signedIn = authStore.state.value as? AuthState.SignedIn ?: return
-        val session = signedIn.session
-
-        val now = Instant.now()
-        val refreshAt = session.expiresAt.minusSeconds(REFRESH_THRESHOLD_SECONDS)
-        if (now.isBefore(refreshAt)) {
-            // Token still has plenty of time. Skip — keeps this hook
-            // free on the hot path (every resume).
-            return
-        }
-
-        // Single-flight guard. AtomicBoolean.compareAndSet pattern
-        // covers two close-together resumes (e.g. a modal dismiss
-        // immediately after a configuration change) launching two
-        // refresh coroutines in parallel.
-        if (!refreshInFlight.compareAndSet(false, true)) {
-            Log.i("QuickInkAuth", "foreground-refresh: already in flight, skipping")
-            return
-        }
-
-        Log.i(
-            "QuickInkAuth",
-            "foreground-refresh: starting (secondsUntilExpiry=" +
-                "${session.expiresAt.epochSecond - now.epochSecond})"
-        )
-
-        appScope.launch {
-            try {
-                val client = RealGoogleAuthClient(activity, webClientId)
-                val fresh: GoogleAuthSession = client.refresh(session)
-                authStore.adoptSession(fresh)
-                Log.i(
-                    "QuickInkAuth",
-                    "foreground-refresh: ok (newSecondsUntilExpiry=" +
-                        "${fresh.expiresAt.epochSecond - Instant.now().epochSecond})"
-                )
-
-                // Clear any AUTH_REJECTED banner that's up — the new
-                // token will validate on the next worker pass. Best-
-                // effort: if the write fails, the banner stays up
-                // until the next successful sync writes "" itself
-                // via QuickInkSyncWorker.writeSyncErrorCode(""). The
-                // banner observer in SettingsScreen reacts via the
-                // syncStateDao Flow, so this clear is reflected
-                // automatically with no extra plumbing.
-                runCatching {
-                    database.syncStateDao().upsert(
-                        SyncStateEntity(
-                            key       = SyncStateKeys.LAST_SYNC_ERROR_CODE,
-                            value     = "",
-                            updatedAt = IsoClock.nowIso(),
-                        )
-                    )
-                }
-
-                // Kick a one-shot sync so "Last synced" updates
-                // immediately. requestImmediate (not requestUserSync)
-                // because the user didn't actually tap anything —
-                // KEEP coalesces if the periodic worker is already
-                // about to fire.
-                QuickInkSyncScheduler.requestImmediate(this@QuickInkApp)
-            } catch (e: Exception) {
-                // Any failure here means refresh didn't yield a usable
-                // token. Most common: consent was revoked at
-                // myaccount.google.com/permissions, so AuthorizationClient
-                // returns a hasResolution() result that RealGoogleAuthClient
-                // surfaces as `Drive scope no longer granted`. Don't
-                // sign the user out — the worker's existing 401 path
-                // already handles that surface (writes AUTH_REJECTED,
-                // banner appears, user taps Sign out). Logging here
-                // lets us tell foreground-refresh-failure apart from
-                // worker-401-failure in logs.
-                Log.w("QuickInkAuth", "foreground-refresh: failed: $e")
-            } finally {
-                refreshInFlight.set(false)
-            }
-        }
-    }
-
     // ------------------------------------------------------------------
     // Pending-push safety net (foreground-only, 60s ticker)
     // ------------------------------------------------------------------
@@ -531,20 +306,19 @@ class QuickInkApp : Application() {
 
     /**
      * Start (or no-op if already running) a 60-second ticker that:
-     *   1. Counts locally-dirty rows across notepad / captures /
-     *      ocr_results / categories.
+     *   1. Counts dirty captures for the UI and all dirty row types
+     *      for the scheduling gate.
      *   2. Writes the count to `sync_state[LOCAL_DIRTY_COUNT]` so
      *      the Home screen pill can react reactively via Room Flow.
-     *   3. Kicks `requestImmediate(KEEP)` when the count is > 0 and
-     *      the user is signed-in with Drive backup enabled. KEEP
-     *      coalesces with any in-flight or queued worker so we
-     *      don't spam WorkManager.
+     *   3. Kicks an app-initiated backup when the count is > 0,
+     *      Drive backup is enabled, and the once-per-day auto-sync
+     *      throttle allows it. Manual Sync now bypasses that
+     *      throttle.
      *
      * Foreground-scoped: started on `onActivityResumed`, cancelled
      * on the LAST `onActivityPaused` (when [topActivityRef] flips
-     * to null). The worker still does the actual upload in
-     * background — we just nudge it from foreground to keep
-     * battery + cellular costs zero when the app isn't open.
+     * to null). The worker itself is left alone and can continue in
+     * the background after it has been enqueued.
      */
     private fun startPendingPushLoopIfNeeded() {
         if (pendingPushLoopJob?.isActive == true) return
@@ -572,8 +346,9 @@ class QuickInkApp : Application() {
 
     /**
      * One iteration of the pending-push loop. Computes the dirty
-     * count for the active user, writes it to `sync_state`, and
-     * kicks a one-shot push when > 0.
+     * count for the active user, writes the user-visible capture
+     * count to `sync_state`, and checks whether the daily auto-sync
+     * policy should enqueue a worker.
      *
      * No-ops gracefully when:
      *   - the user is signed out (nothing to push),
@@ -587,19 +362,16 @@ class QuickInkApp : Application() {
         val prefs = SettingsPreferences(this)
         if (!prefs.driveBackupEnabled) return
 
-        // Token-refresh is intentionally NOT piggybacked on this
-        // tick. Earlier we re-checked the access token here every
+        // Token refresh is intentionally NOT piggybacked on this
+        // tick. Earlier code re-checked the access token here every
         // 60s so a long foreground session (>55 min) wouldn't 401
         // on the next sync, but each call routes through
         // `AuthorizationClient.authorize()` — and if the user
         // happens to background the app while that call is in
         // flight, Android emits a system "Request cancelled by
-        // quickink" toast. Refresh now runs only on
-        // `onActivityResumed` (one shot per resume) and on the
-        // explicit Settings → Sync now / banner-Reconnect taps;
-        // sessions that expire mid-use surface as a one-time 401
-        // → AUTH_REJECTED banner, which the user clears with the
-        // existing in-place Reconnect affordance.
+        // quickink" toast. Now the worker tries the stored token
+        // first and only attempts background-safe silent refresh
+        // after Drive actually rejects it.
 
         val dirty = countLocalDirty(authState.session.userId)
         // Always write — including 0 — so the Home pill clears
@@ -615,12 +387,13 @@ class QuickInkApp : Application() {
             )
         }
 
-        if (dirty <= 0) return
+        val syncDirty = countDirtyRowsForSync(authState.session.userId)
+        if (syncDirty <= 0) return
 
         // If the last sync ended with AUTH_REJECTED, the access token
-        // is dead until the user signs out + back in via Settings →
-        // Account. Re-firing the worker every minute against a dead
-        // token just hammers Drive with 401s and bounces between
+        // needs an explicit reconnect. Re-firing the worker every
+        // minute against a dead token just hammers Drive with 401s
+        // and bounces between
         // doWork → fail → doWork (e.g. when WorkManager re-dispatches
         // a queued retry from before the AUTH_REJECTED was recorded).
         // Read fresh per tick so the moment the user signs back in
@@ -632,14 +405,14 @@ class QuickInkApp : Application() {
         if (lastErr == SyncErrorCodes.AUTH_REJECTED) {
             Log.i(
                 "QuickInkSync",
-                "pending-push tick: $dirty dirty rows — skipping sync " +
+                "pending-push tick: $syncDirty dirty rows — skipping sync " +
                 "(last error AUTH_REJECTED; user must re-auth via Settings)"
             )
             return
         }
 
-        Log.i("QuickInkSync", "pending-push tick: $dirty dirty rows — kicking sync")
-        QuickInkSyncScheduler.requestImmediate(this)
+        Log.i("QuickInkSync", "pending-push tick: $syncDirty dirty rows — checking daily auto-sync")
+        QuickInkSyncScheduler.requestAutoSyncIfDue(this, dirtyCount = syncDirty)
     }
 
     /**
@@ -664,15 +437,34 @@ class QuickInkApp : Application() {
     }
 
     /**
-     * Watch the auth state and install/cancel the periodic sync
-     * worker accordingly. [distinctUntilChanged] keeps us from
-     * re-enqueueing on every in-flight state echo (e.g. SigningIn
-     * → SignedIn → session restored); WorkManager itself de-dupes
-     * via the unique-work name but this keeps logs cleaner. The
-     * worker's per-pass Drive-backup-toggle gate handles the
-     * runtime "user flipped the switch off" case — see
-     * `QuickInkSyncWorker.doWork`.
+     * Count every dirty row type that the Drive sync worker can push.
+     * Used only for scheduling gates, not for the Home "N pending"
+     * label, which intentionally counts user-visible captures.
      */
+    suspend fun countDirtyRowsForSync(userId: String): Int = withContext(Dispatchers.IO) {
+        try {
+            database.notepadDao().dirtyRows().count { it.userId == userId } +
+                database.captureDao().dirtyRows().count { it.userId == userId } +
+                database.ocrResultDao().dirtyRows().size +
+                database.tagDao().dirtyRows().count { it.userId == userId } +
+                database.profileSettingsDao().dirtyRows().count { it.userId == userId } +
+                database.folderDao().dirtyRows().count { it.userId == userId } +
+                database.captureTagDao().dirtyRows().size +
+                database.smartCollectionDao().dirtyRows().count { it.userId == userId } +
+                database.voiceNoteDao().dirtyRows().size +
+                database.locationDao().dirtyRows().count { it.userId == userId } +
+                database.captureLocationDao().dirtyRows().size +
+                database.personDao().dirtyRows().count { it.userId == userId } +
+                database.capturePersonDao().dirtyRows().size +
+                database.storyDao().dirtyRows().count { it.userId == userId } +
+                database.storyItemDao().dirtyRows().size +
+                database.storyVoiceClipDao().dirtyRows().size
+        } catch (e: Exception) {
+            Log.w("QuickInkSync", "countDirtyRowsForSync failed: $e")
+            0
+        }
+    }
+
     /**
      * One-shot move of the historical `<filesDir>/releaf/attachments/`
      * directory (where attachments landed before
@@ -749,18 +541,12 @@ class QuickInkApp : Application() {
      * One-shot latch for the "clear legacy auto-scheduled periodic
      * work" cleanup that runs the first time the auth observer sees
      * `SignedIn` in this process. Re-doing the cancel on every
-     * `SignedIn` emission was wrong: the foreground token-refresh
-     * hook (in this same class) calls `authStore.adoptSession(fresh)`
-     * after rotating the access token, which makes the `AuthStore`
-     * StateFlow emit a NEW `SignedIn` value (the session data class
-     * differs by `accessToken` + `expiresAt`). Pre-fix, that emission
-     * fired `QuickInkSyncScheduler.cancelAll(this)` — which cancels
-     * `QuickInkSyncWorker.ONESHOT_WORK_NAME` along with the legacy
-     * periodic. If the user had just tapped the Home pill or the
-     * Settings "Sync now" button, the cancel raced their tap and
-     * killed the worker mid-execution (logged as
-     * `stopReason=1 (CANCELLED_BY_APP)` ~100ms after `doWork:
-     * starting sync pass`).
+     * `SignedIn` emission was wrong: background silent token refresh
+     * calls `authStore.adoptSession(fresh)` after rotating the access
+     * token, which makes the `AuthStore` StateFlow emit a NEW
+     * `SignedIn` value. Pre-fix, that emission fired
+     * `QuickInkSyncScheduler.cancelAll(this)` and killed in-flight
+     * work.
      *
      * Latching with a Boolean means the cleanup only runs once per
      * process — enough to retire any leftover periodic schedule from
@@ -786,6 +572,12 @@ class QuickInkApp : Application() {
      */
     private var previousAuthState: AuthState? = null
 
+    /**
+     * Watch the auth state for sign-in cleanup and sign-out teardown.
+     * The worker's per-pass Drive-backup-toggle gate handles the
+     * runtime "user flipped the switch off" case — see
+     * `QuickInkSyncWorker.doWork`.
+     */
     private fun observeAuthForSyncLifecycle() {
         // StateFlow already dedupes by equality — no
         // distinctUntilChanged needed (and the operator is

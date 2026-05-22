@@ -47,7 +47,7 @@
 	  it here.
 	-->
 	<key>NSCameraUsageDescription</key>
-	<string>QuickInk uses the camera to scan business cards in-frame and to let you take a fresh profile photo without leaving the app.</string>
+	<string>QuickInk uses the camera to scan documents, take photos, and record videos you add to the app.</string>
 	<!--
 	  Microphone-permission rationale. Shown the first time the
 	  recorder on a document's Voice notes section asks for mic

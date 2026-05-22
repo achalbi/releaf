@@ -59,7 +59,7 @@
  * serves as the still preview, with a "With audio" badge in the
  * top-leading corner when the audio track survived. Use writes
  * the first-frame JPEG via `ImportArtifacts.build`, fires
- * `controller.onScanComplete(source: "photo", paperSize: .custom)`
+ * `controller.onScanComplete(source: "video", paperSize: .custom)`
  * (videos share the photo source-tag — the first frame is still
  * just an arbitrary phone-camera frame whose aspect ratio tells
  * us nothing about A4 / Letter / card bands), and inserts the
@@ -80,6 +80,52 @@ import ReleafCoreScan
 /// chip clamps to, and the value `AVCaptureMovieFileOutput.maxRecordedDuration`
 /// is set to so the recording auto-stops if the user walks away.
 private let videoMaxRecordingSeconds: Int = 120
+
+private enum VideoCaptureQuality: String, CaseIterable {
+    case auto
+    case uhd
+    case fhd
+    case hd
+    case sd
+
+    private static let defaultsKey = "quickink.settings.video_capture_quality"
+
+    var label: String {
+        switch self {
+        case .auto: return "Auto"
+        case .uhd:  return "4K"
+        case .fhd:  return "1080"
+        case .hd:   return "720"
+        case .sd:   return "SD"
+        }
+    }
+
+    var presets: [AVCaptureSession.Preset] {
+        switch self {
+        case .auto:
+            return [.hd4K3840x2160, .hd1920x1080, .hd1280x720, .high]
+        case .uhd:
+            return [.hd4K3840x2160, .hd1920x1080, .hd1280x720, .high]
+        case .fhd:
+            return [.hd1920x1080, .hd1280x720, .high]
+        case .hd:
+            return [.hd1280x720, .high]
+        case .sd:
+            return [.medium, .low]
+        }
+    }
+
+    static func stored() -> VideoCaptureQuality {
+        guard let raw = UserDefaults.standard.string(forKey: defaultsKey) else {
+            return .auto
+        }
+        return VideoCaptureQuality(rawValue: raw) ?? .auto
+    }
+
+    func persist() {
+        UserDefaults.standard.set(rawValue, forKey: Self.defaultsKey)
+    }
+}
 
 public struct VideoCaptureSurface: View {
 
@@ -182,6 +228,7 @@ private struct ActiveVideoSurface: View {
     /// and any time the user picks a chip — the strip is never
     /// "stuck open."
     @State private var isFilterStripExpanded: Bool = false
+    @State private var isQualityStripExpanded: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -201,6 +248,12 @@ private struct ActiveVideoSurface: View {
                         .saturation(session.activeFilter.liveSaturation)
                         .contrast(session.activeFilter.liveContrast)
                         .colorMultiply(session.activeFilter.liveTint)
+                    if session.state == .preview {
+                        qualityStrip
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            .padding(.top, QuickInkSpacing.s5)
+                            .padding(.trailing, QuickInkSpacing.s4)
+                    }
                     if case .recording(let elapsed) = session.state {
                         recordingOverlay(elapsedSeconds: elapsed)
                     }
@@ -337,6 +390,50 @@ private struct ActiveVideoSurface: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Switch camera")
+    }
+
+    // MARK: - Quality selector
+
+    @ViewBuilder
+    private var qualityStrip: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            qualityChip(session.captureQuality, isActive: true) {
+                isQualityStripExpanded.toggle()
+            }
+            if isQualityStripExpanded {
+                ForEach(VideoCaptureQuality.allCases.filter { $0 != session.captureQuality }, id: \.self) { quality in
+                    qualityChip(quality, isActive: false) {
+                        session.selectCaptureQuality(quality)
+                        isQualityStripExpanded = false
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: isQualityStripExpanded)
+    }
+
+    @ViewBuilder
+    private func qualityChip(
+        _ quality: VideoCaptureQuality,
+        isActive: Bool,
+        action: @escaping () -> Void,
+    ) -> some View {
+        Button(action: action) {
+            Text(quality.label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule().fill(
+                        isActive ? QuickInkColors.accent.opacity(0.88) : Color.black.opacity(0.58),
+                    ),
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(quality.label) video quality")
+        .accessibilityAddTraits(isActive ? [.isSelected] : [])
     }
 
     // MARK: - Captured-state preview
@@ -534,7 +631,7 @@ private struct ActiveVideoSurface: View {
             pdfURL:     result.pdfURL,
             previewURL: result.previewURL,
             pageURLs:   result.pageURLs,
-            source:     "photo",
+            source:     "video",
             paperSize:  .custom,
         )
         let captureId: String? = {
@@ -820,6 +917,7 @@ private final class VideoCaptureSession: NSObject, ObservableObject,
     }
 
     @Published private(set) var state: State = .preview
+    @Published private(set) var captureQuality: VideoCaptureQuality = .stored()
 
     let captureSession = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "app.quickink.videocapture.session")
@@ -895,6 +993,7 @@ private final class VideoCaptureSession: NSObject, ObservableObject,
     func flipCamera() {
         guard state == .preview else { return }
         let newPosition: AVCaptureDevice.Position = (cameraPosition == .back) ? .front : .back
+        let quality = captureQuality
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
             guard let device = AVCaptureDevice.default(
@@ -915,6 +1014,7 @@ private final class VideoCaptureSession: NSObject, ObservableObject,
             if self.captureSession.canAddInput(input) {
                 self.captureSession.addInput(input)
                 self.currentCameraInput = input
+                self.applyPreferredVideoPreset(quality)
             } else {
                 NSLog("[VideoCapture] flipCamera: canAddInput=false for %@; reverting",
                       newPosition == .front ? "front" : "back")
@@ -925,12 +1025,22 @@ private final class VideoCaptureSession: NSObject, ObservableObject,
                 self.captureSession.commitConfiguration()
                 return
             }
-            if let conn = self.movieOutput.connection(with: .video),
-               conn.isVideoOrientationSupported {
-                conn.videoOrientation = .portrait
-            }
+            self.applyPreferredVideoConnectionSettings()
             self.captureSession.commitConfiguration()
             Task { @MainActor in self.cameraPosition = newPosition }
+        }
+    }
+
+    func selectCaptureQuality(_ quality: VideoCaptureQuality) {
+        guard state == .preview else { return }
+        captureQuality = quality
+        quality.persist()
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.captureSession.beginConfiguration()
+            self.applyPreferredVideoPreset(quality)
+            self.applyPreferredVideoConnectionSettings()
+            self.captureSession.commitConfiguration()
         }
     }
 
@@ -1033,10 +1143,6 @@ private final class VideoCaptureSession: NSObject, ObservableObject,
         configured = true
 
         captureSession.beginConfiguration()
-        // `.high` so the movie output coexists cleanly with the
-        // audio input — `.photo` preset doesn't promise an audio-
-        // compatible configuration on all devices.
-        captureSession.sessionPreset = .high
 
         if let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: cameraPosition),
            let input  = try? AVCaptureDeviceInput(device: camera),
@@ -1053,16 +1159,37 @@ private final class VideoCaptureSession: NSObject, ObservableObject,
             self.audioInput = input
         }
 
+        applyPreferredVideoPreset(captureQuality)
+
         if captureSession.canAddOutput(movieOutput) {
             captureSession.addOutput(movieOutput)
         }
+        applyPreferredVideoConnectionSettings()
+
+        captureSession.commitConfiguration()
+    }
+
+    /// Applies the requested quality with a downward fallback. The
+    /// final preset still depends on the active device/lens and
+    /// whether audio + movie output can coexist on that hardware.
+    private func applyPreferredVideoPreset(_ quality: VideoCaptureQuality) {
+        for preset in quality.presets where captureSession.canSetSessionPreset(preset) {
+            captureSession.sessionPreset = preset
+            return
+        }
+    }
+
+    private func applyPreferredVideoConnectionSettings() {
         if let conn = movieOutput.connection(with: .video),
            conn.isVideoOrientationSupported
         {
             conn.videoOrientation = .portrait
         }
-
-        captureSession.commitConfiguration()
+        if let conn = movieOutput.connection(with: .video),
+           conn.isVideoStabilizationSupported
+        {
+            conn.preferredVideoStabilizationMode = .auto
+        }
     }
 
     // MARK: Movie file delegate

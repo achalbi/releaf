@@ -66,10 +66,9 @@ data class CaptureEntity(
     /**
      * How the capture was created. `"scan"` (default) — went through
      * the ML Kit / VisionKit document scanner. `"import"` — was
-     * brought in from the system photo picker (single image, no
-     * edge detection, single-page PDF synthesised app-side). Drives
-     * the "Import" pill in the Library cards. Stored as a free-form
-     * TEXT so a later third source ("share-extension", etc.) can
+     * brought in from the system photo picker. `"photo"` / `"video"`
+     * — captured from QuickInk's camera media surfaces. Stored as a
+     * free-form TEXT so a later source ("share-extension", etc.) can
      * land without another migration. Defaulted at the column level
      * so legacy rows synced down from Drive (without this field)
      * read back as scans.

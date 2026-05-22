@@ -21,12 +21,15 @@
 
 package app.quickink.mobile.features.scan
 
+import android.graphics.BitmapFactory
+import android.location.Location
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.capture.CapturedLocation
+import app.quickink.mobile.data.capturelocation.CaptureLocationDao
 import app.quickink.mobile.data.folder.FolderDao
+import app.quickink.mobile.data.location.LocationDao
 import app.quickink.mobile.data.tag.TagDao
 import app.quickink.mobile.features.settings.SettingsPreferences
-import android.graphics.BitmapFactory
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import app.releaf.mobile.data.notepad.NotepadDao
@@ -72,6 +75,14 @@ class ScanFlowController(
      * default-folder seed silently no-ops when the DAO isn't supplied.
      */
     private val folderDao: FolderDao? = null,
+    /**
+     * Places + capture_locations join DAOs. Used to attach any saved
+     * Place whose stored coordinates are near the captured GPS fix.
+     * Optional so tests / previews can keep constructing the
+     * controller without the workspace database.
+     */
+    private val locationDao: LocationDao? = null,
+    private val captureLocationDao: CaptureLocationDao? = null,
     /**
      * Slice 4.2c — fired when a scan pass finishes and at least
      * one row has been written. Wired by `QuickInkRoot.MainShell`
@@ -193,6 +204,15 @@ class ScanFlowController(
     private val _selectedPaperSize = MutableStateFlow(PaperSize.A4)
     val selectedPaperSize: StateFlow<PaperSize> = _selectedPaperSize.asStateFlow()
 
+    /**
+     * Source for the active review pass (`scan`, `import`, `photo`,
+     * `video`, etc.). The review screen uses this to hide paper-size controls
+     * for arbitrary camera media while keeping document/import flows
+     * unchanged.
+     */
+    private val _currentSource = MutableStateFlow("scan")
+    val currentSource: StateFlow<String> = _currentSource.asStateFlow()
+
     private var activeJob: Job? = null
 
     /**
@@ -201,8 +221,8 @@ class ScanFlowController(
      *
      * @param source `"scan"` when the result came from the document
      *   scanner (the default), `"import"` when it came from the
-     *   system photo picker. Persisted on the capture row so the
-     *   Library cards can render an "Import" pill.
+     *   system photo picker, `"photo"` / `"video"` for QuickInk
+     *   camera media. Persisted on the capture row for type labels.
      * @param paperSize Page-size class for the sustainability hero's
      *   per-page weight. Defaults to [PaperSize.A4]; the business-
      *   card camera surface passes [PaperSize.Card] so each card
@@ -271,6 +291,7 @@ class ScanFlowController(
         _selectedCategory.value  = category
         _previewImageUri.value   = result.previewUri?.toString()
         _selectedPaperSize.value = resolvedPaperSize
+        _currentSource.value     = source
         // State.Recognizing is published AFTER the capture row is
         // in Room (below) so the voice-note pane mounts on a real
         // FK target. Previously this fired first and the row write
@@ -355,9 +376,13 @@ class ScanFlowController(
             //    .setLocation] (no-op when fetch returns null).
             launch {
                 val location = captureLocationIfEnabled() ?: return@launch
-                try {
+                val saved = try {
                     repository.setLocation(captureId, location)
-                } catch (_: Exception) { /* best-effort */ }
+                    true
+                } catch (_: Exception) { false }
+                if (saved) {
+                    attachNearbyPlace(captureId, location)
+                }
             }
 
             // 2. Stream OCR results, persisting each one as it
@@ -537,6 +562,7 @@ class ScanFlowController(
         _selectedCategory.value = null
         _selectedFolderId.value = null
         _previewImageUri.value  = null
+        _currentSource.value    = "scan"
     }
 
     /**
@@ -652,6 +678,55 @@ class ScanFlowController(
         val result = LocationService.captureCurrent(ctx)
         android.util.Log.i("QuickInkLocation", "gate: result locality=${result?.locality} subLocality=${result?.subLocality} lat=${result?.latitude} lon=${result?.longitude}")
         return result
+    }
+
+    /**
+     * Auto-tag the capture with saved Places whose coordinates are
+     * close to the captured GPS fix. This lives in the controller,
+     * not just the review screen, so photo/video captures that move
+     * straight into the voice-note flow still get their place join.
+     */
+    private suspend fun attachNearbyPlace(
+        captureId: String,
+        captured: CapturedLocation,
+    ) {
+        val placesDao = locationDao ?: return
+        val joinsDao = captureLocationDao ?: return
+        val places = try {
+            placesDao.listActive(userId)
+        } catch (_: Exception) {
+            return
+        }
+        if (places.isEmpty()) return
+        val attachedIds = try {
+            joinsDao.listLocationIdsForCapture(captureId).toSet()
+        } catch (_: Exception) {
+            emptySet()
+        }
+        val results = FloatArray(1)
+        for (place in places) {
+            val lat = place.latitude ?: continue
+            val lon = place.longitude ?: continue
+            if (place.id in attachedIds) continue
+            Location.distanceBetween(
+                captured.latitude,
+                captured.longitude,
+                lat,
+                lon,
+                results,
+            )
+            if (results[0] <= AUTO_ATTACH_PLACE_RADIUS_METERS) {
+                try {
+                    joinsDao.attachLocation(
+                        joinId = Uuidv7.generate(),
+                        captureId = captureId,
+                        locationId = place.id,
+                        source = "ai-suggested",
+                        timestamp = IsoClock.nowIso(),
+                    )
+                } catch (_: Exception) { /* best-effort */ }
+            }
+        }
     }
 
     // ─── Append-to-today's-entry ──────────────────────────────────
@@ -881,5 +956,9 @@ class ScanFlowController(
             lower.endsWith("s")  -> lower.dropLast(1)
             else -> lower
         }
+    }
+
+    private companion object {
+        private const val AUTO_ATTACH_PLACE_RADIUS_METERS = 150f
     }
 }

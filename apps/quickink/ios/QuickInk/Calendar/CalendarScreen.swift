@@ -424,9 +424,12 @@ private struct CaptureRow: View {
                     .lineLimit(1)
                 HStack(spacing: 4) {
                     Text({
+                            let hasVideo = (capture.videoUri?.isEmpty == false) ||
+                                (capture.videoDriveFileId?.isEmpty == false)
                             switch capture.source {
                             case "import": return "Import"
-                            case "photo":  return "Photo"
+                            case "video":  return "Video"
+                            case "photo":  return hasVideo ? "Video" : "Photo"
                             default:       return "Scan"
                             }
                         }())

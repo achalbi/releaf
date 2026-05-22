@@ -7,19 +7,18 @@
  * (separate processes wouldn't share anyway, but the explicit names
  * keep things grep-able).
  *
- * Three things live here:
- *   1. [schedulePeriodic] — install the 15-minute recurring job.
- *      Called from [QuickInkApp]'s auth observer when state flips
- *      to SignedIn. KEEP policy means re-invoking on every app
- *      start is safe; WorkManager de-dupes by
- *      `QuickInkSyncWorker.PERIODIC_WORK_NAME`.
+ * Four things live here:
+ *   1. [schedulePeriodic] — legacy 15-minute recurring job helper.
+ *      Current QuickInk auth wiring clears this work on sign-in
+ *      because Drive backup is no longer periodic.
  *
- *   2. [requestImmediate] — fire-and-forget one-shot. Called from
- *      mutation sites (capture save, ocr-result save, notepad
- *      edit) so the user's edit shows up on Drive without waiting
- *      15 minutes. KEEP coalesces typing bursts into one run.
+ *   2. [requestAutoSyncIfDue] — app-initiated one-shot. It checks
+ *      dirty rows and caps automatic backup to once per 24 hours.
  *
- *   3. [cancelAll] — tear everything down on sign-out.
+ *   3. [requestUserSync] — manual Sync now. This bypasses the daily
+ *      auto-sync throttle and uses REPLACE so a fresh tap wins.
+ *
+ *   4. [cancelAll] — tear everything down on sign-out.
  *
  * Note on the Drive-backup toggle: [QuickInkSyncWorker] reads
  * `SettingsPreferences.driveBackupEnabled` per pass and no-ops
@@ -31,6 +30,7 @@
 package app.quickink.mobile.data.sync
 
 import android.content.Context
+import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -39,6 +39,16 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.workDataOf
+import app.quickink.mobile.QuickInkApp
+import app.releaf.mobile.auth.AuthState
+import app.releaf.mobile.data.common.IsoClock
+import app.releaf.mobile.data.sync.SyncStateEntity
+import app.releaf.mobile.data.sync.SyncStateKeys
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.time.Duration
+import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 object QuickInkSyncScheduler {
@@ -50,6 +60,8 @@ object QuickInkSyncScheduler {
 
     private const val PERIODIC_BACKOFF_SEC  = 60L
     private const val ONESHOT_BACKOFF_SEC   = 30L
+    private const val AUTO_SYNC_MIN_INTERVAL_HOURS = 24L
+    private const val TAG = "QuickInkSync"
 
     private val networkConstraint = Constraints.Builder()
         .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -73,22 +85,13 @@ object QuickInkSyncScheduler {
     }
 
     /**
-     * Enqueue an immediate single-flight push. Safe to call from
-     * any repository after a row is marked dirty — KEEP coalesces a
-     * burst of calls into one run.
-     *
-     * For *user-initiated* syncs (Settings → "Sync now"), call
-     * [requestUserSync] instead. KEEP causes a serious dead-state
-     * bug for that path: once a worker run fails and WorkManager
-     * queues a backoff retry, every subsequent KEEP request is
-     * silently dropped because the retry is still ENQUEUED. Result:
-     * the user keeps tapping "Sync now" and sees nothing happen.
+     * Raw app-initiated enqueue with no daily throttle. Prefer
+     * [requestAutoSyncIfDue] from feature code; this remains for
+     * narrow internal recovery paths that have already made their
+     * own scheduling decision.
      */
     fun requestImmediate(context: Context) {
-        val request = OneTimeWorkRequestBuilder<QuickInkSyncWorker>()
-            .setConstraints(networkConstraint)
-            .setBackoffCriteria(BackoffPolicy.LINEAR, ONESHOT_BACKOFF_SEC, TimeUnit.SECONDS)
-            .build()
+        val request = oneShotRequest(appInitiated = true)
 
         WorkManager.getInstance(context).enqueueUniqueWork(
             QuickInkSyncWorker.ONESHOT_WORK_NAME,
@@ -96,6 +99,68 @@ object QuickInkSyncScheduler {
             request,
         )
     }
+
+    /**
+     * App-initiated Drive backup for dirty local records. This is
+     * intentionally throttled to once per 24 hours; manual Sync now
+     * remains immediate via [requestUserSync].
+     *
+     * Returns true when a worker was enqueued.
+     */
+    suspend fun requestAutoSyncIfDue(
+        context: Context,
+        dirtyCount: Int? = null,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val app = context.applicationContext as? QuickInkApp ?: return@withContext false
+        val authState = app.authStore.state.value as? AuthState.SignedIn
+            ?: return@withContext false
+
+        val dirty = dirtyCount ?: app.countDirtyRowsForSync(authState.session.userId)
+        if (dirty <= 0) {
+            Log.i(TAG, "auto-sync: skip (no dirty records)")
+            return@withContext false
+        }
+
+        val syncStateDao = app.database.syncStateDao()
+        val now = Instant.now()
+        val lastAuto = syncStateDao
+            .get(SyncStateKeys.LAST_AUTO_SYNC_REQUEST_AT)
+            ?.value
+            ?.let { raw -> runCatching { Instant.parse(raw) }.getOrNull() }
+        if (lastAuto != null &&
+            Duration.between(lastAuto, now) < Duration.ofHours(AUTO_SYNC_MIN_INTERVAL_HOURS)
+        ) {
+            Log.i(TAG, "auto-sync: skip ($dirty dirty records, already requested today)")
+            return@withContext false
+        }
+
+        val nowIso = IsoClock.nowIso()
+        syncStateDao.upsert(
+            SyncStateEntity(
+                key       = SyncStateKeys.LAST_AUTO_SYNC_REQUEST_AT,
+                value     = nowIso,
+                updatedAt = nowIso,
+            )
+        )
+
+        val request = oneShotRequest(appInitiated = true)
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            QuickInkSyncWorker.ONESHOT_WORK_NAME,
+            ExistingWorkPolicy.KEEP,
+            request,
+        )
+        Log.i(TAG, "auto-sync: enqueued ($dirty dirty records)")
+        true
+    }
+
+    private fun oneShotRequest(appInitiated: Boolean) =
+        OneTimeWorkRequestBuilder<QuickInkSyncWorker>()
+            .setConstraints(networkConstraint)
+            .setBackoffCriteria(BackoffPolicy.LINEAR, ONESHOT_BACKOFF_SEC, TimeUnit.SECONDS)
+            .setInputData(
+                workDataOf(QuickInkSyncWorker.INPUT_APP_INITIATED to appInitiated)
+            )
+            .build()
 
     /**
      * Enqueue an immediate sync triggered by an explicit user
@@ -121,10 +186,7 @@ object QuickInkSyncScheduler {
      * for the Restore button.
      */
     fun requestUserSync(context: Context) {
-        val request = OneTimeWorkRequestBuilder<QuickInkSyncWorker>()
-            .setConstraints(networkConstraint)
-            .setBackoffCriteria(BackoffPolicy.LINEAR, ONESHOT_BACKOFF_SEC, TimeUnit.SECONDS)
-            .build()
+        val request = oneShotRequest(appInitiated = false)
 
         WorkManager.getInstance(context).enqueueUniqueWork(
             QuickInkSyncWorker.ONESHOT_WORK_NAME,

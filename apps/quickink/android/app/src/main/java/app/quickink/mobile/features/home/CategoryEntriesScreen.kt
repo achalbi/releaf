@@ -254,8 +254,10 @@ private fun TimelineRow(
                 // sits closer to the default Scan visual (both
                 // came from the camera, only the label
                 // disambiguates).
-                when (capture.source) {
-                    "import" -> Text(
+                val isVideoCapture = capture.source == "video" || (capture.source == "photo" &&
+                    (!capture.videoUri.isNullOrBlank() || !capture.videoDriveFileId.isNullOrBlank()))
+                when {
+                    capture.source == "import" -> Text(
                         text  = "Import",
                         style = type.caption,
                         color = colors.textOnAccent,
@@ -264,7 +266,16 @@ private fun TimelineRow(
                             .background(colors.accent)
                             .padding(horizontal = QuickInkSpacing.s2, vertical = 1.dp),
                     )
-                    "photo" -> Text(
+                    isVideoCapture -> Text(
+                        text  = "Video",
+                        style = type.caption,
+                        color = colors.ink.copy(alpha = 0.75f),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(QuickInkRadius.sm))
+                            .background(colors.borderSoft)
+                            .padding(horizontal = QuickInkSpacing.s2, vertical = 1.dp),
+                    )
+                    capture.source == "photo" -> Text(
                         text  = "Photo",
                         style = type.caption,
                         color = colors.ink.copy(alpha = 0.75f),

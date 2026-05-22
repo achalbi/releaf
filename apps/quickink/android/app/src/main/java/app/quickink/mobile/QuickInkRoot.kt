@@ -21,6 +21,7 @@ package app.quickink.mobile
 
 import android.Manifest
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
@@ -85,9 +86,12 @@ import app.quickink.mobile.features.scan.QuickCaptureScreen
 import app.quickink.mobile.features.scan.ScanDetailScreen
 import app.quickink.mobile.features.scan.ScanFlowController
 import app.quickink.mobile.features.scan.ScanCaptureSurface
+import app.quickink.mobile.features.scan.ScanCaptureHandoffSurface
 import app.quickink.mobile.features.scan.ScanReviewScreen
 import app.quickink.mobile.features.scan.buildImportArtifacts
 import app.quickink.mobile.features.scan.buildPdfImportArtifact
+import app.quickink.mobile.features.scan.commitSystemCameraPhotoCapture
+import app.quickink.mobile.features.scan.createSystemCameraOutput
 import app.quickink.mobile.BuildConfig
 import app.quickink.mobile.data.story.StoryRepository
 import app.quickink.mobile.features.search.SearchScreen
@@ -105,6 +109,7 @@ import app.releaf.shared.scan.MlKitTextRecognizer
 import app.releaf.shared.scan.OcrPipeline
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 
 @Composable
 fun QuickInkRoot(
@@ -135,10 +140,19 @@ fun QuickInkRoot(
 
     var onboardingCompleted by remember { mutableStateOf(preferences.isCompleted) }
     val authState by app.authStore.state.collectAsState()
+    val hasStoredSession = authState is AuthState.SignedIn
+    val effectiveOnboardingCompleted = onboardingCompleted || hasStoredSession
+
+    LaunchedEffect(hasStoredSession, onboardingCompleted) {
+        if (hasStoredSession && !onboardingCompleted) {
+            preferences.isCompleted = true
+            onboardingCompleted = true
+        }
+    }
 
     when {
         // First-time users — full 3-screen onboarding.
-        !onboardingCompleted -> OnboardingFlow(
+        !effectiveOnboardingCompleted -> OnboardingFlow(
             preferences = preferences,
             authStore   = app.authStore,
             onComplete  = { onboardingCompleted = true },
@@ -329,19 +343,25 @@ private fun MainShell(
             ?.takeIf { it.isNotEmpty() }
     }
 
+    val captureRepository = remember(userId) {
+        CaptureRepository(
+            captureDao    = app.database.captureDao(),
+            ocrResultDao  = app.database.ocrResultDao(),
+            tagDao        = app.database.tagDao(),
+            captureTagDao = app.database.captureTagDao(),
+        )
+    }
+
     val controller = remember(userId) {
         ScanFlowController(
             userId     = userId,
-            repository = CaptureRepository(
-                captureDao    = app.database.captureDao(),
-                ocrResultDao  = app.database.ocrResultDao(),
-                tagDao        = app.database.tagDao(),
-                captureTagDao = app.database.captureTagDao(),
-            ),
+            repository = captureRepository,
             pipeline       = OcrPipeline(MlKitTextRecognizer(app)),
             notepadDao     = app.database.notepadDao(),
             scope          = scope,
             folderDao      = app.database.folderDao(),
+            locationDao    = app.database.locationDao(),
+            captureLocationDao = app.database.captureLocationDao(),
             // Application context drives the per-scan location
             // fetch + reverse-geocode (gated by the
             // `locationForScansEnabled` Settings toggle and the
@@ -351,20 +371,17 @@ private fun MainShell(
             appContext     = context.applicationContext,
             // Two pipelines fire on every completed scan/import pass:
             //
-            //   1. Drive sync — kick a one-shot push so the fresh
-            //      capture lands in the user's Drive without waiting
-            //      for the 60s foreground ticker. KEEP coalesces a
-            //      burst of back-to-back scans into one worker run,
-            //      and the worker still respects the user's "Back up
-            //      to Google Drive" toggle + AUTH_REJECTED gate
-            //      internally. Settings → "Sync now" remains the
-            //      manual force-retry path.
+            //   1. Drive sync — app-initiated backup is dirty-row
+            //      gated and capped at once per day. Settings/Home →
+            //      "Sync now" remains the manual immediate path.
             //   2. Analytics outbox — separate cadence, separate
             //      failure mode. Every pass enqueues a row +
             //      opportunistically flushes so the dashboard
             //      reflects the capture within seconds.
             onPassComplete = { summary ->
-                QuickInkSyncScheduler.requestImmediate(context)
+                scope.launch {
+                    QuickInkSyncScheduler.requestAutoSyncIfDue(context)
+                }
                 scope.launch {
                     try {
                         AnalyticsRepository(app.database.analyticsOutboxDao())
@@ -545,9 +562,69 @@ private fun MainShell(
         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
+    var pendingSystemPhotoFile by remember { mutableStateOf<File?>(null) }
+    var systemPhotoHandoffActive by remember { mutableStateOf(false) }
+    var systemPhotoHandoffTitle by remember { mutableStateOf("Opening camera") }
+
+    val systemPhotoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+    ) { success: Boolean ->
+        val file = pendingSystemPhotoFile
+        pendingSystemPhotoFile = null
+        if (success && file != null) {
+            systemPhotoHandoffTitle = "Saving photo"
+            scope.launch {
+                val committed = commitSystemCameraPhotoCapture(
+                    context    = context,
+                    controller = controller,
+                    photoFile  = file,
+                )
+                file.delete()
+                if (!committed) {
+                    systemPhotoHandoffActive = false
+                    systemPhotoHandoffTitle = "Opening camera"
+                    Toast.makeText(context, "Couldn't save photo", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } else {
+            systemPhotoHandoffActive = false
+            systemPhotoHandoffTitle = "Opening camera"
+            file?.delete()
+        }
+    }
+
+    fun launchSystemPhotoCamera() {
+        val output = createSystemCameraOutput(context, "jpg")
+        pendingSystemPhotoFile = output.file
+        systemPhotoHandoffActive = true
+        systemPhotoHandoffTitle = "Opening camera"
+        runCatching {
+            systemPhotoLauncher.launch(output.contentUri)
+        }.onFailure {
+            pendingSystemPhotoFile = null
+            systemPhotoHandoffActive = false
+            systemPhotoHandoffTitle = "Opening camera"
+            output.file.delete()
+            Toast.makeText(context, "No camera app available", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     val scanState by controller.state.collectAsState()
+    LaunchedEffect(scanState) {
+        if (scanState !is ScanFlowController.State.Idle) {
+            systemPhotoHandoffActive = false
+            systemPhotoHandoffTitle = "Opening camera"
+        }
+    }
     if (scanState !is ScanFlowController.State.Idle) {
         ScanCaptureSurface(controller, userId = userId)
+        return
+    }
+    if (systemPhotoHandoffActive) {
+        ScanCaptureHandoffSurface(
+            eyebrow = "PHOTO",
+            title = systemPhotoHandoffTitle,
+        )
         return
     }
 
@@ -581,12 +658,9 @@ private fun MainShell(
         }
         if (result != null) {
             controller.onScanComplete(result, source = "import")
-            // `onScanComplete` already kicks `requestImmediate` via
-            // the controller's `onPassComplete` callback when OCR
-            // finishes — no additional schedule here would be
-            // redundant. Mentioned explicitly so a future reader
-            // doesn't add a second call thinking imports were
-            // skipped.
+            // `onScanComplete` already reaches the once-per-day
+            // auto-sync check via the controller's `onPassComplete`
+            // callback when OCR finishes.
         }
         // Always clear the pending share — even on a null result
         // (corrupt PDF, all-images-failed-to-decode), so a retry
@@ -1082,14 +1156,10 @@ private fun MainShell(
                     pendingInitialMode  = CaptureMode.Document
                     showQuickCapture    = true
                 },
-                // Video routes to the dedicated
-                // [VideoCaptureSurface] — tap-to-start/tap-to-stop
-                // recording, voice-note extraction, filter post-
-                // process baked into the saved .mp4. Replaced the
-                // old shared-surface behavior (Photo and Video
-                // both opened PhotoCaptureSurface with a dual
-                // tap/hold gesture) once the Sundial menu gave
-                // each verb its own ray.
+                // Photo keeps using the platform camera app. Video
+                // uses QuickInk's in-app CameraX recorder so quality
+                // selection is under app control instead of OEM
+                // intent defaults.
                 onSelectVideo = {
                     captureMenuOpen     = false
                     pendingInitialMode  = CaptureMode.Video
@@ -1097,8 +1167,7 @@ private fun MainShell(
                 },
                 onSelectPhoto = {
                     captureMenuOpen     = false
-                    pendingInitialMode  = CaptureMode.Photo
-                    showQuickCapture    = true
+                    launchSystemPhotoCamera()
                 },
             )
 

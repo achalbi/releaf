@@ -18,6 +18,7 @@
  */
 
 import Foundation
+import CoreLocation
 import UIKit
 import GRDB
 import ReleafCoreData
@@ -87,6 +88,12 @@ public final class ScanFlowController: ObservableObject {
     /// the review-screen preview doesn't flicker before scan-1.
     @Published public var selectedPaperSize: PaperSize = .a4
 
+    /// Source for the active review pass (`scan`, `import`, `photo`,
+    /// `video`, etc.). The review screen uses this to hide paper-size controls
+    /// for arbitrary camera media while keeping document/import flows
+    /// unchanged.
+    @Published public private(set) var currentSource: String = "scan"
+
     private let userId: String
     private let repository: CaptureRepository
     private let pipeline: OcrPipeline
@@ -140,8 +147,8 @@ public final class ScanFlowController: ObservableObject {
     /// the same successful scan path).
     /// - Parameter source: `"scan"` when the result came from the
     ///   document scanner (default), `"import"` when it came from
-    ///   the system photo picker. Persisted on the capture row so
-    ///   the Library cards can render an "Import" pill.
+    ///   the system photo picker, `"photo"` / `"video"` for QuickInk
+    ///   camera media. Persisted on the capture row for type labels.
     /// - Parameter paperSize: Page-size class for the sustainability
     ///   hero's per-page weight. Defaults to `.a4`; the business-
     ///   card camera surface passes `.card` so each card scan scores
@@ -201,6 +208,7 @@ public final class ScanFlowController: ObservableObject {
         selectedCategory  = category
         previewImageURL   = previewURL
         selectedPaperSize = resolvedPaperSize
+        currentSource     = source
         state = .recognizing(captureId: captureId, totalPages: totalPages, completedPages: 0)
 
         let userId = self.userId
@@ -258,6 +266,13 @@ public final class ScanFlowController: ObservableObject {
                         folderId:  defaultFolder.id
                     )
                     self?.selectedFolderId = defaultFolder.id
+                }
+                if let location {
+                    await Self.attachNearbyPlace(
+                        captureId: captureId,
+                        userId:    userId,
+                        captured:  location
+                    )
                 }
             } catch {
                 self?.state = .failed(message: "Couldn't save scan: \(error.localizedDescription)")
@@ -420,6 +435,8 @@ public final class ScanFlowController: ObservableObject {
 
     // MARK: - Geolocation
 
+    private static let autoAttachPlaceRadiusMeters = 150.0
+
     /// Resolve the device's current location for the capture row, or
     /// return `nil` when the feature is off, permission isn't granted,
     /// or the system can't produce a fix. Driven by `SettingsState.
@@ -450,6 +467,42 @@ public final class ScanFlowController: ObservableObject {
         let result = await LocationService.shared.captureCurrent()
         print("[Location] gate: result locality=\(result?.locality ?? "nil") subLocality=\(result?.subLocality ?? "nil") lat=\(result.map { "\($0.latitude)" } ?? "nil") lon=\(result.map { "\($0.longitude)" } ?? "nil")")
         return result
+    }
+
+    /// Auto-tag the capture with saved Places whose coordinates are
+    /// close to the captured GPS fix. This lives in the controller,
+    /// not just the review screen, so photo/video captures that move
+    /// straight into the voice-note flow still get their place join.
+    private static func attachNearbyPlace(
+        captureId: String,
+        userId: String,
+        captured: CapturedLocation
+    ) async {
+        let repo = LocationRepository()
+        guard let places = try? await repo.listActive(userId: userId),
+              !places.isEmpty
+        else { return }
+        let attachedIds = Set((try? await repo.listLocationIds(captureId: captureId)) ?? [])
+        let capturedLocation = CLLocation(
+            latitude:  captured.latitude,
+            longitude: captured.longitude
+        )
+        for place in places {
+            guard let latitude = place.latitude,
+                  let longitude = place.longitude,
+                  !attachedIds.contains(place.id)
+            else { continue }
+            let distance = capturedLocation.distance(
+                from: CLLocation(latitude: latitude, longitude: longitude)
+            )
+            if distance <= autoAttachPlaceRadiusMeters {
+                try? await repo.attachLocation(
+                    captureId: captureId,
+                    locationId: place.id,
+                    source:     "ai-suggested"
+                )
+            }
+        }
     }
 
     // MARK: - Append-to-today's-entry
@@ -573,6 +626,7 @@ public final class ScanFlowController: ObservableObject {
         selectedCategory = nil
         selectedFolderId = nil
         previewImageURL  = nil
+        currentSource    = "scan"
     }
 
     /// Picked-paper-size persistence hook for the review screen's

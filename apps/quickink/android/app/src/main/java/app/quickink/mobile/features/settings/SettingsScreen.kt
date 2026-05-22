@@ -118,6 +118,7 @@ fun SettingsScreen(
 
     var driveBackupEnabled by remember { mutableStateOf(preferences.driveBackupEnabled) }
     var searchablePdfExportEnabled by remember { mutableStateOf(preferences.searchablePdfExportEnabled) }
+    var compressedPdfSavesEnabled by remember { mutableStateOf(preferences.compressedPdfSavesEnabled) }
     var experimentalPublicLinksEnabled by remember { mutableStateOf(preferences.experimentalPublicLinksEnabled) }
     var transcriptionModel by remember { mutableStateOf(preferences.transcriptionModel) }
     var locationForScansEnabled by remember { mutableStateOf(preferences.locationForScansEnabled) }
@@ -254,23 +255,6 @@ fun SettingsScreen(
     // a banner tap doesn't have to navigate elsewhere first.
     val reconnectAction = rememberQuickInkSignInAction(authStore)
 
-    // Fire one silent token refresh when Settings opens, and another
-    // every time the AUTH_REJECTED banner shows up. The on-resume
-    // hook in QuickInkApp also runs; this is an extra nudge so a
-    // user who has just opened Settings (often because they noticed
-    // sync isn't working) gets a fresh attempt without having to
-    // tap anything. `requestTokenRefresh` no-ops cleanly when the
-    // cached token is still healthy, when there's no foreground
-    // Activity, or when a refresh is already in flight.
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        app.requestTokenRefresh()
-    }
-    androidx.compose.runtime.LaunchedEffect(lastSyncErrorCode) {
-        if (lastSyncErrorCode == SyncErrorCodes.AUTH_REJECTED) {
-            app.requestTokenRefresh()
-        }
-    }
-
     // Last restore outcome — surfaces a transient banner under the
     // Sync section's action buttons so the user sees what just
     // happened without staring at a logcat. Cleared on dismiss or
@@ -366,7 +350,9 @@ fun SettingsScreen(
                         driveBackupEnabled = value
                         preferences.driveBackupEnabled = value
                         if (value && authState is AuthState.SignedIn) {
-                            QuickInkSyncScheduler.requestImmediate(context)
+                            coroutineScope.launch {
+                                QuickInkSyncScheduler.requestAutoSyncIfDue(context)
+                            }
                         }
                     },
                 )
@@ -377,13 +363,10 @@ fun SettingsScreen(
                     activeLabel   = activeWorkLabel,
                 )
                 // Surface a "needs re-auth" banner when Drive has
-                // been rejecting the token (401/403). The worker
-                // can't refresh the token in the background on
-                // Android (Credential Manager refresh requires an
-                // Activity), so the user has to sign out + sign
-                // back in — and at the consent sheet, make sure
-                // the Drive checkbox is ticked. Banner clears
-                // automatically once a sync succeeds.
+                // been rejecting the token (401/403) and the
+                // background-safe silent refresh could not recover.
+                // Reconnect runs an explicit user-driven Google
+                // flow; Sign out is the fallback.
                 if (lastSyncErrorCode == SyncErrorCodes.AUTH_REJECTED && isSignedIn) {
                     AuthRejectedBanner(
                         onReconnect = reconnectAction,
@@ -587,6 +570,18 @@ fun SettingsScreen(
                 Section(title = "Tags") {
                     ManageCategoriesRow(onClick = onManageCategories)
                 }
+            }
+
+            Section(title = "PDFs") {
+                ToggleRow(
+                    label   = "Compress saved PDFs",
+                    help    = "Targets under 250 KB per page for new scans and photo imports, and keeps raw when raw is smaller.",
+                    checked = compressedPdfSavesEnabled,
+                    onCheckedChange = { value ->
+                        compressedPdfSavesEnabled = value
+                        preferences.compressedPdfSavesEnabled = value
+                    },
+                )
             }
 
             Section(title = "Experimental") {
@@ -1309,10 +1304,9 @@ private fun RestoreOutcomeBanner(
  * "Drive needs re-authentication" banner shown when the worker
  * has hit a persistent Drive auth rejection (401 / 403). Most
  * common cause: the user's access token was revoked server-side,
- * or the Drive scope wasn't granted at sign-in. The worker can't
- * refresh in the background (Credential Manager refresh needs an
- * Activity), so the user has to sign out and sign back in —
- * making sure the Drive checkbox is ticked on the consent sheet.
+ * or the Drive scope wasn't granted at sign-in. The worker first
+ * tries a background-safe silent refresh; this banner appears only
+ * when that was not enough.
  *
  * Banner clears automatically once a sync succeeds (the worker's
  * SUCCESS path writes an empty string to LAST_SYNC_ERROR_CODE).

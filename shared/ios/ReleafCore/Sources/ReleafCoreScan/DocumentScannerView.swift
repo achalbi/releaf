@@ -55,14 +55,20 @@ public struct DocumentScannerView: UIViewControllerRepresentable {
     /// Multi-page / Auto modes. QuickInk's Single mode passes `1`.
     let pageLimit: Int?
 
+    /// When true, write a downscaled JPEG-backed PDF. When false,
+    /// preserve the older full-size renderer PDF path.
+    let compressedPdfEnabled: Bool
+
     public init(
         onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void,
         onCancel: @escaping () -> Void,
-        pageLimit: Int? = nil
+        pageLimit: Int? = nil,
+        compressedPdfEnabled: Bool = true
     ) {
         self.onComplete = onComplete
         self.onCancel = onCancel
         self.pageLimit = pageLimit
+        self.compressedPdfEnabled = compressedPdfEnabled
     }
 
     public func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
@@ -74,22 +80,30 @@ public struct DocumentScannerView: UIViewControllerRepresentable {
     public func updateUIViewController(_ controller: VNDocumentCameraViewController, context: Context) {}
 
     public func makeCoordinator() -> Coordinator {
-        Coordinator(onComplete: onComplete, onCancel: onCancel, pageLimit: pageLimit)
+        Coordinator(
+            onComplete: onComplete,
+            onCancel: onCancel,
+            pageLimit: pageLimit,
+            compressedPdfEnabled: compressedPdfEnabled
+        )
     }
 
     public final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
         private let onComplete: (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void
         private let onCancel: () -> Void
         private let pageLimit: Int?
+        private let compressedPdfEnabled: Bool
 
         init(
             onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void,
             onCancel: @escaping () -> Void,
-            pageLimit: Int?
+            pageLimit: Int?,
+            compressedPdfEnabled: Bool
         ) {
             self.onComplete = onComplete
             self.onCancel = onCancel
             self.pageLimit = pageLimit
+            self.compressedPdfEnabled = compressedPdfEnabled
         }
 
         public func documentCameraViewController(
@@ -110,7 +124,7 @@ public struct DocumentScannerView: UIViewControllerRepresentable {
             // page individually; first-page preview JPEG is just
             // a back-compat alias for `pageURLs.first` so existing
             // Releaf code paths that read `previewURL` keep working.
-            let pdfURL = Self.writePDF(pages: pages)
+            let pdfURL = Self.writePDF(pages: pages, compressedPdfEnabled: compressedPdfEnabled)
             let pageURLs = pages.compactMap { Self.writeJPEG($0) }
             let previewURL = pageURLs.first
 
@@ -138,12 +152,25 @@ public struct DocumentScannerView: UIViewControllerRepresentable {
 
         // MARK: - File writes
 
-        /// Render a multi-page UIGraphicsPDFRenderer PDF. Page size is
-        /// tied to each image's pixel dimensions (so aspect ratio is
-        /// preserved; we're not trying to format to US Letter).
-        private static func writePDF(pages: [UIImage]) -> URL? {
+        /// Render a multi-page PDF. When compression is enabled, keep
+        /// the smaller of the optimized JPEG-backed PDF and the older
+        /// renderer PDF. The optimized writer rejects PDFs above its
+        /// 250 KB/page budget.
+        private static func writePDF(pages: [UIImage], compressedPdfEnabled: Bool) -> URL? {
             guard !pages.isEmpty else { return nil }
+            if compressedPdfEnabled {
+                let compressed = CompressedImagePdfWriter.writeToAttachment(images: pages)
+                let raw = writeRendererPDF(pages: pages)
+                return chooseSmallerPDF(compressed: compressed, raw: raw)
+            }
 
+            return writeRendererPDF(pages: pages)
+        }
+
+        /// Original UIGraphicsPDFRenderer fallback. Page size is tied
+        /// to each image's pixel dimensions so aspect ratio is
+        /// preserved; we're not trying to format to US Letter.
+        private static func writeRendererPDF(pages: [UIImage]) -> URL? {
             let data = NSMutableData()
             // Start with a nominal page size; we'll redefine each
             // page's bounds to match its image so scanned content
@@ -157,6 +184,26 @@ public struct DocumentScannerView: UIViewControllerRepresentable {
             UIGraphicsEndPDFContext()
 
             return AttachmentStorage.write(data as Data, ext: "pdf")
+        }
+
+        private static func chooseSmallerPDF(compressed: URL?, raw: URL?) -> URL? {
+            guard let compressed else { return raw }
+            guard let raw else { return compressed }
+
+            if let compressedSize = fileSize(compressed),
+               let rawSize = fileSize(raw),
+               rawSize < compressedSize {
+                try? FileManager.default.removeItem(at: compressed)
+                return raw
+            }
+
+            try? FileManager.default.removeItem(at: raw)
+            return compressed
+        }
+
+        private static func fileSize(_ url: URL) -> UInt64? {
+            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+            return (attributes?[.size] as? NSNumber)?.uint64Value
         }
 
         /// 0.85-quality JPEG of a single UIImage.
@@ -179,15 +226,18 @@ public struct DocumentScannerView: View {
     let onComplete: (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void
     let onCancel: () -> Void
     let pageLimit: Int?
+    let compressedPdfEnabled: Bool
 
     public init(
         onComplete: @escaping (_ pdfURL: URL, _ previewURL: URL?, _ pageURLs: [URL]) -> Void,
         onCancel: @escaping () -> Void,
-        pageLimit: Int? = nil
+        pageLimit: Int? = nil,
+        compressedPdfEnabled: Bool = true
     ) {
         self.onComplete = onComplete
         self.onCancel = onCancel
         self.pageLimit = pageLimit
+        self.compressedPdfEnabled = compressedPdfEnabled
     }
 
     public var body: some View {

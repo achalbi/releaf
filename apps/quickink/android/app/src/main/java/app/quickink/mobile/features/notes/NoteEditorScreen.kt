@@ -26,6 +26,8 @@ package app.quickink.mobile.features.notes
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -112,9 +114,13 @@ fun NoteEditorScreen(
             userId    = userId,
             dao       = app.database.notepadDao(),
             scope     = scope,
-            // Sync is user-initiated only — no auto-kick on note
-            // edits. User taps Settings → "Sync now" to push.
-            onMutated = { /* intentional no-op */ },
+            // App-initiated backup is dirty-row gated and capped at
+            // once per day; manual Sync now remains immediate.
+            onMutated = {
+                scope.launch {
+                    QuickInkSyncScheduler.requestAutoSyncIfDue(context)
+                }
+            },
         )
     }
 
@@ -190,10 +196,7 @@ fun NoteEditorScreen(
                 searchablePdfEnabled = searchablePdfEnabled,
                 onSelect = { format ->
                     showExportSheet = false
-                    // Format-specific export pipeline lands in a
-                    // follow-up. Currently a no-op — the picker
-                    // surfaces intent without generating the file.
-                    @Suppress("UNUSED_EXPRESSION") format
+                    shareNoteText(context, controller.title, controller.notes, format)
                 },
                 onDismiss = { showExportSheet = false },
             )
@@ -220,6 +223,47 @@ fun NoteEditorScreen(
                 )
             }
         }
+    }
+}
+
+private fun shareNoteText(
+    context: Context,
+    title: String,
+    notes: String,
+    format: ExportFormat,
+) {
+    val trimmedTitle = title.trim()
+    val trimmedNotes = notes.trim()
+    if (trimmedTitle.isEmpty() && trimmedNotes.isEmpty()) {
+        Toast.makeText(context, "Add note text before sharing.", Toast.LENGTH_SHORT).show()
+        return
+    }
+    val body = when (format) {
+        ExportFormat.Markdown -> buildString {
+            if (trimmedTitle.isNotEmpty()) {
+                append("# ")
+                append(trimmedTitle)
+                append("\n\n")
+            }
+            append(trimmedNotes)
+        }.trim()
+        ExportFormat.Plain -> listOf(trimmedTitle, trimmedNotes)
+            .filter { it.isNotEmpty() }
+            .joinToString(separator = "\n\n")
+        else -> listOf(trimmedTitle, trimmedNotes)
+            .filter { it.isNotEmpty() }
+            .joinToString(separator = "\n\n")
+    }
+
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, trimmedTitle.ifEmpty { "QuickInk note" })
+        putExtra(Intent.EXTRA_TEXT, body)
+    }
+    try {
+        context.startActivity(Intent.createChooser(intent, "Share note"))
+    } catch (_: Exception) {
+        Toast.makeText(context, "Couldn't open the share sheet for this note.", Toast.LENGTH_SHORT).show()
     }
 }
 

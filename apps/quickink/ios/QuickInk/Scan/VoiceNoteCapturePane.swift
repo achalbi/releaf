@@ -7,7 +7,7 @@
  * flight capture so the transcript can feed the AI-suggested tags
  * strip on the review screen (alongside the first-page OCR text).
  *
- * Layout: a slim header with Close / Skip, the existing
+ * Layout: a slim header with Skip, the existing
  * `VoicePageRecorder` body, and a bottom bar that toggles between
  * two states:
  *
@@ -26,31 +26,31 @@ struct VoiceNoteCapturePane: View {
 
     let captureId: String
     let userId: String
-    let onContinue: () -> Void
-    let onCancel: () -> Void
+    let onContinue: (String?) -> Void
+    let autoSkipExistingNote: Bool
 
     @StateObject private var model: VoiceNoteCapturePaneModel
     @StateObject private var engine = VoicePageRecorderEngine()
     /// Auto-skip guard. On first mount we query the repository
     /// for any existing voice note attached to the captureId; if
-    /// one is already there (e.g. Photo-mode video capture pre-
-    /// attached the extracted audio), advance straight to the
-    /// review screen so the user isn't prompted to record over
-    /// audio we already have. `checkComplete` flips to true once
-    /// the query lands; `body` shows a brief progress view in the
-    /// meantime so we don't flash the recorder for a frame.
+    /// one is already there (e.g. video capture pre-attached the
+    /// extracted audio), pass that note id up to transcript review
+    /// so the user isn't prompted to record over audio we already
+    /// have. `checkComplete` flips to true once the query lands;
+    /// `body` shows a brief progress view in the meantime so we
+    /// don't flash the recorder for a frame.
     @State private var checkComplete: Bool = false
 
     init(
         captureId: String,
         userId: String,
-        onContinue: @escaping () -> Void,
-        onCancel: @escaping () -> Void
+        onContinue: @escaping (String?) -> Void,
+        autoSkipExistingNote: Bool = true
     ) {
         self.captureId = captureId
         self.userId    = userId
         self.onContinue = onContinue
-        self.onCancel   = onCancel
+        self.autoSkipExistingNote = autoSkipExistingNote
         _model = StateObject(
             wrappedValue: VoiceNoteCapturePaneModel(
                 captureId: captureId,
@@ -81,14 +81,17 @@ struct VoiceNoteCapturePane: View {
     }
 
     /// Hit the voice-note repository once on mount. If a row
-    /// already exists for this captureId, skip the pane entirely
-    /// and let the parent surface advance to the review screen.
+    /// already exists for this captureId, skip the recorder and
+    /// pass that row id up so the parent can show transcript
+    /// review before metadata review.
     /// Failures (DB read error) fall through to showing the pane
     /// so the user isn't stranded.
     private func runExistenceCheck() async {
-        let exists: Bool = (try? await VoiceNoteRepository().anyForCapture(captureId)) ?? false
-        if exists {
-            await MainActor.run { onContinue() }
+        let existing = autoSkipExistingNote
+            ? (try? await VoiceNoteRepository().firstForCapture(captureId))
+            : nil
+        if let existing {
+            await MainActor.run { onContinue(existing.id) }
         } else {
             await MainActor.run { checkComplete = true }
         }
@@ -99,7 +102,7 @@ struct VoiceNoteCapturePane: View {
         VStack(spacing: 0) {
             header
                 .padding(.horizontal, QuickInkSpacing.s4)
-                .padding(.top, QuickInkSpacing.s4)
+                .padding(.top, QuickInkSpacing.s8)
 
             Spacer(minLength: QuickInkSpacing.s5)
 
@@ -112,8 +115,8 @@ struct VoiceNoteCapturePane: View {
                     // `saveAndContinue` directly, but the in-recorder
                     // stop should land the same place.
                     Task {
-                        await model.commit(uri: clip.uri, durationMs: clip.durationMs)
-                        await MainActor.run { onContinue() }
+                        let noteId = await model.commit(uri: clip.uri, durationMs: clip.durationMs)
+                        await MainActor.run { onContinue(noteId) }
                     }
                 },
                 onCancel: { /* recorder cancelled — stay on the pane */ }
@@ -134,15 +137,7 @@ struct VoiceNoteCapturePane: View {
 
     private var header: some View {
         HStack(alignment: .center) {
-            Button(action: onCancel) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(QuickInkColors.inkSoft)
-                    .padding(8)
-                    .background(Color.white.opacity(0.8), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Close")
+            Color.clear.frame(width: 50, height: 1)
 
             Spacer()
 
@@ -163,7 +158,7 @@ struct VoiceNoteCapturePane: View {
                 // Save and continue at the bottom take over.
                 Color.clear.frame(width: 50, height: 1)
             } else {
-                Button(action: onContinue) {
+                Button(action: { onContinue(nil) }) {
                     Text("Skip")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(QuickInkColors.accentDeep)
@@ -207,7 +202,7 @@ struct VoiceNoteCapturePane: View {
                 .buttonStyle(.plain)
             }
         } else {
-            Button(action: onContinue) {
+            Button(action: { onContinue(nil) }) {
                 Text("Continue to review")
                     .font(AppText.body)
                     .foregroundStyle(QuickInkColors.textOnAccent)
@@ -228,12 +223,12 @@ struct VoiceNoteCapturePane: View {
         guard let result = engine.stop() else {
             // Recording was below the engine's min duration — drop
             // it and advance anyway so the user isn't trapped.
-            onContinue()
+            onContinue(nil)
             return
         }
         Task {
-            await model.commit(uri: result.uri, durationMs: result.durationMs)
-            await MainActor.run { onContinue() }
+            let noteId = await model.commit(uri: result.uri, durationMs: result.durationMs)
+            await MainActor.run { onContinue(noteId) }
         }
     }
 
@@ -262,7 +257,7 @@ final class VoiceNoteCapturePaneModel: ObservableObject {
     /// the review screen reactively pulls in the transcript once
     /// `setTranscription` lands, and re-runs the AI suggester at
     /// that point.
-    func commit(uri: String, durationMs: Int) async {
+    func commit(uri: String, durationMs: Int) async -> String? {
         do {
             let row = try await repo.insert(
                 captureId:  captureId,
@@ -285,8 +280,10 @@ final class VoiceNoteCapturePaneModel: ObservableObject {
                     source:        result.source
                 )
             }
+            return row.id
         } catch {
             print("VoiceNoteCapturePane commit failed: \(error)")
+            return nil
         }
     }
 

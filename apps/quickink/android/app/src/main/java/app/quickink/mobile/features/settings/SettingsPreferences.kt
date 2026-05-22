@@ -55,6 +55,19 @@ class SettingsPreferences(context: Context) {
         }
 
     /**
+     * When true, new scanner/image-backed PDF artifacts are saved as
+     * downscaled JPEG-backed PDFs. When false, QuickInk keeps the raw
+     * scanner PDF where available and uses the older full-size image
+     * PDF builder for photo imports. Existing PDF files imported via
+     * share sheet are always copied as-is.
+     */
+    var compressedPdfSavesEnabled: Boolean
+        get() = prefs.getBoolean(KEY_COMPRESSED_PDF_SAVES, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_COMPRESSED_PDF_SAVES, value).apply()
+        }
+
+    /**
      * Stories Phase 6 — public-link publishing. When false, the
      * share sheet's Public link tile is grayed out + toasts to flip
      * this on; when true, the tile triggers the confirm dialog and
@@ -249,6 +262,7 @@ class SettingsPreferences(context: Context) {
         private const val PREFS_NAME              = "quickink.settings"
         private const val KEY_DRIVE_BACKUP        = "drive_backup_enabled"
         private const val KEY_SEARCHABLE_PDF      = "searchable_pdf_export_enabled"
+        private const val KEY_COMPRESSED_PDF_SAVES = "compressed_pdf_saves_enabled"
         private const val KEY_EXPERIMENTAL_PUBLIC_LINKS = "experimental_public_links_enabled"
         private const val KEY_LOCATION_FOR_SCANS  = "location_for_scans_enabled"
         private const val KEY_CUSTOM_DISPLAY_NAME = "custom_display_name"

@@ -48,6 +48,7 @@ struct NoteEditorScreen: View {
     @State private var activeTab: Tab = .page
     @State private var showCopyToast = false
     @State private var showExportSheet = false
+    @State private var pendingShare: NoteSharePayload? = nil
 
     enum Tab { case page, ocr }
 
@@ -110,19 +111,19 @@ struct NoteEditorScreen: View {
             ExportSheet(
                 searchablePdfEnabled: UserDefaults.standard.bool(forKey: "quickink.settings.searchable_pdf_export_enabled"),
                 onSelect: { format in
+                    let payload = makeSharePayload(format: format)
                     showExportSheet = false
-                    // Format-specific export pipeline lands in a
-                    // follow-up. Today the sheet's selection is a
-                    // no-op — surfacing intent without actually
-                    // generating the file. Once the Drive export +
-                    // bitmap renderer ship, hand off here:
-                    //   exporter.export(vm.entry, as: format)
-                    _ = format
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        pendingShare = payload
+                    }
                 },
                 onDismiss: { showExportSheet = false }
             )
             .presentationDetents([.medium])
             .presentationDragIndicator(.hidden)
+        }
+        .sheet(item: $pendingShare) { payload in
+            NoteShareActivityView(activityItems: [payload.text])
         }
     }
 
@@ -445,4 +446,40 @@ struct NoteEditorScreen: View {
             }
         }
     }
+
+    private func makeSharePayload(format: ExportSheet.Format) -> NoteSharePayload {
+        let trimmedTitle = vm.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedNotes = vm.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let subject = trimmedTitle.isEmpty ? "QuickInk note" : trimmedTitle
+        let text: String
+
+        switch format {
+        case .markdown:
+            var parts: [String] = []
+            if !trimmedTitle.isEmpty { parts.append("# \(trimmedTitle)") }
+            if !trimmedNotes.isEmpty { parts.append(trimmedNotes) }
+            text = parts.joined(separator: "\n\n")
+        case .pdf, .image, .plain:
+            text = [trimmedTitle, trimmedNotes]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n\n")
+        }
+
+        return NoteSharePayload(text: text.isEmpty ? subject : text)
+    }
+}
+
+private struct NoteSharePayload: Identifiable {
+    let id = UUID()
+    let text: String
+}
+
+private struct NoteShareActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

@@ -408,7 +408,7 @@ fun StoryEditorScreen(
                 val pre = addSheetPrecedingId
                 showingAddSheet = false
                 onRequestCapture(mode) { summary ->
-                    val kind = if (summary.source == "photo")
+                    val kind = if (summary.source == "photo" || summary.source == "video")
                         StoryItemEntity.Kind.PHOTO
                     else
                         StoryItemEntity.Kind.DOCUMENT

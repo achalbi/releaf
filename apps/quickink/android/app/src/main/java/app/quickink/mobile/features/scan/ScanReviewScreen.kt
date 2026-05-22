@@ -102,6 +102,7 @@ fun ScanReviewScreen(
     val state by controller.state.collectAsState()
     val selectedFolderId by controller.selectedFolderId.collectAsState()
     val selectedPaperSize by controller.selectedPaperSize.collectAsState()
+    val currentSource by controller.currentSource.collectAsState()
     val colors = LocalQuickInkColors.current
     val type   = LocalQuickInkTypography.current
 
@@ -464,7 +465,7 @@ fun ScanReviewScreen(
                 )
             }
 
-            if (!isFailed) {
+            if (!isFailed && currentSource != "photo" && currentSource != "video") {
                 PaperSizeChipRow(
                     selected = selectedPaperSize,
                     onSelect = { controller.setPaperSize(it) },

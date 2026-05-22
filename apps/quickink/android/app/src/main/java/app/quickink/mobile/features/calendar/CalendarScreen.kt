@@ -538,10 +538,14 @@ private fun SelectedDayCapturesList(
                     Text(
                         text = buildString {
                             append(
-                                when (capture.source) {
-                                    "import" -> "Import"
-                                    "photo"  -> "Photo"
-                                    else     -> "Scan"
+                                when {
+                                    capture.source == "import" -> "Import"
+                                    capture.source == "video" ||
+                                        (capture.source == "photo" &&
+                                            (!capture.videoUri.isNullOrBlank() ||
+                                                !capture.videoDriveFileId.isNullOrBlank())) -> "Video"
+                                    capture.source == "photo" -> "Photo"
+                                    else                      -> "Scan"
                                 },
                             )
                             append(" · ")

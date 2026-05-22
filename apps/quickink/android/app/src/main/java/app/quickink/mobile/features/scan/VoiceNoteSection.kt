@@ -15,6 +15,7 @@
 package app.quickink.mobile.features.scan
 
 import android.content.Context
+import android.content.Intent
 import android.media.MediaPlayer
 import android.net.Uri
 import android.widget.Toast
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Subtitles
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -92,9 +94,11 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.File
 import kotlin.math.max
 import kotlin.math.min
 
@@ -226,6 +230,7 @@ fun VoiceNoteSection(
                     }
                 },
                 onEditTranscript = { editingNote = note },
+                onShareAudio = { shareVoiceNote(context, note) },
                 onDelete = {
                     scope.launch {
                         runCatching { repository.softDelete(note.id) }
@@ -553,6 +558,7 @@ private fun VoiceNoteCard(
     /** Open the transcript editor for this card. The section handles
      *  the sheet + persistence so only one editor is alive at a time. */
     onEditTranscript: () -> Unit,
+    onShareAudio: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -563,6 +569,7 @@ private fun VoiceNoteCard(
     var isPlaying by remember(note.id) { mutableStateOf(false) }
     var positionMs by remember(note.id) { mutableLongStateOf(0L) }
     var amplitudes by remember(note.audioUri) { mutableStateOf<FloatArray?>(null) }
+    var showDeleteConfirm by remember(note.id) { mutableStateOf(false) }
 
     LaunchedEffect(note.audioUri) {
         amplitudes = WaveformSamples.extract(note.audioUri, barCount = 40)
@@ -675,19 +682,19 @@ private fun VoiceNoteCard(
 
             Spacer(Modifier.size(QuickInkSpacing.s2))
 
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(QuickInkRadius.sm))
-                    .background(colors.borderSoft)
-                    .clickable(onClick = onDelete),
-                contentAlignment = Alignment.Center,
+            Column(
+                verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Delete,
+                VoiceNoteIconButton(
+                    icon = Icons.Outlined.Share,
+                    contentDescription = "Share voice note",
+                    onClick = onShareAudio,
+                )
+                VoiceNoteIconButton(
+                    icon = Icons.Filled.Delete,
                     contentDescription = "Delete",
-                    tint = colors.inkSoft,
-                    modifier = Modifier.size(16.dp),
+                    onClick = { showDeleteConfirm = true },
                 )
             }
         }
@@ -702,6 +709,122 @@ private fun VoiceNoteCard(
             onEditTranscript  = onEditTranscript,
         )
     }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = {
+                Text(
+                    text = "Delete this voice note?",
+                    style = type.body.copy(fontWeight = FontWeight.SemiBold, fontSize = 17.sp),
+                    color = colors.ink,
+                )
+            },
+            text = {
+                Text(
+                    text = "The audio and transcript will be removed from this scan. This can't be undone.",
+                    style = type.meta,
+                    color = colors.inkSoft,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    onDelete()
+                }) {
+                    Text("Delete", color = colors.danger)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel", color = colors.ink)
+                }
+            },
+            containerColor = colors.surface,
+        )
+    }
+}
+
+@Composable
+private fun VoiceNoteIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(QuickInkRadius.sm))
+            .background(colors.borderSoft)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = colors.inkSoft,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
+private fun shareVoiceNote(
+    context: Context,
+    note: VoiceNoteEntity,
+) {
+    val shareUri = shareableVoiceNoteUri(context, note.audioUri)
+    if (shareUri == null) {
+        Toast.makeText(
+            context,
+            "Voice note isn't available to share.",
+            Toast.LENGTH_SHORT,
+        ).show()
+        return
+    }
+
+    val transcript = note.transcription?.trim().orEmpty()
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "audio/mp4"
+        putExtra(Intent.EXTRA_STREAM, shareUri)
+        if (transcript.isNotEmpty()) {
+            putExtra(Intent.EXTRA_TEXT, transcript)
+        }
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        clipData = android.content.ClipData.newRawUri(null, shareUri)
+    }
+
+    try {
+        context.startActivity(Intent.createChooser(intent, "Share voice note"))
+    } catch (_: Exception) {
+        Toast.makeText(
+            context,
+            "Couldn't open the share sheet for this voice note.",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+}
+
+private fun shareableVoiceNoteUri(context: Context, raw: String): Uri? {
+    if (raw.isBlank()) return null
+    val parsed = runCatching { Uri.parse(raw) }.getOrNull() ?: return null
+    return when (parsed.scheme) {
+        "content" -> parsed
+        "file" -> {
+            val path = parsed.path ?: return null
+            shareableVoiceNoteFileUri(context, File(path))
+        }
+        null -> shareableVoiceNoteFileUri(context, File(raw))
+        else -> null
+    }
+}
+
+private fun shareableVoiceNoteFileUri(context: Context, file: File): Uri? {
+    if (!file.exists()) return null
+    val authority = "${context.packageName}.fileprovider"
+    return runCatching { FileProvider.getUriForFile(context, authority, file) }
+        .getOrNull()
 }
 
 @Composable

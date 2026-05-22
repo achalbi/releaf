@@ -52,6 +52,13 @@ object SyncStateKeys {
     const val LAST_SYNC_ERROR_CODE     = "last_sync_error_code"
 
     /**
+     * Last time QuickInk itself enqueued an automatic Drive backup.
+     * Manual "Sync now" requests do not touch this value; it exists
+     * only to cap dirty-record auto sync to once per day.
+     */
+    const val LAST_AUTO_SYNC_REQUEST_AT = "last_auto_sync_request_at"
+
+    /**
      * Number of locally-dirty rows that haven't been pushed to
      * Drive yet. Refreshed by a foreground 60-second poll in
      * `QuickInkApp` and zeroed by the worker on a successful push.

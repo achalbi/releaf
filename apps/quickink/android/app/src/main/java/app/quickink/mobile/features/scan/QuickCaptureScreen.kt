@@ -251,6 +251,7 @@ fun QuickCaptureScreen(
                     controller    = controller,
                     onDismiss     = onDismiss,
                     onSelectPhoto = { coordinator.select(CaptureMode.Photo) },
+                    onSelectVideo = { coordinator.select(CaptureMode.Video) },
                     modifier      = Modifier.weight(1f),
                 )
                 CaptureMode.BusinessCard -> BusinessCardCaptureSurface(

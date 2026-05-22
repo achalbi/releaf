@@ -19,6 +19,13 @@ import CoreLocation
 import ReleafCoreData
 import ReleafCoreScan
 
+private enum PDFStorageKind: Sendable {
+    case raw
+    case compressed
+
+    static let legacyCompressedSignature = "<< /Type /Catalog /Pages 2 0 R >>"
+}
+
 struct ScanDetailScreen: View {
 
     let captureId: String
@@ -64,6 +71,10 @@ struct ScanDetailScreen: View {
     /// appear so the Details card can show "2.4 MB" etc. Nil until
     /// resolved or when the file isn't readable.
     @State private var pdfFileSize: Int64? = nil
+    /// Whether the local PDF is one of QuickInk's compressed
+    /// JPEG-backed PDFs or a raw scanner/import PDF. Nil until the
+    /// local file marker has been read.
+    @State private var pdfStorageKind: PDFStorageKind? = nil
     /// Extracted contact for the in-flight Business Card review
     /// sheet. Set on tap of "Add to contact"; nil means the sheet
     /// is dismissed. Wrapped in `IdentifiedExtraction` so it works
@@ -290,6 +301,7 @@ struct ScanDetailScreen: View {
             // pdf_uri before we can stat the file) so it runs after
             // loadCapture lands.
             await loadFileSize()
+            await loadPdfStorageKind()
             // Backfill the reverse-geocoded place name on captures
             // whose coordinates landed without a locality at scan
             // time (rate-limited CLGeocoder, offline, remote area).
@@ -812,17 +824,12 @@ struct ScanDetailScreen: View {
             }
 
             Section {
-                // Video subtype = a hold-to-record photo capture
-                // that produced a `.mov`. Same rule as the
-                // fileTypeLabel branch below — source == "photo"
-                // + a video URI (local or Drive). For these, the
+                // Video subtype = a capture whose source is "video"
+                // or a legacy "photo" row with a video URI. For these, the
                 // only useful artifact is the recorded clip
                 // itself; the image/PDF pair makes no sense.
                 // Swap them for a single "Share video" ShareLink.
-                let isVideo = capture.source == "photo" && (
-                    (capture.videoUri?.isEmpty == false) ||
-                    (capture.videoDriveFileId?.isEmpty == false)
-                )
+                let isVideo = isVideoCapture(for: capture)
                 if isVideo {
                     if let videoURL = Self.resolvedLocalURL(for: capture.videoUri) {
                         ShareLink(item: videoURL) {
@@ -1232,56 +1239,77 @@ struct ScanDetailScreen: View {
     private func notesCard(for capture: CaptureSummary) -> some View {
         let trimmed = capture.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let hasNotes = !trimmed.isEmpty
+        let titleText = capture.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let subject = titleText.isEmpty ? "QuickInk notes" : titleText
 
-        Button {
-            notesDraft = capture.notes ?? ""
-            showNotesEditor = true
-        } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                // Heading on a soft grey strip — matches the
-                // Details and Voice notes cards.
-                HStack(spacing: QuickInkSpacing.s2) {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(QuickInkColors.inkSoft)
-                    Text("Notes")
-                        .font(QuickInkFont.ui(13, weight: .semibold))
-                        .foregroundStyle(QuickInkColors.ink)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, QuickInkSpacing.s3)
-                .padding(.vertical, QuickInkSpacing.s2)
-                .background(QuickInkColors.borderSoft)
-
-                VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
-                    if hasNotes {
-                        Text(trimmed)
-                            .font(QuickInkFont.ui(11, weight: .regular))
-                            .foregroundStyle(QuickInkColors.ink)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(8)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        Text("Tap to add notes for this scan. Voice-note transcripts also land here.")
-                            .font(QuickInkText.caption)
-                            .foregroundStyle(QuickInkColors.muted)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 0) {
+            // Heading on a soft grey strip — matches the
+            // Details and Voice notes cards.
+            HStack(spacing: QuickInkSpacing.s2) {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(QuickInkColors.inkSoft)
+                Text("Notes")
+                    .font(QuickInkFont.ui(13, weight: .semibold))
+                    .foregroundStyle(QuickInkColors.ink)
+                Spacer()
+                if hasNotes {
+                    ShareLink(
+                        item: trimmed,
+                        subject: Text(subject)
+                    ) {
+                        HStack(spacing: QuickInkSpacing.s1) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("Share")
+                                .font(QuickInkText.caption)
+                        }
+                        .foregroundStyle(QuickInkColors.accent)
+                        .padding(.horizontal, QuickInkSpacing.s2)
+                        .padding(.vertical, 4)
+                        .background(QuickInkColors.accentSoft)
+                        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.pill, style: .continuous))
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Share notes")
                 }
-                .padding(QuickInkSpacing.s3)
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(QuickInkColors.surface)
-            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
-                    .stroke(QuickInkColors.border, lineWidth: 1)
-            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, QuickInkSpacing.s3)
+            .padding(.vertical, QuickInkSpacing.s2)
+            .background(QuickInkColors.borderSoft)
+
+            VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+                if hasNotes {
+                    Text(trimmed)
+                        .font(QuickInkFont.ui(11, weight: .regular))
+                        .foregroundStyle(QuickInkColors.ink)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(8)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text("Tap to add notes for this scan. Voice-note transcripts also land here.")
+                        .font(QuickInkText.caption)
+                        .foregroundStyle(QuickInkColors.muted)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(QuickInkSpacing.s3)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                notesDraft = capture.notes ?? ""
+                showNotesEditor = true
+            }
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(QuickInkColors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                .stroke(QuickInkColors.border, lineWidth: 1)
+        )
         .accessibilityLabel(hasNotes ? "Edit notes" : "Add notes")
     }
 
@@ -1566,10 +1594,7 @@ struct ScanDetailScreen: View {
                 // place of the Share-as-Image / Export-as-PDF pair —
                 // the PDF/image artifacts make no sense for a clip
                 // whose only meaningful output is the recorded .mov.
-                let isVideo = capture.source == "photo" && (
-                    (capture.videoUri?.isEmpty == false) ||
-                    (capture.videoDriveFileId?.isEmpty == false)
-                )
+                let isVideo = isVideoCapture(for: capture)
                 if isVideo {
                     if let videoURL = Self.resolvedLocalURL(for: capture.videoUri) {
                         ShareLink(item: videoURL) {
@@ -1713,27 +1738,33 @@ struct ScanDetailScreen: View {
 
     // MARK: - File metadata helpers
 
-    /// Resolve the file-type label for the Details row. Every
-    /// capture produces a PDF via `ImportArtifacts.build`
-    /// regardless of how the bytes got in, so just gating on the
-    /// PDF URL would always read "PDF document" — even for in-app
-    /// photos / videos / gallery imports. Branch on `source` (+
-    /// the presence of a video URI) so the label matches how the
-    /// row is presented elsewhere in the app (HomeScreen recents,
-    /// search results, etc.).
+    /// Resolve the file-type label for the Details row. For local
+    /// PDFs, surface whether the saved artifact is QuickInk's
+    /// compressed PDF or a raw scanner/import PDF. Video captures
+    /// keep their user-facing "Video" label because the playable
+    /// movie is the primary artifact.
     private func fileTypeLabel(for capture: CaptureSummary) -> String {
         let isPhotoSource  = capture.source == "photo"
         let isImportSource = capture.source == "import"
-        let isVideo        = isPhotoSource && (
-            (capture.videoUri?.isEmpty == false) ||
-            (capture.videoDriveFileId?.isEmpty == false)
-        )
-        if isVideo                                   { return "Video" }
+        if isVideoCapture(for: capture)              { return "Video" }
         if isPhotoSource                             { return "Photo" }
+        if pdfURL(from: capture) != nil {
+            switch pdfStorageKind {
+            case .compressed: return "Compressed PDF document"
+            case .raw:        return "PDF document"
+            case .none:       return "PDF document"
+            }
+        }
         if isImportSource                            { return "Image" }
-        if pdfURL(from: capture) != nil              { return "PDF document" }
         if loadedPreviewImage(for: capture) != nil   { return "Image" }
         return "Document"
+    }
+
+    private func isVideoCapture(for capture: CaptureSummary) -> Bool {
+        let hasVideoArtifact = (capture.videoUri?.isEmpty == false) ||
+            (capture.videoDriveFileId?.isEmpty == false)
+        return capture.source == "video" ||
+            (capture.source == "photo" && hasVideoArtifact)
     }
 
     /// Format a byte count as "1.2 MB" / "340 KB" using the system
@@ -1808,6 +1839,30 @@ struct ScanDetailScreen: View {
             }
         }.value
         self.pdfFileSize = size
+    }
+
+    /// Reads the small marker QuickInk writes into compressed PDFs.
+    /// Unmarked local PDFs are treated as raw scanner/import PDFs.
+    private func loadPdfStorageKind() async {
+        guard let url = pdfURL(from: capture) else {
+            self.pdfStorageKind = nil
+            return
+        }
+        let kind = await Task.detached(priority: .utility) { () -> PDFStorageKind? in
+            guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+            defer { try? handle.close() }
+            guard let data = try? handle.read(upToCount: 4096) else { return nil }
+            let marker = Data(CompressedImagePdfWriter.pdfMarker.utf8)
+            let legacySignature = Data(PDFStorageKind.legacyCompressedSignature.utf8)
+            let dctDecode = Data("/DCTDecode".utf8)
+            let firstImageName = Data("/Im1".utf8)
+            let isMarkedCompressed = data.range(of: marker) != nil
+            let isLegacyCompressed = data.range(of: legacySignature) != nil &&
+                data.range(of: dctDecode) != nil &&
+                data.range(of: firstImageName) != nil
+            return (isMarkedCompressed || isLegacyCompressed) ? .compressed : .raw
+        }.value
+        self.pdfStorageKind = kind
     }
 
     // MARK: - Share as image
@@ -2276,4 +2331,3 @@ private func splitCsv(_ s: String) -> [String] {
         .map { $0.trimmingCharacters(in: .whitespaces) }
         .filter { !$0.isEmpty }
 }
-

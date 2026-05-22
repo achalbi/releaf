@@ -80,6 +80,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DatePickerDefaults
@@ -762,13 +763,20 @@ private fun LibraryNoteCard(
             if (hasImage) {
                 val isImport = capture.source == "import"
                 val isPhoto  = capture.source == "photo"
+                val isVideo  = capture.source == "video" || (isPhoto &&
+                    (!capture.videoUri.isNullOrBlank() || !capture.videoDriveFileId.isNullOrBlank()))
                 // Photo source uses the same neutral chrome as
                 // Scan (both came from the camera) — only the
                 // label disambiguates a one-shot photo from a
                 // multi-page document scan.
-                val badgeIcon = if (isImport) Icons.Filled.Image else Icons.Filled.PhotoCamera
+                val badgeIcon = when {
+                    isImport -> Icons.Filled.Image
+                    isVideo  -> Icons.Filled.PlayCircle
+                    else     -> Icons.Filled.PhotoCamera
+                }
                 val badgeLabel = when {
                     isImport -> "Import"
+                    isVideo  -> "Video"
                     isPhoto  -> "Photo"
                     else     -> "Scan"
                 }
@@ -1032,7 +1040,11 @@ private fun LibraryScanListRow(
                 val rowIsImport = capture.source == "import"
                 val rowLabel = when (capture.source) {
                     "import" -> "Import"
-                    "photo"  -> "Photo"
+                    "video"  -> "Video"
+                    "photo"  -> if (
+                        !capture.videoUri.isNullOrBlank() ||
+                        !capture.videoDriveFileId.isNullOrBlank()
+                    ) "Video" else "Photo"
                     else     -> "Scan"
                 }
                 Text(

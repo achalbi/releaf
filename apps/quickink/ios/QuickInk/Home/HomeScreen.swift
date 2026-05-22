@@ -830,7 +830,7 @@ struct RecentScanThumb: View {
     ///   - "import" (gallery-picked photos — coral accent).
     ///   - "photo"  (in-app camera shot, no video) — neutral chip
     ///              with a "Photo" label.
-    ///   - "photo" + `video_uri` / `video_drive_file_id` set
+    ///   - "video", or legacy "photo" + `video_uri` / `video_drive_file_id` set
     ///              (hold-to-record clip) — neutral chip with a
     ///              "Video" label + `play.fill` icon so the home
     ///              recents reads videos at a glance.
@@ -840,6 +840,8 @@ struct RecentScanThumb: View {
         switch capture.source {
         case "import":
             return ("photo", "Import", QuickInkColors.textOnAccent, QuickInkColors.accent)
+        case "video":
+            return ("play.fill", "Video", QuickInkColors.ink.opacity(0.7), QuickInkColors.surface.opacity(0.9))
         case "photo":
             // Photo-mode captures split into still-photo and
             // hold-to-record video by the presence of a video
@@ -896,4 +898,3 @@ struct RecentScanThumb: View {
         return String(capture.createdAt.prefix(10))
     }
 }
-

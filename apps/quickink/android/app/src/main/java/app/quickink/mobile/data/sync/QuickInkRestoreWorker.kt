@@ -38,11 +38,9 @@
  *
  * Token-freshness posture: same as QuickInkSyncWorker — proceed even
  * when the local TTL stamp is past. The wire token is the source of
- * truth; if it's also dead, the catch block below picks up the 401
- * and the AUTH_REJECTED banner takes over. With the foreground token-
- * refresh hook in QuickInkApp, tokens are typically rotated by the
- * time this worker runs, so the stale-stamp branch is mostly
- * defensive.
+ * truth; if it's also dead, the catch block below picks up the 401,
+ * tries a background-safe silent refresh, and only then lets the
+ * AUTH_REJECTED banner take over.
  *
  * Not signed in: returns [Result.success] with no-op (defended by
  * the Settings button's `isSignedIn` check, but belt-and-braces).
@@ -99,9 +97,7 @@ class QuickInkRestoreWorker(
         // Previously this returned Result.retry() when the local TTL
         // stamp was past expiry — same anti-pattern QuickInkSyncWorker
         // had and removed. The local stamp is conservative (55min vs
-        // Google's ~60min wire TTL), and a Restore tap from a fresh-
-        // launched app may run before the foreground-refresh hook in
-        // QuickInkApp has fired. Returning retry there made
+        // Google's ~60min wire TTL). Returning retry there made
         // "Restore from Drive" feel silently broken: the user taps,
         // nothing visible happens, the worker quietly backs off and
         // retries. Better posture: try the pull anyway and let the
@@ -339,21 +335,10 @@ class QuickInkRestoreWorker(
             Result.retry()
         } catch (e: DriveError.Unauthenticated) {
             // Drive rejected the token (401, or a 403 that was not a
-            // rate/quota response). Same conservative posture as
-            // QuickInkSyncWorker — DELIBERATELY do NOT sign the user
-            // out here. The Settings banner observes
-            // LAST_SYNC_ERROR_CODE and surfaces the recovery path; the
-            // worker writing AUTH_REJECTED here keeps that surface
-            // honest even when the failing pass was a Restore.
-            Log.w(TAG, "restore: result=FAILURE (Drive auth rejected — 401/403). " +
-                "User can manually sign out + back in via Settings if " +
-                "this persists. $e")
-            writeRestoreProgress(
-                phase = RESTORE_PROGRESS_PHASE_DONE,
-                label = "Restore stopped: Drive needs re-authentication.",
-                percent = 100,
-                logLine = "Restore stopped because Drive rejected the token.",
-            )
+            // rate/quota response). Try the same background-safe
+            // silent refresh path as QuickInkSyncWorker before
+            // surfacing a re-auth banner.
+            Log.w(TAG, "restore: 401/403 from Drive — attempting background silent refresh first. $e")
             // Same diagnostic the sync worker runs on 401/403 — hits
             // Google's tokeninfo endpoint and logs the granted scopes
             // so we can tell "drive.file not granted" apart from
@@ -361,25 +346,52 @@ class QuickInkRestoreWorker(
             // project". Best-effort; swallow any throw so the catch
             // path still writes AUTH_REJECTED below.
             runCatching { logDriveTokenInfo(session.accessToken) }
-            runCatching {
-                val nowIso = IsoClock.nowIso()
-                app.database.syncStateDao().upsert(
-                    SyncStateEntity(
-                        key       = SyncStateKeys.LAST_SYNC_ERROR_CODE,
-                        value     = SyncErrorCodes.AUTH_REJECTED,
-                        updatedAt = nowIso,
-                    )
+
+            val refreshed = app.attemptBackgroundSilentRefresh(session)
+            if (refreshed != null) {
+                Log.i(TAG, "restore: silent refresh succeeded — retrying with rotated session")
+                writeRestoreProgress(
+                    phase = RESTORE_PROGRESS_PHASE_QUEUED,
+                    label = "Refreshed credentials — retrying restore…",
+                    percent = 0,
+                    logLine = "Drive 401 → silent token refresh succeeded → retrying restore.",
                 )
-            }.onFailure { Log.w(TAG, "restore: writeAuthRejected failed: $it") }
-            writeRestoreOutcome(
-                app           = app,
-                status        = RESTORE_STATUS_FAILED,
-                downloaded    = 0,
-                applyFailed   = 0,
-                orphanFound   = 0,
-                orphanCleaned = 0,
-            )
-            Result.failure()
+                Result.retry()
+            } else {
+                // DELIBERATELY do NOT sign the user out here. The
+                // Settings banner observes LAST_SYNC_ERROR_CODE and
+                // surfaces the recovery path; writing AUTH_REJECTED
+                // here keeps that surface honest even when the
+                // failing pass was a Restore.
+                Log.w(TAG, "restore: result=FAILURE (Drive auth rejected — 401/403, " +
+                    "silent refresh also failed). User can reconnect via Settings if " +
+                    "this persists.")
+                writeRestoreProgress(
+                    phase = RESTORE_PROGRESS_PHASE_DONE,
+                    label = "Restore stopped: Drive needs re-authentication.",
+                    percent = 100,
+                    logLine = "Restore stopped because Drive rejected the token.",
+                )
+                runCatching {
+                    val nowIso = IsoClock.nowIso()
+                    app.database.syncStateDao().upsert(
+                        SyncStateEntity(
+                            key       = SyncStateKeys.LAST_SYNC_ERROR_CODE,
+                            value     = SyncErrorCodes.AUTH_REJECTED,
+                            updatedAt = nowIso,
+                        )
+                    )
+                }.onFailure { Log.w(TAG, "restore: writeAuthRejected failed: $it") }
+                writeRestoreOutcome(
+                    app           = app,
+                    status        = RESTORE_STATUS_FAILED,
+                    downloaded    = 0,
+                    applyFailed   = 0,
+                    orphanFound   = 0,
+                    orphanCleaned = 0,
+                )
+                Result.failure()
+            }
         } catch (e: DriveError) {
             // Transient (network blip, 5xx). Back off and retry.
             Log.w(TAG, "restore: result=RETRY (Drive transient error): $e")

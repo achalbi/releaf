@@ -42,10 +42,8 @@ class NoteEditorController(
     private val dao: NotepadDao,
     private val scope: CoroutineScope,
     /**
-     * Slice 4.2c — fired once per successful save / soft-delete so
-     * the just-mutated row pushes to Drive in seconds rather than
-     * waiting for the 15-min periodic. Wired by `NoteEditorScreen`
-     * to call `QuickInkSyncScheduler.requestImmediate(context)`.
+     * Fired once per successful save / soft-delete. Callers use this
+     * to run QuickInk's once-per-day app-initiated sync check.
      * Defaults to a no-op for tests / preview construction sites.
      *
      * Save and delete are user-driven (low frequency), so each one

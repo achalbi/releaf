@@ -29,6 +29,9 @@ class VoiceNoteRepository(
     suspend fun findById(id: String): VoiceNoteEntity? =
         voiceNoteDao.findById(id)
 
+    suspend fun firstForCapture(captureId: String): VoiceNoteEntity? =
+        voiceNoteDao.listForCapture(captureId).firstOrNull()
+
     /**
      * True when at least one active (non-tombstoned) voice note
      * is already attached to [captureId]. Used by the capture

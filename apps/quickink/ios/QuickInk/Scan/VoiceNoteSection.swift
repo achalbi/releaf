@@ -536,6 +536,8 @@ private struct VoiceNoteCard: View {
     @State private var didCopyToNotes: Bool = false
     /// Drives the transcript editor sheet.
     @State private var showTranscriptEditor: Bool = false
+    /// Gates destructive deletes behind an explicit confirmation.
+    @State private var showDeleteConfirm: Bool = false
 
     @StateObject private var player = VoicePlayer()
 
@@ -579,18 +581,35 @@ private struct VoiceNoteCard: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 14))
-                        .foregroundStyle(QuickInkColors.inkSoft)
-                        .frame(width: 32, height: 32)
-                        .background(
-                            RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
-                                .fill(QuickInkColors.borderSoft)
-                        )
+                VStack(spacing: QuickInkSpacing.s1) {
+                    if let url = shareURL {
+                        ShareLink(item: url) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 14))
+                                .foregroundStyle(QuickInkColors.inkSoft)
+                                .frame(width: 32, height: 32)
+                                .background(
+                                    RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
+                                        .fill(QuickInkColors.borderSoft)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Share voice note")
+                    }
+
+                    Button { showDeleteConfirm = true } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 14))
+                            .foregroundStyle(QuickInkColors.inkSoft)
+                            .frame(width: 32, height: 32)
+                            .background(
+                                RoundedRectangle(cornerRadius: QuickInkRadius.sm, style: .continuous)
+                                    .fill(QuickInkColors.borderSoft)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Delete voice note")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Delete voice note")
             }
 
             transcriptStrip
@@ -617,6 +636,27 @@ private struct VoiceNoteCard: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        .alert("Delete this voice note?", isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                player.teardown()
+                onDelete()
+            }
+        } message: {
+            Text("The audio and transcript will be removed from this scan. This can't be undone.")
+        }
+    }
+
+    private var shareURL: URL? {
+        guard let url = resolvedFileURL(for: note.audioUri),
+              FileManager.default.fileExists(atPath: url.path)
+        else { return nil }
+        return url
+    }
+
+    private func resolvedFileURL(for raw: String) -> URL? {
+        if let parsed = URL(string: raw), parsed.isFileURL { return parsed }
+        return URL(fileURLWithPath: raw)
     }
 
     @ViewBuilder

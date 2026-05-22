@@ -1745,10 +1745,10 @@ private fun RecentScanThumb(
     // Drive id (cross-device receive window before the binary-
     // restore pass lands the .mp4). Either signal is enough to
     // treat the row as a video for chip + badge purposes.
-    val isVideo    = isPhoto && (
+    val isVideo    = capture.source == "video" || (isPhoto && (
         !capture.videoUri.isNullOrBlank() ||
             !capture.videoDriveFileId.isNullOrBlank()
-    )
+    ))
 
     Column(
         modifier = Modifier

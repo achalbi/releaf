@@ -17,14 +17,12 @@
  *   - Video →  90° (top, primary)
  *   - Photo →  30° (top-right)
  *
- * Each ray opens its own dedicated surface — Scan launches the
- * ML Kit system document scanner, Video opens
- * [VideoCaptureSurface] (tap-to-start / tap-to-stop recording
- * with voice-note extraction), and Photo opens
- * [PhotoCaptureSurface] (single-tap still capture). Earlier
- * revisions routed Video to a shared photo+video surface with a
- * tap-vs-hold gesture; the dedicated surfaces replaced that
- * once the radial menu made separate verbs cheap.
+ * Scan launches the ML Kit system document scanner. Footer Video
+ * and Photo rays launch the platform camera app via Activity Result
+ * contracts, then QuickInk promotes the returned media into the
+ * same capture pipeline as the in-app surfaces. Earlier revisions
+ * routed those rays to dedicated CameraX surfaces; those surfaces
+ * remain available inside QuickCapture for non-footer flows.
  *
  * Geometry mirrors the design handoff: 110dp radius from the FAB
  * centre, vertical-spring overshoot on open, staggered left → top
@@ -43,6 +41,7 @@
 package app.quickink.mobile.features.nav
 
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -53,7 +52,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -63,23 +61,24 @@ import app.quickink.mobile.R
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
+import kotlinx.coroutines.delay
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -149,42 +148,41 @@ fun SundialCaptureMenu(
         // explicit size restores the label; the padding moves
         // from 56dp down to 24dp to compensate (so the icon
         // centre lands at the same screen Y as before).
-        if (isOpen || overlayAlpha > 0f) {
-            // 24dp was the original FAB-centre anchor; the extra 32dp
-            // lifts the whole menu above the FAB so the rays read as
-            // emanating "above the bolt" rather than sitting on it.
-            Box(
-                modifier = Modifier.padding(bottom = 56.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Ray(
-                    label              = "Scan",
-                    iconResId          = R.drawable.ic_scan,
-                    angleDeg           = 150.0,
-                    openDelayMs        = 0,
-                    accessibilityLabel = "Scan document",
-                    isOpen             = isOpen,
-                    onClick            = onSelectScan,
-                )
-                Ray(
-                    label              = "Video",
-                    iconResId          = R.drawable.ic_video,
-                    angleDeg           = 90.0,
-                    openDelayMs        = 60,
-                    accessibilityLabel = "Record video",
-                    isOpen             = isOpen,
-                    onClick            = onSelectVideo,
-                )
-                Ray(
-                    label              = "Photo",
-                    iconResId          = R.drawable.ic_camera,
-                    angleDeg           = 30.0,
-                    openDelayMs        = 120,
-                    accessibilityLabel = "Take photo",
-                    isOpen             = isOpen,
-                    onClick            = onSelectPhoto,
-                )
-            }
+        // Keep rays composed while closed so their animation state
+        // starts at 0 before the FAB toggles open. If they are first
+        // composed after `isOpen == true`, Compose initializes them at
+        // the final value and the open animation snaps.
+        Box(
+            modifier = Modifier.padding(bottom = 56.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Ray(
+                label              = "Scan",
+                iconResId          = R.drawable.ic_scan,
+                angleDeg           = 150.0,
+                openDelayMs        = 0,
+                accessibilityLabel = "Scan document",
+                isOpen             = isOpen,
+                onClick            = onSelectScan,
+            )
+            Ray(
+                label              = "Video",
+                iconResId          = R.drawable.ic_video,
+                angleDeg           = 90.0,
+                openDelayMs        = 60,
+                accessibilityLabel = "Record video",
+                isOpen             = isOpen,
+                onClick            = onSelectVideo,
+            )
+            Ray(
+                label              = "Photo",
+                iconResId          = R.drawable.ic_camera,
+                angleDeg           = 30.0,
+                openDelayMs        = 120,
+                accessibilityLabel = "Take photo",
+                isOpen             = isOpen,
+                onClick            = onSelectPhoto,
+            )
         }
     }
 }
@@ -216,29 +214,46 @@ private fun Ray(
     // (above horizontal) translate UPWARD on screen.
     val dy  = (-sin(rad) * RAY_RADIUS.value).dp
 
-    val animSpec = spring<Float>(
-        dampingRatio = 0.55f,
-        stiffness    = Spring.StiffnessMediumLow,
-    )
-
-    // animateFloatAsState lets us drive `scale`, `opacity`, and
-    // translation through the same spring. Delay only applied
-    // when opening (close fires all three rays together for a
-    // snappy dismiss).
-    val progress by animateFloatAsState(
-        targetValue   = if (isOpen) 1f else 0f,
-        animationSpec = if (isOpen) {
-            spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow)
+    // Spring progress drives translation + scale only. Opacity uses a
+    // non-spring tween below so the bounce cannot make the circle/label
+    // background visually pulse after the ray lands.
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(isOpen) {
+        if (isOpen) {
+            if (openDelayMs > 0) delay(openDelayMs.toLong())
+            progress.animateTo(
+                targetValue   = 1f,
+                animationSpec = spring(
+                    dampingRatio = 0.55f,
+                    stiffness    = Spring.StiffnessMediumLow,
+                ),
+            )
         } else {
-            tween(durationMillis = 240)
-        },
-        label = "sundial-ray-progress-$label",
+            progress.animateTo(
+                targetValue   = 0f,
+                animationSpec = tween(durationMillis = 240),
+            )
+        }
+    }
+
+    val rayAlpha by animateFloatAsState(
+        targetValue = if (isOpen) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = if (isOpen) 90 else 120,
+            delayMillis    = if (isOpen) openDelayMs else 0,
+        ),
+        label = "sundial-ray-alpha-$label",
     )
 
-    val translatedX = with(density) { (dx.toPx()) * progress }
-    val translatedY = with(density) { (dy.toPx()) * progress }
-    val scale       = 0.4f + (0.6f * progress)
-    val rayAlpha    = progress
+    val progressValue = progress.value
+    val translatedX   = with(density) { (dx.toPx()) * progressValue }
+    val translatedY   = with(density) { (dy.toPx()) * progressValue }
+    val scale         = 0.4f + (0.6f * progressValue)
+    val semanticsModifier = if (isOpen) {
+        Modifier.semantics { contentDescription = accessibilityLabel }
+    } else {
+        Modifier.clearAndSetSemantics {}
+    }
 
     val interactionSource = remember { MutableInteractionSource() }
     Column(
@@ -253,13 +268,13 @@ private fun Ray(
                 this.alpha      = rayAlpha
                 transformOrigin = TransformOrigin(0.5f, 0f)
             }
-            .semantics { contentDescription = accessibilityLabel }
             .clickable(
                 interactionSource = interactionSource,
                 indication        = null,
                 enabled           = isOpen,
                 onClick           = onClick,
-            ),
+            )
+            .then(semanticsModifier),
     ) {
         Box(
             modifier = Modifier

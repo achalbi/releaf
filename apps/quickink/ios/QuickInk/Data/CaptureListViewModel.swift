@@ -27,8 +27,8 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
     public let pageCount: Int
     public let createdAt: String
     /// `"scan"` (default) — went through VisionKit. `"import"` —
-    /// came from the system photo picker. Drives the "Import" pill
-    /// on the Library cards. Defaulting to `"scan"` keeps any
+    /// came from the system photo picker. `"photo"` / `"video"` —
+    /// came from QuickInk's camera media surfaces. Defaulting to `"scan"` keeps any
     /// search-result construction site (and rows synced from older
     /// clients) reading back as scans.
     public let source: String

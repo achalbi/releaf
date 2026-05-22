@@ -31,12 +31,17 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
 import app.releaf.mobile.data.common.AttachmentStorage
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Result of a successful document scan.
@@ -129,6 +134,10 @@ class DocumentScannerLauncher internal constructor(
  *   ("scan" vs "import"), since ML Kit doesn't expose the source
  *   per-page in its result. Releaf keeps the default to preserve
  *   the unified flow it ships.
+ * @param compressedPdfEnabled when `true`, tries an optimized
+ *   JPEG-backed PDF under the writer's 250 KB/page budget and keeps
+ *   it only if it is smaller than ML Kit's raw PDF. When `false`,
+ *   copies ML Kit's raw PDF where available.
  */
 @Composable
 fun rememberDocumentScannerLauncher(
@@ -136,6 +145,7 @@ fun rememberDocumentScannerLauncher(
     onError: (DocumentScanError) -> Unit = {},
     pageLimit: Int? = null,
     galleryImportAllowed: Boolean = true,
+    compressedPdfEnabled: Boolean = true,
 ): DocumentScannerLauncher {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -148,8 +158,10 @@ fun rememberDocumentScannerLauncher(
     val currentOnError      = rememberUpdatedState(onError)
     val currentPageLimit    = rememberUpdatedState(pageLimit)
     val currentGalleryAllow = rememberUpdatedState(galleryImportAllowed)
+    val currentCompressedPdf = rememberUpdatedState(compressedPdfEnabled)
 
     val isLaunching = remember { mutableStateOf(false) }
+    val extractionScope = rememberCoroutineScope()
 
     val scanLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -163,28 +175,42 @@ fun rememberDocumentScannerLauncher(
 
         // ML Kit hands back content:// URIs pointing into its own cache
         // directory. Those stop resolving once the cache rotates, so we
-        // copy both attachment artifacts (PDF + preview JPEG) into
-        // filesDir and store the resulting file:// URIs on the
-        // DocumentScanResult. Cleanup on remove is then straightforward
-        // — the caller just deletes the files we own.
+        // store app-owned attachment artifacts (PDF + preview JPEG) in
+        // filesDir and return file:// URIs on the DocumentScanResult.
+        // Cleanup on remove is then straightforward — the caller just
+        // deletes the files we own. If compression is enabled, keep the
+        // smaller of the optimized image-only PDF and ML Kit's raw PDF
+        // instead of assuming the re-encoded copy always wins.
         //
         // Page content:// URIs are NOT copied — they're handed straight
         // through, expected to feed into Text Recognition v2 off the
         // Compose tree. They stay readable for the process lifetime,
         // which is well beyond a 1–3 s/page inference run.
-        val localPdf  = cachedPdf?.let  { AttachmentStorage.copyIntoStorage(context, it, "pdf") }
-        val localJpeg = cachedJpeg?.let { AttachmentStorage.copyIntoStorage(context, it, "jpg") }
+        extractionScope.launch {
+            val (localPdf, localJpeg) = withContext(Dispatchers.IO) {
+                val pdf = if (currentCompressedPdf.value) {
+                    val compressed = CompressedImagePdfWriter.writeToAttachment(context, pageUris)
+                    val raw = cachedPdf?.let { AttachmentStorage.copyIntoStorage(context, it, "pdf") }
+                    chooseSmallerPdfAttachment(compressed, raw)
+                } else {
+                    cachedPdf?.let { AttachmentStorage.copyIntoStorage(context, it, "pdf") }
+                        ?: CompressedImagePdfWriter.writeToAttachment(context, pageUris)
+                }
+                val jpeg = cachedJpeg?.let { AttachmentStorage.copyIntoStorage(context, it, "jpg") }
+                pdf to jpeg
+            }
 
-        if (localPdf == null && localJpeg == null) {
-            currentOnError.value(DocumentScanError.SaveFailed)
-        } else {
-            currentOnResult.value(
-                DocumentScanResult(
-                    pdfUri     = localPdf,
-                    previewUri = localJpeg,
-                    pageUris   = pageUris,
+            if (localPdf == null && localJpeg == null) {
+                currentOnError.value(DocumentScanError.SaveFailed)
+            } else {
+                currentOnResult.value(
+                    DocumentScanResult(
+                        pdfUri     = localPdf,
+                        previewUri = localJpeg,
+                        pageUris   = pageUris,
+                    )
                 )
-            )
+            }
         }
     }
 
@@ -228,4 +254,26 @@ fun rememberDocumentScannerLauncher(
     }
 
     return remember { DocumentScannerLauncher(onLaunch, isLaunching) }
+}
+
+private fun chooseSmallerPdfAttachment(compressed: Uri?, raw: Uri?): Uri? {
+    if (compressed == null) return raw
+    if (raw == null) return compressed
+
+    val compressedSize = localFileSize(compressed)
+    val rawSize = localFileSize(raw)
+    val keepCompressed = compressedSize == null ||
+        rawSize == null ||
+        compressedSize <= rawSize
+
+    val discarded = if (keepCompressed) raw else compressed
+    AttachmentStorage.deleteIfLocal(discarded.toString())
+
+    return if (keepCompressed) compressed else raw
+}
+
+private fun localFileSize(uri: Uri): Long? {
+    if (uri.scheme != "file") return null
+    val path = uri.path ?: return null
+    return File(path).takeIf { it.exists() }?.length()
 }

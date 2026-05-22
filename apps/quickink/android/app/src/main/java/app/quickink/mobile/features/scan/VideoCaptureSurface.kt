@@ -58,7 +58,7 @@
  * serves as the still preview, with a "With audio" badge in the
  * top-leading corner when the audio track survived. OK writes
  * the first-frame JPEG via [buildImportArtifacts], fires
- * `controller.onScanComplete(source="photo", paperSize=Custom)`
+ * `controller.onScanComplete(source="video", paperSize=Custom)`
  * (videos share the photo source-tag — the first frame is still
  * just an arbitrary phone-camera frame whose aspect ratio tells
  * us nothing about A4 / Letter / card bands), and inserts the
@@ -190,6 +190,8 @@ import java.nio.ByteBuffer
 
 /** Hard cap on a single recording. */
 private const val VIDEO_MAX_RECORDING_MS: Long = 120_000L
+private const val VIDEO_QUALITY_PREFS_NAME = "quickink.settings"
+private const val VIDEO_QUALITY_PREF_KEY = "video_capture_quality"
 
 @Composable
 internal fun VideoCaptureSurface(
@@ -283,6 +285,23 @@ private sealed interface VideoUiState {
     data class Captured(val buffer: CapturedVideoBuffer) : VideoUiState
 }
 
+private enum class VideoCaptureQuality(
+    val id: String,
+    val label: String,
+    val cameraXOrder: List<Quality>,
+) {
+    Auto("auto", "Auto", listOf(Quality.UHD, Quality.FHD, Quality.HD, Quality.SD, Quality.LOWEST)),
+    Uhd("uhd", "4K", listOf(Quality.UHD, Quality.FHD, Quality.HD, Quality.SD, Quality.LOWEST)),
+    Fhd("fhd", "1080", listOf(Quality.FHD, Quality.HD, Quality.SD, Quality.LOWEST)),
+    Hd("hd", "720", listOf(Quality.HD, Quality.SD, Quality.LOWEST)),
+    Sd("sd", "SD", listOf(Quality.SD, Quality.LOWEST));
+
+    companion object {
+        fun fromId(id: String?): VideoCaptureQuality =
+            entries.firstOrNull { it.id == id } ?: Auto
+    }
+}
+
 @Composable
 private fun ActiveVideoSurface(
     controller: ScanFlowController,
@@ -310,6 +329,9 @@ private fun ActiveVideoSurface(
             captureTagDao = app.database.captureTagDao(),
         )
     }
+    val qualityPrefs = remember(context) {
+        context.applicationContext.getSharedPreferences(VIDEO_QUALITY_PREFS_NAME, Context.MODE_PRIVATE)
+    }
 
     var uiState by remember { mutableStateOf<VideoUiState>(VideoUiState.Preview) }
     var commitError by remember { mutableStateOf<String?>(null) }
@@ -335,6 +357,10 @@ private fun ActiveVideoSurface(
     // user.
     var activeFilter by remember { mutableStateOf(PhotoFilter.None) }
     var isFilterStripExpanded by remember { mutableStateOf(false) }
+    var activeQuality by remember {
+        mutableStateOf(VideoCaptureQuality.fromId(qualityPrefs.getString(VIDEO_QUALITY_PREF_KEY, null)))
+    }
+    var isQualityStripExpanded by remember { mutableStateOf(false) }
     // Latest 96x96 RGBA bitmap from the live PreviewView's
     // TextureView, polled while the strip is expanded so each
     // chip can show a real-time mini-preview with its filter
@@ -374,7 +400,7 @@ private fun ActiveVideoSurface(
         }
     }
 
-    LaunchedEffect(previewViewRef, cameraSelector) {
+    LaunchedEffect(previewViewRef, cameraSelector, activeQuality) {
         val pv = previewViewRef ?: return@LaunchedEffect
         bindCameraXForVideo(
             context        = context,
@@ -382,6 +408,7 @@ private fun ActiveVideoSurface(
             lifecycleOwner = lifecycleOwner,
             bindings       = bindings,
             cameraSelector = cameraSelector,
+            quality        = activeQuality,
         )
     }
 
@@ -459,6 +486,25 @@ private fun ActiveVideoSurface(
                             modifier  = Modifier
                                 .align(Alignment.TopCenter)
                                 .padding(top = QuickInkSpacing.s5),
+                        )
+                    }
+                    if (state is VideoUiState.Preview) {
+                        VideoQualityStrip(
+                            isExpanded    = isQualityStripExpanded,
+                            activeQuality = activeQuality,
+                            onToggleExpand = {
+                                isQualityStripExpanded = !isQualityStripExpanded
+                            },
+                            onSelect = { picked ->
+                                activeQuality = picked
+                                isQualityStripExpanded = false
+                                qualityPrefs.edit()
+                                    .putString(VIDEO_QUALITY_PREF_KEY, picked.id)
+                                    .apply()
+                            },
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = QuickInkSpacing.s5, end = QuickInkSpacing.s4),
                         )
                     }
                     if (state is VideoUiState.Processing) {
@@ -1001,6 +1047,68 @@ private fun FilterChip(
     }
 }
 
+/**
+ * Compact quality selector for the in-app recorder. Anchored in
+ * the live preview by the caller; collapsed state shows the active
+ * tier, expanded state reveals the other tiers below it.
+ */
+@Composable
+private fun VideoQualityStrip(
+    isExpanded: Boolean,
+    activeQuality: VideoCaptureQuality,
+    onToggleExpand: () -> Unit,
+    onSelect: (VideoCaptureQuality) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier              = modifier,
+        verticalArrangement   = Arrangement.spacedBy(6.dp),
+        horizontalAlignment   = Alignment.End,
+    ) {
+        VideoQualityChip(
+            quality  = activeQuality,
+            isActive = true,
+            onClick  = onToggleExpand,
+        )
+        if (isExpanded) {
+            VideoCaptureQuality.entries.filter { it != activeQuality }.forEach { quality ->
+                VideoQualityChip(
+                    quality  = quality,
+                    isActive = false,
+                    onClick  = { onSelect(quality) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VideoQualityChip(
+    quality: VideoCaptureQuality,
+    isActive: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(QuickInkRadius.pill))
+            .background(
+                if (isActive) colors.accent.copy(alpha = 0.88f)
+                else Color.Black.copy(alpha = 0.58f),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text  = quality.label,
+            style = type.caption.copy(fontSize = 11.sp),
+            color = Color.White,
+        )
+    }
+}
+
 @Composable
 private fun VideoPermissionRationale(onRequest: () -> Unit) {
     val type = LocalQuickInkTypography.current
@@ -1053,6 +1161,7 @@ private fun bindCameraXForVideo(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     bindings: VideoCameraXBindings,
     cameraSelector: CameraSelector,
+    quality: VideoCaptureQuality,
 ) {
     val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
     cameraProviderFuture.addListener({
@@ -1064,14 +1173,11 @@ private fun bindCameraXForVideo(
             .build()
             .also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
-        // Quality cascade — prefer HD, fall back to lower if the
-        // device doesn't advertise the higher tier. Capping at HD
-        // keeps the post-process audio extract cheap and the
-        // resulting .mp4 well under typical SQLite blob limits
-        // even at 2 minutes.
-        val qualitySelector = QualitySelector.fromOrderedList(
-            listOf(Quality.HD, Quality.SD, Quality.LOWEST),
-        )
+        // Quality cascade — prefer the highest common capture tiers
+        // now that the Video FAB routes here specifically to avoid
+        // OEM intent defaults. CameraX falls through when a device
+        // does not advertise UHD/FHD for the selected lens.
+        val qualitySelector = QualitySelector.fromOrderedList(quality.cameraXOrder)
         val recorder = Recorder.Builder()
             .setQualitySelector(qualitySelector)
             .build()
@@ -1266,7 +1372,7 @@ private suspend fun applyFilterToCapturedVideo(
  * Use handler — promotes the captured video buffer into the scan
  * pipeline. Builds the first-frame JPEG/PDF artifacts via
  * [buildImportArtifacts], fires `controller.onScanComplete` with
- * `source="photo"` / `paperSize=Custom`, copies the extracted
+ * `source="video"` / `paperSize=Custom`, copies the extracted
  * audio + raw .mp4 into AttachmentStorage, and inserts a voice
  * note row against the freshly-created captureId. Returns true
  * on success; false surfaces an inline retry toast.
@@ -1300,7 +1406,7 @@ private suspend fun commitVideoCapture(
     withContext(Dispatchers.Main) {
         controller.onScanComplete(
             result    = result,
-            source    = "photo",
+            source    = "video",
             paperSize = PaperSize.Custom,
         )
     }

@@ -154,6 +154,7 @@ struct QuickCaptureScreen: View {
                             controller:     controller,
                             onDismiss:      onDismiss,
                             onSelectPhoto:  { coordinator.select(.photo) },
+                            onSelectVideo:  { coordinator.select(.video) },
                         )
                     case .businessCard:
                         BusinessCardCaptureSurface(

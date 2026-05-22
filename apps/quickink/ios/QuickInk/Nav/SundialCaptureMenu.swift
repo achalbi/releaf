@@ -17,14 +17,12 @@
  *   - Video →  90° (top, primary)
  *   - Photo →  30° (top-right)
  *
- * Each ray opens its own dedicated surface — Scan launches the
- * VisionKit document scanner, Video opens [VideoCaptureSurface]
- * (tap-to-start / tap-to-stop recording with voice-note
- * extraction), and Photo opens [PhotoCaptureSurface] (single-
- * tap still capture). Earlier revisions routed Video to a
- * shared photo+video surface with a tap-vs-hold gesture; the
- * dedicated surfaces replaced that once the radial menu made
- * separate verbs cheap.
+ * Scan launches the VisionKit document scanner. Footer Video and
+ * Photo rays present the native system camera picker, then QuickInk
+ * promotes the returned media into the same capture pipeline as the
+ * in-app surfaces. Earlier revisions routed those rays to dedicated
+ * AVCapture surfaces; those surfaces remain available inside
+ * QuickCapture for non-footer flows.
  *
  * Geometry mirrors the design handoff: 110pt radius from the FAB
  * centre, vertical-spring overshoot on open, staggered left → top

@@ -37,6 +37,14 @@ public final class SettingsState: ObservableObject {
         didSet { UserDefaults.standard.set(searchablePdfExportEnabled, forKey: Keys.searchablePdfExport) }
     }
 
+    /// When true, new scanner/image-backed PDF artifacts are saved as
+    /// downscaled JPEG-backed PDFs. When false, QuickInk keeps raw
+    /// scanner/import PDF quality. Existing PDF files imported via
+    /// share sheet are always copied as-is.
+    @Published public var compressedPdfSavesEnabled: Bool {
+        didSet { UserDefaults.standard.set(compressedPdfSavesEnabled, forKey: Keys.compressedPdfSaves) }
+    }
+
     /// Stories Phase 6 — public-link publishing. When false, the
     /// share sheet's Public link tile is grayed out + toasts to flip
     /// this on; when true, the tile triggers the confirm dialog and
@@ -162,6 +170,14 @@ public final class SettingsState: ObservableObject {
         // user toggles it — that gate isn't wired yet; this is a
         // pure runtime flag for Slice 5.
         self.searchablePdfExportEnabled = defaults.bool(forKey: Keys.searchablePdfExport)
+        // Compressed PDF saving defaults to true — this preserves
+        // the current smaller-PDF behavior until the user opts into
+        // raw scanner/import PDFs.
+        if defaults.object(forKey: Keys.compressedPdfSaves) == nil {
+            self.compressedPdfSavesEnabled = true
+        } else {
+            self.compressedPdfSavesEnabled = defaults.bool(forKey: Keys.compressedPdfSaves)
+        }
         // Public-link publishing defaults off — see the property doc.
         self.experimentalPublicLinksEnabled = defaults.bool(forKey: Keys.experimentalPublicLinks)
         // Location-for-scans defaults to true so the onboarding step
@@ -204,6 +220,14 @@ public final class SettingsState: ObservableObject {
     /// keyspace.
     public static func commitOnboardingChoices(driveBackupEnabled: Bool) {
         UserDefaults.standard.set(driveBackupEnabled, forKey: Keys.driveBackup)
+    }
+
+    public nonisolated static var compressedPdfSavesDefault: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: Keys.compressedPdfSaves) == nil {
+            return true
+        }
+        return defaults.bool(forKey: Keys.compressedPdfSaves)
     }
 
     /// Last-known lifetime Tree-points balance. Written by HomeScreen
@@ -277,6 +301,7 @@ public final class SettingsState: ObservableObject {
     private enum Keys {
         static let driveBackup          = "quickink.settings.drive_backup_enabled"
         static let searchablePdfExport  = "quickink.settings.searchable_pdf_export_enabled"
+        static let compressedPdfSaves   = "quickink.settings.compressed_pdf_saves_enabled"
         static let experimentalPublicLinks = "quickink.settings.experimental_public_links_enabled"
         static let locationForScans     = "quickink.settings.location_for_scans_enabled"
         static let customDisplayName    = "quickink.settings.custom_display_name"
