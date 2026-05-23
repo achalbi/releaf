@@ -357,6 +357,7 @@ fun HomeScreen(
                 profilePhotoUri = profilePhotoUri,
                 onTapAvatar     = { showProfileDrawer = true },
                 onTapCalendar   = { onOpenCalendar?.invoke() },
+                onTapSettings   = onOpenSettings,
             )
             Spacer(Modifier.size(QuickInkSpacing.s4))
             // Daylight hero — slim card showing today's sunrise and
@@ -583,6 +584,7 @@ private fun HomeHeader(
     profilePhotoUri: String,
     onTapAvatar: () -> Unit,
     onTapCalendar: () -> Unit,
+    onTapSettings: () -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
@@ -603,10 +605,9 @@ private fun HomeHeader(
     }
     val resolvedName = (displayName?.trim().orEmpty()).ifEmpty { "QuickInk" }
 
-    // Header reads "greeting | calendar | profile" — both right-side
-    // affordances are 44dp coral discs (mirrors iOS). Calendar is
-    // a destination; profile (showing the user's first initial,
-    // picked photo, or Face fallback) opens the account drawer.
+    // Header reads "greeting | calendar | settings | profile" — all
+    // right-side affordances are 44dp discs. Calendar and Settings are
+    // direct destinations; profile opens the account drawer.
     val nameInitial = displayName?.trim().orEmpty().firstOrNull()?.uppercaseChar()?.toString()
 
     Row(
@@ -661,6 +662,28 @@ private fun HomeHeader(
                 imageVector        = Icons.Outlined.CalendarMonth,
                 contentDescription = "Open calendar",
                 // Matches the greeting text's deep-taupe (#5F5245).
+                tint               = Color(0xFF5F5245),
+                modifier           = Modifier.size(20.dp),
+            )
+        }
+
+        val settingsInteraction = remember { MutableInteractionSource() }
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(colors.borderSoft)
+                .border(1.dp, colors.borderSoft, CircleShape)
+                .clickable(
+                    interactionSource = settingsInteraction,
+                    indication        = null,
+                    onClick           = onTapSettings,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.Settings,
+                contentDescription = "Open settings",
                 tint               = Color(0xFF5F5245),
                 modifier           = Modifier.size(20.dp),
             )

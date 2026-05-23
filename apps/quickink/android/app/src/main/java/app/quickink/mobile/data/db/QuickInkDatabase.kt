@@ -259,6 +259,10 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // Free-form TEXT, nullable, no index — read pattern is "load the
     // whole field for the detail screen" so a full-text index isn't
     // useful yet.
+    // v26 — Adds `captures.is_favorite` for Moments photos/videos.
+    // The focused gallery and detail screen toggle this flag; it
+    // syncs through `CapturePayloadV2.is_favorite`.
+    //
     // v25 — Workspace tab refresh (Phase 2 of
     // `design/WORKSPACE_TAB_HANDOFF.md`). Adds `folders.type`,
     // `folders.tier`, `folders.is_seeded` + relaxes the
@@ -266,7 +270,7 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // and adds `tags.bucket` + `tags.is_seeded`. The seeder in
     // `WorkspaceTaxonomySeed` writes the 12 spec'd folders + 32
     // spec'd tags on first launch after the bump.
-    version       = 25,
+    version       = 26,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {

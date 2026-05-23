@@ -368,6 +368,7 @@ struct HomeScreen: View {
             }
             Spacer()
             calendarIconButton
+            settingsIconButton
             profileIconButton
         }
     }
@@ -375,9 +376,9 @@ struct HomeScreen: View {
     /// Top-right calendar button — small 44pt accent-soft disc with
     /// a coral calendar glyph. Tapping pushes the standalone Calendar
     /// screen (panchanga + Indian holidays + per-day capture dots).
-    /// Sits to the left of the profile avatar so the header reads
-    /// "name | calendar | profile" — calendar is a destination,
-    /// profile is the account menu.
+    /// Sits before Settings and Profile so the header reads
+    /// "name | calendar | settings | profile" — Calendar and Settings
+    /// are destinations; Profile opens the account menu.
     @ViewBuilder
     private var calendarIconButton: some View {
         Button {
@@ -397,6 +398,30 @@ struct HomeScreen: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Open calendar")
+    }
+
+    /// Top-right Settings button — direct path to the existing Settings
+    /// surface. Sits between Calendar and Profile so the header exposes
+    /// both destination shortcuts before the account drawer.
+    @ViewBuilder
+    private var settingsIconButton: some View {
+        Button {
+            onOpenSettings()
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(QuickInkColors.accentSoft)
+                    .frame(width: 44, height: 44)
+                Image(systemName: "gearshape")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(QuickInkColors.accent)
+            }
+            .overlay(
+                Circle().stroke(QuickInkColors.accent.opacity(0.55), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open settings")
     }
 
     /// "Settings override > Google session > QuickInk fallback".

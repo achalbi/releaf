@@ -108,6 +108,20 @@ interface CaptureDao {
     fun observeRecent(userId: String, limit: Int = 30): Flow<List<CaptureEntity>>
 
     /**
+     * Live, capped feed for Moments. Only camera media belongs here:
+     * document scans and imports remain in Workspace.
+     */
+    @Query("""
+        SELECT * FROM captures
+        WHERE user_id = :userId
+          AND deleted_at IS NULL
+          AND source IN ('photo', 'video')
+        ORDER BY created_at DESC
+        LIMIT :limit
+    """)
+    fun observeRecentMedia(userId: String, limit: Int = 30): Flow<List<CaptureEntity>>
+
+    /**
      * Live total pages digitised by the user — the sum of `page_count`
      * across every active (non-tombstone) capture. Drives the home
      * sustainability hero ("By going digital — N pages saved"). Returns
@@ -317,6 +331,19 @@ interface CaptureDao {
         WHERE id = :id
     """)
     suspend fun setVideoUri(id: String, videoUri: String?, timestamp: String)
+
+    /**
+     * Toggle the Moments favorite state. Bumps dirty + updated_at so
+     * the choice syncs alongside the capture metadata.
+     */
+    @Query("""
+        UPDATE captures
+        SET is_favorite = :isFavorite,
+            updated_at  = :timestamp,
+            dirty       = 1
+        WHERE id = :id
+    """)
+    suspend fun setFavorite(id: String, isFavorite: Boolean, timestamp: String)
 
     /**
      * Backfill the reverse-geocoded place name + full address on a

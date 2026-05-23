@@ -73,6 +73,7 @@ import app.quickink.mobile.data.sync.QuickInkSyncScheduler
 import kotlinx.coroutines.launch
 import app.quickink.mobile.features.home.CategoryEntriesScreen
 import app.quickink.mobile.features.home.HomeScreen
+import app.quickink.mobile.features.moments.MomentsScreen
 import app.quickink.mobile.features.notes.NoteEditorScreen
 import app.quickink.mobile.features.notes.NotesListScreen
 import app.quickink.mobile.features.onboarding.OnboardingFlow
@@ -225,7 +226,9 @@ private object Routes {
     const val SETTINGS          = "settings"
     const val PROFILE           = "profile"
     const val SEARCH            = "search"
-    /** Stories shelf — bottom-nav slot (replaced the Search tab). */
+    /** Moments grid — bottom-nav slot that replaced the old Stories slot. */
+    const val MOMENTS           = "moments"
+    /** Stories shelf — right footer slot, replacing the old Settings tab. */
     const val STORIES           = "stories"
 
     /** Stories editor (Phase 2) — opened from the shelf FAB / card tap. */
@@ -719,29 +722,28 @@ private fun MainShell(
     val navController = rememberNavController()
 
     /// Tab-style navigation between top-level destinations (Home,
-    /// Library, Search, Settings). `popUpTo(HOME, saveState=true)` +
-    /// `restoreState=true` gives Material's expected tab semantics:
-    /// each tab keeps its own scroll position / draft state across
-    /// switches, the back stack stays shallow (one entry), and back
-    /// from any tab returns to Home.
-    val navToTab: (String) -> Unit = { route ->
-        if (route == Routes.HOME) {
-            // HOME is the start destination, always at the back-stack root.
-            // navigate(HOME) with restoreState=true restores HOME's saved
-            // nested chain (left over from popUpTo HOME saveState=true on
-            // earlier tab-switches), which can drop the user back onto the
-            // saved Workspace/Search/Settings child instead of HOME itself.
-            // Pop back to HOME instead — same visual result, no state to
-            // restore.
-            navController.popBackStack(Routes.HOME, inclusive = false)
-        } else {
+    /// Workspace, Moments, Stories). First try to pop back to the tab
+    /// root when it is already in the active stack; otherwise replace
+    /// the current branch with a fresh top-level destination. Avoid
+    /// `restoreState=true` here: with this single NavHost setup it can
+    /// restore a saved child destination (for example ScanDetail) above
+    /// Moments, making a bottom-tab tap look like it did nothing.
+    val navToTab: (String) -> Unit = navToTab@ { route ->
+        captureMenuOpen = false
+
+        if (navController.currentDestination?.route == route) {
+            return@navToTab
+        }
+
+        val poppedToExistingTab = navController.popBackStack(route, inclusive = false)
+        if (!poppedToExistingTab && route != Routes.HOME) {
             navController.navigate(route) {
                 popUpTo(Routes.HOME) {
-                    saveState = true
+                    saveState = false
                     inclusive = false
                 }
                 launchSingleTop = true
-                restoreState    = true
+                restoreState    = false
             }
         }
     }
@@ -832,6 +834,7 @@ private fun MainShell(
         Routes.TAG_LIBRARY,
         Routes.LOCATION_DETAIL,
         Routes.PERSON_DETAIL     -> NavTab.Workspace
+        Routes.MOMENTS           -> NavTab.Moments
         Routes.STORIES,
         Routes.STORY_EDITOR,
         Routes.STORY_READER,
@@ -841,7 +844,6 @@ private fun MainShell(
         // Workspace `onOpenSearch` callbacks; when it's the current
         // route we paint the bar with no active pill.
         Routes.SEARCH            -> NavTab.None
-        Routes.SETTINGS          -> NavTab.Settings
         Routes.SCAN_DETAIL       -> NavTab.None
         else                     -> null
     }
@@ -906,6 +908,28 @@ private fun MainShell(
                     // back from the detail returns to Home, not Search.
                     navController.popBackStack()
                     navController.navigate(Routes.scanDetail(captureId))
+                },
+            )
+        }
+        composable(Routes.MOMENTS) {
+            MomentsScreen(
+                userId        = userId,
+                onOpenCapture = { captureId ->
+                    navController.navigate(Routes.scanDetail(captureId))
+                },
+                onOpenSearch = { navToTab(Routes.SEARCH) },
+                onOpenSmartCollection = { collection ->
+                    navController.navigate(Routes.smartCollection(collection.id))
+                },
+                onOpenTagLibrary = { navController.navigate(Routes.TAG_LIBRARY) },
+                onOpenTag = { tag ->
+                    navController.navigate(Routes.categoryEntries(tag.name))
+                },
+                onOpenLocation = { location ->
+                    navController.navigate(Routes.locationDetail(location.id))
+                },
+                onOpenPerson = { person ->
+                    navController.navigate(Routes.personDetail(person.id))
                 },
             )
         }
@@ -1175,10 +1199,10 @@ private fun MainShell(
                 activeTab           = tab,
                 onHome              = { navToTab(Routes.HOME) },
                 onWorkspace         = { navToTab(workspaceTabRoute) },
+                onMoments           = { navToTab(Routes.MOMENTS) },
                 isCaptureMenuOpen   = captureMenuOpen,
                 onToggleCaptureMenu = { captureMenuOpen = !captureMenuOpen },
                 onStories           = { navToTab(Routes.STORIES) },
-                onSettings          = { navToTab(Routes.SETTINGS) },
                 modifier            = Modifier
                     .align(Alignment.BottomCenter)
                     .zIndex(1f),

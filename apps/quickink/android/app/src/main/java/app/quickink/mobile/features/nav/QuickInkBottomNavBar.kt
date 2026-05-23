@@ -10,7 +10,7 @@
  * the bolt icon and the custom `IconNote` / `IconStory` assets.
  *
  *   ┌─────────────────────────────────────────┐
- *   │  Home   Library   ⚡   Stories Settings │
+ *   │  Home Workspace   ⚡    Moments Stories │
  *   └─────────────────────────────────────────┘
  *
  * Surface:
@@ -56,7 +56,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -91,7 +90,7 @@ import app.quickink.mobile.ui.theme.QuickInkSpacing
  * (e.g. ScanDetail) that host the bar but aren't themselves a
  * destination — passing [NavTab.None] paints no active cell.
  */
-enum class NavTab { Home, Workspace, Stories, Settings, None }
+enum class NavTab { Home, Workspace, Moments, Stories, None }
 
 /**
  * The reserved space the bottom nav occupies on screens that own a
@@ -109,8 +108,8 @@ fun QuickInkBottomNavBar(
     activeTab: NavTab,
     onHome: () -> Unit,
     onWorkspace: () -> Unit,
+    onMoments: () -> Unit,
     onStories: () -> Unit,
-    onSettings: () -> Unit,
     modifier: Modifier = Modifier,
     /**
      * Whether the radial [SundialCaptureMenu] is currently open.
@@ -198,18 +197,18 @@ fun QuickInkBottomNavBar(
                         .height(64.dp),
                 )
                 RegularTabAsset(
+                    drawableId = R.drawable.ic_moments,
+                    label      = "Moments",
+                    isSelected = activeTab == NavTab.Moments,
+                    modifier   = Modifier.weight(1f),
+                    onClick    = onMoments,
+                )
+                RegularTabAsset(
                     drawableId = R.drawable.ic_story,
                     label      = "Stories",
                     isSelected = activeTab == NavTab.Stories,
                     modifier   = Modifier.weight(1f),
                     onClick    = onStories,
-                )
-                RegularTab(
-                    icon       = Icons.Outlined.Settings,
-                    label      = "Settings",
-                    isSelected = activeTab == NavTab.Settings,
-                    modifier   = Modifier.weight(1f),
-                    onClick    = onSettings,
                 )
             }
         }
@@ -291,7 +290,7 @@ private fun RegularTab(
 /**
  * Asset-backed regular tab — same shape as [RegularTab] but renders a
  * QuickInk vector drawable from `res/drawable/ic_*.xml`. Used for
- * Library / Stories where we have brand-specific icons.
+ * Workspace / Moments / Stories where we have brand-specific icons.
  */
 @Composable
 private fun RegularTabAsset(

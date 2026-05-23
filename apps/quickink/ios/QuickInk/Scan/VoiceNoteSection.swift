@@ -174,6 +174,7 @@ struct VoiceNoteSection: View {
                     onSave: { clip in
                         Task {
                             await viewModel.commitRecorded(uri: clip.uri, durationMs: clip.durationMs)
+                            onNotesChanged()
                         }
                     },
                     onCancel: { viewModel.showRecorder = false }
@@ -402,6 +403,7 @@ final class VoiceNoteSectionViewModel: ObservableObject {
                 transcription: result.text,
                 source:        result.source
             )
+            try? await captureRepo.appendNote(captureId: captureId, text: result.text)
         } else {
             showRecorder = false
         }

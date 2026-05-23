@@ -9,7 +9,7 @@
  * matching width + bottom-clearance values).
  *
  *   ┌─────────────────────────────────────────┐
- *   │  Home   Library   ⚡   Stories Settings │
+ *   │  Home Workspace   ⚡    Moments Stories │
  *   └─────────────────────────────────────────┘
  *
  * Active-tab indication is driven by `activeTab`; each cell paints
@@ -42,7 +42,7 @@ import SwiftUI
 /// sentinel for sub-screens (e.g. ScanDetail) that host the bar but
 /// aren't themselves a destination — passing `.none` paints no
 /// active cell.
-public enum NavTab { case home, workspace, stories, settings, none }
+public enum NavTab { case home, workspace, moments, stories, none }
 
 /// The reserved space the bottom nav occupies on screens that own a
 /// scroll surface. Padding callers should add at the bottom of their
@@ -69,8 +69,8 @@ public struct QuickInkBottomNavBar: View {
     /// [SundialCaptureMenu]. Replaces the prior tap-for-last-mode
     /// + long-press-for-photo idiom with one explicit choice.
     public let onToggleCaptureMenu: () -> Void
+    public let onMoments: () -> Void
     public let onStories: () -> Void
-    public let onSettings: () -> Void
 
     public init(
         activeTab: NavTab,
@@ -78,16 +78,16 @@ public struct QuickInkBottomNavBar: View {
         onWorkspace: @escaping () -> Void,
         isCaptureMenuOpen: Bool = false,
         onToggleCaptureMenu: @escaping () -> Void,
-        onStories: @escaping () -> Void,
-        onSettings: @escaping () -> Void
+        onMoments: @escaping () -> Void,
+        onStories: @escaping () -> Void
     ) {
         self.activeTab = activeTab
         self.onHome = onHome
         self.onWorkspace = onWorkspace
         self.isCaptureMenuOpen = isCaptureMenuOpen
         self.onToggleCaptureMenu = onToggleCaptureMenu
+        self.onMoments = onMoments
         self.onStories = onStories
-        self.onSettings = onSettings
     }
 
     public var body: some View {
@@ -139,9 +139,9 @@ public struct QuickInkBottomNavBar: View {
                 Color.clear
                     .frame(maxWidth: .infinity)
                     .frame(height: 64)
-                navIconAsset(assetName: "IconStory", label: "Stories", active: activeTab == .stories, action: onStories)
+                navIcon(systemName: "photo.on.rectangle", label: "Moments", active: activeTab == .moments, action: onMoments)
                     .frame(maxWidth: .infinity)
-                navIcon(systemName: "gearshape", label: "Settings", active: activeTab == .settings, action: onSettings)
+                navIconAsset(assetName: "IconStory", label: "Stories", active: activeTab == .stories, action: onStories)
                     .frame(maxWidth: .infinity)
             }
             .padding(.vertical, QuickInkSpacing.s1)
@@ -219,7 +219,7 @@ public struct QuickInkBottomNavBar: View {
 
     /// Asset-backed nav icon — same shape as `navIcon` but renders a
     /// QuickInk vector asset (template-rendered, tinted via
-    /// foregroundStyle). Used for the Library / Stories tabs which
+    /// foregroundStyle). Used for the Workspace / Stories tabs which
     /// have brand-specific icons in `Assets.xcassets`.
     @ViewBuilder
     private func navIconAsset(

@@ -121,6 +121,16 @@ interface CaptureLocationDao {
     fun observeCaptureIdsForLocation(locationId: String): Flow<List<String>>
 
     @Query("""
+        SELECT DISTINCT capture_locations.capture_id
+        FROM capture_locations
+        JOIN captures ON captures.id = capture_locations.capture_id
+        WHERE capture_locations.deleted_at IS NULL
+          AND captures.deleted_at IS NULL
+          AND captures.user_id = :userId
+    """)
+    fun observeCaptureIdsWithLocations(userId: String): Flow<List<String>>
+
+    @Query("""
         SELECT capture_locations.location_id AS location_id, COUNT(*) AS doc_count
         FROM capture_locations
         JOIN captures ON captures.id = capture_locations.capture_id

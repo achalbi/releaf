@@ -93,6 +93,9 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
     /// "downloading" card (drive id set, local file not yet
     /// downloaded), or no card at all (neither set).
     public let videoDriveFileId: String?
+    /// User-facing favorite flag for Moments photos/videos. Defaults
+    /// false for older SELECTs/payloads that don't include the column.
+    public let isFavorite: Bool
 
     public init(
         id: String,
@@ -114,7 +117,8 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         lastOpenedPage: Int? = nil,
         lastOpenedDevice: String? = nil,
         videoUri: String? = nil,
-        videoDriveFileId: String? = nil
+        videoDriveFileId: String? = nil,
+        isFavorite: Bool = false
     ) {
         self.id          = id
         self.title       = title
@@ -136,6 +140,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         self.lastOpenedDevice = lastOpenedDevice
         self.videoUri         = videoUri
         self.videoDriveFileId = videoDriveFileId
+        self.isFavorite       = isFavorite
     }
 
     public init(from decoder: Decoder) throws {
@@ -180,6 +185,9 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         // `video_drive_file_id` landed in v17. Same back-compat
         // tolerance.
         self.videoDriveFileId = try c.decodeIfPresent(String.self, forKey: .videoDriveFileId)
+        // `is_favorite` lands after the Moments visual refresh.
+        // Older SELECTs and payloads omit it; default to false.
+        self.isFavorite       = (try c.decodeIfPresent(Bool.self, forKey: .isFavorite)) ?? false
     }
 
     public enum CodingKeys: String, CodingKey {
@@ -203,6 +211,7 @@ public struct CaptureSummary: Codable, FetchableRecord, Equatable, Sendable, Ide
         case lastOpenedDevice = "last_opened_device"
         case videoUri         = "video_uri"
         case videoDriveFileId = "video_drive_file_id"
+        case isFavorite       = "is_favorite"
     }
 }
 
@@ -239,7 +248,8 @@ public final class CaptureListViewModel: ObservableObject {
         cancellable = ValueObservation.tracking { [userId] db in
             try CaptureSummary.fetchAll(db, sql: """
                 SELECT id, title, preview_uri, pdf_uri, page_count, created_at,
-                       source, paper_size, video_uri, video_drive_file_id
+                       source, paper_size, video_uri, video_drive_file_id,
+                       is_favorite
                 FROM captures
                 WHERE user_id = ? AND deleted_at IS NULL
                 ORDER BY created_at DESC

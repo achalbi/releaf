@@ -120,6 +120,16 @@ interface CapturePersonDao {
     fun observeCaptureIdsForPerson(personId: String): Flow<List<String>>
 
     @Query("""
+        SELECT DISTINCT capture_people.capture_id
+        FROM capture_people
+        JOIN captures ON captures.id = capture_people.capture_id
+        WHERE capture_people.deleted_at IS NULL
+          AND captures.deleted_at IS NULL
+          AND captures.user_id = :userId
+    """)
+    fun observeCaptureIdsWithPeople(userId: String): Flow<List<String>>
+
+    @Query("""
         SELECT capture_people.person_id AS person_id, COUNT(*) AS doc_count
         FROM capture_people
         JOIN captures ON captures.id = capture_people.capture_id

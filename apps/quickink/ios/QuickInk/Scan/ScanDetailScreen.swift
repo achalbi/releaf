@@ -720,6 +720,13 @@ struct ScanDetailScreen: View {
                 .frame(maxWidth: .infinity)
                 .background(QuickInkColors.bg)
                 .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+                .overlay(alignment: .topTrailing) {
+                    if isMomentMediaCapture(for: capture) {
+                        favoriteChip(for: capture)
+                            .padding(QuickInkSpacing.s3)
+                    }
+                }
+                .overlay(alignment: .center) { videoPlayOverlay(for: capture) }
         } else {
             ZStack {
                 QuickInkColors.paper2
@@ -773,10 +780,27 @@ struct ScanDetailScreen: View {
     @ViewBuilder
     private func topRightChips(for capture: CaptureSummary) -> some View {
         HStack(spacing: QuickInkSpacing.s2) {
+            if isMomentMediaCapture(for: capture) {
+                favoriteChip(for: capture)
+            }
             fullscreenChip
             moreActionsMenu(for: capture)
         }
         .padding(QuickInkSpacing.s3)
+    }
+
+    private func favoriteChip(for capture: CaptureSummary) -> some View {
+        Button(action: { toggleFavorite(capture) }) {
+            Image(systemName: capture.isFavorite ? "heart.fill" : "heart")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(capture.isFavorite ? QuickInkColors.accent : QuickInkColors.textOnAccent)
+                .frame(width: 32, height: 32)
+                .background(QuickInkColors.ink.opacity(capture.isFavorite ? 0.58 : 0.55))
+                .clipShape(Circle())
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.30), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(capture.isFavorite ? "Remove from favorites" : "Add to favorites")
     }
 
     /// Pill button that opens [showFullscreenViewer] against the
@@ -1767,6 +1791,10 @@ struct ScanDetailScreen: View {
             (capture.source == "photo" && hasVideoArtifact)
     }
 
+    private func isMomentMediaCapture(for capture: CaptureSummary) -> Bool {
+        capture.source == "photo" || isVideoCapture(for: capture)
+    }
+
     private var deleteDialogTitle: String {
         guard let capture else { return "Delete this capture?" }
         return "Delete this \(deleteNoun(for: capture))?"
@@ -2115,6 +2143,21 @@ struct ScanDetailScreen: View {
         }
     }
 
+    private func toggleFavorite(_ capture: CaptureSummary) {
+        Task {
+            do {
+                try await CaptureRepository().setFavorite(
+                    captureId: capture.id,
+                    isFavorite: !capture.isFavorite
+                )
+                await QuickInkSyncEnvironment.shared.refreshPendingPushState()
+                await loadCapture()
+            } catch {
+                print("ScanDetailScreen.toggleFavorite failed: \(error)")
+            }
+        }
+    }
+
     private func loadCapture() async {
         let dbQueue = QuickInkDatabase.shared.dbQueue
         do {
@@ -2124,7 +2167,8 @@ struct ScanDetailScreen: View {
                            created_at, source, latitude, longitude,
                            locality, sub_locality, address, notes,
                            folder_id, last_opened_at, last_opened_page,
-                           last_opened_device, video_uri, video_drive_file_id
+                           last_opened_device, video_uri, video_drive_file_id,
+                           is_favorite
                     FROM captures
                     WHERE id = ? AND deleted_at IS NULL
                     LIMIT 1

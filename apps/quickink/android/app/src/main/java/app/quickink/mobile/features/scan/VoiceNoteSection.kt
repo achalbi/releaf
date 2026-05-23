@@ -323,13 +323,20 @@ fun VoiceNoteSection(
                                         // Pre-save what the recognizer
                                         // heard so the card has something
                                         // to show if the user dismisses
-                                        // the editor without saving.
-                                        runCatching {
+                                        // the editor without saving, and
+                                        // copy it to document notes right
+                                        // away.
+                                        val saved = runCatching {
                                             repository.setTranscription(
                                                 id     = noteId,
                                                 text   = result.text,
                                                 source = result.source,
                                             )
+                                        }.isSuccess
+                                        if (saved) {
+                                            runCatching {
+                                                captureRepository.appendNote(captureId, result.text)
+                                            }.onSuccess { onNotesChanged() }
                                         }
                                         stage = RecorderStage.Editing(
                                             initialText = result.text,
