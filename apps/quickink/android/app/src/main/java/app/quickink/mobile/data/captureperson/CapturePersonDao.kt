@@ -120,6 +120,28 @@ interface CapturePersonDao {
     fun observeCaptureIdsForPerson(personId: String): Flow<List<String>>
 
     @Query("""
+        SELECT DISTINCT capture_people.capture_id
+        FROM capture_people
+        JOIN captures ON captures.id = capture_people.capture_id
+        WHERE capture_people.deleted_at IS NULL
+          AND captures.deleted_at IS NULL
+          AND captures.user_id = :userId
+    """)
+    fun observeCaptureIdsWithPeople(userId: String): Flow<List<String>>
+
+    @Query("""
+        SELECT capture_people.capture_id AS capture_id, capture_people.person_id AS person_id
+        FROM capture_people
+        JOIN captures ON captures.id = capture_people.capture_id
+        JOIN people   ON people.id   = capture_people.person_id
+        WHERE capture_people.deleted_at IS NULL
+          AND captures.deleted_at IS NULL
+          AND people.deleted_at IS NULL
+          AND captures.user_id = :userId
+    """)
+    fun observeCapturePersonIds(userId: String): Flow<List<CapturePersonMembershipRow>>
+
+    @Query("""
         SELECT capture_people.person_id AS person_id, COUNT(*) AS doc_count
         FROM capture_people
         JOIN captures ON captures.id = capture_people.capture_id
@@ -181,4 +203,9 @@ interface CapturePersonDao {
 data class PersonCount(
     @ColumnInfo(name = "person_id") val personId: String,
     @ColumnInfo(name = "doc_count") val docCount: Int,
+)
+
+data class CapturePersonMembershipRow(
+    @ColumnInfo(name = "capture_id") val captureId: String,
+    @ColumnInfo(name = "person_id")  val personId: String,
 )

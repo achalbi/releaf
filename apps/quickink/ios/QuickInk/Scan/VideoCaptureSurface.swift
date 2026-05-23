@@ -741,8 +741,12 @@ private struct ActiveVideoSurface: View {
                         transcription: transcript.text,
                         source:        transcript.source,
                     )
+                    try await CaptureRepository().appendNote(
+                        captureId: captureId,
+                        text:      transcript.text
+                    )
                 } catch {
-                    NSLog("[VideoCapture] setTranscription failed: %@", "\(error)")
+                    NSLog("[VideoCapture] transcript save failed: %@", "\(error)")
                 }
             }
         } catch {

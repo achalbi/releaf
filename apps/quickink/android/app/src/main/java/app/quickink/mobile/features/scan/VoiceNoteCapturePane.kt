@@ -57,6 +57,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
+import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.voicenote.SpeechTranscriber
 import app.quickink.mobile.data.voicenote.TranscribeResult
 import app.quickink.mobile.data.voicenote.VoiceNoteRepository
@@ -81,6 +82,12 @@ fun VoiceNoteCapturePane(
     val context = LocalContext.current
     val app     = context.applicationContext as QuickInkApp
     val repo    = remember(app) { VoiceNoteRepository(app.database.voiceNoteDao()) }
+    val captureRepo = remember(app) {
+        CaptureRepository(
+            captureDao   = app.database.captureDao(),
+            ocrResultDao = app.database.ocrResultDao(),
+        )
+    }
     val scope   = rememberCoroutineScope()
     // Long-lived scope for the fire-and-forget transcription work
     // so it isn't cancelled when this pane unmounts on advance to
@@ -219,6 +226,7 @@ fun VoiceNoteCapturePane(
                             if (result is TranscribeResult.Success) {
                                 runCatching {
                                     repo.setTranscription(row.id, result.text, result.source)
+                                    captureRepo.appendNote(captureId, result.text)
                                 }
                             }
                         }

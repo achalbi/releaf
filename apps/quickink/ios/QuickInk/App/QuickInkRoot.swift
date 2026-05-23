@@ -293,6 +293,7 @@ private struct MainShell: View {
         case settings
         case profile
         case search
+        case moments
         case stories
         case storyEditor(storyId: String)
         case storyReader(storyId: String)
@@ -310,6 +311,8 @@ private struct MainShell: View {
         case folderDetail(folderId: String)
         case smartCollection(collectionId: String)
         case tagLibrary
+        case locationDetail(locationId: String)
+        case personDetail(personId: String)
         // Standalone Calendar surface — pushed from the Home header's
         // calendar button. Combines the bundled Vontikoppal panchanga
         // (festival / moon / Rahu Kala) with QuickInk capture dots so
@@ -371,13 +374,13 @@ private struct MainShell: View {
     @State private var systemCameraHandoffActive: Bool = false
     @State private var systemCameraHandoffMode: SystemCameraCaptureMode? = nil
 
-    /// Tab-style switch between top-level destinations (Library,
-    /// Search, Settings). Replaces the nav stack with a single entry,
+    /// Tab-style switch between top-level destinations (Workspace,
+    /// Moments, Stories). Replaces the nav stack with a single entry,
     /// so back from any tab returns to Home — matches the standard
-    /// bottom-tab UX. Calling with the route the user is already on
-    /// is a no-op caller-side (the bar's per-tab callback short-
-    /// circuits to `{ }`).
+    /// bottom-tab UX. Also closes the capture menu so the newly opened
+    /// tab is immediately interactive.
     private func navToTab(_ route: Route) {
+        captureMenuOpen = false
         path = [route]
     }
 
@@ -391,8 +394,10 @@ private struct MainShell: View {
     private var activeTab: NavTab? {
         guard let last = path.last else { return NavTab.home }
         switch last {
-        case .workspaceHome, .notesList, .folderDetail, .smartCollection, .tagLibrary:
+        case .workspaceHome, .notesList, .folderDetail, .smartCollection, .tagLibrary,
+             .locationDetail, .personDetail:
             return NavTab.workspace
+        case .moments:                                               return NavTab.moments
         case .stories, .storyEditor, .storyReader,
              .storySuggestionPreview:                                return NavTab.stories
         // Search no longer owns a bottom-nav slot — Stories replaced
@@ -400,10 +405,9 @@ private struct MainShell: View {
         // Workspace `onOpenSearch` callbacks; when it's on top of the
         // stack we paint the bar with no active pill.
         case .search:                                                return NavTab.none
-        case .settings:                                              return NavTab.settings
         case .scanDetail:                                            return NavTab.none
         case .calendar, .profile, .manageCategories,
-             .noteEditor, .categoryEntries:                          return nil
+             .settings, .noteEditor, .categoryEntries:                return nil
         }
     }
 
@@ -568,7 +572,10 @@ private struct MainShell: View {
                     if let tab = activeTab {
                         QuickInkBottomNavBar(
                             activeTab:          tab,
-                            onHome:             { path.removeAll() },
+                            onHome:             {
+                                captureMenuOpen = false
+                                path.removeAll()
+                            },
                             onWorkspace:        { navToTab(workspaceTabRoute) },
                             isCaptureMenuOpen:  captureMenuOpen,
                             onToggleCaptureMenu: {
@@ -576,8 +583,8 @@ private struct MainShell: View {
                                     captureMenuOpen.toggle()
                                 }
                             },
-                            onStories:          { navToTab(.stories) },
-                            onSettings:         { navToTab(.settings) }
+                            onMoments:          { navToTab(.moments) },
+                            onStories:          { navToTab(.stories) }
                         )
                         .zIndex(1)
                     }
@@ -905,6 +912,37 @@ private struct MainShell: View {
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
 
+        case .moments:
+            MomentsScreen(
+                userId: userId,
+                onOpenCapture: { captureId in
+                    path.append(.scanDetail(captureId: captureId))
+                },
+                onOpenSearch: {
+                    navToTab(.search)
+                },
+                onOpenFolder: { folder in
+                    path.append(.folderDetail(folderId: folder.id))
+                },
+                onOpenSmartCollection: { collection in
+                    path.append(.smartCollection(collectionId: collection.id))
+                },
+                onOpenTagLibrary: {
+                    path.append(.tagLibrary)
+                },
+                onOpenTag: { tag in
+                    path.append(.categoryEntries(name: tag.name))
+                },
+                onOpenLocation: { location in
+                    path.append(.locationDetail(locationId: location.id))
+                },
+                onOpenPerson: { person in
+                    path.append(.personDetail(personId: person.id))
+                }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
         case .stories:
             StoriesShelfScreen(
                 userId:                  userId,
@@ -984,7 +1022,13 @@ private struct MainShell: View {
                 onOpenSmartCollection: { sc in
                     path.append(.smartCollection(collectionId: sc.id))
                 },
-                onBrowseTags:          { path.append(.tagLibrary) }
+                onBrowseTags:          { path.append(.tagLibrary) },
+                onOpenLocation:        { location in
+                    path.append(.locationDetail(locationId: location.id))
+                },
+                onOpenPerson:          { person in
+                    path.append(.personDetail(personId: person.id))
+                }
             )
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -1027,6 +1071,30 @@ private struct MainShell: View {
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
 
+        case .locationDetail(let locationId):
+            LocationDetailRoute(
+                locationId: locationId,
+                userId:     userId,
+                onBack:     { path.removeLast() },
+                onOpenCapture: { capture in
+                    path.append(.scanDetail(captureId: capture.id))
+                }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
+        case .personDetail(let personId):
+            PersonDetailRoute(
+                personId: personId,
+                userId:   userId,
+                onBack:   { path.removeLast() },
+                onOpenCapture: { capture in
+                    path.append(.scanDetail(captureId: capture.id))
+                }
+            )
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+
         case .calendar:
             CalendarScreen(
                 userId:         userId,
@@ -1043,6 +1111,108 @@ private struct MainShell: View {
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
         }
+    }
+}
+
+private struct LocationDetailRoute: View {
+    let locationId: String
+    let userId: String
+    let onBack: () -> Void
+    let onOpenCapture: (CaptureSummary) -> Void
+
+    @State private var location: LocationEntity? = nil
+    @State private var didFail = false
+
+    var body: some View {
+        Group {
+            if let location {
+                PlaceDetailScreen(
+                    userId: userId,
+                    location: location,
+                    onOpenCapture: onOpenCapture,
+                    onBack: onBack
+                )
+            } else {
+                DetailLoadingState(
+                    title: didFail ? "Place unavailable" : "Opening place",
+                    onBack: onBack
+                )
+            }
+        }
+        .task(id: locationId) {
+            do {
+                location = try await LocationRepository().findById(locationId)
+                didFail = location == nil
+            } catch {
+                didFail = true
+            }
+        }
+    }
+}
+
+private struct PersonDetailRoute: View {
+    let personId: String
+    let userId: String
+    let onBack: () -> Void
+    let onOpenCapture: (CaptureSummary) -> Void
+
+    @State private var person: PersonEntity? = nil
+    @State private var didFail = false
+
+    var body: some View {
+        Group {
+            if let person {
+                PersonDetailScreen(
+                    userId: userId,
+                    person: person,
+                    onOpenCapture: onOpenCapture,
+                    onBack: onBack
+                )
+            } else {
+                DetailLoadingState(
+                    title: didFail ? "Person unavailable" : "Opening person",
+                    onBack: onBack
+                )
+            }
+        }
+        .task(id: personId) {
+            do {
+                person = try await PersonRepository().findById(personId)
+                didFail = person == nil
+            } catch {
+                didFail = true
+            }
+        }
+    }
+}
+
+private struct DetailLoadingState: View {
+    let title: String
+    let onBack: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s4) {
+            Button(action: onBack) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(QuickInkColors.ink)
+                    .frame(width: 36, height: 36)
+                    .background(QuickInkColors.surface, in: Circle())
+                    .overlay(Circle().strokeBorder(QuickInkColors.border, lineWidth: 1))
+            }
+            Spacer()
+            VStack(spacing: QuickInkSpacing.s2) {
+                ProgressView()
+                    .tint(QuickInkColors.accent)
+                Text(title)
+                    .font(QuickInkText.label)
+                    .foregroundStyle(QuickInkColors.ink)
+            }
+            .frame(maxWidth: .infinity)
+            Spacer()
+        }
+        .padding(QuickInkSpacing.s4)
+        .background(QuickInkColors.bg.ignoresSafeArea())
     }
 }
 

@@ -48,6 +48,7 @@ import androidx.compose.foundation.verticalScroll
 import android.widget.MediaController
 import android.widget.VideoView
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
@@ -58,6 +59,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Image
@@ -662,6 +664,26 @@ fun ScanDetailScreen(
                     modifier            = Modifier.padding(horizontal = QuickInkSpacing.s5),
                 )
 
+                if (isMomentMediaCapture(current)) {
+                    FavoriteOverlayButton(
+                        isFavorite = current.isFavorite,
+                        onClick = {
+                            scope.launch {
+                                val next = !current.isFavorite
+                                captureRepository.setFavorite(captureId, next)
+                                capture = captureDao.findById(captureId)
+                                app.refreshPendingPushState()
+                            }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(
+                                start = QuickInkSpacing.s5 + QuickInkSpacing.s3,
+                                top = QuickInkSpacing.s3,
+                            ),
+                    )
+                }
+
                 // Centred play button on top of the preview — only
                 // when the capture has a locally-playable video. Tap
                 // opens the same VideoPlayerDialog the (now-removed)
@@ -1132,6 +1154,31 @@ fun ScanDetailScreen(
                 businessCardExtraction = null
                 launchAddContactIntent(context, edited)
             },
+        )
+    }
+}
+
+@Composable
+private fun FavoriteOverlayButton(
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalQuickInkColors.current
+    Box(
+        modifier = modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = if (isFavorite) 0.58f else 0.42f))
+            .border(1.dp, Color.White.copy(alpha = 0.58f), CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+            contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+            tint = if (isFavorite) colors.accent else Color.White,
+            modifier = Modifier.size(16.dp),
         )
     }
 }
@@ -2894,6 +2941,9 @@ private fun isVideoCapture(capture: CaptureEntity): Boolean {
     return capture.source == "video" ||
         (capture.source == "photo" && hasVideoArtifact)
 }
+
+private fun isMomentMediaCapture(capture: CaptureEntity): Boolean =
+    capture.source == "photo" || isVideoCapture(capture)
 
 private fun captureDeleteTitle(capture: CaptureEntity): String =
     "Delete this ${captureDeleteNoun(capture)}?"

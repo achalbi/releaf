@@ -209,8 +209,9 @@ public final class CaptureRepository: @unchecked Sendable {
     /// after recording + transcribing, the edited text is saved both
     /// onto the voice note's `transcription` field AND appended here
     /// so the document carries the running notes across all clips.
-    /// Empty / whitespace input is a no-op; the existing notes value
-    /// is preserved.
+    /// Empty / whitespace input is a no-op; an exact paragraph already
+    /// present in notes is also a no-op so auto-copy and manual save
+    /// paths don't duplicate the same transcript.
     public func appendNote(captureId: String, text: String) async throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -221,11 +222,18 @@ public final class CaptureRepository: @unchecked Sendable {
                 sql: "SELECT notes FROM captures WHERE id = ? LIMIT 1",
                 arguments: [captureId]
             )
-            let next: String = {
-                guard let cur = existing?.trimmingCharacters(in: .whitespacesAndNewlines),
-                      !cur.isEmpty else { return trimmed }
-                return cur + "\n\n" + trimmed
-            }()
+            let next: String
+            if let cur = existing?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !cur.isEmpty {
+                let paragraphs = cur
+                    .replacingOccurrences(of: "\r\n", with: "\n")
+                    .components(separatedBy: "\n\n")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                guard !paragraphs.contains(trimmed) else { return }
+                next = cur + "\n\n" + trimmed
+            } else {
+                next = trimmed
+            }
             try db.execute(sql: """
                 UPDATE captures
                 SET notes = ?, updated_at = ?, dirty = 1
@@ -283,6 +291,19 @@ public final class CaptureRepository: @unchecked Sendable {
                 SET video_uri = ?, updated_at = ?, dirty = 1
                 WHERE id = ?
                 """, arguments: [videoUri, now, captureId])
+        }
+    }
+
+    /// Persist the user-facing Moments favorite flag. Used by the
+    /// focused gallery and media detail screens.
+    public func setFavorite(captureId: String, isFavorite: Bool) async throws {
+        let now = IsoClock.nowIso()
+        try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE captures
+                SET is_favorite = ?, updated_at = ?, dirty = 1
+                WHERE id = ?
+                """, arguments: [isFavorite, now, captureId])
         }
     }
 

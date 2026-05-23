@@ -168,12 +168,18 @@ class CaptureRepository(
      * after recording + transcribing, the edited text lands both on
      * the voice note's `transcription` field AND is appended here so
      * the document carries the running notes across clips. Empty /
-     * whitespace input is a no-op; the existing value is preserved.
+     * whitespace input is a no-op; an exact paragraph already present
+     * in notes is also a no-op so auto-copy and manual save paths don't
+     * duplicate the same transcript.
      */
     suspend fun appendNote(captureId: String, text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
         val existing = captureDao.getNotes(captureId)?.trim().orEmpty()
+        if (existing
+                .split(Regex("\\n\\s*\\n"))
+                .any { it.trim() == trimmed }
+        ) return
         val next = if (existing.isEmpty()) trimmed else "$existing\n\n$trimmed"
         captureDao.setNotes(captureId, next, IsoClock.nowIso())
     }
@@ -218,6 +224,14 @@ class CaptureRepository(
      */
     suspend fun setVideoUri(captureId: String, videoUri: String?) {
         captureDao.setVideoUri(captureId, videoUri, IsoClock.nowIso())
+    }
+
+    /**
+     * Persist the user-facing Moments favorite flag. Used by the
+     * focused gallery and media detail screens.
+     */
+    suspend fun setFavorite(captureId: String, isFavorite: Boolean) {
+        captureDao.setFavorite(captureId, isFavorite, IsoClock.nowIso())
     }
 
     /**

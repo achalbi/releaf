@@ -217,6 +217,8 @@ data class CapturePayloadV2(
      * preview_uri sync story.
      */
     @SerialName("video_uri")             val videoUri: String? = null,
+    /** User-facing Moments favorite flag. Defaults false for older payloads. */
+    @SerialName("is_favorite")           val isFavorite: Boolean = false,
     @SerialName("created_at")            val createdAt: String,
     @SerialName("updated_at")            val updatedAt: String,
 )
@@ -243,6 +245,7 @@ fun CaptureEntity.toV2Payload(): CapturePayloadV2 = CapturePayloadV2(
     address            = address,
     notes              = notes,
     videoUri           = videoUri,
+    isFavorite         = isFavorite,
     createdAt          = createdAt,
     updatedAt          = updatedAt,
 )
@@ -272,6 +275,7 @@ fun CapturePayloadV2.toEntity(driveFileId: String?): CaptureEntity = CaptureEnti
     pdfDriveFileId     = pdfDriveFileId,
     previewDriveFileId = previewDriveFileId,
     videoDriveFileId   = videoDriveFileId,
+    isFavorite         = isFavorite,
     // Drop the URI on receive — the remote path is meaningless on
     // this device. `QuickInkBinarySync.restorePending` downloads
     // the companion .mp4 from Drive via [videoDriveFileId] and

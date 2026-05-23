@@ -318,6 +318,8 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
     /// to the per-device cache path on pull (mirrors the pdf_uri /
     /// preview_uri sync story).
     public let videoUri: String?
+    /// User-facing Moments favorite flag. Defaults false for older payloads.
+    public let isFavorite: Bool
     public let createdAt: String
     public let updatedAt: String
 
@@ -341,6 +343,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         address: String? = nil,
         notes: String? = nil,
         videoUri: String? = nil,
+        isFavorite: Bool = false,
         createdAt: String,
         updatedAt: String
     ) {
@@ -363,6 +366,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         self.address = address
         self.notes = notes
         self.videoUri = videoUri
+        self.isFavorite = isFavorite
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -409,6 +413,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         // back-compat treatment — payloads from older clients read
         // back as nil.
         self.videoUri           = try c.decodeIfPresent(String.self, forKey: .videoUri)
+        self.isFavorite         = (try c.decodeIfPresent(Bool.self, forKey: .isFavorite)) ?? false
         self.createdAt          = try c.decode(String.self, forKey: .createdAt)
         self.updatedAt          = try c.decode(String.self, forKey: .updatedAt)
     }
@@ -433,6 +438,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         case address
         case notes
         case videoUri           = "video_uri"
+        case isFavorite         = "is_favorite"
         case createdAt          = "created_at"
         case updatedAt          = "updated_at"
     }

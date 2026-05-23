@@ -207,7 +207,7 @@ fun QuickCaptureScreen(
                         bottom = QuickInkSpacing.s4,
                     ),
                 verticalAlignment = Alignment.CenterVertically,
-            ) {
+            )    {
                 CircleIconButton(icon = Icons.Filled.Close, onClick = onDismiss)
                 Spacer(Modifier.weight(1f))
                 // Top-bar control depends on which surface is up:

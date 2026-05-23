@@ -222,6 +222,15 @@ data class CaptureEntity(
     @ColumnInfo(name = "video_drive_file_id")
     val videoDriveFileId: String? = null,
 
+    /**
+     * User-facing favorite flag for Moments photos/videos. Stored on
+     * the capture row so timeline, focused gallery, and detail
+     * screens all observe the same state and sync it with the rest of
+     * the capture metadata.
+     */
+    @ColumnInfo(name = "is_favorite", defaultValue = "0")
+    val isFavorite: Boolean = false,
+
     @ColumnInfo(name = "created_at")
     val createdAt: String,
 

@@ -122,6 +122,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                     address:            row["address"] as String?,
                     notes:              row["notes"] as String?,
                     videoUri:           row["video_uri"] as String?,
+                    isFavorite:         (row["is_favorite"] as Bool?) ?? false,
                     createdAt:          row["created_at"],
                     updatedAt:          row["updated_at"]
                 )
@@ -1340,9 +1341,9 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 source, paper_size, drive_file_id,
                 pdf_drive_file_id, preview_drive_file_id, video_drive_file_id,
                 latitude, longitude, locality, sub_locality, address, notes,
-                video_uri,
+                video_uri, is_favorite,
                 created_at, updated_at, dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ON CONFLICT(id) DO UPDATE SET
                 user_id               = excluded.user_id,
                 title                 = excluded.title,
@@ -1362,6 +1363,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 address               = excluded.address,
                 notes                 = excluded.notes,
                 video_uri             = excluded.video_uri,
+                is_favorite           = excluded.is_favorite,
                 updated_at            = excluded.updated_at,
                 dirty                 = 0
             WHERE captures.updated_at < excluded.updated_at
@@ -1373,7 +1375,7 @@ public final class QuickInkSyncDataSource: SyncDataSource, @unchecked Sendable {
                 payload.latitude, payload.longitude,
                 payload.locality, payload.subLocality, payload.address,
                 payload.notes,
-                resolvedVideoUri,
+                resolvedVideoUri, payload.isFavorite,
                 payload.createdAt, payload.updatedAt,
             ])
     }

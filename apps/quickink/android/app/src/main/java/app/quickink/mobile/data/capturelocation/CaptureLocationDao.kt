@@ -121,6 +121,28 @@ interface CaptureLocationDao {
     fun observeCaptureIdsForLocation(locationId: String): Flow<List<String>>
 
     @Query("""
+        SELECT DISTINCT capture_locations.capture_id
+        FROM capture_locations
+        JOIN captures ON captures.id = capture_locations.capture_id
+        WHERE capture_locations.deleted_at IS NULL
+          AND captures.deleted_at IS NULL
+          AND captures.user_id = :userId
+    """)
+    fun observeCaptureIdsWithLocations(userId: String): Flow<List<String>>
+
+    @Query("""
+        SELECT capture_locations.capture_id AS capture_id, capture_locations.location_id AS location_id
+        FROM capture_locations
+        JOIN captures  ON captures.id  = capture_locations.capture_id
+        JOIN locations ON locations.id = capture_locations.location_id
+        WHERE capture_locations.deleted_at IS NULL
+          AND captures.deleted_at IS NULL
+          AND locations.deleted_at IS NULL
+          AND captures.user_id = :userId
+    """)
+    fun observeCaptureLocationIds(userId: String): Flow<List<CaptureLocationMembershipRow>>
+
+    @Query("""
         SELECT capture_locations.location_id AS location_id, COUNT(*) AS doc_count
         FROM capture_locations
         JOIN captures ON captures.id = capture_locations.capture_id
@@ -181,4 +203,9 @@ interface CaptureLocationDao {
 data class LocationCount(
     @ColumnInfo(name = "location_id") val locationId: String,
     @ColumnInfo(name = "doc_count")   val docCount: Int,
+)
+
+data class CaptureLocationMembershipRow(
+    @ColumnInfo(name = "capture_id")  val captureId: String,
+    @ColumnInfo(name = "location_id") val locationId: String,
 )

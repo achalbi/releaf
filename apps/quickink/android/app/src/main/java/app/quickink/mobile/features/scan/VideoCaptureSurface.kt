@@ -1446,6 +1446,7 @@ private suspend fun commitVideoCapture(
                     if (transcribe is TranscribeResult.Success) {
                         runCatching {
                             repo.setTranscription(row.id, transcribe.text, transcribe.source)
+                            captureRepo.appendNote(captureId, transcribe.text)
                         }
                     }
                 }

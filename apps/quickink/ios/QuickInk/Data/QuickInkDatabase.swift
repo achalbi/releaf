@@ -1103,6 +1103,18 @@ public final class QuickInkDatabase: @unchecked Sendable {
             try db.execute(sql: "CREATE INDEX idx_tags_bucket ON tags (bucket) WHERE bucket IS NOT NULL")
         }
 
+        // ─── v21_capture_favorite ──────────────────────────────
+        //
+        // Moments favorite flag for photos/videos. Stored directly
+        // on captures so the timeline, focused gallery, and detail
+        // screen share one observed state and sync it through
+        // CapturePayloadV2.is_favorite.
+        migrator.registerMigration("v21_capture_favorite") { db in
+            try db.execute(sql: """
+                ALTER TABLE captures ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1))
+                """)
+        }
+
         return migrator
     }
 }

@@ -266,6 +266,7 @@ final class VoiceNoteCapturePaneModel: ObservableObject {
                 durationMs: durationMs
             )
             let pendingUserId = userId
+            let pendingCaptureId = captureId
             Task.detached(priority: .userInitiated) {
                 let granted = await VoiceTranscriber.requestPermission()
                 guard granted else { return }
@@ -278,6 +279,10 @@ final class VoiceNoteCapturePaneModel: ObservableObject {
                     id:            row.id,
                     transcription: result.text,
                     source:        result.source
+                )
+                try? await CaptureRepository().appendNote(
+                    captureId: pendingCaptureId,
+                    text:      result.text
                 )
             }
             return row.id
