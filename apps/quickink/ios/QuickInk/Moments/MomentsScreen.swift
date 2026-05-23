@@ -315,7 +315,7 @@ struct MomentsScreen: View {
                 )
                 QuickAccessCard(
                     title: "Tags",
-                    caption: "\(model.tags.count) labels",
+                    caption: "\(model.tags.count) tags",
                     systemName: "tag",
                     active: false,
                     action: onOpenTagLibrary
@@ -1527,7 +1527,7 @@ private enum MomentFilter: String, CaseIterable, Identifiable {
     case photos
     case videos
     case favorites
-    case labels
+    case tags
     case people
     case places
 
@@ -1538,7 +1538,7 @@ private enum MomentFilter: String, CaseIterable, Identifiable {
         case .photos: return "Photos"
         case .videos: return "Videos"
         case .favorites: return "Favorites"
-        case .labels: return "Labels"
+        case .tags: return "Tags"
         case .people: return "People"
         case .places: return "Places"
         }
@@ -1668,7 +1668,7 @@ private extension CaptureSummary {
         }
 
         if selected.contains(.favorites), !isFavorite { return false }
-        if selected.contains(.labels), (primaryTagByCapture[id] ?? "").isEmpty { return false }
+        if selected.contains(.tags), (primaryTagByCapture[id] ?? "").isEmpty { return false }
         if selected.contains(.people), !captureIdsWithPeople.contains(id) { return false }
         if selected.contains(.places),
            !captureIdsWithPlaces.contains(id),

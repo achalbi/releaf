@@ -647,7 +647,7 @@ private fun QuickAccessRow(
             onOpenSearch()
         },
         QuickAccessSpec("Smart", "$smartCount rules", Icons.Outlined.AutoAwesome, false, onOpenSmart),
-        QuickAccessSpec("Tags", "$tagCount labels", Icons.Outlined.Tag, false, onOpenTags),
+        QuickAccessSpec("Tags", "$tagCount tags", Icons.Outlined.Tag, false, onOpenTags),
         QuickAccessSpec("People", "$peopleCount faces", Icons.Outlined.Person, false, onOpenPeople),
         QuickAccessSpec("Places", "$placesCount places", Icons.Outlined.LocationOn, false, onOpenPlaces),
         QuickAccessSpec("Archive", "Archived media", Icons.Outlined.Folder, false, onOpenSearch),
@@ -1825,7 +1825,7 @@ private enum class MomentFilter(val label: String) {
     Photos("Photos"),
     Videos("Videos"),
     Favorites("Favorites"),
-    Labels("Labels"),
+    Tags("Tags"),
     People("People"),
     Places("Places"),
 }
@@ -1891,7 +1891,7 @@ private fun CaptureEntity.matchesMomentFilters(
     }
 
     if (MomentFilter.Favorites in selected && !isFavorite) return false
-    if (MomentFilter.Labels in selected && primaryTagByCapture[id].isNullOrBlank()) return false
+    if (MomentFilter.Tags in selected && primaryTagByCapture[id].isNullOrBlank()) return false
     if (MomentFilter.People in selected && id !in captureIdsWithPeople) return false
     if (MomentFilter.Places in selected &&
         id !in captureIdsWithPlaces &&
