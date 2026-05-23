@@ -918,6 +918,9 @@ private fun MainShell(
                     navController.navigate(Routes.scanDetail(captureId))
                 },
                 onOpenSearch = { navToTab(Routes.SEARCH) },
+                onOpenFolder = { folder ->
+                    navController.navigate(Routes.folderDetail(folder.id))
+                },
                 onOpenSmartCollection = { collection ->
                     navController.navigate(Routes.smartCollection(collection.id))
                 },

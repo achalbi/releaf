@@ -143,6 +143,18 @@ interface CaptureTagDao {
     """)
     fun observeCaptureIdsForTag(tagId: String): Flow<List<String>>
 
+    @Query("""
+        SELECT capture_tags.capture_id AS capture_id, capture_tags.tag_id AS tag_id
+        FROM capture_tags
+        JOIN captures ON captures.id = capture_tags.capture_id
+        JOIN tags     ON tags.id     = capture_tags.tag_id
+        WHERE capture_tags.deleted_at IS NULL
+          AND captures.deleted_at IS NULL
+          AND tags.deleted_at IS NULL
+          AND captures.user_id = :userId
+    """)
+    fun observeCaptureTagIds(userId: String): Flow<List<CaptureTagMembershipRow>>
+
     /**
      * One-shot version of [observeCaptureIdsForTag] for non-Flow
      * call sites — the `#tag` autocomplete on the search bar
@@ -334,4 +346,9 @@ data class TagCount(
 data class CapturePrimaryTagRow(
     @ColumnInfo(name = "capture_id") val captureId: String,
     @ColumnInfo(name = "tag_name")   val tagName: String,
+)
+
+data class CaptureTagMembershipRow(
+    @ColumnInfo(name = "capture_id") val captureId: String,
+    @ColumnInfo(name = "tag_id")     val tagId: String,
 )

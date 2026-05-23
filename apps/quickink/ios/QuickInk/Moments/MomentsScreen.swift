@@ -15,10 +15,17 @@ import Speech
 private let galleryTileGap: CGFloat = 6
 private let focusedGalleryTileRadius: CGFloat = QuickInkRadius.lg
 
+private enum MomentHomeTab {
+    case timeline
+    case albums
+    case smartCollections
+}
+
 struct MomentsScreen: View {
     let userId: String
     let onOpenCapture: (String) -> Void
     let onOpenSearch: () -> Void
+    let onOpenFolder: (FolderEntity) -> Void
     let onOpenSmartCollection: (SmartCollectionEntity) -> Void
     let onOpenTagLibrary: () -> Void
     let onOpenTag: (TagEntity) -> Void
@@ -28,14 +35,21 @@ struct MomentsScreen: View {
     @StateObject private var model: MomentsViewModel
     @StateObject private var speechRecognizer = MomentsSearchSpeechRecognizer()
     @State private var selectedFilters: Set<MomentFilter> = []
+    @State private var selectedTagIds: Set<String> = []
+    @State private var selectedPersonIds: Set<String> = []
+    @State private var selectedLocationIds: Set<String> = []
     @State private var showFilters = false
+    @State private var activeFilterPicker: MomentFilterPicker?
     @State private var openGalleryGroupId: String?
     @State private var searchQuery = ""
+    @State private var selectedTab: MomentHomeTab = .timeline
+    @State private var folderEditorMode: FolderEditorMode?
 
     init(
         userId: String,
         onOpenCapture: @escaping (String) -> Void,
         onOpenSearch: @escaping () -> Void,
+        onOpenFolder: @escaping (FolderEntity) -> Void,
         onOpenSmartCollection: @escaping (SmartCollectionEntity) -> Void,
         onOpenTagLibrary: @escaping () -> Void,
         onOpenTag: @escaping (TagEntity) -> Void,
@@ -45,6 +59,7 @@ struct MomentsScreen: View {
         self.userId = userId
         self.onOpenCapture = onOpenCapture
         self.onOpenSearch = onOpenSearch
+        self.onOpenFolder = onOpenFolder
         self.onOpenSmartCollection = onOpenSmartCollection
         self.onOpenTagLibrary = onOpenTagLibrary
         self.onOpenTag = onOpenTag
@@ -73,6 +88,32 @@ struct MomentsScreen: View {
         .onChange(of: speechRecognizer.transcript) { value in
             searchQuery = value
         }
+        .sheet(item: $activeFilterPicker) { picker in
+            MomentFilterPickerSheet(
+                picker: picker,
+                options: filterOptions(for: picker),
+                selectedIds: selectedIds(for: picker),
+                onToggle: { toggleOption($0, for: picker) },
+                onDone: { activeFilterPicker = nil }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $folderEditorMode) { mode in
+            FolderEditorView(
+                mode: mode,
+                onSubmit: { name, color in
+                    Task {
+                        if case .create = mode {
+                            await model.createAlbum(name: name, color: color)
+                        }
+                        folderEditorMode = nil
+                    }
+                },
+                onCancel: { folderEditorMode = nil }
+            )
+            .presentationDetents([.medium])
+        }
     }
 
     private var momentsHome: some View {
@@ -86,23 +127,13 @@ struct MomentsScreen: View {
 
                 quickAccessRow
 
-                if hasDiscoveryContent {
-                    discoverySection
-                }
-
-                if mediaCaptures.isEmpty {
-                    emptyState
-                } else if visibleCaptures.isEmpty {
-                    emptyFilteredState
-                } else {
-                    ForEach(groups) { group in
-                        TimelineGroupView(
-                            group: group,
-                            primaryTagByCapture: model.primaryTagByCapture,
-                            onOpenCapture: onOpenCapture,
-                            onOpenGallery: { openGalleryGroupId = group.id }
-                        )
-                    }
+                switch selectedTab {
+                case .timeline:
+                    timelineContent
+                case .albums:
+                    albumsTab
+                case .smartCollections:
+                    smartCollectionsTab
                 }
 
                 Color.clear.frame(height: QuickInkBottomNavReservedHeight)
@@ -112,13 +143,34 @@ struct MomentsScreen: View {
         }
     }
 
+    @ViewBuilder
+    private var timelineContent: some View {
+        if mediaCaptures.isEmpty {
+            emptyState
+        } else if visibleCaptures.isEmpty {
+            emptyFilteredState
+        } else {
+            ForEach(groups) { group in
+                TimelineGroupView(
+                    group: group,
+                    primaryTagByCapture: model.primaryTagByCapture,
+                    onOpenCapture: onOpenCapture,
+                    onOpenGallery: { openGalleryGroupId = group.id }
+                )
+            }
+        }
+    }
+
     private var visibleCaptures: [CaptureSummary] {
         let filtered = mediaCaptures.filter {
             $0.matchesMomentFilters(
                 selectedFilters,
-                primaryTagByCapture: model.primaryTagByCapture,
-                captureIdsWithPeople: model.captureIdsWithPeople,
-                captureIdsWithPlaces: model.captureIdsWithPlaces
+                selectedTagIds: selectedTagIds,
+                selectedPersonIds: selectedPersonIds,
+                selectedLocationIds: selectedLocationIds,
+                tagIdsByCapture: model.tagIdsByCapture,
+                personIdsByCapture: model.personIdsByCapture,
+                locationIdsByCapture: model.locationIdsByCapture
             )
         }
         let searched = filtered.filter {
@@ -135,6 +187,24 @@ struct MomentsScreen: View {
         model.captures.filter { $0.isMomentMedia }
     }
 
+    private var albums: [FolderEntity] {
+        model.folders.filter { !$0.isDefault && !$0.isSeeded }
+    }
+
+    private var mediaCountsByFolder: [String: Int] {
+        Dictionary(grouping: mediaCaptures.compactMap { $0.folderId }, by: { $0 })
+            .mapValues { $0.count }
+    }
+
+    private var albumCoverByFolder: [String: CaptureSummary] {
+        var out: [String: CaptureSummary] = [:]
+        for capture in mediaCaptures {
+            guard let folderId = capture.folderId, out[folderId] == nil else { continue }
+            out[folderId] = capture
+        }
+        return out
+    }
+
     private var openGalleryGroup: MomentGroup? {
         groups.first { $0.id == openGalleryGroupId }
     }
@@ -145,17 +215,6 @@ struct MomentsScreen: View {
 
     private var videoCount: Int {
         mediaCaptures.filter { $0.mediaKind == .video }.count
-    }
-
-    private var unsortedCount: Int {
-        mediaCaptures.filter { $0.folderId == nil }.count
-    }
-
-    private var hasDiscoveryContent: Bool {
-        !model.smartCollections.isEmpty ||
-            !model.tags.isEmpty ||
-            !model.people.isEmpty ||
-            !model.locations.isEmpty
     }
 
     private var header: some View {
@@ -237,10 +296,25 @@ struct MomentsScreen: View {
                 HStack(spacing: QuickInkSpacing.s2) {
                     ForEach(MomentFilter.allCases) { filter in
                         FilterPill(
-                            label: filter.label,
-                            selected: selectedFilters.contains(filter),
-                            action: { toggleFilter(filter) }
+                            label: filterLabel(filter),
+                            selected: isFilterActive(filter),
+                            action: { handleFilterTap(filter) }
                         )
+                    }
+                }
+            }
+            if !selectedOptionTokens.isEmpty {
+                Text("Selected")
+                    .font(QuickInkText.caption)
+                    .foregroundStyle(QuickInkColors.muted)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: QuickInkSpacing.s2) {
+                        ForEach(selectedOptionTokens) { token in
+                            SelectedFilterChip(
+                                label: token.label,
+                                action: { removeOption(token) }
+                            )
+                        }
                     }
                 }
             }
@@ -264,141 +338,229 @@ struct MomentsScreen: View {
         }
     }
 
-    private var quickAccessRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: QuickInkSpacing.s2) {
-                QuickAccessCard(
-                    title: "Timeline",
-                    caption: "All memories",
-                    systemName: "calendar",
-                    active: selectedFilters.isEmpty,
-                    action: { selectedFilters.removeAll() }
-                )
-                QuickAccessCard(
-                    title: "Photos",
-                    caption: "\(photoCount) items",
-                    systemName: "photo",
-                    active: selectedFilters.contains(.photos),
-                    action: { toggleFilter(.photos) }
-                )
-                QuickAccessCard(
-                    title: "Videos",
-                    caption: "\(videoCount) clips",
-                    systemName: "video",
-                    active: selectedFilters.contains(.videos),
-                    action: { toggleFilter(.videos) }
-                )
-                QuickAccessCard(
-                    title: "Favorites",
-                    caption: "Saved media",
-                    systemName: "heart",
-                    active: selectedFilters.contains(.favorites),
-                    action: { toggleFilter(.favorites) }
-                )
-                QuickAccessCard(
-                    title: "Albums",
-                    caption: "Curated sets",
-                    systemName: "rectangle.stack",
-                    active: false,
-                    action: onOpenSearch
-                )
-                QuickAccessCard(
-                    title: "Smart",
-                    caption: "\(model.smartCollections.count) rules",
-                    systemName: "sparkles",
-                    active: false,
-                    action: {
-                        if let first = model.smartCollections.first {
-                            onOpenSmartCollection(first)
-                        }
-                    }
-                )
-                QuickAccessCard(
-                    title: "Tags",
-                    caption: "\(model.tags.count) tags",
+    private func handleFilterTap(_ filter: MomentFilter) {
+        switch filter {
+        case .tags:
+            activeFilterPicker = .tags
+        case .people:
+            activeFilterPicker = .people
+        case .places:
+            activeFilterPicker = .places
+        default:
+            toggleFilter(filter)
+        }
+    }
+
+    private func isFilterActive(_ filter: MomentFilter) -> Bool {
+        switch filter {
+        case .tags: return !selectedTagIds.isEmpty
+        case .people: return !selectedPersonIds.isEmpty
+        case .places: return !selectedLocationIds.isEmpty
+        default: return selectedFilters.contains(filter)
+        }
+    }
+
+    private func filterLabel(_ filter: MomentFilter) -> String {
+        switch filter {
+        case .tags where !selectedTagIds.isEmpty: return "Tags (\(selectedTagIds.count))"
+        case .people where !selectedPersonIds.isEmpty: return "People (\(selectedPersonIds.count))"
+        case .places where !selectedLocationIds.isEmpty: return "Places (\(selectedLocationIds.count))"
+        default: return filter.label
+        }
+    }
+
+    private func clearAllFilters() {
+        selectedFilters.removeAll()
+        selectedTagIds.removeAll()
+        selectedPersonIds.removeAll()
+        selectedLocationIds.removeAll()
+    }
+
+    private var selectedOptionTokens: [SelectedMomentFilterToken] {
+        let tagById = Dictionary(uniqueKeysWithValues: model.tags.map { ($0.id, $0) })
+        let personById = Dictionary(uniqueKeysWithValues: model.people.map { ($0.id, $0) })
+        let locationById = Dictionary(uniqueKeysWithValues: model.locations.map { ($0.id, $0) })
+        var tokens: [SelectedMomentFilterToken] = []
+        tokens.append(contentsOf: selectedTagIds.map {
+            SelectedMomentFilterToken(
+                kind: .tags,
+                optionId: $0,
+                label: "#\(tagById[$0]?.name ?? "Tag")"
+            )
+        })
+        tokens.append(contentsOf: selectedPersonIds.map {
+            SelectedMomentFilterToken(
+                kind: .people,
+                optionId: $0,
+                label: personById[$0]?.name ?? "Person"
+            )
+        })
+        tokens.append(contentsOf: selectedLocationIds.map {
+            SelectedMomentFilterToken(
+                kind: .places,
+                optionId: $0,
+                label: locationById[$0]?.name ?? "Place"
+            )
+        })
+        return tokens
+    }
+
+    private func selectedIds(for picker: MomentFilterPicker) -> Set<String> {
+        switch picker {
+        case .tags: return selectedTagIds
+        case .people: return selectedPersonIds
+        case .places: return selectedLocationIds
+        }
+    }
+
+    private func toggleOption(_ id: String, for picker: MomentFilterPicker) {
+        switch picker {
+        case .tags:
+            selectedTagIds.toggleMembership(id)
+        case .people:
+            selectedPersonIds.toggleMembership(id)
+        case .places:
+            selectedLocationIds.toggleMembership(id)
+        }
+    }
+
+    private func removeOption(_ token: SelectedMomentFilterToken) {
+        switch token.kind {
+        case .tags:
+            selectedTagIds.remove(token.optionId)
+        case .people:
+            selectedPersonIds.remove(token.optionId)
+        case .places:
+            selectedLocationIds.remove(token.optionId)
+        }
+    }
+
+    private func filterOptions(for picker: MomentFilterPicker) -> [MomentFilterOption] {
+        switch picker {
+        case .tags:
+            return model.tags.map {
+                let bucketId = $0.bucket ?? inferMomentTagBucketId($0.name)
+                let bucket = workspaceTagBuckets.first { $0.id == bucketId }
+                return MomentFilterOption(
+                    id: $0.id,
+                    label: $0.name,
+                    subtitle: "\(model.tagCounts[$0.id] ?? 0) moments",
                     systemName: "tag",
-                    active: false,
-                    action: onOpenTagLibrary
+                    tint: color(from: $0.color) ?? bucket?.hue ?? QuickInkColors.accent,
+                    bucketId: bucketId
                 )
-                QuickAccessCard(
-                    title: "People",
-                    caption: "\(model.people.count) faces",
+            }
+        case .people:
+            return model.people.map {
+                MomentFilterOption(
+                    id: $0.id,
+                    label: $0.name,
+                    subtitle: "\(model.personCounts[$0.id] ?? 0) moments",
                     systemName: "person",
-                    active: false,
-                    action: {
-                        if let first = model.people.first {
-                            onOpenPerson(first)
-                        }
-                    }
+                    tint: color(from: $0.color) ?? QuickInkColors.accent,
+                    bucketId: nil
                 )
-                QuickAccessCard(
-                    title: "Places",
-                    caption: "\(model.locations.count) places",
+            }
+        case .places:
+            return model.locations.map {
+                MomentFilterOption(
+                    id: $0.id,
+                    label: $0.name,
+                    subtitle: "\(model.locationCounts[$0.id] ?? 0) moments",
                     systemName: "mappin.and.ellipse",
-                    active: false,
-                    action: {
-                        if let first = model.locations.first {
-                            onOpenLocation(first)
-                        }
-                    }
-                )
-                QuickAccessCard(
-                    title: "Archive",
-                    caption: "Archived media",
-                    systemName: "archivebox",
-                    active: false,
-                    action: onOpenSearch
-                )
-                QuickAccessCard(
-                    title: "Unsorted",
-                    caption: "\(unsortedCount) items",
-                    systemName: "tag",
-                    active: false,
-                    action: onOpenSearch
+                    tint: color(from: $0.color) ?? QuickInkColors.accent,
+                    bucketId: nil
                 )
             }
         }
     }
 
-    private var discoverySection: some View {
+    private var quickAccessRow: some View {
+        HStack(spacing: QuickInkSpacing.s2) {
+            QuickAccessCard(
+                title: "Timeline",
+                caption: "All memories",
+                systemName: "calendar",
+                active: selectedTab == .timeline,
+                action: { selectedTab = .timeline }
+            )
+            QuickAccessCard(
+                title: "Albums",
+                caption: albums.count == 1 ? "1 album" : "\(albums.count) albums",
+                systemName: "rectangle.stack",
+                active: selectedTab == .albums,
+                action: { selectedTab = .albums }
+            )
+            QuickAccessCard(
+                title: "Smart collections",
+                caption: model.smartCollections.count == 1 ? "1 collection" : "\(model.smartCollections.count) collections",
+                systemName: "sparkles",
+                active: selectedTab == .smartCollections,
+                action: { selectedTab = .smartCollections }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var albumsTab: some View {
         VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
-            SectionTitle(title: "Smart Collections", action: "See all", onAction: onOpenTagLibrary)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: QuickInkSpacing.s3) {
-                    ForEach(model.smartCollections.prefix(4)) { collection in
-                        DiscoveryCard(
-                            title: collection.name,
-                            caption: collection.isSeeded ? "System managed" : "Custom rule",
-                            systemName: "sparkles",
-                            accent: color(from: collection.color),
+            SectionTitleBlock(
+                title: "Albums",
+                subtitle: albums.isEmpty
+                    ? "Create curated sets for your favorite moments"
+                    : "\(albums.count) curated \(albums.count == 1 ? "set" : "sets")"
+            )
+            if albums.isEmpty {
+                CreateAlbumHeroCard {
+                    folderEditorMode = .create
+                }
+            } else {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: QuickInkSpacing.s3),
+                        GridItem(.flexible(), spacing: QuickInkSpacing.s3),
+                    ],
+                    spacing: QuickInkSpacing.s3
+                ) {
+                    AddAlbumTile {
+                        folderEditorMode = .create
+                    }
+                    ForEach(albums) { album in
+                        AlbumTile(
+                            album: album,
+                            itemCount: mediaCountsByFolder[album.id] ?? 0,
+                            cover: albumCoverByFolder[album.id],
+                            action: { onOpenFolder(album) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var smartCollectionsTab: some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
+            SectionTitleBlock(
+                title: "Smart collections",
+                subtitle: model.smartCollections.isEmpty
+                    ? "AI-built sets will appear here"
+                    : "\(model.smartCollections.count) automatic \(model.smartCollections.count == 1 ? "collection" : "collections")"
+            )
+            if model.smartCollections.isEmpty {
+                SmartCollectionsEmptyCard()
+            } else {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: QuickInkSpacing.s3),
+                        GridItem(.flexible(), spacing: QuickInkSpacing.s3),
+                    ],
+                    spacing: QuickInkSpacing.s3
+                ) {
+                    ForEach(model.smartCollections) { collection in
+                        SmartCollectionTile(
+                            collection: collection,
                             action: { onOpenSmartCollection(collection) }
-                        )
-                    }
-                    ForEach(model.tags.prefix(3)) { tag in
-                        DiscoveryCard(
-                            title: tag.name,
-                            caption: "Tag",
-                            systemName: "tag",
-                            accent: color(from: tag.color),
-                            action: { onOpenTag(tag) }
-                        )
-                    }
-                    ForEach(model.people.prefix(3)) { person in
-                        DiscoveryCard(
-                            title: person.name,
-                            caption: "\(model.personCounts[person.id, default: 0]) moments",
-                            systemName: "person",
-                            accent: color(from: person.color),
-                            action: { onOpenPerson(person) }
-                        )
-                    }
-                    ForEach(model.locations.prefix(3)) { location in
-                        DiscoveryCard(
-                            title: location.name,
-                            caption: "\(model.locationCounts[location.id, default: 0]) moments",
-                            systemName: "mappin.and.ellipse",
-                            accent: color(from: location.color),
-                            action: { onOpenLocation(location) }
                         )
                     }
                 }
@@ -451,7 +613,7 @@ struct MomentsScreen: View {
                 .font(QuickInkText.body)
                 .foregroundStyle(QuickInkColors.inkSoft)
             Button("Show timeline") {
-                selectedFilters.removeAll()
+                clearAllFilters()
                 searchQuery = ""
             }
                 .font(QuickInkText.label)
@@ -483,13 +645,16 @@ final class MomentsViewModel: ObservableObject {
     @Published private(set) var captures: [CaptureSummary] = []
     @Published private(set) var primaryTagByCapture: [String: String] = [:]
     @Published private(set) var tags: [TagEntity] = []
+    @Published private(set) var tagCounts: [String: Int] = [:]
+    @Published private(set) var folders: [FolderEntity] = []
     @Published private(set) var smartCollections: [SmartCollectionEntity] = []
     @Published private(set) var locations: [LocationEntity] = []
     @Published private(set) var locationCounts: [String: Int] = [:]
     @Published private(set) var people: [PersonEntity] = []
     @Published private(set) var personCounts: [String: Int] = [:]
-    @Published private(set) var captureIdsWithPlaces: Set<String> = []
-    @Published private(set) var captureIdsWithPeople: Set<String> = []
+    @Published private(set) var tagIdsByCapture: [String: Set<String>] = [:]
+    @Published private(set) var personIdsByCapture: [String: Set<String>] = [:]
+    @Published private(set) var locationIdsByCapture: [String: Set<String>] = [:]
 
     private let userId: String
     private let dbQueue: DatabaseQueue
@@ -543,11 +708,27 @@ final class MomentsViewModel: ObservableObject {
             })
             .store(in: &cancellables)
 
+        CaptureTagRepository()
+            .observeTagCounts(userId: userId)
+            .receive(on: DispatchQueue.main)
+            .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] rows in
+                self?.tagCounts = Dictionary(uniqueKeysWithValues: rows.map { ($0.tagId, $0.docCount) })
+            })
+            .store(in: &cancellables)
+
         SmartCollectionRepository()
             .observeActive(userId: userId)
             .receive(on: DispatchQueue.main)
             .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] in
                 self?.smartCollections = $0
+            })
+            .store(in: &cancellables)
+
+        FolderRepository()
+            .observe(userId: userId)
+            .receive(on: DispatchQueue.main)
+            .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] in
+                self?.folders = $0
             })
             .store(in: &cancellables)
 
@@ -583,39 +764,102 @@ final class MomentsViewModel: ObservableObject {
             })
             .store(in: &cancellables)
 
-        ValueObservation.tracking { [userId] db -> Set<String> in
-            let ids = try String.fetchAll(db, sql: """
-                SELECT DISTINCT capture_locations.capture_id
-                FROM capture_locations
-                JOIN captures ON captures.id = capture_locations.capture_id
-                WHERE capture_locations.deleted_at IS NULL
+        ValueObservation.tracking { [userId] db -> [String: Set<String>] in
+            struct Pair: Decodable, FetchableRecord {
+                let captureId: String
+                let tagId: String
+                enum CodingKeys: String, CodingKey {
+                    case captureId = "capture_id"
+                    case tagId = "tag_id"
+                }
+            }
+            let rows = try Pair.fetchAll(db, sql: """
+                SELECT capture_tags.capture_id AS capture_id,
+                       capture_tags.tag_id     AS tag_id
+                FROM capture_tags
+                JOIN captures ON captures.id = capture_tags.capture_id
+                JOIN tags     ON tags.id     = capture_tags.tag_id
+                WHERE capture_tags.deleted_at IS NULL
                   AND captures.deleted_at IS NULL
+                  AND tags.deleted_at IS NULL
                   AND captures.user_id = ?
                 """, arguments: [userId])
-            return Set(ids)
+            var map: [String: Set<String>] = [:]
+            for row in rows {
+                map[row.captureId, default: []].insert(row.tagId)
+            }
+            return map
         }
         .publisher(in: dbQueue)
         .receive(on: DispatchQueue.main)
-        .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] ids in
-            self?.captureIdsWithPlaces = ids
+        .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] value in
+            self?.tagIdsByCapture = value
         })
         .store(in: &cancellables)
 
-        ValueObservation.tracking { [userId] db -> Set<String> in
-            let ids = try String.fetchAll(db, sql: """
-                SELECT DISTINCT capture_people.capture_id
+        ValueObservation.tracking { [userId] db -> [String: Set<String>] in
+            struct Pair: Decodable, FetchableRecord {
+                let captureId: String
+                let personId: String
+                enum CodingKeys: String, CodingKey {
+                    case captureId = "capture_id"
+                    case personId = "person_id"
+                }
+            }
+            let rows = try Pair.fetchAll(db, sql: """
+                SELECT capture_people.capture_id AS capture_id,
+                       capture_people.person_id  AS person_id
                 FROM capture_people
                 JOIN captures ON captures.id = capture_people.capture_id
+                JOIN people   ON people.id   = capture_people.person_id
                 WHERE capture_people.deleted_at IS NULL
                   AND captures.deleted_at IS NULL
+                  AND people.deleted_at IS NULL
                   AND captures.user_id = ?
                 """, arguments: [userId])
-            return Set(ids)
+            var map: [String: Set<String>] = [:]
+            for row in rows {
+                map[row.captureId, default: []].insert(row.personId)
+            }
+            return map
         }
         .publisher(in: dbQueue)
         .receive(on: DispatchQueue.main)
-        .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] ids in
-            self?.captureIdsWithPeople = ids
+        .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] value in
+            self?.personIdsByCapture = value
+        })
+        .store(in: &cancellables)
+
+        ValueObservation.tracking { [userId] db -> [String: Set<String>] in
+            struct Pair: Decodable, FetchableRecord {
+                let captureId: String
+                let locationId: String
+                enum CodingKeys: String, CodingKey {
+                    case captureId = "capture_id"
+                    case locationId = "location_id"
+                }
+            }
+            let rows = try Pair.fetchAll(db, sql: """
+                SELECT capture_locations.capture_id  AS capture_id,
+                       capture_locations.location_id AS location_id
+                FROM capture_locations
+                JOIN captures  ON captures.id  = capture_locations.capture_id
+                JOIN locations ON locations.id = capture_locations.location_id
+                WHERE capture_locations.deleted_at IS NULL
+                  AND captures.deleted_at IS NULL
+                  AND locations.deleted_at IS NULL
+                  AND captures.user_id = ?
+                """, arguments: [userId])
+            var map: [String: Set<String>] = [:]
+            for row in rows {
+                map[row.captureId, default: []].insert(row.locationId)
+            }
+            return map
+        }
+        .publisher(in: dbQueue)
+        .receive(on: DispatchQueue.main)
+        .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] value in
+            self?.locationIdsByCapture = value
         })
         .store(in: &cancellables)
     }
@@ -631,6 +875,19 @@ final class MomentsViewModel: ObservableObject {
             } catch {
                 print("MomentsViewModel.toggleFavorite failed: \(error)")
             }
+        }
+    }
+
+    func createAlbum(name: String, color: String) async {
+        do {
+            _ = try await FolderRepository().create(
+                userId: userId,
+                name: name,
+                color: color,
+                position: folders.count
+            )
+        } catch {
+            print("MomentsViewModel.createAlbum failed: \(error)")
         }
     }
 }
@@ -1394,16 +1651,17 @@ private struct QuickAccessCard: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(active ? QuickInkColors.accent : QuickInkColors.ink)
                 Spacer(minLength: QuickInkSpacing.s3)
-                Text(title)
+                Text(title == "Smart collections" ? "Smart\ncollections" : title)
                     .font(QuickInkText.caption)
                     .foregroundStyle(active ? QuickInkColors.accent : QuickInkColors.ink)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .lineSpacing(-3)
                 Text(caption)
                     .font(QuickInkText.caption)
                     .foregroundStyle(QuickInkColors.muted)
                     .lineLimit(1)
             }
-            .frame(width: 72, height: 62, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 74, alignment: .leading)
             .padding(QuickInkSpacing.s3)
             .background(
                 RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
@@ -1415,42 +1673,51 @@ private struct QuickAccessCard: View {
             )
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
         .accessibilityLabel(Text(title))
     }
 }
 
-private struct DiscoveryCard: View {
+private struct SectionTitleBlock: View {
     let title: String
-    let caption: String
-    let systemName: String
-    let accent: Color?
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(QuickInkText.label)
+                .foregroundStyle(QuickInkColors.ink)
+            Text(subtitle)
+                .font(QuickInkText.caption)
+                .foregroundStyle(QuickInkColors.inkSoft)
+        }
+    }
+}
+
+private struct CreateAlbumHeroCard: View {
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: QuickInkSpacing.s3) {
-                Image(systemName: systemName)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(accent ?? QuickInkColors.accent)
-                    .frame(width: 42, height: 42)
-                    .background((accent ?? QuickInkColors.accent).opacity(0.14), in: RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+                Image(systemName: "plus")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(QuickInkColors.accent)
+                    .frame(width: 52, height: 52)
+                    .background(QuickInkColors.accentSoft, in: RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
+                    Text("Create your first album")
                         .font(QuickInkText.label)
                         .foregroundStyle(QuickInkColors.ink)
-                        .lineLimit(1)
-                    Text(caption)
+                    Text("Collect photos and videos into a focused memory set.")
                         .font(QuickInkText.caption)
-                        .foregroundStyle(QuickInkColors.muted)
-                        .lineLimit(1)
+                        .foregroundStyle(QuickInkColors.inkSoft)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: QuickInkSpacing.s2)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(QuickInkColors.muted)
+                Spacer(minLength: 0)
             }
-            .frame(width: 172)
-            .padding(QuickInkSpacing.s3)
+            .padding(QuickInkSpacing.s4)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(QuickInkColors.surface, in: RoundedRectangle(cornerRadius: QuickInkRadius.lg, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: QuickInkRadius.lg, style: .continuous)
@@ -1458,7 +1725,162 @@ private struct DiscoveryCard: View {
             )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(Text(title))
+    }
+}
+
+private struct AddAlbumTile: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: QuickInkSpacing.s3) {
+                Image(systemName: "plus")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(QuickInkColors.accent)
+                    .frame(width: 44, height: 44)
+                    .background(QuickInkColors.accentSoft, in: Circle())
+                Text("New album")
+                    .font(QuickInkText.caption.weight(.semibold))
+                    .foregroundStyle(QuickInkColors.ink)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, minHeight: 138)
+            .aspectRatio(1, contentMode: .fit)
+            .background(QuickInkColors.surface, in: RoundedRectangle(cornerRadius: QuickInkRadius.lg, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: QuickInkRadius.lg, style: .continuous)
+                    .strokeBorder(QuickInkColors.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("Create album"))
+    }
+}
+
+private struct AlbumTile: View {
+    let album: FolderEntity
+    let itemCount: Int
+    let cover: CaptureSummary?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .bottomLeading) {
+                if let cover {
+                    MomentPreview(capture: cover)
+                } else {
+                    LinearGradient(
+                        colors: [
+                            (colorFromHex(album.color) ?? QuickInkColors.accent).opacity(0.30),
+                            QuickInkColors.surface,
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
+                LinearGradient(
+                    colors: [
+                        .clear,
+                        Color.black.opacity(cover == nil ? 0.10 : 0.48),
+                    ],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(album.name)
+                        .font(QuickInkText.caption.weight(.semibold))
+                        .foregroundStyle(cover == nil ? QuickInkColors.ink : Color.white)
+                        .lineLimit(1)
+                    Text(itemCount == 1 ? "1 item" : "\(itemCount) items")
+                        .font(QuickInkText.caption)
+                        .foregroundStyle(cover == nil ? QuickInkColors.inkSoft : Color.white.opacity(0.82))
+                        .lineLimit(1)
+                }
+                .padding(QuickInkSpacing.s3)
+            }
+            .frame(maxWidth: .infinity, minHeight: 138)
+            .aspectRatio(1, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.lg, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: QuickInkRadius.lg, style: .continuous)
+                    .strokeBorder(QuickInkColors.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("Open album \(album.name)"))
+    }
+}
+
+private struct SmartCollectionTile: View {
+    let collection: SmartCollectionEntity
+    let action: () -> Void
+
+    var body: some View {
+        let accent = colorFromHex(collection.color) ?? QuickInkColors.accent
+        Button(action: action) {
+            VStack(alignment: .leading) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 42, height: 42)
+                    .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+                Spacer(minLength: QuickInkSpacing.s4)
+                Text(collection.name)
+                    .font(QuickInkText.caption.weight(.semibold))
+                    .foregroundStyle(QuickInkColors.ink)
+                    .lineLimit(2)
+                Text("Smart album")
+                    .font(QuickInkText.caption)
+                    .foregroundStyle(QuickInkColors.inkSoft)
+                    .lineLimit(1)
+            }
+            .padding(QuickInkSpacing.s3)
+            .frame(maxWidth: .infinity, minHeight: 138, alignment: .leading)
+            .aspectRatio(1, contentMode: .fit)
+            .background(
+                LinearGradient(
+                    colors: [accent.opacity(0.18), QuickInkColors.surface],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: QuickInkRadius.lg, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: QuickInkRadius.lg, style: .continuous)
+                    .strokeBorder(QuickInkColors.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("Open smart collection \(collection.name)"))
+    }
+}
+
+private struct SmartCollectionsEmptyCard: View {
+    var body: some View {
+        HStack(spacing: QuickInkSpacing.s3) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(QuickInkColors.accent)
+                .frame(width: 52, height: 52)
+                .background(QuickInkColors.accentSoft, in: RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("No smart collections yet")
+                    .font(QuickInkText.label)
+                    .foregroundStyle(QuickInkColors.ink)
+                Text("Automatic sets will appear as Moments learns from your media.")
+                    .font(QuickInkText.caption)
+                    .foregroundStyle(QuickInkColors.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(QuickInkSpacing.s4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(QuickInkColors.surface, in: RoundedRectangle(cornerRadius: QuickInkRadius.lg, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: QuickInkRadius.lg, style: .continuous)
+                .strokeBorder(QuickInkColors.border, lineWidth: 1)
+        )
     }
 }
 
@@ -1503,6 +1925,341 @@ private struct FilterPill: View {
     }
 }
 
+private struct SelectedFilterChip: View {
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: QuickInkSpacing.s1) {
+            Text(label)
+                .font(QuickInkText.caption)
+                .foregroundStyle(QuickInkColors.accent)
+                .lineLimit(1)
+            Button(action: action) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(QuickInkColors.accent)
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Remove \(label) filter"))
+        }
+        .padding(.leading, QuickInkSpacing.s3)
+        .padding(.trailing, QuickInkSpacing.s1)
+        .padding(.vertical, QuickInkSpacing.s2)
+        .background(QuickInkColors.accentSoft, in: Capsule())
+        .overlay(Capsule().strokeBorder(QuickInkColors.accent.opacity(0.18), lineWidth: 1))
+    }
+}
+
+private struct MomentFilterPickerSheet: View {
+    let picker: MomentFilterPicker
+    let options: [MomentFilterOption]
+    let selectedIds: Set<String>
+    let onToggle: (String) -> Void
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
+            if picker == .tags {
+                MomentTagVocabularyContent(
+                    options: options,
+                    selectedIds: selectedIds,
+                    emptyMessage: picker.emptyMessage,
+                    onToggle: onToggle,
+                    onDone: onDone
+                )
+            } else {
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(picker.title)
+                            .font(QuickInkText.heading)
+                            .foregroundStyle(QuickInkColors.ink)
+                        Text(picker.subtitle)
+                            .font(QuickInkText.caption)
+                            .foregroundStyle(QuickInkColors.muted)
+                    }
+                    Spacer()
+                    Button("Done", action: onDone)
+                        .font(QuickInkText.label)
+                        .foregroundStyle(QuickInkColors.accent)
+                        .buttonStyle(.plain)
+                }
+
+                if options.isEmpty {
+                    Text(picker.emptyMessage)
+                        .font(QuickInkText.body)
+                        .foregroundStyle(QuickInkColors.inkSoft)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, QuickInkSpacing.s4)
+                } else {
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: QuickInkSpacing.s2) {
+                            ForEach(options) { option in
+                                MomentFilterOptionRow(
+                                    option: option,
+                                    selected: selectedIds.contains(option.id),
+                                    action: { onToggle(option.id) }
+                                )
+                            }
+                        }
+                        .padding(.bottom, QuickInkSpacing.s4)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, QuickInkSpacing.s4)
+        .padding(.top, QuickInkSpacing.s3)
+        .padding(.bottom, QuickInkSpacing.s5)
+        .background(QuickInkColors.surface)
+    }
+}
+
+private struct MomentTagVocabularyContent: View {
+    let options: [MomentFilterOption]
+    let selectedIds: Set<String>
+    let emptyMessage: String
+    let onToggle: (String) -> Void
+    let onDone: () -> Void
+    @State private var tagSearchQuery = ""
+
+    private var filteredOptions: [MomentFilterOption] {
+        let query = tagSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return options }
+        return options.filter {
+            $0.label.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }
+    }
+
+    private var sections: [MomentTagVocabularySectionData] {
+        buildMomentTagVocabularySections(filteredOptions)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: QuickInkSpacing.s3) {
+            HStack(alignment: .center, spacing: QuickInkSpacing.s2) {
+                Text("TAG VOCABULARY")
+                    .font(QuickInkFont.ui(12, weight: .semibold))
+                    .tracking(1.6)
+                    .foregroundStyle(QuickInkColors.ink)
+
+                Spacer()
+
+                Text("\(filteredOptions.count) tags · \(sections.count) buckets")
+                    .font(QuickInkFont.ui(12).italic())
+                    .foregroundStyle(QuickInkColors.muted)
+
+                Button("Done", action: onDone)
+                    .font(QuickInkFont.ui(12, weight: .semibold))
+                    .foregroundStyle(QuickInkColors.accent)
+                    .buttonStyle(.plain)
+            }
+
+            if options.isEmpty {
+                Text(emptyMessage)
+                    .font(QuickInkFont.ui(12))
+                    .foregroundStyle(QuickInkColors.inkSoft)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, QuickInkSpacing.s4)
+            } else {
+                MomentTagVocabularySearchField(query: $tagSearchQuery)
+
+                if filteredOptions.isEmpty {
+                    Text("No matching tags.")
+                        .font(QuickInkFont.ui(12))
+                        .foregroundStyle(QuickInkColors.inkSoft)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, QuickInkSpacing.s4)
+                } else {
+                    ScrollView(showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(sections) { section in
+                                MomentTagVocabularySectionView(
+                                    section: section,
+                                    selectedIds: selectedIds,
+                                    showBottomBorder: section.id != sections.last?.id,
+                                    onToggle: onToggle
+                                )
+                            }
+                        }
+                        .padding(.bottom, QuickInkSpacing.s4)
+                    }
+                    .frame(maxHeight: 520)
+                }
+            }
+        }
+    }
+}
+
+private struct MomentTagVocabularySearchField: View {
+    @Binding var query: String
+
+    var body: some View {
+        HStack(spacing: QuickInkSpacing.s2) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(QuickInkColors.muted)
+
+            TextField("Search tags...", text: $query)
+                .font(QuickInkFont.ui(12))
+                .foregroundStyle(QuickInkColors.ink)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(QuickInkColors.muted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("Clear tag search"))
+            }
+        }
+        .padding(.horizontal, QuickInkSpacing.s3)
+        .padding(.vertical, 10)
+        .background(QuickInkColors.bg, in: RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                .strokeBorder(QuickInkColors.borderSoft, lineWidth: 1)
+        )
+    }
+}
+
+private struct MomentTagVocabularySectionView: View {
+    let section: MomentTagVocabularySectionData
+    let selectedIds: Set<String>
+    let showBottomBorder: Bool
+    let onToggle: (String) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: QuickInkSpacing.s3) {
+                RoundedRectangle(cornerRadius: 99, style: .continuous)
+                    .fill(section.hue)
+                    .frame(width: 3, height: 42)
+                    .padding(.top, 3)
+
+                VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+                    HStack(alignment: .center, spacing: QuickInkSpacing.s2) {
+                        Text(section.name.uppercased())
+                            .font(QuickInkFont.ui(13, weight: .semibold))
+                            .tracking(1)
+                            .foregroundStyle(section.hue)
+
+                        if let prefixLabel = section.prefixLabel {
+                            Text(prefixLabel)
+                                .font(QuickInkFont.ui(12))
+                                .foregroundStyle(QuickInkColors.muted)
+                        }
+
+                        Spacer()
+
+                        Text("\(section.options.count)")
+                            .font(QuickInkFont.ui(12, weight: .semibold))
+                            .foregroundStyle(QuickInkColors.ink)
+                            .frame(width: 34, height: 34)
+                            .background(QuickInkColors.bg, in: Circle())
+                    }
+
+                    Text(section.question)
+                        .font(QuickInkFont.ui(12).italic())
+                        .foregroundStyle(QuickInkColors.muted)
+
+                    FlowLayout(spacing: QuickInkSpacing.s2, runSpacing: QuickInkSpacing.s2) {
+                        ForEach(section.options) { option in
+                            MomentTagVocabularyChip(
+                                option: option,
+                                tint: section.hue,
+                                selected: selectedIds.contains(option.id),
+                                action: { onToggle(option.id) }
+                            )
+                        }
+                    }
+                }
+            }
+            .padding(.top, QuickInkSpacing.s3)
+
+            if showBottomBorder {
+                Rectangle()
+                    .fill(QuickInkColors.borderSoft)
+                    .frame(height: 1)
+                    .padding(.top, QuickInkSpacing.s3)
+            }
+        }
+    }
+}
+
+private struct MomentTagVocabularyChip: View {
+    let option: MomentFilterOption
+    let tint: Color
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(option.label)
+                .font(QuickInkFont.ui(12, weight: .semibold))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .padding(.horizontal, QuickInkSpacing.s3)
+                .padding(.vertical, 7)
+                .background(selected ? tint.opacity(0.14) : Color.clear, in: Capsule())
+                .overlay(Capsule().strokeBorder(selected ? tint : tint.opacity(0.72), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("Filter by tag \(option.label)"))
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}
+
+private struct MomentFilterOptionRow: View {
+    let option: MomentFilterOption
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: QuickInkSpacing.s3) {
+                Image(systemName: option.systemName)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(option.tint)
+                    .frame(width: 34, height: 34)
+                    .background(option.tint.opacity(0.14), in: Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(option.label)
+                        .font(QuickInkText.label)
+                        .foregroundStyle(QuickInkColors.ink)
+                        .lineLimit(1)
+                    if let subtitle = option.subtitle {
+                        Text(subtitle)
+                            .font(QuickInkText.caption)
+                            .foregroundStyle(QuickInkColors.muted)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(QuickInkColors.accent)
+                }
+            }
+            .padding(QuickInkSpacing.s3)
+            .background(selected ? QuickInkColors.accentSoft : QuickInkColors.bg, in: RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous)
+                    .strokeBorder(selected ? QuickInkColors.accent.opacity(0.24) : QuickInkColors.borderSoft, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}
+
 private struct CircleIconButton: View {
     let systemName: String
     let label: String
@@ -1543,6 +2300,64 @@ private enum MomentFilter: String, CaseIterable, Identifiable {
         case .places: return "Places"
         }
     }
+}
+
+private enum MomentFilterPicker: String, Identifiable {
+    case tags
+    case people
+    case places
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .tags: return "Choose tags"
+        case .people: return "Choose people"
+        case .places: return "Choose places"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .tags: return "Show moments with any selected tag."
+        case .people: return "Show moments with any selected person."
+        case .places: return "Show moments from any selected place."
+        }
+    }
+
+    var emptyMessage: String {
+        switch self {
+        case .tags: return "No tags are available yet."
+        case .people: return "No people are available yet."
+        case .places: return "No places are available yet."
+        }
+    }
+}
+
+private struct MomentFilterOption: Identifiable {
+    let id: String
+    let label: String
+    let subtitle: String?
+    let systemName: String
+    let tint: Color
+    let bucketId: String?
+}
+
+private struct MomentTagVocabularySectionData: Identifiable {
+    let id: String
+    let name: String
+    let question: String
+    let hue: Color
+    let prefixLabel: String?
+    let options: [MomentFilterOption]
+}
+
+private struct SelectedMomentFilterToken: Identifiable {
+    let kind: MomentFilterPicker
+    let optionId: String
+    let label: String
+
+    var id: String { "\(kind.rawValue)-\(optionId)" }
 }
 
 private enum MediaKind: String {
@@ -1653,11 +2468,17 @@ private extension CaptureSummary {
 
     func matchesMomentFilters(
         _ selected: Set<MomentFilter>,
-        primaryTagByCapture: [String: String],
-        captureIdsWithPeople: Set<String>,
-        captureIdsWithPlaces: Set<String>
+        selectedTagIds: Set<String>,
+        selectedPersonIds: Set<String>,
+        selectedLocationIds: Set<String>,
+        tagIdsByCapture: [String: Set<String>],
+        personIdsByCapture: [String: Set<String>],
+        locationIdsByCapture: [String: Set<String>]
     ) -> Bool {
-        guard !selected.isEmpty else { return true }
+        guard !selected.isEmpty ||
+                !selectedTagIds.isEmpty ||
+                !selectedPersonIds.isEmpty ||
+                !selectedLocationIds.isEmpty else { return true }
 
         let mediaTypeSelected = selected.contains(.photos) || selected.contains(.videos)
         if mediaTypeSelected {
@@ -1668,17 +2489,26 @@ private extension CaptureSummary {
         }
 
         if selected.contains(.favorites), !isFavorite { return false }
-        if selected.contains(.tags), (primaryTagByCapture[id] ?? "").isEmpty { return false }
-        if selected.contains(.people), !captureIdsWithPeople.contains(id) { return false }
-        if selected.contains(.places),
-           !captureIdsWithPlaces.contains(id),
-           (locality ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return false
-        }
+        if !selectedTagIds.isEmpty,
+           tagIdsByCapture[id, default: []].isDisjoint(with: selectedTagIds) { return false }
+        if !selectedPersonIds.isEmpty,
+           personIdsByCapture[id, default: []].isDisjoint(with: selectedPersonIds) { return false }
+        if !selectedLocationIds.isEmpty,
+           locationIdsByCapture[id, default: []].isDisjoint(with: selectedLocationIds) { return false }
 
         return true
     }
 
+}
+
+private extension Set where Element == String {
+    mutating func toggleMembership(_ value: String) {
+        if contains(value) {
+            remove(value)
+        } else {
+            insert(value)
+        }
+    }
 }
 
 private extension Array where Element == CaptureSummary {
@@ -1807,6 +2637,74 @@ private func momentDate(_ iso: String) -> String {
     let formatter = DateFormatter()
     formatter.dateFormat = "MMM d"
     return formatter.string(from: date)
+}
+
+private func buildMomentTagVocabularySections(_ options: [MomentFilterOption]) -> [MomentTagVocabularySectionData] {
+    let canonicalIds = Set(workspaceTagBuckets.map(\.id))
+    var sections: [MomentTagVocabularySectionData] = workspaceTagBuckets.compactMap { bucket in
+        let bucketOptions = options.filter { option in
+            (option.bucketId ?? inferMomentTagBucketId(option.label)) == bucket.id
+        }
+        guard !bucketOptions.isEmpty else { return nil }
+        return MomentTagVocabularySectionData(
+            id: bucket.id,
+            name: bucket.name,
+            question: bucket.question,
+            hue: bucket.hue,
+            prefixLabel: momentBucketPrefixLabel(bucket.prefixes),
+            options: bucketOptions
+        )
+    }
+
+    let otherOptions = options.filter { option in
+        guard let bucketId = option.bucketId ?? inferMomentTagBucketId(option.label) else { return true }
+        return !canonicalIds.contains(bucketId)
+    }
+    if !otherOptions.isEmpty {
+        sections.append(
+            MomentTagVocabularySectionData(
+                id: "other",
+                name: "Other",
+                question: "uncategorized media tags",
+                hue: QuickInkColors.muted,
+                prefixLabel: nil,
+                options: otherOptions
+            )
+        )
+    }
+
+    return sections
+}
+
+private func momentBucketPrefixLabel(_ prefixes: [String]?) -> String? {
+    guard let prefixes, !prefixes.isEmpty else { return nil }
+    return "(" + prefixes.map { "#\($0)" }.joined(separator: ", ") + ")"
+}
+
+private func inferMomentTagBucketId(_ name: String) -> String? {
+    let trimmed = name
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let normalized = (trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : trimmed).lowercased()
+    if let bucket = workspaceTagBuckets.first(where: { bucket in
+        bucket.prefixes?.contains(where: { normalized.hasPrefix($0.lowercased()) }) == true
+    }) {
+        return bucket.id
+    }
+
+    switch normalized {
+    case "active", "later", "done", "todo":
+        return "status"
+    case "focus", "shallow", "errand", "call":
+        return "energy"
+    case "today", "thisweek", "thismonth":
+        return "time"
+    case "idea", "quote", "recipe", "checklist", "template":
+        return "kind"
+    case "camera", "capture", "import", "photo", "scan", "screenshot", "screenshots", "share", "shared", "video", "voice":
+        return "source"
+    default:
+        return nil
+    }
 }
 
 private func parseMomentDate(_ iso: String) -> Date? {

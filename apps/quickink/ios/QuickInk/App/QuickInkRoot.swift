@@ -921,6 +921,9 @@ private struct MainShell: View {
                 onOpenSearch: {
                     navToTab(.search)
                 },
+                onOpenFolder: { folder in
+                    path.append(.folderDetail(folderId: folder.id))
+                },
                 onOpenSmartCollection: { collection in
                     path.append(.smartCollection(collectionId: collection.id))
                 },

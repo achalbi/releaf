@@ -6,7 +6,10 @@
  * retrieval, and a grouped timeline of media thumbnails.
  */
 
-@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@file:OptIn(
+    androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+)
 
 package app.quickink.mobile.features.moments
 
@@ -42,35 +45,35 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.LocalOffer
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Share
-import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -92,6 +95,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -101,11 +105,17 @@ import app.quickink.mobile.QuickInkApp
 import app.quickink.mobile.data.capture.CaptureEntity
 import app.quickink.mobile.data.capture.CaptureRepository
 import app.quickink.mobile.data.capture.displayTitle
+import app.quickink.mobile.data.folder.FolderEntity
+import app.quickink.mobile.data.folder.FolderRepository
 import app.quickink.mobile.data.location.LocationEntity
 import app.quickink.mobile.data.person.PersonEntity
 import app.quickink.mobile.data.smartcollection.SmartCollectionEntity
 import app.quickink.mobile.data.tag.TagEntity
 import app.quickink.mobile.features.nav.QuickInkBottomNavReservedHeight
+import app.quickink.mobile.features.workspace.FolderEditorDialog
+import app.quickink.mobile.features.workspace.FolderEditorMode
+import app.quickink.mobile.features.workspace.WorkspaceFolderPalette
+import app.quickink.mobile.features.workspace.workspaceTagBuckets
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
 import app.quickink.mobile.ui.theme.QuickInkRadius
@@ -127,6 +137,7 @@ fun MomentsScreen(
     userId: String,
     onOpenCapture: (String) -> Unit,
     onOpenSearch: () -> Unit,
+    onOpenFolder: (FolderEntity) -> Unit,
     onOpenSmartCollection: (SmartCollectionEntity) -> Unit,
     onOpenTagLibrary: () -> Unit,
     onOpenTag: (TagEntity) -> Unit,
@@ -145,9 +156,16 @@ fun MomentsScreen(
             ocrResultDao = app.database.ocrResultDao(),
         )
     }
+    val folderRepository = remember(app) {
+        FolderRepository(folderDao = app.database.folderDao())
+    }
     val captures by remember(userId, captureDao) {
         captureDao.observeRecentMedia(userId, limit = 120)
     }.collectAsState(initial = emptyList())
+
+    val folders by produceState(initialValue = emptyList<FolderEntity>(), key1 = userId) {
+        app.database.folderDao().observeActive(userId).collect { value = it }
+    }
 
     val primaryTagRows by remember(userId, app) {
         app.database.captureTagDao().observePrimaryTagNames(userId)
@@ -158,6 +176,11 @@ fun MomentsScreen(
 
     val tags by produceState(initialValue = emptyList<TagEntity>(), key1 = userId) {
         app.database.tagDao().observeActive(userId).collect { value = it }
+    }
+    val tagCounts by produceState(initialValue = emptyMap<String, Int>(), key1 = userId) {
+        app.database.captureTagDao().observeTagCounts(userId).collect { rows ->
+            value = rows.associate { it.tagId to it.docCount }
+        }
     }
     val smartCollections by produceState(
         initialValue = emptyList<SmartCollectionEntity>(),
@@ -181,22 +204,39 @@ fun MomentsScreen(
             value = rows.associate { it.personId to it.docCount }
         }
     }
-    val captureIdsWithPlaces by produceState(initialValue = emptySet<String>(), key1 = userId) {
-        app.database.captureLocationDao().observeCaptureIdsWithLocations(userId).collect { rows ->
-            value = rows.toSet()
+    val tagIdsByCapture by produceState(initialValue = emptyMap<String, Set<String>>(), key1 = userId) {
+        app.database.captureTagDao().observeCaptureTagIds(userId).collect { rows ->
+            value = rows
+                .groupBy({ it.captureId }, { it.tagId })
+                .mapValues { (_, tagIds) -> tagIds.toSet() }
         }
     }
-    val captureIdsWithPeople by produceState(initialValue = emptySet<String>(), key1 = userId) {
-        app.database.capturePersonDao().observeCaptureIdsWithPeople(userId).collect { rows ->
-            value = rows.toSet()
+    val personIdsByCapture by produceState(initialValue = emptyMap<String, Set<String>>(), key1 = userId) {
+        app.database.capturePersonDao().observeCapturePersonIds(userId).collect { rows ->
+            value = rows
+                .groupBy({ it.captureId }, { it.personId })
+                .mapValues { (_, personIds) -> personIds.toSet() }
+        }
+    }
+    val locationIdsByCapture by produceState(initialValue = emptyMap<String, Set<String>>(), key1 = userId) {
+        app.database.captureLocationDao().observeCaptureLocationIds(userId).collect { rows ->
+            value = rows
+                .groupBy({ it.captureId }, { it.locationId })
+                .mapValues { (_, locationIds) -> locationIds.toSet() }
         }
     }
 
     var selectedFilters by remember { mutableStateOf<Set<MomentFilter>>(emptySet()) }
+    var selectedTagIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selectedPersonIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selectedLocationIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showFilters by remember { mutableStateOf(false) }
+    var activeFilterPicker by remember { mutableStateOf<MomentFilterPicker?>(null) }
     var openGalleryGroupKey by remember { mutableStateOf<String?>(null) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var isVoiceSearchListening by remember { mutableStateOf(false) }
+    var selectedTab by rememberSaveable { mutableStateOf(MomentHomeTab.Timeline) }
+    var showCreateAlbumDialog by remember { mutableStateOf(false) }
     val speechRecognizer = remember(context) {
         if (SpeechRecognizer.isRecognitionAvailable(context)) {
             SpeechRecognizer.createSpeechRecognizer(context)
@@ -307,20 +347,86 @@ fun MomentsScreen(
         }
     }
 
+    fun clearAllFilters() {
+        selectedFilters = emptySet()
+        selectedTagIds = emptySet()
+        selectedPersonIds = emptySet()
+        selectedLocationIds = emptySet()
+    }
+
+    fun togglePickerOption(picker: MomentFilterPicker, id: String) {
+        when (picker) {
+            MomentFilterPicker.Tags -> selectedTagIds = selectedTagIds.toggle(id)
+            MomentFilterPicker.People -> selectedPersonIds = selectedPersonIds.toggle(id)
+            MomentFilterPicker.Places -> selectedLocationIds = selectedLocationIds.toggle(id)
+        }
+    }
+
+    val tagById = remember(tags) { tags.associateBy { it.id } }
+    val personById = remember(people) { people.associateBy { it.id } }
+    val locationById = remember(locations) { locations.associateBy { it.id } }
+    val selectedOptionChips = remember(
+        selectedTagIds,
+        selectedPersonIds,
+        selectedLocationIds,
+        tagById,
+        personById,
+        locationById,
+    ) {
+        buildList {
+            selectedTagIds.forEach { id ->
+                add(
+                    SelectedMomentOptionChip(
+                        id = "tag-$id",
+                        picker = MomentFilterPicker.Tags,
+                        optionId = id,
+                        label = "#${tagById[id]?.name ?: "Tag"}",
+                    ),
+                )
+            }
+            selectedPersonIds.forEach { id ->
+                add(
+                    SelectedMomentOptionChip(
+                        id = "person-$id",
+                        picker = MomentFilterPicker.People,
+                        optionId = id,
+                        label = personById[id]?.name ?: "Person",
+                    ),
+                )
+            }
+            selectedLocationIds.forEach { id ->
+                add(
+                    SelectedMomentOptionChip(
+                        id = "place-$id",
+                        picker = MomentFilterPicker.Places,
+                        optionId = id,
+                        label = locationById[id]?.name ?: "Place",
+                    ),
+                )
+            }
+        }
+    }
     val visibleCaptures = remember(
         captures,
         selectedFilters,
+        selectedTagIds,
+        selectedPersonIds,
+        selectedLocationIds,
         searchQuery,
         primaryTagByCapture,
-        captureIdsWithPeople,
-        captureIdsWithPlaces,
+        tagIdsByCapture,
+        personIdsByCapture,
+        locationIdsByCapture,
     ) {
         val filtered = captures.filter { capture ->
             capture.matchesMomentFilters(
                 selected = selectedFilters,
-                primaryTagByCapture = primaryTagByCapture,
-                captureIdsWithPeople = captureIdsWithPeople,
-                captureIdsWithPlaces = captureIdsWithPlaces,
+                selectedTagIds = selectedTagIds,
+                selectedPersonIds = selectedPersonIds,
+                selectedLocationIds = selectedLocationIds,
+                tagIdsByCapture = tagIdsByCapture,
+                personIdsByCapture = personIdsByCapture,
+                locationIdsByCapture = locationIdsByCapture,
             )
         }
         val searched = filtered.filter { capture ->
@@ -329,9 +435,23 @@ fun MomentsScreen(
         searched.sortedByDescending { it.createdAt }
     }
     val groups = remember(visibleCaptures) { visibleCaptures.groupedByMomentDay() }
+    val albums = remember(folders) {
+        folders.filter { !it.isDefault && !it.isSeeded }
+    }
+    val mediaCountsByFolder = remember(captures) {
+        captures.mapNotNull { capture ->
+            capture.folderId?.takeIf { it.isNotBlank() }
+        }.groupingBy { it }.eachCount()
+    }
+    val albumCoverByFolder = remember(captures) {
+        captures.mapNotNull { capture ->
+            capture.folderId?.takeIf { it.isNotBlank() }?.let { folderId -> folderId to capture }
+        }
+            .groupBy({ it.first }, { it.second })
+            .mapValues { (_, folderCaptures) -> folderCaptures.first() }
+    }
     val videoCount = remember(captures) { captures.count { it.mediaKind == MediaKind.Video } }
     val photoCount = remember(captures) { captures.count { it.mediaKind == MediaKind.Photo } }
-    val unsortedCount = remember(captures) { captures.count { it.folderId == null } }
     val openGalleryGroup = remember(groups, openGalleryGroupKey) {
         groups.firstOrNull { it.key == openGalleryGroupKey }
     }
@@ -381,74 +501,139 @@ fun MomentsScreen(
             item {
                 FilterPanel(
                     selectedFilters = selectedFilters,
+                    selectedTagCount = selectedTagIds.size,
+                    selectedPersonCount = selectedPersonIds.size,
+                    selectedPlaceCount = selectedLocationIds.size,
+                    selectedOptionChips = selectedOptionChips,
                     onToggleFilter = ::toggleFilter,
+                    onOpenPicker = { activeFilterPicker = it },
+                    onRemoveOption = { picker, optionId ->
+                        togglePickerOption(picker, optionId)
+                    },
                 )
             }
         }
 
         item {
             QuickAccessRow(
-                selectedFilters = selectedFilters,
-                photoCount = photoCount,
-                videoCount = videoCount,
-                unsortedCount = unsortedCount,
+                selectedTab = selectedTab,
+                albumCount = albums.size,
                 smartCount = smartCollections.size,
-                tagCount = tags.size,
-                peopleCount = people.size,
-                placesCount = locations.size,
-                onClearFilters = { selectedFilters = emptySet() },
-                onToggleFilter = ::toggleFilter,
-                onOpenSearch = onOpenSearch,
-                onOpenSmart = {
-                    smartCollections.firstOrNull()?.let(onOpenSmartCollection)
-                },
-                onOpenTags = onOpenTagLibrary,
-                onOpenPeople = {
-                    people.firstOrNull()?.let(onOpenPerson)
-                },
-                onOpenPlaces = {
-                    locations.firstOrNull()?.let(onOpenLocation)
-                },
+                onSelectTab = { selectedTab = it },
             )
         }
 
-        if (smartCollections.isNotEmpty() || tags.isNotEmpty() || locations.isNotEmpty() || people.isNotEmpty()) {
-            item {
-                DiscoverySection(
-                    smartCollections = smartCollections,
-                    tags = tags,
-                    locations = locations,
-                    locationCounts = locationCounts,
-                    people = people,
-                    personCounts = personCounts,
-                    onOpenSmartCollection = onOpenSmartCollection,
-                    onOpenTag = onOpenTag,
-                    onOpenTagLibrary = onOpenTagLibrary,
-                    onOpenLocation = onOpenLocation,
-                    onOpenPerson = onOpenPerson,
-                )
+        when (selectedTab) {
+            MomentHomeTab.Timeline -> {
+                if (captures.isEmpty()) {
+                    item { EmptyMoments(onSearch = onOpenSearch) }
+                } else if (visibleCaptures.isEmpty()) {
+                    item {
+                        EmptyFilteredState(onClear = {
+                            clearAllFilters()
+                            searchQuery = ""
+                        })
+                    }
+                } else {
+                    items(groups, key = { it.key }) { group ->
+                        TimelineGroup(
+                            group = group,
+                            primaryTagByCapture = primaryTagByCapture,
+                            onOpenCapture = onOpenCapture,
+                            onOpenGallery = { openGalleryGroupKey = group.key },
+                        )
+                    }
+                }
+            }
+            MomentHomeTab.Albums -> {
+                item {
+                    AlbumsTab(
+                        albums = albums,
+                        countsByFolder = mediaCountsByFolder,
+                        coverByFolder = albumCoverByFolder,
+                        onCreateAlbum = { showCreateAlbumDialog = true },
+                        onOpenAlbum = onOpenFolder,
+                    )
+                }
+            }
+            MomentHomeTab.SmartCollections -> {
+                item {
+                    SmartCollectionsTab(
+                        collections = smartCollections,
+                        onOpenCollection = onOpenSmartCollection,
+                    )
+                }
             }
         }
+    }
 
-        if (captures.isEmpty()) {
-            item { EmptyMoments(onSearch = onOpenSearch) }
-        } else if (visibleCaptures.isEmpty()) {
-            item {
-                EmptyFilteredState(onClear = {
-                    selectedFilters = emptySet()
-                    searchQuery = ""
-                })
+    activeFilterPicker?.let { picker ->
+        val options = when (picker) {
+            MomentFilterPicker.Tags -> tags.map { tag ->
+                val bucketId = tag.bucket ?: inferMomentTagBucketId(tag.name)
+                val bucket = workspaceTagBuckets.firstOrNull { it.id == bucketId }
+                MomentFilterOption(
+                    id = tag.id,
+                    label = tag.name,
+                    subtitle = "${tagCounts[tag.id] ?: 0} moments",
+                    color = tag.color?.let(::parseColorOrNull) ?: bucket?.hue,
+                    icon = Icons.Outlined.Tag,
+                    bucketId = bucketId,
+                )
             }
-        } else {
-            items(groups, key = { it.key }) { group ->
-                TimelineGroup(
-                    group = group,
-                    primaryTagByCapture = primaryTagByCapture,
-                    onOpenCapture = onOpenCapture,
-                    onOpenGallery = { openGalleryGroupKey = group.key },
+            MomentFilterPicker.People -> people.map { person ->
+                MomentFilterOption(
+                    id = person.id,
+                    label = person.name,
+                    subtitle = "${personCounts[person.id] ?: 0} moments",
+                    color = person.color?.let(::parseColorOrNull),
+                    icon = Icons.Outlined.Person,
+                    bucketId = null,
+                )
+            }
+            MomentFilterPicker.Places -> locations.map { location ->
+                MomentFilterOption(
+                    id = location.id,
+                    label = location.name,
+                    subtitle = "${locationCounts[location.id] ?: 0} moments",
+                    color = location.color?.let(::parseColorOrNull),
+                    icon = Icons.Outlined.LocationOn,
+                    bucketId = null,
                 )
             }
         }
+        val selectedIds = when (picker) {
+            MomentFilterPicker.Tags -> selectedTagIds
+            MomentFilterPicker.People -> selectedPersonIds
+            MomentFilterPicker.Places -> selectedLocationIds
+        }
+        MomentFilterPickerSheet(
+            picker = picker,
+            options = options,
+            selectedIds = selectedIds,
+            onToggle = { optionId -> togglePickerOption(picker, optionId) },
+            onDismiss = { activeFilterPicker = null },
+        )
+    }
+
+    if (showCreateAlbumDialog) {
+        FolderEditorDialog(
+            mode = FolderEditorMode.Create,
+            initialName = "",
+            initialColor = WorkspaceFolderPalette.first(),
+            onDismiss = { showCreateAlbumDialog = false },
+            onSubmit = { name, color ->
+                scope.launch {
+                    folderRepository.create(
+                        userId = userId,
+                        name = name,
+                        color = color,
+                        position = folders.size,
+                    )
+                    showCreateAlbumDialog = false
+                }
+            },
+        )
     }
 }
 
@@ -583,7 +768,13 @@ private fun MomentsHeader(
 @Composable
 private fun FilterPanel(
     selectedFilters: Set<MomentFilter>,
+    selectedTagCount: Int,
+    selectedPersonCount: Int,
+    selectedPlaceCount: Int,
+    selectedOptionChips: List<SelectedMomentOptionChip>,
     onToggleFilter: (MomentFilter) -> Unit,
+    onOpenPicker: (MomentFilterPicker) -> Unit,
+    onRemoveOption: (MomentFilterPicker, String) -> Unit,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
@@ -602,11 +793,48 @@ private fun FilterPanel(
             verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
         ) {
             MomentFilter.values().forEach { filter ->
+                val selected = when (filter) {
+                    MomentFilter.Tags -> selectedTagCount > 0
+                    MomentFilter.People -> selectedPersonCount > 0
+                    MomentFilter.Places -> selectedPlaceCount > 0
+                    else -> filter in selectedFilters
+                }
+                val label = when (filter) {
+                    MomentFilter.Tags -> filter.labelWithCount(selectedTagCount)
+                    MomentFilter.People -> filter.labelWithCount(selectedPersonCount)
+                    MomentFilter.Places -> filter.labelWithCount(selectedPlaceCount)
+                    else -> filter.label
+                }
                 FilterPill(
-                    label = filter.label,
-                    selected = filter in selectedFilters,
-                    onClick = { onToggleFilter(filter) },
+                    label = label,
+                    selected = selected,
+                    onClick = {
+                        when (filter) {
+                            MomentFilter.Tags -> onOpenPicker(MomentFilterPicker.Tags)
+                            MomentFilter.People -> onOpenPicker(MomentFilterPicker.People)
+                            MomentFilter.Places -> onOpenPicker(MomentFilterPicker.Places)
+                            else -> onToggleFilter(filter)
+                        }
+                    },
                 )
+            }
+        }
+        if (selectedOptionChips.isNotEmpty()) {
+            Text(
+                text = "Selected",
+                style = type.caption.copy(fontSize = 11.sp),
+                color = colors.muted,
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+                verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+            ) {
+                selectedOptionChips.forEach { chip ->
+                    SelectedFilterChip(
+                        label = chip.label,
+                        onRemove = { onRemoveOption(chip.picker, chip.optionId) },
+                    )
+                }
             }
         }
     }
@@ -614,66 +842,52 @@ private fun FilterPanel(
 
 @Composable
 private fun QuickAccessRow(
-    selectedFilters: Set<MomentFilter>,
-    photoCount: Int,
-    videoCount: Int,
-    unsortedCount: Int,
+    selectedTab: MomentHomeTab,
+    albumCount: Int,
     smartCount: Int,
-    tagCount: Int,
-    peopleCount: Int,
-    placesCount: Int,
-    onClearFilters: () -> Unit,
-    onToggleFilter: (MomentFilter) -> Unit,
-    onOpenSearch: () -> Unit,
-    onOpenSmart: () -> Unit,
-    onOpenTags: () -> Unit,
-    onOpenPeople: () -> Unit,
-    onOpenPlaces: () -> Unit,
+    onSelectTab: (MomentHomeTab) -> Unit,
 ) {
     val items = listOf(
-        QuickAccessSpec("Timeline", "All memories", Icons.Outlined.CalendarToday, selectedFilters.isEmpty()) {
-            onClearFilters()
+        QuickAccessSpec("Timeline", "All memories", Icons.Outlined.CalendarToday, selectedTab == MomentHomeTab.Timeline) {
+            onSelectTab(MomentHomeTab.Timeline)
         },
-        QuickAccessSpec("Photos", "$photoCount items", Icons.Outlined.Photo, MomentFilter.Photos in selectedFilters) {
-            onToggleFilter(MomentFilter.Photos)
+        QuickAccessSpec(
+            "Albums",
+            if (albumCount == 1) "1 album" else "$albumCount albums",
+            Icons.Outlined.Folder,
+            selectedTab == MomentHomeTab.Albums,
+        ) {
+            onSelectTab(MomentHomeTab.Albums)
         },
-        QuickAccessSpec("Videos", "$videoCount clips", Icons.Outlined.VideoLibrary, MomentFilter.Videos in selectedFilters) {
-            onToggleFilter(MomentFilter.Videos)
+        QuickAccessSpec(
+            "Smart collections",
+            if (smartCount == 1) "1 collection" else "$smartCount collections",
+            Icons.Outlined.AutoAwesome,
+            selectedTab == MomentHomeTab.SmartCollections,
+        ) {
+            onSelectTab(MomentHomeTab.SmartCollections)
         },
-        QuickAccessSpec("Favorites", "Saved media", Icons.Outlined.StarBorder, MomentFilter.Favorites in selectedFilters) {
-            onToggleFilter(MomentFilter.Favorites)
-        },
-        QuickAccessSpec("Albums", "Curated sets", Icons.Outlined.Folder, false) {
-            onOpenSearch()
-        },
-        QuickAccessSpec("Smart", "$smartCount rules", Icons.Outlined.AutoAwesome, false, onOpenSmart),
-        QuickAccessSpec("Tags", "$tagCount tags", Icons.Outlined.Tag, false, onOpenTags),
-        QuickAccessSpec("People", "$peopleCount faces", Icons.Outlined.Person, false, onOpenPeople),
-        QuickAccessSpec("Places", "$placesCount places", Icons.Outlined.LocationOn, false, onOpenPlaces),
-        QuickAccessSpec("Archive", "Archived media", Icons.Outlined.Folder, false, onOpenSearch),
-        QuickAccessSpec("Unsorted", "$unsortedCount items", Icons.Outlined.LocalOffer, false, onOpenSearch),
     )
 
-    LazyRow(
+    Row(
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
-        contentPadding = PaddingValues(end = QuickInkSpacing.s2),
     ) {
-        items(items, key = { it.title }) { item ->
-            QuickAccessCard(item)
+        items.forEach { item ->
+            QuickAccessCard(item = item, modifier = Modifier.weight(1f))
         }
     }
 }
 
 @Composable
-private fun QuickAccessCard(item: QuickAccessSpec) {
+private fun QuickAccessCard(item: QuickAccessSpec, modifier: Modifier = Modifier) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
     val bg = if (item.active) colors.accentSoft else colors.surface
     val tint = if (item.active) colors.accent else colors.ink
     Column(
-        modifier = Modifier
-            .width(96.dp)
-            .height(86.dp)
+        modifier = modifier
+            .height(94.dp)
             .clip(RoundedCornerShape(QuickInkRadius.md))
             .background(bg)
             .border(
@@ -693,10 +907,10 @@ private fun QuickAccessCard(item: QuickAccessSpec) {
         )
         Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text(
-                text = item.title,
-                style = type.label.copy(fontSize = 12.sp),
+                text = if (item.title == "Smart collections") "Smart\ncollections" else item.title,
+                style = type.label.copy(fontSize = 12.sp, lineHeight = 13.sp),
                 color = tint,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
@@ -711,120 +925,374 @@ private fun QuickAccessCard(item: QuickAccessSpec) {
 }
 
 @Composable
-private fun DiscoverySection(
-    smartCollections: List<SmartCollectionEntity>,
-    tags: List<TagEntity>,
-    locations: List<LocationEntity>,
-    locationCounts: Map<String, Int>,
-    people: List<PersonEntity>,
-    personCounts: Map<String, Int>,
-    onOpenSmartCollection: (SmartCollectionEntity) -> Unit,
-    onOpenTag: (TagEntity) -> Unit,
-    onOpenTagLibrary: () -> Unit,
-    onOpenLocation: (LocationEntity) -> Unit,
-    onOpenPerson: (PersonEntity) -> Unit,
+private fun AlbumsTab(
+    albums: List<FolderEntity>,
+    countsByFolder: Map<String, Int>,
+    coverByFolder: Map<String, CaptureEntity>,
+    onCreateAlbum: () -> Unit,
+    onOpenAlbum: (FolderEntity) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
-        SectionTitle(title = "Smart Collections", action = "See all", onAction = onOpenTagLibrary)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
-            items(smartCollections.take(4), key = { it.id }) { collection ->
-                DiscoveryCard(
-                    title = collection.name,
-                    caption = if (collection.isSeeded) "System managed" else "Custom rule",
-                    icon = Icons.Outlined.AutoAwesome,
-                    accent = collection.color?.let(::parseColorOrNull),
-                    onClick = { onOpenSmartCollection(collection) },
-                )
-            }
-            items(tags.take(3), key = { "tag-${it.id}" }) { tag ->
-                DiscoveryCard(
-                    title = tag.name,
-                    caption = "Tag",
-                    icon = Icons.Outlined.LocalOffer,
-                    accent = tag.color?.let(::parseColorOrNull),
-                    onClick = { onOpenTag(tag) },
-                )
-            }
-            items(people.take(3), key = { "person-${it.id}" }) { person ->
-                DiscoveryCard(
-                    title = person.name,
-                    caption = "${personCounts[person.id] ?: 0} moments",
-                    icon = Icons.Outlined.Person,
-                    accent = person.color?.let(::parseColorOrNull),
-                    onClick = { onOpenPerson(person) },
-                )
-            }
-            items(locations.take(3), key = { "place-${it.id}" }) { location ->
-                DiscoveryCard(
-                    title = location.name,
-                    caption = "${locationCounts[location.id] ?: 0} moments",
-                    icon = Icons.Outlined.LocationOn,
-                    accent = location.color?.let(::parseColorOrNull),
-                    onClick = { onOpenLocation(location) },
-                )
+        SectionHeader(
+            title = "Albums",
+            subtitle = if (albums.isEmpty()) "Create curated sets for your favorite moments"
+            else "${albums.size} curated ${if (albums.size == 1) "set" else "sets"}",
+        )
+        if (albums.isEmpty()) {
+            CreateAlbumHero(onClick = onCreateAlbum)
+        } else {
+            val tiles: List<FolderEntity?> = listOf(null) + albums
+            tiles.chunked(2).forEach { row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+                ) {
+                    row.forEach { album ->
+                        if (album == null) {
+                            AddAlbumTile(
+                                onClick = onCreateAlbum,
+                                modifier = Modifier.weight(1f),
+                            )
+                        } else {
+                            AlbumTile(
+                                album = album,
+                                itemCount = countsByFolder[album.id] ?: 0,
+                                cover = coverByFolder[album.id],
+                                onClick = { onOpenAlbum(album) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                    if (row.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun DiscoveryCard(
+private fun SmartCollectionsTab(
+    collections: List<SmartCollectionEntity>,
+    onOpenCollection: (SmartCollectionEntity) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3)) {
+        SectionHeader(
+            title = "Smart collections",
+            subtitle = if (collections.isEmpty()) "AI-built sets will appear here"
+            else "${collections.size} automatic ${if (collections.size == 1) "collection" else "collections"}",
+        )
+        if (collections.isEmpty()) {
+            SmartCollectionsEmptyCard()
+        } else {
+            collections.chunked(2).forEach { row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+                ) {
+                    row.forEach { collection ->
+                        SmartCollectionTile(
+                            collection = collection,
+                            onClick = { onOpenCollection(collection) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    if (row.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(
     title: String,
-    caption: String,
-    icon: ImageVector,
-    accent: Color?,
-    onClick: () -> Unit,
+    subtitle: String,
 ) {
     val colors = LocalQuickInkColors.current
     val type = LocalQuickInkTypography.current
-    val resolvedAccent = accent ?: colors.accent
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = title,
+            style = type.label.copy(fontSize = 15.sp),
+            color = colors.ink,
+        )
+        Text(
+            text = subtitle,
+            style = type.caption.copy(fontSize = 12.sp),
+            color = colors.inkSoft,
+        )
+    }
+}
+
+@Composable
+private fun CreateAlbumHero(onClick: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
     Row(
         modifier = Modifier
-            .width(172.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.lg))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.lg))
+            .clickable(onClick = onClick)
+            .padding(QuickInkSpacing.s4),
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(QuickInkRadius.md))
+                .background(colors.accentSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Add,
+                contentDescription = null,
+                tint = colors.accent,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = "Create your first album",
+                style = type.label.copy(fontSize = 15.sp),
+                color = colors.ink,
+            )
+            Text(
+                text = "Collect photos and videos into a focused memory set.",
+                style = type.caption.copy(fontSize = 12.sp),
+                color = colors.inkSoft,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AddAlbumTile(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Column(
+        modifier = modifier
+            .aspectRatio(1f)
             .clip(RoundedCornerShape(QuickInkRadius.lg))
             .background(colors.surface)
             .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.lg))
             .clickable(onClick = onClick)
             .padding(QuickInkSpacing.s3),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(colors.accentSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Add,
+                contentDescription = null,
+                tint = colors.accent,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        Spacer(modifier = Modifier.height(QuickInkSpacing.s3))
+        Text(
+            text = "New album",
+            style = type.label.copy(fontSize = 13.sp),
+            color = colors.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun AlbumTile(
+    album: FolderEntity,
+    itemCount: Int,
+    cover: CaptureEntity?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val accent = parseColorOrNull(album.color) ?: colors.accent
+    Box(
+        modifier = modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(QuickInkRadius.lg))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.lg))
+            .clickable(onClick = onClick),
+    ) {
+        if (cover != null) {
+            MomentPreview(
+                capture = cover,
+                modifier = Modifier.matchParentSize(),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                accent.copy(alpha = 0.30f),
+                                colors.surface,
+                            ),
+                        ),
+                    ),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.Transparent,
+                            Color.Black.copy(alpha = if (cover != null) 0.48f else 0.10f),
+                        ),
+                    ),
+                ),
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(QuickInkSpacing.s3),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = album.name,
+                style = type.label.copy(fontSize = 13.sp),
+                color = if (cover != null) Color.White else colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = if (itemCount == 1) "1 item" else "$itemCount items",
+                style = type.caption.copy(fontSize = 11.sp),
+                color = if (cover != null) Color.White.copy(alpha = 0.82f) else colors.inkSoft,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SmartCollectionTile(
+    collection: SmartCollectionEntity,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val accent = collection.color?.let(::parseColorOrNull) ?: colors.accent
+    Column(
+        modifier = modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(QuickInkRadius.lg))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        accent.copy(alpha = 0.18f),
+                        colors.surface,
+                    ),
+                ),
+            )
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.lg))
+            .clickable(onClick = onClick)
+            .padding(QuickInkSpacing.s3),
+        verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Box(
             modifier = Modifier
                 .size(42.dp)
                 .clip(RoundedCornerShape(QuickInkRadius.md))
-                .background(resolvedAccent.copy(alpha = 0.14f)),
+                .background(accent.copy(alpha = 0.16f)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = icon,
+                imageVector = Icons.Outlined.AutoAwesome,
                 contentDescription = null,
-                tint = resolvedAccent,
-                modifier = Modifier.size(21.dp),
+                tint = accent,
+                modifier = Modifier.size(22.dp),
             )
         }
-        Spacer(modifier = Modifier.width(QuickInkSpacing.s3))
-        Column(modifier = Modifier.weight(1f)) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                text = title,
+                text = collection.name,
                 style = type.label.copy(fontSize = 13.sp),
                 color = colors.ink,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = caption,
-                style = type.caption.copy(fontSize = 10.sp),
-                color = colors.muted,
+                text = "Smart album",
+                style = type.caption.copy(fontSize = 11.sp),
+                color = colors.inkSoft,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
         }
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = colors.muted,
-            modifier = Modifier.size(16.dp),
-        )
+    }
+}
+
+@Composable
+private fun SmartCollectionsEmptyCard() {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.lg))
+            .background(colors.surface)
+            .border(1.dp, colors.border, RoundedCornerShape(QuickInkRadius.lg))
+            .padding(QuickInkSpacing.s4),
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(QuickInkRadius.md))
+                .background(colors.accentSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.AutoAwesome,
+                contentDescription = null,
+                tint = colors.accent,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = "No smart collections yet",
+                style = type.label.copy(fontSize = 15.sp),
+                color = colors.ink,
+            )
+            Text(
+                text = "Automatic sets will appear as Moments learns from your media.",
+                style = type.caption.copy(fontSize = 12.sp),
+                color = colors.inkSoft,
+            )
+        }
     }
 }
 
@@ -1768,6 +2236,486 @@ private fun FilterPill(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
+private fun SelectedFilterChip(label: String, onRemove: () -> Unit) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(QuickInkRadius.pill))
+            .background(colors.accentSoft)
+            .border(1.dp, colors.accent.copy(alpha = 0.18f), RoundedCornerShape(QuickInkRadius.pill))
+            .padding(start = QuickInkSpacing.s3, end = QuickInkSpacing.s2, top = QuickInkSpacing.s2, bottom = QuickInkSpacing.s2),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s1),
+    ) {
+        Text(
+            text = label,
+            style = type.caption.copy(fontSize = 11.sp),
+            color = colors.accent,
+            maxLines = 1,
+        )
+        Icon(
+            imageVector = Icons.Outlined.Close,
+            contentDescription = "Remove $label filter",
+            tint = colors.accent,
+            modifier = Modifier
+                .size(14.dp)
+                .clickable(onClick = onRemove),
+        )
+    }
+}
+
+@Composable
+private fun MomentFilterPickerSheet(
+    picker: MomentFilterPicker,
+    options: List<MomentFilterOption>,
+    selectedIds: Set<String>,
+    onToggle: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = colors.surface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = QuickInkSpacing.s4)
+                .padding(bottom = QuickInkSpacing.s5),
+            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+        ) {
+            if (picker == MomentFilterPicker.Tags) {
+                MomentTagVocabularyContent(
+                    options = options,
+                    selectedIds = selectedIds,
+                    emptyMessage = picker.emptyMessage,
+                    onToggle = onToggle,
+                    onDone = onDismiss,
+                )
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = picker.title,
+                            style = type.heading,
+                            color = colors.ink,
+                        )
+                        Text(
+                            text = picker.subtitle,
+                            style = type.caption,
+                            color = colors.muted,
+                        )
+                    }
+                    Text(
+                        text = "Done",
+                        style = type.label.copy(fontSize = 13.sp),
+                        color = colors.accent,
+                        modifier = Modifier
+                            .clickable(onClick = onDismiss)
+                            .padding(QuickInkSpacing.s2),
+                    )
+                }
+
+                if (options.isEmpty()) {
+                    Text(
+                        text = picker.emptyMessage,
+                        style = type.body.copy(fontSize = 13.sp),
+                        color = colors.inkSoft,
+                        modifier = Modifier.padding(vertical = QuickInkSpacing.s4),
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(420.dp),
+                        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+                        contentPadding = PaddingValues(bottom = QuickInkSpacing.s3),
+                    ) {
+                        items(options, key = { it.id }) { option ->
+                            MomentFilterOptionRow(
+                                option = option,
+                                selected = option.id in selectedIds,
+                                onToggle = { onToggle(option.id) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MomentTagVocabularyContent(
+    options: List<MomentFilterOption>,
+    selectedIds: Set<String>,
+    emptyMessage: String,
+    onToggle: (String) -> Unit,
+    onDone: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    var tagSearchQuery by rememberSaveable { mutableStateOf("") }
+    val normalizedQuery = tagSearchQuery.trim()
+    val filteredOptions = remember(options, normalizedQuery) {
+        if (normalizedQuery.isBlank()) {
+            options
+        } else {
+            options.filter { option ->
+                option.label.contains(normalizedQuery, ignoreCase = true)
+            }
+        }
+    }
+    val sections = remember(filteredOptions) { buildMomentTagVocabularySections(filteredOptions) }
+    val lastSectionId = sections.lastOrNull()?.bucketId
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "TAG VOCABULARY",
+                style = type.label.copy(
+                    fontSize = 13.sp,
+                    letterSpacing = 1.6.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = colors.ink,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "${filteredOptions.size} tags · ${sections.size} buckets",
+                style = type.body.copy(
+                    fontSize = 12.sp,
+                    fontStyle = FontStyle.Italic,
+                ),
+                color = colors.muted,
+            )
+            Text(
+                text = "Done",
+                style = type.label.copy(fontSize = 12.sp),
+                color = colors.accent,
+                modifier = Modifier
+                    .padding(start = QuickInkSpacing.s2)
+                    .clickable(onClick = onDone)
+                    .padding(QuickInkSpacing.s2),
+            )
+        }
+
+        if (options.isEmpty()) {
+            Text(
+                text = emptyMessage,
+                style = type.body.copy(fontSize = 12.sp),
+                color = colors.inkSoft,
+                modifier = Modifier.padding(vertical = QuickInkSpacing.s4),
+            )
+        } else {
+            MomentTagVocabularySearchField(
+                query = tagSearchQuery,
+                onQueryChange = { tagSearchQuery = it },
+            )
+
+            if (filteredOptions.isEmpty()) {
+                Text(
+                    text = "No matching tags.",
+                    style = type.body.copy(fontSize = 12.sp),
+                    color = colors.inkSoft,
+                    modifier = Modifier.padding(vertical = QuickInkSpacing.s4),
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(500.dp),
+                    contentPadding = PaddingValues(bottom = QuickInkSpacing.s3),
+                ) {
+                    items(sections, key = { it.bucketId }) { section ->
+                        MomentTagVocabularySection(
+                            section = section,
+                            selectedIds = selectedIds,
+                            showBottomBorder = section.bucketId != lastSectionId,
+                            onToggle = onToggle,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MomentTagVocabularySearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    val searchShape = RoundedCornerShape(QuickInkRadius.md)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(searchShape)
+            .background(colors.bg, searchShape)
+            .border(1.dp, colors.borderSoft, searchShape)
+            .padding(horizontal = QuickInkSpacing.s3, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Search,
+            contentDescription = null,
+            tint = colors.muted,
+            modifier = Modifier.size(15.dp),
+        )
+        Spacer(modifier = Modifier.width(QuickInkSpacing.s2))
+        BasicTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            singleLine = true,
+            textStyle = type.body.copy(fontSize = 12.sp, color = colors.ink),
+            modifier = Modifier.weight(1f),
+            decorationBox = { innerTextField ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (query.isBlank()) {
+                        Text(
+                            text = "Search tags...",
+                            style = type.body.copy(fontSize = 12.sp),
+                            color = colors.muted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    innerTextField()
+                }
+            },
+        )
+        if (query.isNotBlank()) {
+            Spacer(modifier = Modifier.width(QuickInkSpacing.s2))
+            Icon(
+                imageVector = Icons.Outlined.Close,
+                contentDescription = "Clear tag search",
+                tint = colors.muted,
+                modifier = Modifier
+                    .size(15.dp)
+                    .clickable { onQueryChange("") },
+            )
+        }
+    }
+}
+
+@Composable
+private fun MomentTagVocabularySection(
+    section: MomentTagVocabularySectionData,
+    selectedIds: Set<String>,
+    showBottomBorder: Boolean,
+    onToggle: (String) -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = QuickInkSpacing.s3),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(top = 3.dp)
+                    .width(3.dp)
+                    .height(42.dp)
+                    .clip(RoundedCornerShape(99.dp))
+                    .background(section.hue),
+            )
+            Spacer(modifier = Modifier.width(QuickInkSpacing.s3))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = section.name.uppercase(Locale.US),
+                        style = type.label.copy(
+                            fontSize = 14.sp,
+                            letterSpacing = 1.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                        color = section.hue,
+                    )
+                    section.prefixLabel?.let { prefix ->
+                        Spacer(modifier = Modifier.width(QuickInkSpacing.s2))
+                        Text(
+                            text = prefix,
+                            style = type.body.copy(fontSize = 12.sp),
+                            color = colors.muted,
+                        )
+                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(colors.bg),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = section.options.size.toString(),
+                            style = type.label.copy(fontSize = 12.sp),
+                            color = colors.ink,
+                        )
+                    }
+                }
+                Text(
+                    text = section.question,
+                    style = type.body.copy(
+                        fontSize = 12.sp,
+                        fontStyle = FontStyle.Italic,
+                    ),
+                    color = colors.muted,
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+                    verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+                ) {
+                    section.options.forEach { option ->
+                        MomentTagVocabularyChip(
+                            option = option,
+                            tint = section.hue,
+                            selected = option.id in selectedIds,
+                            onToggle = { onToggle(option.id) },
+                        )
+                    }
+                }
+            }
+        }
+
+        if (showBottomBorder) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = QuickInkSpacing.s3)
+                    .height(1.dp)
+                    .background(colors.borderSoft),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MomentTagVocabularyChip(
+    option: MomentFilterOption,
+    tint: Color,
+    selected: Boolean,
+    onToggle: () -> Unit,
+) {
+    val type = LocalQuickInkTypography.current
+    val fill = if (selected) tint.copy(alpha = 0.14f) else Color.Transparent
+    val stroke = if (selected) tint else tint.copy(alpha = 0.72f)
+
+    Text(
+        text = option.label,
+        style = type.label.copy(fontSize = 12.sp),
+        color = tint,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(fill)
+            .border(1.dp, stroke, CircleShape)
+            .clickable(onClick = onToggle)
+            .padding(horizontal = QuickInkSpacing.s3, vertical = 7.dp)
+            .semantics { contentDescription = "Filter by tag ${option.label}" },
+    )
+}
+
+@Composable
+private fun MomentFilterOptionRow(
+    option: MomentFilterOption,
+    selected: Boolean,
+    onToggle: () -> Unit,
+) {
+    val colors = LocalQuickInkColors.current
+    val type = LocalQuickInkTypography.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(QuickInkRadius.md))
+            .background(if (selected) colors.accentSoft else colors.bg)
+            .border(
+                1.dp,
+                if (selected) colors.accent.copy(alpha = 0.24f) else colors.borderSoft,
+                RoundedCornerShape(QuickInkRadius.md),
+            )
+            .clickable(onClick = onToggle)
+            .padding(QuickInkSpacing.s3),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(QuickInkSpacing.s3),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background((option.color ?: colors.accent).copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = option.icon,
+                contentDescription = null,
+                tint = option.color ?: colors.accent,
+                modifier = Modifier.size(17.dp),
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
+            Text(
+                text = option.label,
+                style = type.label.copy(fontSize = 13.sp),
+                color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            option.subtitle?.let {
+                Text(
+                    text = it,
+                    style = type.caption.copy(fontSize = 11.sp),
+                    color = colors.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (selected) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                tint = colors.accent,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+@Composable
 private fun IconButtonCircle(
     icon: ImageVector,
     label: String,
@@ -1801,6 +2749,12 @@ private data class QuickAccessSpec(
     val onClick: () -> Unit,
 )
 
+private enum class MomentHomeTab {
+    Timeline,
+    Albums,
+    SmartCollections,
+}
+
 private data class MomentGroup(
     val key: String,
     val title: String,
@@ -1829,6 +2783,56 @@ private enum class MomentFilter(val label: String) {
     People("People"),
     Places("Places"),
 }
+
+private fun MomentFilter.labelWithCount(count: Int): String =
+    if (count > 0) "$label ($count)" else label
+
+private enum class MomentFilterPicker(
+    val title: String,
+    val subtitle: String,
+    val emptyMessage: String,
+) {
+    Tags(
+        title = "Choose tags",
+        subtitle = "Show moments with any selected tag.",
+        emptyMessage = "No tags are available yet.",
+    ),
+    People(
+        title = "Choose people",
+        subtitle = "Show moments with any selected person.",
+        emptyMessage = "No people are available yet.",
+    ),
+    Places(
+        title = "Choose places",
+        subtitle = "Show moments from any selected place.",
+        emptyMessage = "No places are available yet.",
+    ),
+}
+
+private data class MomentFilterOption(
+    val id: String,
+    val label: String,
+    val subtitle: String?,
+    val color: Color?,
+    val icon: ImageVector,
+    val bucketId: String?,
+)
+
+private data class MomentTagVocabularySectionData(
+    val bucketId: String,
+    val name: String,
+    val question: String,
+    val hue: Color,
+    val prefixLabel: String?,
+    val options: List<MomentFilterOption>,
+)
+
+private data class SelectedMomentOptionChip(
+    val id: String,
+    val picker: MomentFilterPicker,
+    val optionId: String,
+    val label: String,
+)
 
 private enum class MediaKind(val label: String, val accessibilityLabel: String) {
     Photo("Photo", "photo"),
@@ -1876,11 +2880,19 @@ private fun CaptureEntity.matchesMomentSearch(
 
 private fun CaptureEntity.matchesMomentFilters(
     selected: Set<MomentFilter>,
-    primaryTagByCapture: Map<String, String>,
-    captureIdsWithPeople: Set<String>,
-    captureIdsWithPlaces: Set<String>,
+    selectedTagIds: Set<String>,
+    selectedPersonIds: Set<String>,
+    selectedLocationIds: Set<String>,
+    tagIdsByCapture: Map<String, Set<String>>,
+    personIdsByCapture: Map<String, Set<String>>,
+    locationIdsByCapture: Map<String, Set<String>>,
 ): Boolean {
-    if (selected.isEmpty()) return true
+    if (
+        selected.isEmpty() &&
+        selectedTagIds.isEmpty() &&
+        selectedPersonIds.isEmpty() &&
+        selectedLocationIds.isEmpty()
+    ) return true
 
     val mediaTypeSelected = MomentFilter.Photos in selected || MomentFilter.Videos in selected
     if (mediaTypeSelected) {
@@ -1891,15 +2903,15 @@ private fun CaptureEntity.matchesMomentFilters(
     }
 
     if (MomentFilter.Favorites in selected && !isFavorite) return false
-    if (MomentFilter.Tags in selected && primaryTagByCapture[id].isNullOrBlank()) return false
-    if (MomentFilter.People in selected && id !in captureIdsWithPeople) return false
-    if (MomentFilter.Places in selected &&
-        id !in captureIdsWithPlaces &&
-        locality.isNullOrBlank()
-    ) return false
+    if (selectedTagIds.isNotEmpty() && tagIdsByCapture[id].orEmpty().intersect(selectedTagIds).isEmpty()) return false
+    if (selectedPersonIds.isNotEmpty() && personIdsByCapture[id].orEmpty().intersect(selectedPersonIds).isEmpty()) return false
+    if (selectedLocationIds.isNotEmpty() && locationIdsByCapture[id].orEmpty().intersect(selectedLocationIds).isEmpty()) return false
 
     return true
 }
+
+private fun Set<String>.toggle(value: String): Set<String> =
+    if (value in this) this - value else this + value
 
 private fun Bundle?.firstRecognitionText(): String? =
     this
@@ -2030,6 +3042,66 @@ private fun formatMomentDate(iso: String): String =
 private fun parseMomentDate(iso: String): Instant? =
     runCatching { Instant.parse(iso) }.getOrNull()
         ?: runCatching { OffsetDateTime.parse(iso).toInstant() }.getOrNull()
+
+private fun buildMomentTagVocabularySections(
+    options: List<MomentFilterOption>,
+): List<MomentTagVocabularySectionData> {
+    val canonicalIds = workspaceTagBuckets.map { it.id }.toSet()
+    val sections = workspaceTagBuckets.mapNotNull { bucket ->
+        val bucketOptions = options.filter {
+            (it.bucketId ?: inferMomentTagBucketId(it.label)) == bucket.id
+        }
+        if (bucketOptions.isEmpty()) {
+            null
+        } else {
+            MomentTagVocabularySectionData(
+                bucketId = bucket.id,
+                name = bucket.name,
+                question = bucket.question,
+                hue = bucket.hue,
+                prefixLabel = momentBucketPrefixLabel(bucket.prefixes),
+                options = bucketOptions,
+            )
+        }
+    }
+
+    val otherOptions = options.filter {
+        val bucketId = it.bucketId ?: inferMomentTagBucketId(it.label)
+        bucketId == null || bucketId !in canonicalIds
+    }
+    if (otherOptions.isEmpty()) return sections
+
+    return sections + MomentTagVocabularySectionData(
+        bucketId = "other",
+        name = "Other",
+        question = "uncategorized media tags",
+        hue = Color(0xFF6B625C),
+        prefixLabel = null,
+        options = otherOptions,
+    )
+}
+
+private fun momentBucketPrefixLabel(prefixes: List<String>?): String? =
+    prefixes
+        ?.takeIf { it.isNotEmpty() }
+        ?.joinToString(", ") { "#$it" }
+        ?.let { "($it)" }
+
+private fun inferMomentTagBucketId(name: String): String? {
+    val normalized = name.trim().removePrefix("#").lowercase(Locale.US)
+    workspaceTagBuckets.firstOrNull { bucket ->
+        bucket.prefixes?.any { prefix -> normalized.startsWith(prefix.lowercase(Locale.US)) } == true
+    }?.let { return it.id }
+
+    return when (normalized) {
+        "active", "later", "done", "todo" -> "status"
+        "focus", "shallow", "errand", "call" -> "energy"
+        "today", "thisweek", "thismonth" -> "time"
+        "idea", "quote", "recipe", "checklist", "template" -> "kind"
+        "camera", "capture", "import", "photo", "scan", "screenshot", "screenshots", "share", "shared", "video", "voice" -> "source"
+        else -> null
+    }
+}
 
 private fun parseColorOrNull(raw: String): Color? {
     val hex = raw.removePrefix("#")
