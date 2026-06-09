@@ -281,6 +281,7 @@ graph TD
 | `releaf://search?q=meadow`               | Search with `q` prefilled under Home           | Home                     |
 | `releaf://capture`                       | Capture tab (was `QuickCaptureSheet` modal pre-`CAPTURE_TAB_PLAN.md`) | Previously-active tab   |
 | `releaf://capture?kind=photo`            | Capture tab + opens Photo tile flow            | Capture tab              |
+| `releaf://share/:id`                     | Capture tab pre-filled from share inbox (uncommitted) | Previously-active tab |
 | `releaf://conflicts`                     | Conflicts list under Settings                  | Settings                 |
 | `releaf://conflicts/:entryId`            | Conflict resolver                              | Conflicts list           |
 | `releaf://settings`                      | Settings                                       | —                        |
@@ -307,7 +308,7 @@ Entry points **other than** cold launch, backgrounding, and deep links.
 | Task reminder fires             | `task/{id}`                             | Uses `reminders` + `tasks` tables; parent-chain rebuild |
 | Drive sync conflict detected    | Conflict banner on affected screen     | If user not on that screen, subtle Settings badge      |
 | Backup restore completed        | Home + toast "Restored N entries"       | Post-restore, route pops any open stack                |
-| Share-sheet to Releaf           | QuickCaptureSheet with prefilled content | iOS: `Share Extension`; Android: `ACTION_SEND` intent   |
+| Share-sheet to Releaf           | `releaf://share/:id` → Capture tab pre-filled (uncommitted) | iOS: `Share Extension` → App Group inbox; Android: `ACTION_SEND`. See [`SHARE_DESIGN.md`](./SHARE_DESIGN.md) |
 | Siri Shortcut / App Intent      | Per-intent routing (capture, today)     | v2 stretch; documented to-be-done                      |
 | Widget tap                      | Per-widget routing (today, quick-cap)   | v2 stretch                                             |
 
