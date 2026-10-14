@@ -370,6 +370,11 @@ dependencies {
     implementation(libs.commons.compress)
     implementation(libs.mlkit.genai.speech)
 
+    // Printed-notebook template routing reads a QR mark in a page
+    // corner. Bundled model: decoding runs fully on-device with no
+    // Play Services model download (PROMPT.md hard constraint 6).
+    implementation(libs.mlkit.barcode.scanning)
+
     // Phase 4 Slice 4.4 — unit-test toolchain. Keeps the test
     // dep set minimal (junit + kotlinx-serialization for the
     // canonical-JSON interop test). Match the version pins

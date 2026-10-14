@@ -1115,6 +1115,16 @@ public final class QuickInkDatabase: @unchecked Sendable {
                 """)
         }
 
+        // ─── v22_capture_template_id ───────────────────────────
+        //
+        // Printed QuickInk page template a scan was routed by
+        // (`page_templates.json` id), NULL when the page wasn't
+        // recognised. Mirror of Android Room v27; syncs through
+        // CapturePayloadV2.template_id.
+        migrator.registerMigration("v22_capture_template_id") { db in
+            try db.execute(sql: "ALTER TABLE captures ADD COLUMN template_id TEXT")
+        }
+
         return migrator
     }
 }

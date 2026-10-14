@@ -1,0 +1,64 @@
+{
+  "_meta": {
+    "owner": "QuickInk",
+    "consumed_by": "Android PrintedPageTemplates.kt + iOS PrintedPageTemplates.swift",
+    "notes": [
+      "Page templates for the printed QuickInk notebook. A scan whose page carries a template mark (or, failing that, the template's printed header words) is filed into folder_id, gets the template's tags, and has its title / date read from the OCR lines whose box centre falls inside title_zone / date_zone.",
+      "Zones are normalised page coordinates: 0..1, origin top-left, {x, y, width, height}. They describe where the handwritten value sits, not the printed label.",
+      "Both platforms ship hard-coded mirrors of this file; unit tests on each side parse it and fail when a mirror drifts.",
+      "folder_id values are the stable ids from workspace_seed.json; tags are tag names (created on demand when missing)."
+    ],
+    "mark_format": {
+      "status": "ASSUMED: there is no spec in the repo for how a printed page identifies itself. Confirm against the printed-book design before printing.",
+      "encoding": "QR code in a page corner",
+      "payload": "quickink://t/<templateId> with an optional /p/<pageNumber>",
+      "example": "quickink://t/meeting-notes/p/42"
+    }
+  },
+  "templates": [
+    {
+      "id": "meeting-notes",
+      "name": "Meeting notes",
+      "folder_id": "projects",
+      "tags": ["meetings"],
+      "title_zone": { "x": 0.08, "y": 0.08, "width": 0.60, "height": 0.08 },
+      "date_zone": { "x": 0.70, "y": 0.08, "width": 0.24, "height": 0.08 },
+      "has_checkbox_column": true,
+      "header_zone": { "x": 0.0, "y": 0.0, "width": 1.0, "height": 0.08 },
+      "header_phrases": ["quickink meeting notes"]
+    },
+    {
+      "id": "journal",
+      "name": "Journal",
+      "folder_id": "lifestyle",
+      "tags": ["journal"],
+      "title_zone": { "x": 0.08, "y": 0.08, "width": 0.60, "height": 0.08 },
+      "date_zone": { "x": 0.70, "y": 0.08, "width": 0.24, "height": 0.08 },
+      "has_checkbox_column": false,
+      "header_zone": { "x": 0.0, "y": 0.0, "width": 1.0, "height": 0.08 },
+      "header_phrases": ["quickink journal"]
+    },
+    {
+      "id": "todo",
+      "name": "To-do",
+      "folder_id": "inbox",
+      "tags": ["todo"],
+      "title_zone": { "x": 0.08, "y": 0.08, "width": 0.60, "height": 0.08 },
+      "date_zone": { "x": 0.70, "y": 0.08, "width": 0.24, "height": 0.08 },
+      "has_checkbox_column": true,
+      "header_zone": { "x": 0.0, "y": 0.0, "width": 1.0, "height": 0.08 },
+      "header_phrases": ["quickink todo", "quickink to do"]
+    },
+    {
+      "id": "ideas",
+      "name": "Ideas",
+      "folder_id": "ideas",
+      "tags": ["ideas"],
+      "title_zone": { "x": 0.08, "y": 0.08, "width": 0.60, "height": 0.08 },
+      "date_zone": { "x": 0.70, "y": 0.08, "width": 0.24, "height": 0.08 },
+      "has_checkbox_column": false,
+      "header_zone": { "x": 0.0, "y": 0.0, "width": 1.0, "height": 0.08 },
+      "header_phrases": ["quickink ideas"]
+    }
+  ]
+}

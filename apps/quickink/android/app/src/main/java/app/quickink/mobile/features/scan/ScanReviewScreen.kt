@@ -79,6 +79,7 @@ import app.quickink.mobile.data.voicenote.VoiceNoteRepository
 import app.quickink.mobile.data.location.LocationEntity
 import app.quickink.mobile.data.person.PersonEntity
 import app.quickink.mobile.features.scan.handwriting.ExtractedTodosReviewSection
+import app.quickink.mobile.features.scan.templates.TemplateMatch
 import app.quickink.mobile.features.workspace.AutoTagSuggester
 import app.quickink.mobile.features.workspace.LocationPickerSheet
 import app.quickink.mobile.features.workspace.PeoplePickerSheet
@@ -141,6 +142,7 @@ fun ScanReviewScreen(
     }.collectAsState(initial = emptyList())
 
     val reviewTodos by controller.reviewTodos.collectAsState()
+    val detectedTemplate by controller.detectedTemplate.collectAsState()
     val isFailed = state is ScanFlowController.State.Failed
     val isRecognizing = state is ScanFlowController.State.Recognizing
 
@@ -359,6 +361,15 @@ fun ScanReviewScreen(
         }
     }
 
+    // A recognised printed template attaches its own tags in the
+    // controller; mirror them into the TAGS section's selection so
+    // they show as attached (and can be detached like any other).
+    androidx.compose.runtime.LaunchedEffect(captureId, detectedTemplate) {
+        val tags = detectedTemplate?.template?.tags.orEmpty()
+        val missing = tags.filter { it !in acceptedTagNames.value && it !in dismissedNames.value }
+        if (missing.isNotEmpty()) acceptedTagNames.value = acceptedTagNames.value + missing
+    }
+
     // Derived strip — anything proposed that isn't currently
     // attached. Updates automatically when the user (de)selects.
     val suggestedTags = androidx.compose.runtime.remember {
@@ -428,6 +439,9 @@ fun ScanReviewScreen(
             // category grid. Renders only while we have a
             // captureId in flight and the suggester produced hits.
             val cid = captureId
+            detectedTemplate?.let { match ->
+                if (!isFailed) TemplateBadge(match)
+            }
             val suggestions = suggestedTags.value
             if (cid != null && suggestions.isNotEmpty() && !isFailed) {
                 ScanReviewSuggestions(
@@ -1128,6 +1142,31 @@ private fun EntityToggleChip(
                 RoundedCornerShape(999.dp),
             )
             .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    )
+}
+
+/**
+ * "Printed page · Meeting notes · p. 42" — shown when the scan was
+ * recognised as a QuickInk notebook template and routed by it.
+ */
+@Composable
+private fun TemplateBadge(match: TemplateMatch) {
+    val colors = LocalQuickInkColors.current
+    val type   = LocalQuickInkTypography.current
+    val parts = listOfNotNull(
+        "PRINTED PAGE",
+        match.template.name.uppercase(),
+        match.pageNumber?.let { "P. $it" },
+    )
+    Text(
+        text       = parts.joinToString(" · "),
+        style      = type.eyebrow,
+        color      = colors.accentDeep,
+        fontFamily = QuickInkFonts.ui,
+        modifier   = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(colors.accentSoft)
             .padding(horizontal = 10.dp, vertical = 5.dp),
     )
 }

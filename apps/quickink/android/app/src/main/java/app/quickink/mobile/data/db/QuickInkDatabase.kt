@@ -28,6 +28,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
@@ -259,6 +260,12 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // Free-form TEXT, nullable, no index — read pattern is "load the
     // whole field for the detail screen" so a full-text index isn't
     // useful yet.
+    // v27 — Adds nullable `captures.template_id`: the printed
+    // QuickInk page template a scan was routed by (see
+    // `features/scan/templates`). Syncs via
+    // `CapturePayloadV2.template_id`. Ships with a real migration
+    // ([MIGRATION_26_27]) so this bump keeps existing data.
+    //
     // v26 — Adds `captures.is_favorite` for Moments photos/videos.
     // The focused gallery and detail screen toggle this flag; it
     // syncs through `CapturePayloadV2.is_favorite`.
@@ -270,7 +277,7 @@ import app.releaf.mobile.data.sync.SyncStateEntity
     // and adds `tags.bucket` + `tags.is_seeded`. The seeder in
     // `WorkspaceTaxonomySeed` writes the 12 spec'd folders + 32
     // spec'd tags on first launch after the bump.
-    version       = 26,
+    version       = 27,
     exportSchema  = true,
 )
 abstract class QuickInkDatabase : RoomDatabase() {
@@ -331,6 +338,7 @@ abstract class QuickInkDatabase : RoomDatabase() {
                     // path Releaf uses.
                     .setDriver(BundledSQLiteDriver())
                     .addCallback(SchemaCallback)
+                    .addMigrations(MIGRATION_26_27)
                     // Dogfood: wipe on @Database version bump until
                     // real user data lands. Replace with
                     // `addMigrations(...)` blocks before any real
@@ -354,6 +362,19 @@ abstract class QuickInkDatabase : RoomDatabase() {
      * existing virtual tables. Triggers are scoped to per-table
      * lifecycle anyway; recreating them on a fresh DB is fine.
      */
+    /**
+     * v26 → v27: nullable `captures.template_id`. Additive, so a
+     * plain ALTER keeps every existing row; the column defaults to
+     * NULL ("not a recognised printed page"). Overrides the
+     * connection overload because the database runs on
+     * `BundledSQLiteDriver` (same reason as [SchemaCallback]).
+     */
+    internal object MIGRATION_26_27 : Migration(26, 27) {
+        override fun migrate(connection: SQLiteConnection) {
+            connection.execSQL("ALTER TABLE captures ADD COLUMN template_id TEXT")
+        }
+    }
+
     private object SchemaCallback : Callback() {
         override fun onCreate(connection: SQLiteConnection) {
             // ─── notepad notes FTS ─────────────────────────────

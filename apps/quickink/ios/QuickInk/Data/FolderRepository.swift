@@ -80,6 +80,16 @@ public final class FolderRepository: @unchecked Sendable {
         }
     }
 
+    /// One folder by id (tombstoned rows included — callers check
+    /// `deletedAt`). Mirror of Android `FolderDao.findById`.
+    public func findById(_ id: String) async throws -> FolderEntity? {
+        try await dbQueue.read { db in
+            try FolderEntity
+                .filter(Column("id") == id)
+                .fetchOne(db)
+        }
+    }
+
     // MARK: - Writes
 
     /// Create a user folder. Returns the inserted entity or `nil`

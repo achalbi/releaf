@@ -77,6 +77,8 @@ data class CaptureTagEntity(
      *   `captures.category` value into the join. Lets us tell
      *   organic tagging activity apart from one-time migration
      *   noise in analytics dashboards.
+     * - `"template"` — applied by printed-page template routing (a
+     *   recognised QuickInk notebook page brings its own tags).
      *
      * Stored as free-form TEXT so future sources land without a
      * migration.

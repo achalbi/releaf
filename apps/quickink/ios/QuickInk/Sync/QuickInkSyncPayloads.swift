@@ -320,6 +320,9 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
     public let videoUri: String?
     /// User-facing Moments favorite flag. Defaults false for older payloads.
     public let isFavorite: Bool
+    /// Printed QuickInk page template id the capture was routed by
+    /// (v22). Optional: absent on older payloads, which decode as nil.
+    public let templateId: String?
     public let createdAt: String
     public let updatedAt: String
 
@@ -344,6 +347,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         notes: String? = nil,
         videoUri: String? = nil,
         isFavorite: Bool = false,
+        templateId: String? = nil,
         createdAt: String,
         updatedAt: String
     ) {
@@ -367,6 +371,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         self.notes = notes
         self.videoUri = videoUri
         self.isFavorite = isFavorite
+        self.templateId = templateId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -414,6 +419,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         // back as nil.
         self.videoUri           = try c.decodeIfPresent(String.self, forKey: .videoUri)
         self.isFavorite         = (try c.decodeIfPresent(Bool.self, forKey: .isFavorite)) ?? false
+        self.templateId         = try c.decodeIfPresent(String.self, forKey: .templateId)
         self.createdAt          = try c.decode(String.self, forKey: .createdAt)
         self.updatedAt          = try c.decode(String.self, forKey: .updatedAt)
     }
@@ -439,6 +445,7 @@ public struct CapturePayloadV2: Codable, Equatable, Sendable {
         case notes
         case videoUri           = "video_uri"
         case isFavorite         = "is_favorite"
+        case templateId         = "template_id"
         case createdAt          = "created_at"
         case updatedAt          = "updated_at"
     }

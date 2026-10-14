@@ -231,6 +231,15 @@ data class CaptureEntity(
     @ColumnInfo(name = "is_favorite", defaultValue = "0")
     val isFavorite: Boolean = false,
 
+    /**
+     * Printed QuickInk page template the capture was routed by
+     * (`page_templates.json` id, e.g. `"meeting-notes"`), or null
+     * when the page wasn't recognised as one. Written by the scan
+     * flow's template routing; syncs as `CapturePayloadV2.template_id`.
+     */
+    @ColumnInfo(name = "template_id")
+    val templateId: String? = null,
+
     @ColumnInfo(name = "created_at")
     val createdAt: String,
 

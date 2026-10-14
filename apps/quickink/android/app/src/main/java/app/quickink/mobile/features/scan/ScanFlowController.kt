@@ -11,6 +11,15 @@
  *   4. State transitions: `Idle` → `Recognizing(progress)`
  *      → `Complete(captureId, success/total)`.
  *
+ * In the same pass, each page image is decoded once for:
+ *   - printed-notebook template routing on page 0 (QR mark, then
+ *     printed header words — `features/scan/templates`), which
+ *     files / tags / titles the capture before the first-two-words
+ *     category heuristic runs as the fallback;
+ *   - checkbox lines → to-dos on every page
+ *     (`features/scan/handwriting`), held in [reviewTodos] until the
+ *     review screen's Done commits them to the day's note.
+ *
  * Mirror of `ScanFlowController.swift`. Plain Kotlin class with
  * its own `CoroutineScope` injected at construction (rather than
  * an Android `ViewModel`) — keeps the scaffold simple, fits the
@@ -36,6 +45,13 @@ import app.quickink.mobile.features.scan.handwriting.HandwritingTodoJson
 import app.quickink.mobile.features.scan.handwriting.LoadedPage
 import app.quickink.mobile.features.scan.handwriting.OcrLine
 import app.quickink.mobile.features.scan.handwriting.PageImageLoader
+import app.quickink.mobile.features.scan.templates.CompositeTemplateDetector
+import app.quickink.mobile.features.scan.templates.DateParser
+import app.quickink.mobile.features.scan.templates.MlKitBarcodeReader
+import app.quickink.mobile.features.scan.templates.PageTemplateDetector
+import app.quickink.mobile.features.scan.templates.TemplateFieldExtractor
+import app.quickink.mobile.features.scan.templates.TemplateMatch
+import app.quickink.mobile.features.scan.templates.TemplatePage
 import app.quickink.mobile.features.settings.SettingsPreferences
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
@@ -113,6 +129,12 @@ class ScanFlowController(
      * sites read top-down without arg-order accidents.
      */
     private val onPassComplete: (PassSummary) -> Unit = {},
+    /**
+     * Printed-notebook template detection (QR mark, then printed
+     * header words). Injectable so tests / a future mark format can
+     * swap it; defaults to the built-in template registry.
+     */
+    private val templateDetector: PageTemplateDetector = CompositeTemplateDetector.standard(),
 ) {
 
     /**
@@ -239,6 +261,17 @@ class ScanFlowController(
      */
     private var passEntryDate: String = LocalDate.now().toString()
 
+    /**
+     * Printed QuickInk template the in-flight capture was recognised
+     * as, or null. `ScanReviewScreen` shows it and pre-selects its
+     * tags.
+     */
+    private val _detectedTemplate = MutableStateFlow<TemplateMatch?>(null)
+    val detectedTemplate: StateFlow<TemplateMatch?> = _detectedTemplate.asStateFlow()
+
+    /** Title read from the template's title zone (or built from its name + date). */
+    private var passTemplateTitle: String? = null
+
     private var activeJob: Job? = null
 
     /**
@@ -269,6 +302,8 @@ class ScanFlowController(
         // reviewed to-dos — keep them rather than silently dropping.
         commitReviewTodos()
         passEntryDate = LocalDate.now().toString()
+        passTemplateTitle = null
+        _detectedTemplate.value = null
 
         val captureId  = Uuidv7.generate()
         val totalPages = result.pageUris.size
@@ -445,12 +480,24 @@ class ScanFlowController(
                             // process moves on. One decode per page.
                             val pageUri = result.pageUris.getOrNull(page.pageIndex)
                             val lines = linesOf(page.result)
-                            val loaded = if (pageUri != null && lines.isNotEmpty()) {
+                            // Page 0 is decoded even without text so
+                            // a template QR mark can still be read.
+                            val loaded = if (pageUri != null && (lines.isNotEmpty() || page.pageIndex == 0)) {
                                 loadPageImage(pageUri)
                             } else {
                                 null
                             }
                             try {
+                                // Template routing — page 0 identifies
+                                // the printed page. Runs before the
+                                // first-two-words heuristic below, which
+                                // stays as the fallback (it's skipped
+                                // once a template sets the category).
+                                if (page.pageIndex == 0 && _detectedTemplate.value == null) {
+                                    val payloads = loaded?.let { MlKitBarcodeReader.readPayloads(it.bitmap) }.orEmpty()
+                                    val match = templateDetector.detect(TemplatePage(lines, payloads))
+                                    if (match != null) applyTemplate(captureId, match, lines)
+                                }
                                 val todos = detectTodos(
                                     captureId = captureId,
                                     pageIndex = page.pageIndex,
@@ -555,7 +602,7 @@ class ScanFlowController(
             //    `setTitle`, so the latest value wins. Best-effort:
             //    a SQL failure here leaves the title null and the
             //    Library card falls back to its existing cascade.
-            val autoTitle = computeInitialTitle(
+            val autoTitle = passTemplateTitle ?: computeInitialTitle(
                 category  = _selectedCategory.value,
                 pageTexts = pageTexts,
             )
@@ -615,6 +662,7 @@ class ScanFlowController(
         activeJob?.cancel()
         activeJob = null
         commitReviewTodos()
+        _detectedTemplate.value = null
         _state.value = State.Idle
         _selectedCategory.value = null
         _selectedFolderId.value = null
@@ -761,6 +809,53 @@ class ScanFlowController(
                 println("Saving extracted to-dos failed: $e")
             }
         }
+    }
+
+    // ─── Printed-page templates ───────────────────────────────────
+
+    /**
+     * Route a capture recognised as a printed QuickInk template:
+     * persist the template id, file it into the template's folder,
+     * attach its tags (first = primary, which also pre-empts the
+     * first-two-words heuristic), and read title / date from the
+     * template's zones. A plausible page date moves the pass's
+     * notepad entry (OCR text + to-dos) to that day. Each write is
+     * best-effort, like the rest of the pass.
+     */
+    private suspend fun applyTemplate(captureId: String, match: TemplateMatch, lines: List<OcrLine>) {
+        val template = match.template
+        _detectedTemplate.value = match
+        try {
+            repository.setTemplateId(captureId, template.id)
+        } catch (_: Exception) { /* best-effort */ }
+
+        template.folderId?.let { folderId ->
+            val folder = try { folderDao?.findById(folderId) } catch (_: Exception) { null }
+            if (folder != null && folder.userId == userId && folder.deletedAt == null) {
+                try {
+                    repository.setFolder(captureId = captureId, folderId = folder.id)
+                    _selectedFolderId.value = folder.id
+                } catch (_: Exception) { /* best-effort */ }
+            }
+        }
+
+        for (tag in template.tags) {
+            try {
+                repository.attachOrEnsurePrimaryTag(
+                    captureId = captureId,
+                    userId    = userId,
+                    name      = tag,
+                    source    = "template",
+                )
+            } catch (_: Exception) { /* best-effort */ }
+        }
+        if (_selectedCategory.value == null) _selectedCategory.value = template.tags.firstOrNull()
+
+        val fields = TemplateFieldExtractor.extract(template, lines)
+        val date = fields.dateIso?.takeIf { DateParser.isPlausibleEntryDate(it, LocalDate.now()) }
+        if (date != null) passEntryDate = date
+        passTemplateTitle = fields.title
+            ?: listOfNotNull(template.name, fields.dateText).joinToString(" · ")
     }
 
     /**

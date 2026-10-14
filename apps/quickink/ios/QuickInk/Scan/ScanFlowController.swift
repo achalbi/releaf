@@ -11,6 +11,15 @@
  *   4. State transitions: `.idle` → `.recognizing(progress)`
  *      → `.complete(captureId, success/total)`.
  *
+ * In the same pass, each page image is decoded once for:
+ *   - printed-notebook template routing on page 0 (QR mark, then
+ *     printed header words — `Scan/Templates`), which files / tags /
+ *     titles the capture before the first-two-words category
+ *     heuristic runs as the fallback;
+ *   - checkbox lines → to-dos on every page (`Scan/Handwriting`),
+ *     held in `reviewTodos` until the review screen's Done commits
+ *     them to the day's note.
+ *
  * Mirror of `ScanFlowController.kt`. Plain `ObservableObject` with
  * a manual coroutine-equivalent (`Task`) — we don't use SwiftUI's
  * Observable macro yet because the QuickInk package's iOS floor
@@ -105,6 +114,13 @@ public final class ScanFlowController: ObservableObject {
     /// to-dos to. Today by default.
     private var passEntryDate: String = ScanFlowController.todayLocalDate()
 
+    /// Printed QuickInk template the in-flight capture was recognised
+    /// as, or nil. `ScanReviewScreen` shows it and pre-selects its tags.
+    @Published public private(set) var detectedTemplate: TemplateMatch?
+
+    /// Title read from the template's title zone (or built from its name + date).
+    private var passTemplateTitle: String?
+
     private let userId: String
     private let repository: CaptureRepository
     private let pipeline: OcrPipeline
@@ -126,6 +142,11 @@ public final class ScanFlowController: ObservableObject {
     /// site reads as a 1:1 forward.
     private let onPassComplete: (PassSummary) -> Void
 
+    /// Printed-notebook template detection (QR mark, then printed
+    /// header words). Injectable so tests / a future mark format can
+    /// swap it.
+    private let templateDetector: any PageTemplateDetector
+
     /// One-shot hook fired AFTER `onPassComplete`. Used by the Story
     /// editor to pick up the just-captured row and insert it as a
     /// story_item. Cleared to nil after firing so a subsequent
@@ -139,11 +160,13 @@ public final class ScanFlowController: ObservableObject {
         userId: String,
         repository: CaptureRepository = CaptureRepository(),
         pipeline: OcrPipeline = OcrPipeline(engine: VisionTextRecognizer()),
+        templateDetector: any PageTemplateDetector = CompositeTemplateDetector.standard(),
         onPassComplete: @escaping (PassSummary) -> Void = { _ in }
     ) {
         self.userId = userId
         self.repository = repository
         self.pipeline = pipeline
+        self.templateDetector = templateDetector
         self.onPassComplete = onPassComplete
     }
 
@@ -181,6 +204,8 @@ public final class ScanFlowController: ObservableObject {
         // reviewed to-dos — keep them rather than silently dropping.
         commitReviewTodos()
         passEntryDate = Self.todayLocalDate()
+        passTemplateTitle = nil
+        detectedTemplate = nil
 
         let captureId = UUID().uuidString.lowercased()
         let totalPages = pageURLs.count
@@ -319,12 +344,26 @@ public final class ScanFlowController: ObservableObject {
                         successCount += 1
                         pageTexts[pageIndex] = result.text
 
-                        // Image-side analysis (checkbox to-dos) runs
-                        // in the OCR pass, off the main actor, one
-                        // decode per page.
+                        // Image-side analysis (template QR mark on
+                        // page 0, checkbox to-dos on every page)
+                        // runs in the OCR pass, off the main actor,
+                        // one decode per page.
                         let lines = Self.linesOf(result)
                         let pageURL = pageIndex < pageURLs.count ? pageURLs[pageIndex] : nil
-                        let analysis = await Self.analyzePage(url: pageURL, lines: lines)
+                        let wantsMark = pageIndex == 0 && self?.detectedTemplate == nil
+                        let analysis = await Self.analyzePage(url: pageURL, lines: lines, readMarks: wantsMark)
+
+                        // Template routing — page 0 identifies the
+                        // printed page. Runs before the first-two-
+                        // words heuristic below, which stays as the
+                        // fallback (skipped once a template sets the
+                        // category).
+                        if wantsMark, let strongSelf = self,
+                           let match = strongSelf.templateDetector.detect(
+                               TemplatePage(lines: lines, barcodePayloads: analysis.barcodePayloads)
+                           ) {
+                            await strongSelf.applyTemplate(captureId: captureId, match: match, lines: lines)
+                        }
                         let todos = analysis.checkboxes.map { hit in
                             HandwritingTodo(
                                 id:              UUID().uuidString.lowercased(),
@@ -419,7 +458,7 @@ public final class ScanFlowController: ObservableObject {
             //    `setTitle`, so the latest value wins. Best-effort:
             //    a SQL failure here leaves the title null and the
             //    Library card falls back to its existing cascade.
-            if let autoTitle = Self.computeInitialTitle(
+            if let autoTitle = self?.passTemplateTitle ?? Self.computeInitialTitle(
                 category:  self?.selectedCategory,
                 pageTexts: pageTexts
             ) {
@@ -661,6 +700,7 @@ public final class ScanFlowController: ObservableObject {
         activeTask?.cancel()
         activeTask = nil
         commitReviewTodos()
+        detectedTemplate = nil
         state = .idle
         selectedCategory = nil
         selectedFolderId = nil
@@ -757,16 +797,59 @@ public final class ScanFlowController: ObservableObject {
     /// results so nothing image-backed crosses actors.
     struct PageAnalysis: Sendable {
         var checkboxes: [DetectedCheckboxLine] = []
+        var barcodePayloads: [String] = []
     }
 
-    nonisolated static func analyzePage(url: URL?, lines: [OcrLine]) async -> PageAnalysis {
-        guard !lines.isEmpty else { return PageAnalysis() }
+    /// `readMarks` also runs the on-device QR pass (page 0) and
+    /// decodes the page even when it has no text.
+    nonisolated static func analyzePage(url: URL?, lines: [OcrLine], readMarks: Bool) async -> PageAnalysis {
+        guard !lines.isEmpty || readMarks else { return PageAnalysis() }
         return await Task.detached(priority: .userInitiated) {
             let loaded = url.flatMap { PageImageLoader.load(url: $0) }
             return PageAnalysis(
-                checkboxes: CheckboxTodoDetector.detect(lines: lines, image: loaded?.gray)
+                checkboxes: lines.isEmpty ? [] : CheckboxTodoDetector.detect(lines: lines, image: loaded?.gray),
+                barcodePayloads: (readMarks ? loaded.map { VisionBarcodeReader.readPayloads($0.cgImage) } : nil) ?? []
             )
         }.value
+    }
+
+    // MARK: - Printed-page templates
+
+    /// Route a capture recognised as a printed QuickInk template:
+    /// persist the template id, file it into the template's folder,
+    /// attach its tags (first = primary, which also pre-empts the
+    /// first-two-words heuristic), and read title / date from the
+    /// template's zones. A plausible page date moves the pass's
+    /// notepad entry (OCR text + to-dos) to that day. Each write is
+    /// best-effort, like the rest of the pass.
+    private func applyTemplate(captureId: String, match: TemplateMatch, lines: [OcrLine]) async {
+        let template = match.template
+        detectedTemplate = match
+        try? await repository.setTemplateId(captureId: captureId, templateId: template.id)
+
+        if let folderId = template.folderId,
+           let folder = try? await FolderRepository().findById(folderId),
+           folder.userId == userId, folder.deletedAt == nil {
+            try? await repository.setFolder(captureId: captureId, folderId: folder.id)
+            selectedFolderId = folder.id
+        }
+
+        for tag in template.tags {
+            try? await repository.attachOrEnsurePrimaryTag(
+                captureId: captureId,
+                userId:    userId,
+                name:      tag,
+                source:    "template"
+            )
+        }
+        if selectedCategory == nil { selectedCategory = template.tags.first }
+
+        let fields = TemplateFieldExtractor.extract(template, lines: lines)
+        if let date = fields.dateIso, DateParser.isPlausibleEntryDate(date) {
+            passEntryDate = date
+        }
+        passTemplateTitle = fields.title
+            ?? ([template.name] + [fields.dateText].compactMap { $0 }).joined(separator: " · ")
     }
 
     /// Picked-paper-size persistence hook for the review screen's

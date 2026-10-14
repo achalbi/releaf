@@ -346,6 +346,19 @@ interface CaptureDao {
     suspend fun setFavorite(id: String, isFavorite: Boolean, timestamp: String)
 
     /**
+     * Stamp the printed-page template the scan was routed by. Bumps
+     * dirty + updated_at so it syncs with the capture metadata.
+     */
+    @Query("""
+        UPDATE captures
+        SET template_id = :templateId,
+            updated_at  = :timestamp,
+            dirty       = 1
+        WHERE id = :id
+    """)
+    suspend fun setTemplateId(id: String, templateId: String?, timestamp: String)
+
+    /**
      * Backfill the reverse-geocoded place name + full address on a
      * capture whose coordinates landed without them at scan time
      * (rate-limited Geocoder, offline, or a remote area the system

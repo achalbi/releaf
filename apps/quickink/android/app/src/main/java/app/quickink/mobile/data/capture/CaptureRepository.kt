@@ -234,6 +234,11 @@ class CaptureRepository(
         captureDao.setFavorite(captureId, isFavorite, IsoClock.nowIso())
     }
 
+    /** Record the printed-page template the scan flow routed by. */
+    suspend fun setTemplateId(captureId: String, templateId: String?) {
+        captureDao.setTemplateId(captureId, templateId, IsoClock.nowIso())
+    }
+
     /**
      * Stamp a fresh [CapturedLocation] onto an existing capture row
      * — both the locality / sub-locality / address fields and the

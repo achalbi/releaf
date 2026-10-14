@@ -150,6 +150,9 @@ struct ScanReviewScreen: View {
             }
             ScrollView {
                 VStack(spacing: QuickInkSpacing.s5) {
+                    if let match = controller.detectedTemplate, !isFailed {
+                        templateBadge(match)
+                    }
                     if !suggestedNames.isEmpty, !isFailed,
                        let cid = inflightCaptureId {
                         suggestionsStrip(captureId: cid)
@@ -248,6 +251,15 @@ struct ScanReviewScreen: View {
                 await refreshSelfAutoAttach(captureId: cid)
             }
             await refreshSuggestions()
+        }
+        // A recognised printed template attaches its own tags in the
+        // controller; mirror them into the TAGS section's selection
+        // so they show as attached (and can be detached as usual).
+        .onChange(of: controller.detectedTemplate) { match in
+            let missing = (match?.template.tags ?? []).filter {
+                !acceptedNames.contains($0) && !dismissedNames.contains($0)
+            }
+            if !missing.isEmpty { acceptedNames.append(contentsOf: missing) }
         }
         .onChange(of: inflightCaptureId) { newId in
             proposedNames = []
@@ -1130,6 +1142,21 @@ struct ScanReviewScreen: View {
     // MARK: - Status
 
     @ViewBuilder
+    /// "PRINTED PAGE · MEETING NOTES · P. 42" — shown when the scan
+    /// was recognised as a QuickInk notebook template and routed by it.
+    private func templateBadge(_ match: TemplateMatch) -> some View {
+        let parts = ["PRINTED PAGE", match.template.name.uppercased()]
+            + [match.pageNumber.map { "P. \($0)" }].compactMap { $0 }
+        return Text(parts.joined(separator: " · "))
+            .font(QuickInkText.eyebrow)
+            .tracking(QuickInkLetterSpacing.eyebrow)
+            .foregroundStyle(QuickInkColors.accent)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(QuickInkColors.accentSoft, in: Capsule())
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var statusIndicator: some View {
         switch controller.state {
         case .idle:

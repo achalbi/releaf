@@ -307,6 +307,18 @@ public final class CaptureRepository: @unchecked Sendable {
         }
     }
 
+    /// Record the printed-page template the scan flow routed by.
+    public func setTemplateId(captureId: String, templateId: String?) async throws {
+        let now = IsoClock.nowIso()
+        try await dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE captures
+                SET template_id = ?, updated_at = ?, dirty = 1
+                WHERE id = ?
+                """, arguments: [templateId, now, captureId])
+        }
+    }
+
     /// Backfill the reverse-geocoded place name + full address on a
     /// capture whose coordinates landed without them at scan time
     /// (rate-limited CLGeocoder, no network, or a remote area the

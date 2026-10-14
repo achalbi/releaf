@@ -47,6 +47,9 @@ mlkit-document-scanner = "16.0.0-beta1"
 # Pairs with the document scanner to OCR scanned pages into plain text —
 # also on-device, no network.
 mlkit-text-recognition = "19.0.1"
+# Bundled (on-device, no Play Services model download) barcode model.
+# QuickInk reads printed-page template QR marks with it.
+mlkit-barcode-scanning = "17.3.0"
 # Used to generate client-side UUIDs for attachment/contact/todo ids.
 # `java.util.UUID.randomUUID()` is on the classpath for free — no dep.
 # androidx.activity already ships the new ActivityResult contracts we need
@@ -176,6 +179,7 @@ androidx-palette          = { module = "androidx.palette:palette-ktx",       ver
 play-services-location    = { module = "com.google.android.gms:play-services-location", version.ref = "play-services-location" }
 mlkit-document-scanner    = { module = "com.google.android.gms:play-services-mlkit-document-scanner", version.ref = "mlkit-document-scanner" }
 mlkit-text-recognition    = { module = "com.google.android.gms:play-services-mlkit-text-recognition", version.ref = "mlkit-text-recognition" }
+mlkit-barcode-scanning    = { module = "com.google.mlkit:barcode-scanning", version.ref = "mlkit-barcode-scanning" }
 activity-ktx              = { module = "androidx.activity:activity-ktx", version.ref = "activity" }
 
 # sherpa-onnx on-device speech recognition. Feeds float PCM in and gets
