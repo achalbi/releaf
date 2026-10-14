@@ -94,6 +94,17 @@ public final class ScanFlowController: ObservableObject {
     /// unchanged.
     @Published public private(set) var currentSource: String = "scan"
 
+    /// Checkbox lines read off the in-flight capture's pages, waiting
+    /// for the user's review. `ScanReviewScreen` lists them so the
+    /// user can edit, untick or remove items; `dismiss()` (the review
+    /// screen's Done) writes what's left into the day's
+    /// `notepad_entries.todos`. Ordered by (page, line).
+    @Published public private(set) var reviewTodos: [HandwritingTodo] = []
+
+    /// `notepad_entries.entry_date` the pass appends its OCR text and
+    /// to-dos to. Today by default.
+    private var passEntryDate: String = ScanFlowController.todayLocalDate()
+
     private let userId: String
     private let repository: CaptureRepository
     private let pipeline: OcrPipeline
@@ -166,6 +177,10 @@ public final class ScanFlowController: ObservableObject {
         // succession; we don't try to deduplicate at the launcher
         // layer, so guard here.
         activeTask?.cancel()
+        // A previous pass that never reached Done still owns
+        // reviewed to-dos — keep them rather than silently dropping.
+        commitReviewTodos()
+        passEntryDate = Self.todayLocalDate()
 
         let captureId = UUID().uuidString.lowercased()
         let totalPages = pageURLs.count
@@ -303,6 +318,29 @@ public final class ScanFlowController: ObservableObject {
                         )
                         successCount += 1
                         pageTexts[pageIndex] = result.text
+
+                        // Image-side analysis (checkbox to-dos) runs
+                        // in the OCR pass, off the main actor, one
+                        // decode per page.
+                        let lines = Self.linesOf(result)
+                        let pageURL = pageIndex < pageURLs.count ? pageURLs[pageIndex] : nil
+                        let analysis = await Self.analyzePage(url: pageURL, lines: lines)
+                        let todos = analysis.checkboxes.map { hit in
+                            HandwritingTodo(
+                                id:              UUID().uuidString.lowercased(),
+                                text:            hit.text,
+                                done:            hit.state == .done,
+                                sourceCaptureId: captureId,
+                                sourcePageIndex: pageIndex,
+                                sourceLineIndex: hit.lineIndex
+                            )
+                        }
+                        if let strongSelf = self, !todos.isEmpty {
+                            strongSelf.reviewTodos = (strongSelf.reviewTodos + todos).sorted {
+                                ($0.sourcePageIndex ?? 0, $0.sourceLineIndex ?? 0) <
+                                    ($1.sourcePageIndex ?? 0, $1.sourceLineIndex ?? 0)
+                            }
+                        }
 
                         // Fast-path auto-pick: as soon as page 0
                         // (the first physical page) lands, try to
@@ -520,7 +558,7 @@ public final class ScanFlowController: ObservableObject {
     ) async {
         let snippet = Self.formatSnippet(pageTexts: pageTexts)
         guard !snippet.isEmpty else { return }
-        let today = Self.todayLocalDate()
+        let today = passEntryDate
         let now = IsoClock.nowIso()
         let userId = self.userId
         let dbQueue = QuickInkDatabase.shared.dbQueue
@@ -560,7 +598,7 @@ public final class ScanFlowController: ObservableObject {
 
     /// `YYYY-MM-DD` in the device's local timezone — matches the
     /// `notepad_entries.entry_date` CHECK constraint.
-    private static func todayLocalDate() -> String {
+    nonisolated private static func todayLocalDate() -> String {
         let f = DateFormatter()
         f.calendar = .init(identifier: .gregorian)
         f.locale   = .init(identifier: "en_US_POSIX")
@@ -622,11 +660,113 @@ public final class ScanFlowController: ObservableObject {
     public func dismiss() {
         activeTask?.cancel()
         activeTask = nil
+        commitReviewTodos()
         state = .idle
         selectedCategory = nil
         selectedFolderId = nil
         previewImageURL  = nil
         currentSource    = "scan"
+    }
+
+    // MARK: - Checkbox to-dos
+
+    /// Review-screen edit: replace an extracted item's text.
+    public func editTodoText(id: String, text: String) {
+        guard let i = reviewTodos.firstIndex(where: { $0.id == id }) else { return }
+        reviewTodos[i].text = text
+    }
+
+    /// Review-screen edit: tick / untick an extracted item.
+    public func setTodoDone(id: String, done: Bool) {
+        guard let i = reviewTodos.firstIndex(where: { $0.id == id }) else { return }
+        reviewTodos[i].done = done
+    }
+
+    /// Review-screen edit: drop an item the user doesn't want saved.
+    public func removeTodo(id: String) {
+        reviewTodos.removeAll { $0.id == id }
+    }
+
+    /// Write the reviewed items into the pass's notepad entry
+    /// (creating it when the page had no OCR text to append) and
+    /// clear the review list. Runs in its own `Task`, not
+    /// `activeTask`, so the cancel in `dismiss()` doesn't abort it.
+    /// Items whose text the user blanked out are skipped.
+    private func commitReviewTodos() {
+        let items: [HandwritingTodo] = reviewTodos.compactMap { todo in
+            var t = todo
+            t.text = todo.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return t.text.isEmpty ? nil : t
+        }
+        reviewTodos = []
+        guard !items.isEmpty else { return }
+        let date = passEntryDate
+        let userId = self.userId
+        let dbQueue = QuickInkDatabase.shared.dbQueue
+        Task {
+            let now = IsoClock.nowIso()
+            do {
+                try await dbQueue.write { db in
+                    if let row = try Row.fetchOne(db, sql: """
+                        SELECT id, todos FROM notepad_entries
+                        WHERE user_id = ? AND entry_date = ? AND deleted_at IS NULL
+                        ORDER BY updated_at DESC
+                        LIMIT 1
+                        """, arguments: [userId, date]) {
+                        let id: String = row["id"]
+                        let existing: String? = row["todos"]
+                        try db.execute(sql: """
+                            UPDATE notepad_entries
+                            SET todos = ?, updated_at = ?, dirty = 1
+                            WHERE id = ?
+                            """, arguments: [HandwritingTodoJson.append(existing, items: items), now, id])
+                    } else {
+                        try db.execute(sql: """
+                            INSERT INTO notepad_entries (
+                                id, user_id, entry_date, notes, todos,
+                                created_at, updated_at, dirty
+                            ) VALUES (?, ?, ?, '', ?, ?, ?, 1)
+                            """, arguments: [
+                                UUID().uuidString.lowercased(),
+                                userId, date,
+                                HandwritingTodoJson.append(nil, items: items),
+                                now, now,
+                            ])
+                    }
+                }
+            } catch {
+                print("Saving extracted to-dos failed: \(error)")
+            }
+        }
+    }
+
+    /// Line-grained OCR blocks in emit order. Matched on the case
+    /// name, case-insensitively, so this keeps working whatever
+    /// casing or coding `OcrBlock.Kind` ends up with. Falls back to
+    /// every block when an engine emitted no line tier.
+    nonisolated static func linesOf(_ result: OcrResult) -> [OcrLine] {
+        let lineBlocks = result.blocks.filter { String(describing: $0.kind).lowercased() == "line" }
+        let source = lineBlocks.isEmpty ? result.blocks : lineBlocks
+        return source.enumerated().map { i, b in
+            OcrLine(index: i, text: b.text, x: b.bbox.x, y: b.bbox.y, width: b.bbox.width, height: b.bbox.height)
+        }
+    }
+
+    /// Per-page image work, off the main actor. Decodes the page once
+    /// and runs the checkbox detector over it. Returns only Sendable
+    /// results so nothing image-backed crosses actors.
+    struct PageAnalysis: Sendable {
+        var checkboxes: [DetectedCheckboxLine] = []
+    }
+
+    nonisolated static func analyzePage(url: URL?, lines: [OcrLine]) async -> PageAnalysis {
+        guard !lines.isEmpty else { return PageAnalysis() }
+        return await Task.detached(priority: .userInitiated) {
+            let loaded = url.flatMap { PageImageLoader.load(url: $0) }
+            return PageAnalysis(
+                checkboxes: CheckboxTodoDetector.detect(lines: lines, image: loaded?.gray)
+            )
+        }.value
     }
 
     /// Picked-paper-size persistence hook for the review screen's

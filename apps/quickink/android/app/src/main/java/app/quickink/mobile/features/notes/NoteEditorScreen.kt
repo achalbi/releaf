@@ -11,7 +11,7 @@
  *
  *   - Tab 2 (OCR Text): clean editorial serif rendering of the
  *     transcript with a confidence badge, copy-to-clipboard button,
- *     and a "smart suggestions" footer hook (currently inert).
+ *     and the entry's to-dos (checkbox lines read off scans).
  *
  *   - Floating action bar (Re-tag / Export / Delete).
  *
@@ -83,6 +83,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.quickink.mobile.QuickInkApp
+import app.quickink.mobile.features.scan.handwriting.ExtractedTodoRow
 import app.quickink.mobile.features.settings.SettingsPreferences
 import app.quickink.mobile.ui.theme.LocalQuickInkColors
 import app.quickink.mobile.ui.theme.LocalQuickInkTypography
@@ -507,21 +508,31 @@ private fun OcrTab(controller: NoteEditorController, onCopy: () -> Unit) {
             )
         }
 
-        // Smart suggestions footer placeholder.
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(QuickInkRadius.md))
-                .background(colors.accentSoft)
-                .padding(QuickInkSpacing.s4),
-            verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
-        ) {
-            Text(text = "SMART SUGGESTIONS", style = type.eyebrow, color = colors.muted)
-            Text(
-                text  = "Coming soon — extracted to-dos, dates, and contacts from this page.",
-                style = type.bodyItalic,
-                color = colors.inkSoft,
-            )
+        // To-dos read off checkbox lines on scanned pages (plus any
+        // the entry already carried, e.g. from Releaf). Ticking one
+        // persists immediately.
+        if (controller.todos.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(QuickInkRadius.md))
+                    .background(colors.accentSoft)
+                    .padding(QuickInkSpacing.s4),
+                verticalArrangement = Arrangement.spacedBy(QuickInkSpacing.s2),
+            ) {
+                val open = controller.todos.count { !it.done }
+                Text(
+                    text  = if (open == 0) "TO-DOS · ALL DONE" else "TO-DOS · $open OPEN",
+                    style = type.eyebrow,
+                    color = colors.muted,
+                )
+                controller.todos.forEach { todo ->
+                    ExtractedTodoRow(
+                        todo     = todo,
+                        onToggle = { controller.toggleTodo(todo.id) },
+                    )
+                }
+            }
         }
     }
 }

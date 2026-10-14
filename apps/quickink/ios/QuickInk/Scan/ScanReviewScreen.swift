@@ -6,10 +6,12 @@
  *   1. Big category-button grid  — the user picks a category
  *      (or none) for the in-flight capture. Tap-to-toggle
  *      persists immediately via `controller.setCategory(name)`.
- *   2. Status indicator          — small progress / saved /
+ *   2. To-dos from this scan      — checkbox lines read off the
+ *      pages, editable before Done saves them to the day's note.
+ *   3. Status indicator          — small progress / saved /
  *      failed badge. The hero used to be the progress UI; now
  *      it sits beneath the actionable affordances.
- *   3. Done button                — terminal-state-only.
+ *   4. Done button                — terminal-state-only.
  *
  * `captures.category` is per-capture, so the user can change
  * their mind any number of times during review.
@@ -168,6 +170,12 @@ struct ScanReviewScreen: View {
                     if !isFailed, let cid = inflightCaptureId {
                         peopleSection(captureId: cid)
                         placesSection(captureId: cid)
+                    }
+                    // Checkbox lines read off the pages. Confirm
+                    // step: edit / untick / remove here, Done saves
+                    // what's left (see ScanFlowController.dismiss).
+                    if !isFailed {
+                        ExtractedTodosReviewSection(controller: controller)
                     }
                     statusIndicator
                 }

@@ -11,7 +11,7 @@
  *
  *   - Tab 2 (OCR Text): clean editorial serif rendering of the
  *     transcript with a confidence badge, copy-to-clipboard button,
- *     and a "smart suggestions" footer hook (currently inert).
+ *     and the entry's to-dos (checkbox lines read off scans).
  *
  *   - Floating action bar (Re-tag / Export / Delete).
  *
@@ -337,23 +337,33 @@ struct NoteEditorScreen: View {
                         )
                 }
 
-                // Smart suggestions footer — placeholder. When the
-                // suggestion model lands, populate with detected
-                // todos, dates, contacts from the OCR text.
-                VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
-                    Text("SMART SUGGESTIONS")
-                        .font(QuickInkText.eyebrow)
-                        .tracking(QuickInkLetterSpacing.eyebrow)
-                        .foregroundStyle(QuickInkColors.muted)
+                // To-dos read off checkbox lines on scanned pages
+                // (plus any the entry already carried, e.g. from
+                // Releaf). Ticking one persists straight away.
+                if !vm.todos.isEmpty {
+                    VStack(alignment: .leading, spacing: QuickInkSpacing.s2) {
+                        let open = vm.todos.filter { !$0.done }.count
+                        Text(open == 0 ? "TO-DOS · ALL DONE" : "TO-DOS · \(open) OPEN")
+                            .font(QuickInkText.eyebrow)
+                            .tracking(QuickInkLetterSpacing.eyebrow)
+                            .foregroundStyle(QuickInkColors.muted)
 
-                    Text("Coming soon — extracted to-dos, dates, and contacts from this page.")
-                        .font(QuickInkText.bodyItalic)
-                        .foregroundStyle(QuickInkColors.inkSoft)
+                        ForEach(vm.todos) { todo in
+                            ExtractedTodoRow(
+                                text: todo.text,
+                                done: todo.done,
+                                onToggle: {
+                                    vm.toggleTodo(id: todo.id)
+                                    vm.save()
+                                }
+                            )
+                        }
+                    }
+                    .padding(QuickInkSpacing.s4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(QuickInkColors.accentSoft)
+                    .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
                 }
-                .padding(QuickInkSpacing.s4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(QuickInkColors.accentSoft)
-                .clipShape(RoundedRectangle(cornerRadius: QuickInkRadius.md, style: .continuous))
             }
             .padding(.horizontal, QuickInkSpacing.s5)
             .padding(.top, QuickInkSpacing.s3)

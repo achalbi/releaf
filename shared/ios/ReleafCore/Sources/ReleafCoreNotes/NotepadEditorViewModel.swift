@@ -141,7 +141,7 @@ public final class NotepadEditorViewModel: ObservableObject {
 
     public func toggleTodo(id: String) {
         todos = todos.map { t in
-            t.id == id ? NotepadTodo(id: t.id, text: t.text, done: !t.done) : t
+            t.id == id ? t.with(done: !t.done) : t
         }
     }
 

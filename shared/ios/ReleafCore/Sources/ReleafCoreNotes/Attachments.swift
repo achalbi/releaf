@@ -91,11 +91,40 @@ public struct NotepadTodo: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let text: String
     public let done: Bool
+    /// QuickInk provenance for to-dos read off a scanned page's
+    /// checkbox lines (capture id, page index, line index). Optional
+    /// and omitted from the JSON when nil, so rows without them encode
+    /// exactly as before; Releaf Android ignores them
+    /// (`ignoreUnknownKeys`). Carried here so an edit through this
+    /// type doesn't strip them.
+    public let sourceCaptureId: String?
+    public let sourcePageIndex: Int?
+    public let sourceLineIndex: Int?
 
-    public init(id: String, text: String, done: Bool = false) {
+    public init(
+        id: String,
+        text: String,
+        done: Bool = false,
+        sourceCaptureId: String? = nil,
+        sourcePageIndex: Int? = nil,
+        sourceLineIndex: Int? = nil
+    ) {
         self.id = id
         self.text = text
         self.done = done
+        self.sourceCaptureId = sourceCaptureId
+        self.sourcePageIndex = sourcePageIndex
+        self.sourceLineIndex = sourceLineIndex
+    }
+
+    /// Copy with `done` replaced, keeping provenance.
+    public func with(done: Bool) -> NotepadTodo {
+        NotepadTodo(
+            id: id, text: text, done: done,
+            sourceCaptureId: sourceCaptureId,
+            sourcePageIndex: sourcePageIndex,
+            sourceLineIndex: sourceLineIndex
+        )
     }
 }
 

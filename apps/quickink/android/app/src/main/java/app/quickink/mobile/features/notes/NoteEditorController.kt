@@ -16,9 +16,14 @@
  *   - `save()` upserts on demand
  *   - `delete()` soft-deletes
  *
- * Side-channel arrays (contacts / todos / locations / attachments)
- * are intentionally out of scope — those are Releaf-flavored
- * sections; QuickInk's editor stays text-focused.
+ * Side-channel arrays (contacts / locations / attachments) are
+ * intentionally out of scope — those are Releaf-flavored sections;
+ * QuickInk's editor stays text-focused. The one exception is
+ * `todos`: checkbox lines read off scanned pages land there (see
+ * `ScanFlowController.commitReviewTodos`), so the editor lists them
+ * and lets the user tick them off. Toggles rewrite only the `done`
+ * key of the touched element, so fields Releaf stores (`priority`)
+ * survive.
  *
  * The future "extract Android VMs into :shared:notes" PR replaces
  * this controller with the shared VM.
@@ -29,6 +34,8 @@ package app.quickink.mobile.features.notes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import app.quickink.mobile.features.scan.handwriting.HandwritingTodo
+import app.quickink.mobile.features.scan.handwriting.HandwritingTodoJson
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
 import app.releaf.mobile.data.notepad.NotepadDao
@@ -63,6 +70,10 @@ class NoteEditorController(
     var entry by mutableStateOf<NotepadEntry?>(null)
         private set
 
+    /** Parsed `todos` column of [entry]; empty in draft mode. */
+    var todos by mutableStateOf<List<HandwritingTodo>>(emptyList())
+        private set
+
     var title     by mutableStateOf("")
     var notes     by mutableStateOf("")
     var entryDate by mutableStateOf("")
@@ -82,6 +93,7 @@ class NoteEditorController(
         val loaded = dao.findById(entryId)
         if (loaded != null) {
             entry     = loaded
+            todos     = HandwritingTodoJson.parse(loaded.todos)
             title     = loaded.title.orEmpty()
             notes     = loaded.notes
             entryDate = loaded.entryDate
@@ -129,9 +141,14 @@ class NoteEditorController(
                 dao.upsert(row)
                 entry = row
             } else {
+                // `todos` comes from a fresh read: a scan can commit
+                // to-dos into this entry while the editor is open,
+                // and the editor never edits that column wholesale.
+                val freshTodos = dao.findById(current.id)?.todos ?: current.todos
                 val updated = current.copy(
                     title     = title.takeIf { it.isNotBlank() },
                     notes     = notes,
+                    todos     = freshTodos,
                     entryDate = entryDate,
                     updatedAt = now,
                     dirty     = true,
@@ -142,6 +159,30 @@ class NoteEditorController(
             // Slice 4.2c — kick an immediate sync now that the row
             // is dirty. Inside the same coroutine as the upsert so
             // we never enqueue the worker before the row exists.
+            onMutated()
+        }
+    }
+
+    /**
+     * Tick / untick one to-do and persist straight away (no Save
+     * needed — matches how a checkbox behaves everywhere else).
+     * Re-reads the row first so a concurrent scan commit isn't
+     * clobbered by this editor's stale copy.
+     */
+    fun toggleTodo(id: String) {
+        val current = entry ?: return
+        val target = todos.firstOrNull { it.id == id } ?: return
+        val done = !target.done
+        todos = todos.map { if (it.id == id) it.copy(done = done) else it }
+        scope.launch {
+            val fresh = dao.findById(current.id) ?: current
+            val updated = fresh.copy(
+                todos     = HandwritingTodoJson.setDone(fresh.todos, id, done),
+                updatedAt = IsoClock.nowIso(),
+                dirty     = true,
+            )
+            dao.upsert(updated)
+            entry = updated
             onMutated()
         }
     }

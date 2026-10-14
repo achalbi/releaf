@@ -29,6 +29,13 @@ import app.quickink.mobile.data.capturelocation.CaptureLocationDao
 import app.quickink.mobile.data.folder.FolderDao
 import app.quickink.mobile.data.location.LocationDao
 import app.quickink.mobile.data.tag.TagDao
+import app.quickink.mobile.features.scan.handwriting.CheckboxState
+import app.quickink.mobile.features.scan.handwriting.CheckboxTodoDetector
+import app.quickink.mobile.features.scan.handwriting.HandwritingTodo
+import app.quickink.mobile.features.scan.handwriting.HandwritingTodoJson
+import app.quickink.mobile.features.scan.handwriting.LoadedPage
+import app.quickink.mobile.features.scan.handwriting.OcrLine
+import app.quickink.mobile.features.scan.handwriting.PageImageLoader
 import app.quickink.mobile.features.settings.SettingsPreferences
 import app.releaf.mobile.data.common.IsoClock
 import app.releaf.mobile.data.common.Uuidv7
@@ -36,13 +43,16 @@ import app.releaf.mobile.data.notepad.NotepadDao
 import app.releaf.mobile.data.notepad.NotepadEntry
 import app.releaf.shared.scan.DocumentScanResult
 import app.releaf.shared.scan.OcrPipeline
+import app.releaf.shared.scan.OcrResult
 import app.releaf.shared.scan.PageOcr
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 class ScanFlowController(
@@ -213,6 +223,22 @@ class ScanFlowController(
     private val _currentSource = MutableStateFlow("scan")
     val currentSource: StateFlow<String> = _currentSource.asStateFlow()
 
+    /**
+     * Checkbox lines read off the in-flight capture's pages, waiting
+     * for the user's review. `ScanReviewScreen` lists them so the
+     * user can edit, untick or remove items; [dismiss] (the review
+     * screen's Done) writes what's left into the day's
+     * `notepad_entries.todos`. Ordered by (page, line).
+     */
+    private val _reviewTodos = MutableStateFlow<List<HandwritingTodo>>(emptyList())
+    val reviewTodos: StateFlow<List<HandwritingTodo>> = _reviewTodos.asStateFlow()
+
+    /**
+     * `notepad_entries.entry_date` the pass appends its OCR text and
+     * to-dos to. Today by default.
+     */
+    private var passEntryDate: String = LocalDate.now().toString()
+
     private var activeJob: Job? = null
 
     /**
@@ -239,6 +265,10 @@ class ScanFlowController(
         // succession; we don't dedupe at the launcher layer so
         // guard here.
         activeJob?.cancel()
+        // A previous pass that never reached Done still owns
+        // reviewed to-dos — keep them rather than silently dropping.
+        commitReviewTodos()
+        passEntryDate = LocalDate.now().toString()
 
         val captureId  = Uuidv7.generate()
         val totalPages = result.pageUris.size
@@ -409,6 +439,32 @@ class ScanFlowController(
                             successCount += 1
                             pageTexts[page.pageIndex] = page.result.text
 
+                            // Image-side analysis runs here, in the
+                            // OCR pass, because the scanner's page
+                            // URIs stop being readable once the
+                            // process moves on. One decode per page.
+                            val pageUri = result.pageUris.getOrNull(page.pageIndex)
+                            val lines = linesOf(page.result)
+                            val loaded = if (pageUri != null && lines.isNotEmpty()) {
+                                loadPageImage(pageUri)
+                            } else {
+                                null
+                            }
+                            try {
+                                val todos = detectTodos(
+                                    captureId = captureId,
+                                    pageIndex = page.pageIndex,
+                                    lines     = lines,
+                                    page      = loaded,
+                                )
+                                if (todos.isNotEmpty()) {
+                                    _reviewTodos.value = (_reviewTodos.value + todos)
+                                        .sortedWith(compareBy({ it.sourcePageIndex }, { it.sourceLineIndex }))
+                                }
+                            } finally {
+                                loaded?.recycle()
+                            }
+
                             // Fast-path auto-pick: as soon as page 0
                             // (the first physical page) lands, try
                             // to match its leading tokens against
@@ -558,6 +614,7 @@ class ScanFlowController(
     fun dismiss() {
         activeJob?.cancel()
         activeJob = null
+        commitReviewTodos()
         _state.value = State.Idle
         _selectedCategory.value = null
         _selectedFolderId.value = null
@@ -642,6 +699,117 @@ class ScanFlowController(
         is State.Recognizing -> current.captureId
         is State.Complete    -> current.captureId
         is State.Idle, is State.Failed -> null
+    }
+
+    // ─── Checkbox to-dos ──────────────────────────────────────────
+
+    /** Review-screen edit: replace an extracted item's text. */
+    fun editTodoText(id: String, text: String) {
+        _reviewTodos.value = _reviewTodos.value.map { if (it.id == id) it.copy(text = text) else it }
+    }
+
+    /** Review-screen edit: tick / untick an extracted item. */
+    fun setTodoDone(id: String, done: Boolean) {
+        _reviewTodos.value = _reviewTodos.value.map { if (it.id == id) it.copy(done = done) else it }
+    }
+
+    /** Review-screen edit: drop an item the user doesn't want saved. */
+    fun removeTodo(id: String) {
+        _reviewTodos.value = _reviewTodos.value.filterNot { it.id == id }
+    }
+
+    /**
+     * Write the reviewed items into the pass's notepad entry
+     * (creating it when the page had no OCR text to append) and clear
+     * the review list. Runs on [scope], not [activeJob], so the
+     * cancel in [dismiss] doesn't abort it. Items whose text the user
+     * blanked out are skipped.
+     */
+    private fun commitReviewTodos() {
+        val items = _reviewTodos.value
+            .map { it.copy(text = it.text.trim()) }
+            .filter { it.text.isNotEmpty() }
+        _reviewTodos.value = emptyList()
+        if (items.isEmpty()) return
+        val date = passEntryDate
+        scope.launch {
+            val now = IsoClock.nowIso()
+            try {
+                val existing = notepadDao.findLatestForDate(userId, date)
+                if (existing != null) {
+                    notepadDao.upsert(
+                        existing.copy(
+                            todos     = HandwritingTodoJson.append(existing.todos, items),
+                            updatedAt = now,
+                            dirty     = true,
+                        ),
+                    )
+                } else {
+                    notepadDao.upsert(
+                        NotepadEntry(
+                            id        = Uuidv7.generate(),
+                            userId    = userId,
+                            entryDate = date,
+                            todos     = HandwritingTodoJson.append(null, items),
+                            createdAt = now,
+                            updatedAt = now,
+                            dirty     = true,
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
+                println("Saving extracted to-dos failed: $e")
+            }
+        }
+    }
+
+    /**
+     * Line-grained OCR blocks in emit order. ML Kit emits paragraph
+     * and line tiers; Vision only lines. Matched on the enum name
+     * case-insensitively so this keeps working whatever casing
+     * `OcrBlock.Kind` ends up with. Falls back to every block when an
+     * engine emitted no line tier.
+     */
+    private fun linesOf(result: OcrResult): List<OcrLine> {
+        val lineBlocks = result.blocks.filter { it.kind.name.equals("line", ignoreCase = true) }
+            .ifEmpty { result.blocks }
+        return lineBlocks.mapIndexed { i, b ->
+            OcrLine(
+                index  = i,
+                text   = b.text,
+                x      = b.bbox.x,
+                y      = b.bbox.y,
+                width  = b.bbox.width,
+                height = b.bbox.height,
+            )
+        }
+    }
+
+    private suspend fun loadPageImage(uri: android.net.Uri): LoadedPage? {
+        val ctx = appContext ?: return null
+        return withContext(Dispatchers.Default) { PageImageLoader.load(ctx, uri) }
+    }
+
+    private suspend fun detectTodos(
+        captureId: String,
+        pageIndex: Int,
+        lines: List<OcrLine>,
+        page: LoadedPage?,
+    ): List<HandwritingTodo> {
+        if (lines.isEmpty()) return emptyList()
+        val found = withContext(Dispatchers.Default) {
+            CheckboxTodoDetector.detect(lines, page?.gray)
+        }
+        return found.map { hit ->
+            HandwritingTodo(
+                id              = Uuidv7.generate(),
+                text            = hit.text,
+                done            = hit.state == CheckboxState.Done,
+                sourceCaptureId = captureId,
+                sourcePageIndex = pageIndex,
+                sourceLineIndex = hit.lineIndex,
+            )
+        }
     }
 
     // ─── Geolocation ──────────────────────────────────────────────
@@ -746,7 +914,7 @@ class ScanFlowController(
     ) {
         val snippet = formatSnippet(pageTexts)
         if (snippet.isEmpty()) return
-        val today = LocalDate.now().toString() // YYYY-MM-DD, local TZ
+        val today = passEntryDate // YYYY-MM-DD, local TZ
         val now   = IsoClock.nowIso()
 
         try {

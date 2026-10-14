@@ -6,10 +6,12 @@
  *   1. Big category-button grid  — the user picks a category
  *      (or none) for the in-flight capture. Tap-to-toggle
  *      persists immediately via `controller.setCategory(name)`.
- *   2. Status indicator          — small progress / saved /
+ *   2. To-dos from this scan      — checkbox lines read off the
+ *      pages, editable before Done saves them to the day's note.
+ *   3. Status indicator          — small progress / saved /
  *      failed badge. The hero used to be the progress UI; now
  *      it sits beneath the actionable affordances.
- *   3. Done button                — terminal-state-only.
+ *   4. Done button                — terminal-state-only.
  *
  * Mirror of iOS `ScanReviewScreen.swift`.
  */
@@ -76,6 +78,7 @@ import app.quickink.mobile.data.voicenote.VoiceNoteEntity
 import app.quickink.mobile.data.voicenote.VoiceNoteRepository
 import app.quickink.mobile.data.location.LocationEntity
 import app.quickink.mobile.data.person.PersonEntity
+import app.quickink.mobile.features.scan.handwriting.ExtractedTodosReviewSection
 import app.quickink.mobile.features.workspace.AutoTagSuggester
 import app.quickink.mobile.features.workspace.LocationPickerSheet
 import app.quickink.mobile.features.workspace.PeoplePickerSheet
@@ -137,6 +140,7 @@ fun ScanReviewScreen(
         locationDao.observeActive(userId)
     }.collectAsState(initial = emptyList())
 
+    val reviewTodos by controller.reviewTodos.collectAsState()
     val isFailed = state is ScanFlowController.State.Failed
     val isRecognizing = state is ScanFlowController.State.Recognizing
 
@@ -569,6 +573,18 @@ fun ScanReviewScreen(
                         }
                     },
                     onAddTag      = { showAddTagDialog.value = true },
+                )
+            }
+
+            // Checkbox lines read off the pages. Confirm step: the
+            // user edits / unticks / removes here, Done saves what's
+            // left into the day's note (see ScanFlowController.dismiss).
+            if (!isFailed) {
+                ExtractedTodosReviewSection(
+                    items    = reviewTodos,
+                    onToggle = { controller.setTodoDone(it.id, !it.done) },
+                    onEdit   = { todo, text -> controller.editTodoText(todo.id, text) },
+                    onRemove = { controller.removeTodo(it.id) },
                 )
             }
 
