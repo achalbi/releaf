@@ -117,10 +117,27 @@ public struct OcrBlock: Codable, Equatable, Sendable {
     /// word. Apple Vision is line-grained; ML Kit emits paragraph +
     /// line tiers. Stored on the block so a downstream renderer can
     /// pick the right granularity for its overlay.
+    /// Encoded lowercase (`"line"` / `"paragraph"` / `"word"`), the
+    /// canonical wire form on both platforms. Decoding also accepts
+    /// the PascalCase form (`"Line"`) that older Android builds wrote
+    /// into `ocr_results.blocks_json`, which reaches iOS through
+    /// Drive sync unchanged.
     public enum Kind: String, Codable, Sendable {
         case line
         case paragraph
         case word
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            let raw = try container.decode(String.self)
+            guard let kind = Kind(rawValue: raw.lowercased()) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Unknown OcrBlock.Kind: \"\(raw)\""
+                )
+            }
+            self = kind
+        }
     }
 
     /// The recognized text, with line breaks within multi-line
