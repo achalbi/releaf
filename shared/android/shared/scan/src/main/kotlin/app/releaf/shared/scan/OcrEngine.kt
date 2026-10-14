@@ -38,7 +38,14 @@
 package app.releaf.shared.scan
 
 import android.net.Uri
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
 /**
  * Engine-agnostic OCR contract. Implementors are expected to be safe
@@ -168,14 +175,44 @@ data class OcrBlock(
      * The Kotlin convention — and Releaf's existing convention for
      * sibling enums (`CaptureMode.Overview` etc.) — is PascalCase
      * symbol names. iOS's `OcrBlock.Kind` cases are lowercase per
-     * Swift convention. When the storage layer adds `@SerialName`
-     * decoration to align with the iOS-side encoded form, the wire
-     * names become lowercase (`"line"` / `"paragraph"` / `"word"`)
-     * on both platforms — matters for cross-platform readers of
-     * `ocr_results.blocks_json` exported via Drive sync.
+     * Swift convention. The canonical wire form is the iOS one
+     * (`"line"` / `"paragraph"` / `"word"`) on both platforms, so
+     * `ocr_results.blocks_json` synced through Drive decodes on
+     * either side. See [KindSerializer].
      */
-    @Serializable
-    enum class Kind { Line, Paragraph, Word }
+    @Serializable(with = KindSerializer::class)
+    enum class Kind(val wireName: String) {
+        Line("line"),
+        Paragraph("paragraph"),
+        Word("word"),
+    }
+
+    /**
+     * Encodes [Kind] as its lowercase [Kind.wireName] and decodes
+     * either casing. Builds before this serializer wrote the
+     * PascalCase symbol name (`"Line"`), and those strings live on in
+     * existing `ocr_results` rows and in users' Drive folders; they
+     * are read as-is rather than rewritten, since re-encoding a row
+     * changes its canonical JSON hash and would re-upload it.
+     *
+     * A custom serializer rather than `@SerialName` + `@JsonNames`
+     * so the tolerance doesn't depend on the `Json` instance's
+     * `useAlternativeNames` setting.
+     */
+    object KindSerializer : KSerializer<Kind> {
+        override val descriptor: SerialDescriptor =
+            PrimitiveSerialDescriptor("app.releaf.shared.scan.OcrBlock.Kind", PrimitiveKind.STRING)
+
+        override fun serialize(encoder: Encoder, value: Kind) {
+            encoder.encodeString(value.wireName)
+        }
+
+        override fun deserialize(decoder: Decoder): Kind {
+            val raw = decoder.decodeString()
+            return Kind.entries.firstOrNull { it.wireName.equals(raw, ignoreCase = true) }
+                ?: throw SerializationException("Unknown OcrBlock.Kind: \"$raw\"")
+        }
+    }
 }
 
 /** Normalized bounding box, 0..1 in image space, origin top-left. */
